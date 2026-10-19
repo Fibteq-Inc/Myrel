@@ -8,6 +8,7 @@ import {
   type CreateRoutineInput,
   createId,
   type Message,
+  type MessageStats,
   type ArtifactRef,
   nextCronRun,
   type NotificationKind,
@@ -29,7 +30,7 @@ import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-stor
 import { deliverNotification, excerpt } from "../notifications/deliver";
 import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
-import { meteredForTurn } from "../usage";
+import { meteredForTurn, TurnMeter } from "../usage";
 import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID } from "./names";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
@@ -48,6 +49,8 @@ type MessageRow = {
   attachments: string | null;
   /** JSON array of ArtifactRef, or null. */
   artifacts: string | null;
+  /** JSON MessageStats, or null. */
+  stats: string | null;
   created_at: string;
 };
 
@@ -83,6 +86,7 @@ type RoutineRow = {
 export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | "body"> & {
   attachments?: Attachment[];
   artifacts?: ArtifactRef[];
+  stats?: MessageStats;
 };
 
 export type ThreadPatch = Partial<Pick<Thread, "title" | "status" | "statusText" | "resolved" | "label">>;
@@ -137,6 +141,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "attachments")) this.sql`ALTER TABLE messages ADD COLUMN attachments TEXT`;
     // Added with artifacts.
     if (!columns.some((c) => c.name === "artifacts")) this.sql`ALTER TABLE messages ADD COLUMN artifacts TEXT`;
+    // Added with per-message stats.
+    if (!columns.some((c) => c.name === "stats")) this.sql`ALTER TABLE messages ADD COLUMN stats TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -280,9 +286,9 @@ export class ProjectAgent extends Agent<Env> {
     const stored = attachments.length ? JSON.stringify(attachments) : null;
     const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, created_at)
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, created_at)
       VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
-        ${artifacts ? JSON.stringify(artifacts) : null}, ${createdAt})
+        ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null}, ${createdAt})
       RETURNING seq`;
     const { artifacts: _, ...rest } = input;
     const message: Message = {
@@ -637,13 +643,14 @@ export class ProjectAgent extends Agent<Env> {
       const chat = this.sql<MessageRow>`
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
+      const meter = new TurnMeter(llm.provider.model);
       await runLoop({
-        provider: meteredForTurn(llm.provider, this.env, {
-          projectId: this.name,
-          threadId: null,
-          userId: this.turnRequester(inbox),
-          agent: "coordinator",
-        }),
+        provider: meteredForTurn(
+          llm.provider,
+          this.env,
+          { projectId: this.name, threadId: null, userId: this.turnRequester(inbox), agent: "coordinator" },
+          meter,
+        ),
         system: COORDINATOR_SYSTEM,
         prompt: coordinatorPrompt({
           projectName,
@@ -657,7 +664,7 @@ export class ProjectAgent extends Agent<Env> {
           defaultTimezone: this.defaultTimezone(),
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID })),
+          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID })),
           ...routineTools(this.routineHost(null)),
         ],
         maxSteps: 8,
@@ -684,12 +691,19 @@ export class ProjectAgent extends Agent<Env> {
     return null;
   }
 
-  private coordinatorHost(): CoordinatorHost {
+  private coordinatorHost(meter?: TurnMeter): CoordinatorHost {
     return {
       getMessage: (id) => this.getMessage(id),
       getThread: (id) => this.getThread(id),
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
-      post: (body) => this.sendMessage({ threadId: null, authorKind: "agent", authorId: COORDINATOR_ID, body }),
+      post: (body) =>
+        this.sendMessage({
+          threadId: null,
+          authorKind: "agent",
+          authorId: COORDINATOR_ID,
+          body,
+          ...(meter && { stats: meter.take() ?? undefined }),
+        }),
       react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
       startThread: async ({ rootMessageId, title, brief, ack }) => {
         const thread = this.createThread(rootMessageId, title);
@@ -801,6 +815,7 @@ export class ProjectAgent extends Agent<Env> {
       body: r.body,
       attachments: r.attachments ? (JSON.parse(r.attachments) as Attachment[]) : [],
       ...(r.artifacts && { artifacts: JSON.parse(r.artifacts) as ArtifactRef[] }),
+      ...(r.stats && { stats: JSON.parse(r.stats) as MessageStats }),
       seq: r.seq,
       createdAt: r.created_at,
     };

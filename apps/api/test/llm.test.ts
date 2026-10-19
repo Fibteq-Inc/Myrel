@@ -220,3 +220,44 @@ describe("metered", () => {
     ]);
   });
 });
+
+describe("TurnMeter", () => {
+  it("sums calls between messages and marks the total unknown when a call is unpriced", async () => {
+    const { TurnMeter } = await import("../src/usage");
+    const meter = new TurnMeter("configured");
+    const call = (servedModel: string | null, input: number) => ({
+      provider: "fireworks",
+      model: "firerouter/opus",
+      servedModel,
+      usage: { inputTokens: input, outputTokens: 10, cachedInputTokens: 2 },
+      latencyMs: 5,
+    });
+    expect(meter.take()).toBeNull();
+    meter.add(call("claude-opus-5-5", 100), 500);
+    meter.add(call("kimi-k2p6", 50), 20);
+    expect(meter.take()).toMatchObject({
+      model: "kimi-k2p6",
+      calls: 2,
+      inputTokens: 150,
+      cachedInputTokens: 4,
+      outputTokens: 20,
+      costMicros: 520,
+      runtime: "cloud",
+    });
+    // Counting starts afresh after each message.
+    meter.add(call(null, 10), null);
+    expect(meter.take()).toMatchObject({ model: "firerouter/opus", calls: 1, costMicros: null });
+    const task = {
+      title: "Fix",
+      harness: "claude",
+      runtime: "local" as const,
+      model: null,
+      durationMs: 1000,
+      inputTokens: 0,
+      outputTokens: 0,
+      costMicros: null,
+    };
+    // With no new calls, the turn's last model still names who wrote it.
+    expect(meter.take(task)).toMatchObject({ model: "firerouter/opus", calls: 0, runtime: "local", task });
+  });
+});

@@ -32,6 +32,45 @@ export const ArtifactRef = z.object({
 });
 export type ArtifactRef = z.infer<typeof ArtifactRef>;
 
+/** Where a reply's work ran: Altair's cloud (the Worker or a sandbox) or the person's computer (altair-runner). */
+export const Runtime = z.enum(["cloud", "local"]);
+export type Runtime = z.infer<typeof Runtime>;
+
+const Count = z.number().int().nonnegative();
+
+/** The coding task a reply reports on (`run_task`), summed. */
+export const TaskStats = z.object({
+  title: z.string(),
+  /** The harness or the person's CLI, e.g. "opencode", "claude". */
+  harness: z.string(),
+  runtime: Runtime,
+  /** The task's model, when Altair chose it; a person's own CLI picks its own. */
+  model: z.string().nullable(),
+  durationMs: Count,
+  inputTokens: Count,
+  outputTokens: Count,
+  /** Millionths of a US dollar; null when unknown. */
+  costMicros: Count.nullable(),
+});
+export type TaskStats = z.infer<typeof TaskStats>;
+
+/** What it took to write an agent's message: the model calls since its previous message, and any task it reports. */
+export const MessageStats = z.object({
+  /** The model that answered (the one a router picked, when it says). */
+  model: z.string(),
+  durationMs: Count,
+  calls: Count,
+  inputTokens: Count,
+  cachedInputTokens: Count,
+  outputTokens: Count,
+  /** Millionths of a US dollar; null when the model has no known price. */
+  costMicros: Count.nullable(),
+  /** Where the work behind the message ran. */
+  runtime: Runtime,
+  task: TaskStats.optional(),
+});
+export type MessageStats = z.infer<typeof MessageStats>;
+
 export const Message = z.object({
   id: MessageId,
   projectId: ProjectId,
@@ -44,6 +83,8 @@ export const Message = z.object({
   attachments: z.array(Attachment).optional(),
   /** Artifacts delivered with the message. Absent = none (and from servers older than artifacts). */
   artifacts: z.array(ArtifactRef).optional(),
+  /** Agent messages only: model, time, tokens and where it ran. Absent on older messages. */
+  stats: MessageStats.optional(),
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,

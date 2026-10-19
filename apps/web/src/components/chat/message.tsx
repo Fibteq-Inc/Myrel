@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { AltairMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
+import { MessageStatsLine } from "./message-stats";
 
 export type Names = Record<string, string>;
 
@@ -63,6 +64,7 @@ export function MessageView({
           <MessageMarkdown body={message.body} decision={decision} />
           <AttachmentList attachments={message.attachments} />
           {children}
+          {message.stats && <MessageStatsLine stats={message.stats} />}
           <div className="-ml-1.5 -mt-1 flex items-center gap-1">
             <Reactions reactions={reactions} />
             <span className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
