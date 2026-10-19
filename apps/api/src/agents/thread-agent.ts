@@ -303,17 +303,37 @@ export class ThreadAgent extends Agent<Env> {
         // The opening note and each plan update take a step of their own.
         maxSteps: 24,
       });
-      // A finished task always gets reported, even when the model ended its turn without a word.
-      if (finishedTask && !lastReply && !this.runningTask()) {
-        await project.sendMessage({
-          threadId,
-          authorKind: "agent",
-          authorId: THREAD_AGENT_ID,
-          body: taskReport(this.toTask(finishedTask).title, finishedTask, this.taskLog(finishedTask.id, 15)),
-          artifacts: pending,
-          stats: stats(),
-        });
-        pending = [];
+      // A finished task always gets an answer. A failed one first gets one more turn to fix it and run it
+      // again; if the agent stays silent, the thread posts the result and hands it to the coordinator.
+      const nudged = this.getMeta("task_nudged");
+      const unreported = finishedTask ?? (nudged ? this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${nudged}`[0] : undefined);
+      if (unreported && (lastReply || this.runningTask())) this.deleteMeta("task_nudged");
+      else if (unreported) {
+        const title = this.toTask(unreported).title;
+        if (unreported.status === "failed" && nudged !== unreported.id) {
+          this.setMeta("task_nudged", unreported.id);
+          this.sql`INSERT INTO notes (body, created_at) VALUES (${`The task "${title}" failed and you ended your turn without telling the person. Find the cause in its output under "Tasks". If it is in your own command or prompt, fix it and run the task again; otherwise reply with what failed and what you need.`}, ${new Date().toISOString()})`;
+          await this.markDirty();
+        } else {
+          this.deleteMeta("task_nudged");
+          await project.sendMessage({
+            threadId,
+            authorKind: "agent",
+            authorId: THREAD_AGENT_ID,
+            body: taskReport(title, unreported, this.taskLog(unreported.id, 15)),
+            artifacts: pending,
+            stats: stats(),
+          });
+          pending = [];
+          if (unreported.status === "failed") {
+            asked = true;
+            await project.requestCoordinator(
+              threadId,
+              "handoff",
+              `The task "${title}" failed and this thread's agent could not recover: ${unreported.summary ?? "no error message"}`,
+            );
+          }
+        }
       }
       // Published but never mentioned in a reply: still deliver the cards.
       if (pending.length) {

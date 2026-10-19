@@ -110,6 +110,34 @@ describe("run_task", () => {
     ws.close();
   });
 
+  it("nudges a silent agent once after a failed task, then reports it and hands it to the coordinator", async () => {
+    const prompts: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      prompts.push(req.prompt);
+      if (prompts.length > 1) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [call("run_task", { title: "Komutları çalıştır", prompt: "ls demo", harness: "shell", language: "tr" })],
+      };
+    });
+
+    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run it." });
+
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    const report = await until(
+      async () => (await bodies()).find((b) => b.startsWith('"Komutları çalıştır" görevi başarısız oldu.')),
+      "the thread's own report",
+    );
+    expect(report).toContain("container is not configured");
+    // One more turn carried the nudge, and only one: then the thread reported it itself.
+    const nudge = 'The task "Komutları çalıştır" failed and you ended your turn without telling the person.';
+    expect(prompts.filter((p) => p.includes(nudge))).toHaveLength(1);
+    await until(async () => (await projectAgent.getThread(thread.id))!.status === "blocked", "the thread to wait on the coordinator");
+    ws.close();
+  });
+
   it("reports what it cannot do as a tool error, without starting anything", async () => {
     const { project, ws, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
