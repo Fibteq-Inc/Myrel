@@ -61,7 +61,7 @@ export function MessageView({
         <AltairMark size={28} />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
           <MessageMarkdown body={message.body} decision={decision} />
-          <AttachmentList projectId={message.projectId} attachments={message.attachments} />
+          <AttachmentList attachments={message.attachments} />
           {children}
           <div className="-ml-1.5 -mt-1 flex items-center gap-1">
             <Reactions reactions={reactions} />
@@ -87,7 +87,7 @@ export function MessageView({
         </div>
       )}
       <div className="flex max-w-[85%] justify-end">
-        <AttachmentList projectId={message.projectId} attachments={message.attachments} />
+        <AttachmentList attachments={message.attachments} />
       </div>
       <Reactions reactions={reactions} />
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}

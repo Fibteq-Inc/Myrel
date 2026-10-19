@@ -1,13 +1,13 @@
 import { useT } from "@altair/i18n/react";
 import type { Attachment, ProjectFile } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { IconButton } from "../lib/ui";
+import { useProjectView } from "./project-view";
 
 export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -37,23 +37,23 @@ export function FileIcon({ path, contentType, size = 15 }: { path: string; conte
   return <Icon size={size} className="flex-none text-muted" aria-hidden="true" />;
 }
 
-/** Files on a message, as chips that open the file in the project's files. */
-export function AttachmentList({ projectId, attachments }: { projectId: string; attachments?: Attachment[] }) {
+/** Files on a message, as chips that open the file in the project's files tab. */
+export function AttachmentList({ attachments }: { attachments?: Attachment[] }) {
+  const { go } = useProjectView();
   if (!attachments?.length) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {attachments.map((a) => (
-        <Link
+        <button
+          type="button"
           key={a.path}
-          to="/projects/$projectId/files"
-          params={{ projectId }}
-          search={{ file: a.path }}
+          onClick={() => go("files", { item: a.path })}
           className="flex max-w-[260px] items-center gap-2 rounded-lg border border-edge bg-raised px-2.5 py-1.5 text-left text-[13px] text-fg hover:bg-hover"
         >
           <FileIcon path={a.path} contentType={a.contentType} />
           <span className="truncate">{displayName(a.path)}</span>
           <span className="flex-none text-xs text-subtle">{formatSize(a.size)}</span>
-        </Link>
+        </button>
       ))}
     </div>
   );

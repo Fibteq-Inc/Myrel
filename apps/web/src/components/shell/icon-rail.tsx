@@ -6,6 +6,7 @@ import { BarChart3, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare
 import { canChooseServer, server } from "../../lib/api";
 import { AltairMark, cn, UserAvatar } from "../../lib/ui";
 import { NotificationBell } from "../notifications";
+import { viewSearch } from "../project-view";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
 
 type RailItem = {
@@ -36,6 +37,7 @@ const itemClass =
 export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: () => void }) {
   const { t, locale, setLocale } = useI18n();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const view = useRouterState({ select: (s) => (s.location.search as { view?: string }).view });
   const isActive = (item: RailItem) =>
     item.match?.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p))) ?? false;
   const projectId = /^\/projects\/([^/]+)/.exec(pathname)?.[1];
@@ -53,12 +55,13 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
         item.label === "rail.files" && projectId ? (
           <Link
             key={item.label}
-            to="/projects/$projectId/files"
+            to="/projects/$projectId"
             params={{ projectId }}
+            search={viewSearch("files")}
             aria-label={t("rail.projectFiles")}
             title={t("rail.projectFiles")}
-            className={itemClass}
-            activeProps={{ className: "bg-hover text-fg", "aria-current": "page" }}
+            aria-current={view === "files" ? "page" : undefined}
+            className={cn(itemClass, view === "files" && "bg-hover text-fg")}
           >
             <item.icon size={20} strokeWidth={1.8} />
           </Link>

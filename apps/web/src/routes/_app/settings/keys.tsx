@@ -7,6 +7,8 @@ import { type FormEvent, useState } from "react";
 import { Badge, Field, List, Notice, Row, Section, Select } from "../../../components/settings";
 import { api, keysQuery, meQuery, providersQuery } from "../../../lib/api";
 import { Button, errorMessage, IconButton, Input } from "../../../lib/ui";
+import { useConfirm } from "../../../components/ui/confirm";
+import { Checkbox } from "../../../components/ui/controls";
 
 export const Route = createFileRoute("/_app/settings/keys")({
   component: KeysSettings,
@@ -14,6 +16,7 @@ export const Route = createFileRoute("/_app/settings/keys")({
 
 function KeysSettings() {
   const t = useT();
+  const confirm = useConfirm();
   const { data: me } = useQuery(meQuery);
   const { data: keys = [] } = useQuery(keysQuery);
   const { data: providers } = useQuery(providersQuery);
@@ -63,8 +66,9 @@ function KeysSettings() {
           aria-label={t("keys.deleteLabel", { label: k.label })}
           title={t("keys.delete")}
           disabled={remove.isPending}
-          onClick={() => {
-            if (confirm(t("keys.deleteConfirm", { label: k.label }))) remove.mutate(k.id);
+          onClick={async () => {
+            if (await confirm({ title: t("keys.deleteConfirm", { label: k.label }), action: t("keys.delete"), danger: true }))
+              remove.mutate(k.id);
           }}
         >
           <Trash2 size={15} />
@@ -112,7 +116,7 @@ function KeysSettings() {
           </Field>
           {isAdmin && (
             <label className="flex items-center gap-2 text-[13px] text-muted">
-              <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
+              <Checkbox checked={shared} onChange={(e) => setShared(e.target.checked)} />
               {t("keys.share")}
             </label>
           )}

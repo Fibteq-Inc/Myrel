@@ -3,7 +3,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, FolderPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { ProjectBadge } from "../../components/shell/project-sidebar";
+import { ProjectBadge } from "../../components/shell/project-header";
 import { NavToggle, PaneHeader, Sidebar } from "../../components/shell/shell";
 import { api, projectsQuery } from "../../lib/api";
 import { AltairMark, Button, errorMessage, Input } from "../../lib/ui";

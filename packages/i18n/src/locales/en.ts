@@ -41,9 +41,6 @@ export const en = {
   // Shell
   "shell.openMenu": "Open menu",
   "shell.closeMenu": "Close menu",
-  "shell.showSidebar": "Show sidebar",
-  "shell.hideSidebar": "Hide sidebar",
-  "shell.backToChat": "Back to the project chat",
   "rail.main": "Main",
   "rail.home": "Altair home",
   "rail.projects": "Projects",
@@ -65,10 +62,8 @@ export const en = {
   "projects.member": "Member",
 
   // Project sidebar
-  "sidebar.label": "Project and threads",
   "sidebar.searchThreads": "Search threads",
   "sidebar.newRequest": "New request",
-  "sidebar.projectChat": "Project chat",
   "sidebar.threads": "Threads",
   "sidebar.noMatch": "No threads match.",
   "sidebar.noThreads": "Threads open here when Altair takes on work.",
@@ -77,15 +72,16 @@ export const en = {
   "sidebar.members": { one: "1 member", other: "{count} members" },
   "sidebar.current": "Current",
   "sidebar.newProject": "New project",
-  "connection.open": "Live",
-  "connection.openDetail": "Updates arrive as they happen",
+  "tabs.label": "Project sections",
+  "tabs.chat": "Conversation",
+  "tabs.files": "Files",
+  "threads.open": "Open",
   "connection.connecting": "Connecting",
   "connection.connectingDetail": "Reaching the server",
   "connection.closed": "Offline",
   "connection.closedDetail": "Retrying in the background",
 
   // Project chat
-  "chat.title": "Project chat",
   "chat.membersLabel": { one: "1 member", other: "{count} members" },
   "chat.placeholder": "Give Altair a task",
   "chat.emptyTitle": "What should Altair work on?",
@@ -142,7 +138,6 @@ export const en = {
   "workspace.outputsEmptyBody": "Files, artifacts and links this thread delivers collect here.",
   // Project chat header
   "chat.projectSettings": "Project settings",
-  "chat.artifactsCount": "Artifacts ({count})",
   "projectSettings.dialogTitle": "{name} settings",
   "projectSettings.close": "Close settings",
   "rail.usage": "Usage",
@@ -318,6 +313,7 @@ export const en = {
   "github.search": "Search repositories",
   "github.noMatch": "No other repositories match.",
   "github.noneVisible": "The app cannot see any repositories yet.",
+  "common.cancel": "Cancel",
   "common.loading": "Loading",
 
   // Shell and chat additions

@@ -17,6 +17,7 @@ import {
   providersQuery,
 } from "../lib/api";
 import { Button, errorMessage, GhostButton, IconButton, initials, Input } from "../lib/ui";
+import { useConfirm } from "./ui/confirm";
 
 export const roleKey = (role: ProjectRole) => `role.${role}` as const;
 
@@ -213,6 +214,7 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
 
 function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole }) {
   const t = useT();
+  const confirm = useConfirm();
   const { user } = useRouteContext({ from: "/_app" });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -279,9 +281,13 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
                   aria-label={isMe ? t("members.leave") : t("members.removeLabel", { name: m.name })}
                   title={isMe ? t("members.leave") : t("members.remove")}
                   disabled={remove.isPending}
-                  onClick={() => {
-                    const question = isMe ? t("members.leaveConfirm") : t("members.removeConfirm", { name: m.name });
-                    if (confirm(question)) remove.mutate(m.id);
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: isMe ? t("members.leaveConfirm") : t("members.removeConfirm", { name: m.name }),
+                      action: isMe ? t("members.leave") : t("members.remove"),
+                      danger: true,
+                    });
+                    if (ok) remove.mutate(m.id);
                   }}
                 >
                   <X size={15} />

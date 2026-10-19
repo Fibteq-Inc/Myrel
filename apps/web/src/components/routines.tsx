@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { useFormat } from "../lib/format";
 import { Button, errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
+import { useConfirm } from "./ui/confirm";
+import { Select } from "./ui/controls";
 
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
@@ -49,6 +51,8 @@ export function RoutinesPanel({
   const [creating, setCreating] = useState(routines.length === 0);
   const [error, setError] = useState<string | null>(null);
   const titles = useMemo(() => Object.fromEntries(threads.map((t) => [t.id, t.title])), [threads]);
+
+  const confirm = useConfirm();
 
   async function act(fn: () => Promise<unknown>) {
     setError(null);
@@ -132,9 +136,10 @@ export function RoutinesPanel({
                     className="size-7 hover:text-bad"
                     title={t("routines.delete")}
                     aria-label={`${t("routines.delete")}: ${r.name}`}
-                    onClick={() =>
-                      confirm(t("routines.confirmDelete", { name: r.name })) && act(() => api.deleteRoutine(projectId, r.id))
-                    }
+                    onClick={async () => {
+                      const ok = await confirm({ title: t("routines.confirmDelete", { name: r.name }), action: t("routines.delete"), danger: true });
+                      if (ok) await act(() => api.deleteRoutine(projectId, r.id));
+                    }}
                   >
                     <Trash2 size={14} />
                   </IconButton>
@@ -229,9 +234,9 @@ function RoutineForm({
         className="w-full resize-y rounded-lg border border-edge bg-raised px-3 py-2 text-sm text-fg outline-none placeholder:text-subtle focus:border-accent"
       />
       <div className="flex flex-wrap gap-2">
-        <select
+        <Select
           aria-label={t("routines.repeat")}
-          className={select}
+          className="w-auto"
           value={repeat}
           onChange={(e) => setRepeat(e.target.value as Repeat)}
         >
@@ -241,11 +246,11 @@ function RoutineForm({
           <option value="hourly">{t("routines.repeatHourly")}</option>
           <option value="once">{t("routines.repeatOnce")}</option>
           <option value="custom">{t("routines.repeatCustom")}</option>
-        </select>
+        </Select>
         {repeat === "weekly" && (
-          <select
+          <Select
             aria-label={t("routines.day")}
-            className={select}
+            className="w-auto"
             value={weekday}
             onChange={(e) => setWeekday(Number(e.target.value))}
           >
@@ -254,7 +259,7 @@ function RoutineForm({
                 {format.weekday(d)}
               </option>
             ))}
-          </select>
+          </Select>
         )}
         {(repeat === "daily" || repeat === "weekdays" || repeat === "weekly") && (
           <input
@@ -285,9 +290,8 @@ function RoutineForm({
           />
         )}
       </div>
-      <select
+      <Select
         aria-label={t("routines.where")}
-        className={`${select} w-full`}
         value={target}
         onChange={(e) => setTarget(e.target.value)}
       >
@@ -297,7 +301,7 @@ function RoutineForm({
             {t("routines.targetThread", { title: thread.title })}
           </option>
         ))}
-      </select>
+      </Select>
       <p className="text-[11px] text-subtle">
         {preview ? t("routines.firstRun", { date: format.dateTime(preview), zone: localZone }) : t("routines.never")}
       </p>

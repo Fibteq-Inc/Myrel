@@ -23,14 +23,7 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
   );
 }
 
-export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={`h-9 w-full rounded-lg border border-edge bg-raised px-2.5 text-sm text-fg outline-none focus:border-accent ${className}`}
-      {...props}
-    />
-  );
-}
+export { Select } from "./ui/controls";
 
 /** Bordered list used for keys, members and invites. */
 export function List({ children, empty }: { children: ReactNode[]; empty: string }) {

@@ -7,6 +7,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, filesQuery, instructionsQuery, memoryQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton, Input } from "../lib/ui";
 import { displayName, FileIcon, FilePreview, formatSize } from "./files";
+import { useConfirm } from "./ui/confirm";
 
 export type PanelTab = "files" | "memory" | "instructions";
 
@@ -96,6 +97,7 @@ function FilesTab({
   onOpen: (path: string) => void;
 }) {
   const t = useT();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { data: files = [], isPending } = useQuery(filesQuery(projectId));
   const input = useRef<HTMLInputElement>(null);
@@ -111,7 +113,7 @@ function FilesTab({
   });
 
   async function remove(path: string) {
-    if (!confirm(t("knowledge.deleteFileConfirm", { path }))) return;
+    if (!(await confirm({ title: t("knowledge.deleteFileConfirm", { path }), action: t("knowledge.delete"), danger: true }))) return;
     try {
       await api.deleteFile(projectId, path);
       await refresh();
@@ -267,6 +269,7 @@ function MemoryEditor({
   onDone: () => void;
 }) {
   const t = useT();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
@@ -324,7 +327,10 @@ function MemoryEditor({
         {!isNew && (
           <GhostButton
             type="button"
-            onClick={() => confirm(t("knowledge.deleteMemoryConfirm", { name: initial.name })) && remove.mutate()}
+            onClick={async () => {
+              if (await confirm({ title: t("knowledge.deleteMemoryConfirm", { name: initial.name }), action: t("knowledge.delete"), danger: true }))
+                remove.mutate();
+            }}
             className="text-bad"
           >
             <Trash2 size={14} aria-hidden="true" />

@@ -9,7 +9,6 @@ import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import { Checklist, Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking } from "../chat";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
-import { NavToggle } from "../shell/shell";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
 import { CHAT_MIN, PANEL_MIN, PANEL_SPLIT, useThreadPanel } from "./panel-state";
@@ -167,12 +166,6 @@ export function ThreadPanel({
       ) : (
         <>
           <header className="flex h-14 flex-none items-center gap-1 border-b border-line pl-4 pr-2">
-            {panel.maximized && (
-              // The chat and its header are hidden, so bring a folded sidebar back from here.
-              <span className="mr-1 flex max-lg:hidden">
-                <NavToggle />
-              </span>
-            )}
             <ThreadStatusIcon thread={thread} />
             <div className="ml-1.5 flex min-w-0 flex-1 flex-col leading-tight">
               <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
