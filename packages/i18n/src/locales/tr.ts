@@ -277,4 +277,30 @@ export const tr: Catalog = {
   "usage.chartTokens": "Günlük token",
   "usage.chartCost": "Günlük tahmini maliyet",
   "usage.modelCalls": { other: "{count} model çağrısı" },
+  // GitHub repositories (project settings)
+  "github.connected": "GitHub bağlandı. Bu projenin üzerinde çalışacağı depoları seç.",
+  "github.noCode":
+    "GitHub oturum açmadı. GitHub App'te “Request user authorization (OAuth) during installation” seçeneğini aç, sonra yeniden dene.",
+  "github.error": "GitHub bağlanamadı. Yeniden dene.",
+  "github.invalidState": "Bu GitHub bağlantısının süresi dolmuş ya da başka bir hesaba ait. Yeniden dene.",
+  "github.title": "GitHub depoları",
+  "github.description": "Thread'ler bu depolardaki kodu okur. Klonlama, çalıştırma ve pull request açma sırada.",
+  "github.notConfigured":
+    "Bu sunucuda GitHub henüz kurulmadı. Sunucu yöneticisi bir GitHub App oluşturup ayarlarını Worker'a ekler ({path} dosyasına bak).",
+  "github.connectedAccounts": "Bağlı: {accounts}",
+  "github.addAccount": "Hesap ya da depo ekle",
+  "github.refresh": "GitHub'dan yenile",
+  "github.installHint":
+    "Altair GitHub App'i hesabına ya da organizasyonuna kur ve hangi depoları görebileceğini seç.",
+  "github.connect": "GitHub'ı bağla",
+  "github.signIn": "Zaten kurulu mu? GitHub ile giriş yap",
+  "github.empty": "Henüz bağlı depo yok.",
+  "github.private": "Özel",
+  "github.disconnect": "Bağlantıyı kes",
+  "github.disconnectLabel": "{repo} bağlantısını kes",
+  "github.add": "Depo ekle",
+  "github.search": "Depolarda ara",
+  "github.noMatch": "Eşleşen başka depo yok.",
+  "github.noneVisible": "Uygulama henüz hiçbir depoyu göremiyor.",
+  "common.loading": "Yükleniyor",
 };

@@ -279,4 +279,30 @@ export const en = {
   "usage.chartTokens": "Daily tokens",
   "usage.chartCost": "Daily estimated cost",
   "usage.modelCalls": { one: "1 model call", other: "{count} model calls" },
+  // GitHub repositories (project settings)
+  "github.connected": "GitHub is connected. Pick the repositories this project works on.",
+  "github.noCode":
+    "GitHub did not sign you in. Turn on “Request user authorization (OAuth) during installation” in the GitHub App, then try again.",
+  "github.error": "Connecting GitHub failed. Try again.",
+  "github.invalidState": "That GitHub link expired or belongs to another account. Try again.",
+  "github.title": "GitHub repositories",
+  "github.description": "Threads read the code in these repositories. Cloning, running and opening pull requests come next.",
+  "github.notConfigured":
+    "GitHub is not set up on this server yet. The server admin creates a GitHub App and adds its settings to the Worker (see {path}).",
+  "github.connectedAccounts": "Connected: {accounts}",
+  "github.addAccount": "Add an account or repositories",
+  "github.refresh": "Refresh from GitHub",
+  "github.installHint":
+    "Install the Altair GitHub App on your account or organization and choose which repositories it can see.",
+  "github.connect": "Connect GitHub",
+  "github.signIn": "Already installed? Sign in with GitHub",
+  "github.empty": "No repositories connected yet.",
+  "github.private": "Private",
+  "github.disconnect": "Disconnect",
+  "github.disconnectLabel": "Disconnect {repo}",
+  "github.add": "Add repository",
+  "github.search": "Search repositories",
+  "github.noMatch": "No other repositories match.",
+  "github.noneVisible": "The app cannot see any repositories yet.",
+  "common.loading": "Loading",
 } satisfies Record<string, string | PluralMessage>;
