@@ -25,6 +25,8 @@ export type TaskRunnerOptions = {
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
 export class TaskRunner {
   private readonly running = new Map<string, ChildProcess>();
+  /** Tasks the server asked to stop. */
+  private readonly cancelled = new Set<string>();
   private send: Send = () => {};
 
   constructor(private readonly opts: TaskRunnerOptions) {}
@@ -96,6 +98,11 @@ export class TaskRunner {
         done = true;
         clearTimeout(timer);
         this.running.delete(task.taskId);
+        if (this.cancelled.delete(task.taskId)) {
+          log(`■ ${adapter.id} task stopped`);
+          this.send({ type: "task.done", taskId: task.taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
+          return resolve();
+        }
         log(`${ok ? "✓" : "✗"} ${adapter.id} task finished`);
         this.send({ type: "task.done", taskId: task.taskId, ok, result: result.slice(0, MAX_RESULT) });
         resolve();
@@ -108,6 +115,10 @@ export class TaskRunner {
             : `Could not start ${adapter.bin}: ${err.message}`,
         );
       });
+      // A stopped CLI can leave children holding its output open, so "close" may come late.
+      child.on("exit", () => {
+        if (this.cancelled.has(task.taskId)) finish(false, "");
+      });
       child.on("close", async (code, signal) => {
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
@@ -119,6 +130,15 @@ export class TaskRunner {
         finish(ok, result || "(no output)");
       });
     });
+  }
+
+  /** Stops one task, as asked from Altair. Its "task.done" says it was cancelled. */
+  cancel(taskId: string) {
+    const child = this.running.get(taskId);
+    if (!child) return;
+    this.cancelled.add(taskId);
+    child.kill("SIGTERM");
+    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 5000).unref();
   }
 
   /** Stops every running task, e.g. when this computer is unpaired. */

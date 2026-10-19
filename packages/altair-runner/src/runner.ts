@@ -11,7 +11,7 @@ import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, sh
 import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 
-export const RUNNER_VERSION = "0.2.2";
+export const RUNNER_VERSION = "0.3.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -104,7 +104,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       platform: platform(),
       folders: config.folders,
       clis,
-      features: ["folders"],
+      features: ["folders", "cancel"],
       running: tasks.runningIds(),
     });
   tasks.setSender(send);
@@ -168,6 +168,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         status({ state: "task", taskId: frame.taskId, event: "started" });
         void tasks.start(frame);
       }
+      if (frame.type === "task.cancel") tasks.cancel(frame.taskId);
       if (frame.type === "dirs.list" || frame.type === "folder.share" || frame.type === "folder.unshare") {
         void answer(frame).catch((err: unknown) =>
           send({ type: "request.failed", requestId: frame.requestId, message: errorText(err) }),

@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `task_target` text DEFAULT 'auto' NOT NULL;

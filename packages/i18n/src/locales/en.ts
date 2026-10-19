@@ -227,6 +227,13 @@ export const en = {
   "projectSettings.shared": "(shared)",
   "projectSettings.missingKey":
     "The server has no {provider} key, so agents cannot answer in this project until you pick one.",
+  "projectSettings.tasks": "Tasks",
+  "projectSettings.tasksDescription":
+    "Where thread agents run code: on a computer with the project's local folder, using its own coding CLI, or in a sandbox in the cloud.",
+  "projectSettings.runTasks": "Run tasks",
+  "projectSettings.taskTarget.auto": "Automatic: on the computer when it is online, otherwise in the cloud",
+  "projectSettings.taskTarget.local": "Always on the computer",
+  "projectSettings.taskTarget.cloud": "Always in the cloud",
   "members.title": "Members",
   "members.description": "Owners and admins manage members, invitations and settings.",
   "members.empty": "No members.",
@@ -481,5 +488,6 @@ export const en = {
   "tasks.running": "Running",
   "tasks.done": "Done",
   "tasks.cancelled": "Cancelled",
+  "tasks.stopFailed": "Could not stop the task.",
   "tasks.failed": "Failed",
 } satisfies Record<string, string | PluralMessage>;

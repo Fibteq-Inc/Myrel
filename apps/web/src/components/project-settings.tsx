@@ -1,5 +1,5 @@
 import { useT } from "@altair/i18n/react";
-import type { InviteRole, ProjectRole, ProviderId } from "@altair/protocol";
+import type { InviteRole, ProjectRole, ProviderId, TaskTarget } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { X } from "lucide-react";
@@ -70,11 +70,13 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
   const [provider, setProvider] = useState<ProviderId | "">(settings.provider ?? "");
   const [model, setModel] = useState(settings.model ?? "");
   const [keyId, setKeyId] = useState(settings.keyId ?? "");
+  const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   useEffect(() => {
     setName(settings.name);
     setProvider(settings.provider ?? "");
     setModel(settings.model ?? "");
     setKeyId(settings.keyId ?? "");
+    setTaskTarget(settings.taskTarget);
   }, [settings]);
 
   const save = useMutation({
@@ -84,6 +86,7 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
         provider: provider || null,
         model: model.trim() || null,
         keyId: keyId || null,
+        taskTarget,
       }),
     onSuccess: (s) => {
       queryClient.setQueryData(projectSettingsQuery(projectId).queryKey, s);
@@ -183,6 +186,16 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
             {t("projectSettings.missingKey", { provider: providerInfo.name })}
           </Notice>
         )}
+      </Section>
+
+      <Section title={t("projectSettings.tasks")} description={t("projectSettings.tasksDescription")}>
+        <Field label={t("projectSettings.runTasks")}>
+          <Select value={taskTarget} onChange={(e) => setTaskTarget(e.target.value as TaskTarget)} disabled={!canManage}>
+            <option value="auto">{t("projectSettings.taskTarget.auto")}</option>
+            <option value="local">{t("projectSettings.taskTarget.local")}</option>
+            <option value="cloud">{t("projectSettings.taskTarget.cloud")}</option>
+          </Select>
+        </Field>
       </Section>
 
       {canManage && (

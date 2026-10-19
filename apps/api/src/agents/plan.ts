@@ -31,7 +31,7 @@ export function renderPlan(plan: Plan): string {
 
 /**
  * What the thread shows: the agent's plan, with the checklist of the task it
- * started (run_task, run_local_task) nested under the step it belongs to. Without
+ * started (run_task) nested under the step it belongs to. Without
  * a plan, the task's checklist alone; without either, nothing.
  */
 export function composeStatus(plan: Plan | null, task: string | null): string | null {

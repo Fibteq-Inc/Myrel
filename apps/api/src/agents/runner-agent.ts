@@ -115,7 +115,7 @@ export class RunnerAgent extends Agent<Env> {
       }
       case "task.done": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
-        if (task?.status === "running") await this.finish(task, frame.ok, frame.result);
+        if (task?.status === "running") await this.finish(task, frame.ok, frame.result, frame.cancelled);
         return;
       }
       case "folders":
@@ -161,6 +161,23 @@ export class RunnerAgent extends Agent<Env> {
       cli: input.cli,
       prompt: input.prompt,
     });
+    return { ok: true };
+  }
+
+  /** Asks the computer to stop a task; its result arrives as a cancelled "task.done". Callable over RPC. */
+  async cancelTask(taskId: string): Promise<TaskStartResult> {
+    const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (task?.status !== "running") return { ok: false, reason: "This task is not running." };
+    const [connection] = this.getConnections();
+    if (!connection) return { ok: false, reason: "The computer is offline, so the task cannot be stopped from here." };
+    const [row] = await createDb(this.env.DB)
+      .select({ info: schema.runners.info })
+      .from(schema.runners)
+      .where(eq(schema.runners.id, this.name));
+    if (!parseInfo(row?.info ?? null)?.features.includes("cancel")) {
+      return { ok: false, reason: "Update altair-runner on this computer to stop tasks from Altair (npx altair-runner@latest)." };
+    }
+    send(connection, { type: "task.cancel", taskId });
     return { ok: true };
   }
 
@@ -228,13 +245,13 @@ export class RunnerAgent extends Agent<Env> {
       .where(eq(schema.runners.id, this.name));
   }
 
-  private async finish(task: TaskRow, ok: boolean, result: string) {
+  private async finish(task: TaskRow, ok: boolean, result: string, cancelled = false) {
     this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
     const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
     await thread.taskEvents(task.id, [
       { type: "text", text: result },
       ok ? { type: "phase", phase: "agent", state: "done" } : { type: "phase", phase: "agent", state: "failed" },
-      { type: "done", ok },
+      cancelled ? { type: "done", ok: false, error: "Cancelled." } : { type: "done", ok },
     ]);
   }
 }

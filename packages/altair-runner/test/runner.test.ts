@@ -116,6 +116,23 @@ describe.skipIf(process.platform === "win32")("TaskRunner", () => {
     return frames;
   }
 
+  it("stops a task when the server asks", async () => {
+    await fakeClaude("read prompt\nsleep 30");
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const config: RunnerConfig = { folders: [{ path: folder, name: "proj" }], access: "edit" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    const taskId = "task_01JTEST0000000000000000001";
+    const done = runner.start({ type: "task.start", taskId, threadId: "thr_01JTEST0000000000000000000", folder, cli: "claude", prompt: "x" });
+    for (let i = 0; i < 100 && !runner.runningIds().includes(taskId); i++) await new Promise((r) => setTimeout(r, 10));
+    runner.cancel(taskId);
+    await done;
+    expect(frames.at(-1)).toEqual({ type: "task.done", taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
+    expect(runner.runningIds()).toEqual([]);
+  });
+
   it("runs the CLI in the shared folder with the prompt on stdin and reports the result", async () => {
     await fakeClaude(
       `read prompt

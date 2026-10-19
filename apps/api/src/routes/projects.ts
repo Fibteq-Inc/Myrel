@@ -11,6 +11,7 @@ import {
   type ProjectSettings,
   UpdateMemberInput,
   SetWorkspaceInput,
+  TaskTarget,
   UpdateProjectSettingsInput,
 } from "@altair/protocol";
 import { getAgentByName } from "agents";
@@ -69,7 +70,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, model } = input.data;
+    const { name, model, taskTarget } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -87,6 +88,7 @@ export const projectRoutes = new Hono<AppEnv>()
       .set({
         ...(name !== undefined && { name }),
         ...(model !== undefined && { llmModel: model || null }),
+        ...(taskTarget !== undefined && { taskTarget }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -409,8 +411,18 @@ async function ownerCount(env: Env, projectId: string): Promise<number> {
 
 async function readSettings(env: Env, projectId: string): Promise<ProjectSettings> {
   const [row] = await createDb(env.DB)
-    .select({ name: projects.name, provider: projects.llmProvider, model: projects.llmModel, keyId: projects.llmKeyId })
+    .select({
+      name: projects.name,
+      provider: projects.llmProvider,
+      model: projects.llmModel,
+      keyId: projects.llmKeyId,
+      taskTarget: projects.taskTarget,
+    })
     .from(projects)
     .where(eq(projects.id, projectId));
-  return { ...row!, provider: row!.provider as ProjectSettings["provider"] };
+  return {
+    ...row!,
+    provider: row!.provider as ProjectSettings["provider"],
+    taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
+  };
 }

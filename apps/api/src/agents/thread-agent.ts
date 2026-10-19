@@ -1,4 +1,4 @@
-import { type ArtifactRef, createId, type ProjectWorkspace, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type ArtifactRef, CLI_NAMES, createId, type ProjectWorkspace, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
 import {
   emptyProgress,
   HarnessId,
@@ -15,7 +15,7 @@ import { listProjectRepos } from "../github/store";
 import { projectProvider, projectTaskModel } from "../keys";
 import { runLoop } from "../llm";
 import { getWorkspace } from "../runners";
-import { localBackend, normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
+import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBackend, taskPlace } from "../sandbox/backend";
 import { threadWorkspace } from "../sandbox/workspace";
 import { meteredForTurn, recordTaskUsage } from "../usage";
 import { type Author, knowledgeTools } from "./knowledge";
@@ -46,7 +46,7 @@ type TaskRow = {
 };
 
 /** A task's spec as stored. Tasks on the person's computer name their CLI (claude, codex…) as the harness. */
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string };
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string };
 
 type LogRow = { stream: TerminalLine["stream"]; text: string };
 
@@ -67,8 +67,8 @@ const WATCHDOG_GRACE_SEC = 300;
  * wake queues a turn that reads the thread from the ProjectAgent, calls the
  * model and acts through reply / update_status / request_coordinator.
  * Messages themselves live in the ProjectAgent; this DO keeps the brief,
- * coordinator notes, a read cursor, and the tasks the agent ran (run_task in
- * the sandbox, run_local_task on the person's computer) with their progress
+ * coordinator notes, a read cursor, and the tasks the agent ran (run_task, in
+ * the sandbox or on the person's computer) with their progress
  * and terminal output.
  */
 export class ThreadAgent extends Agent<Env> {
@@ -153,6 +153,7 @@ export class ThreadAgent extends Agent<Env> {
       isNew: row.status !== "running" && row.reported === 0,
     }));
     const workspace = await getWorkspace(this.env, projectId);
+    const place = await taskPlace(this.env, projectId);
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     this.sql`UPDATE notes SET seen = 1`;
     this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
@@ -185,6 +186,7 @@ export class ThreadAgent extends Agent<Env> {
           repos: await listProjectRepos(this.env.DB, projectId),
           tasks: renderTasks(tasks),
           workspace,
+          place,
         }),
         tools: [
           ...threadTools({
@@ -233,13 +235,6 @@ export class ThreadAgent extends Agent<Env> {
               if (!started.ok) throw new Error(started.error);
               return started.message;
             },
-            runLocalTask: workspace
-              ? async (input) => {
-                  const started = await this.startTask({ ...input, local: true });
-                  if (!started.ok) throw new Error(started.error);
-                  return started.message;
-                }
-              : undefined,
             cancelTask: () => this.cancelRunningTask(),
           }),
           ...knowledgeTools({
@@ -278,12 +273,19 @@ export class ThreadAgent extends Agent<Env> {
     }
   }
 
-  // ---- Tasks (run_task, run_local_task) -------------------------------------
+  // ---- Tasks (run_task) ---------------------------------------------------
 
-  /** Starts a task for run_task or run_local_task, or says why it cannot. Callable over RPC. */
+  /** Starts a task for run_task, or says why it cannot. Callable over RPC. */
   async startTask(input: RunTaskInput): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
     try {
-      return { ok: true, message: input.local ? await this.launchLocalTask(input) : await this.launchTask(input) };
+      const { projectId } = this.ids();
+      this.assertIdle();
+      const place = await taskPlace(this.env, projectId);
+      if (place.kind === "error") throw new Error(place.message);
+      return {
+        ok: true,
+        message: place.kind === "local" ? await this.launchLocalTask(input, place.workspace) : await this.launchTask(input),
+      };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -346,19 +348,21 @@ export class ThreadAgent extends Agent<Env> {
     return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
   }
 
-  private async launchLocalTask(input: RunTaskInput): Promise<string> {
+  private async launchLocalTask(input: RunTaskInput, workspace: ProjectWorkspace): Promise<string> {
     const { projectId, threadId } = this.ids();
-    this.assertIdle();
-    const workspace = await getWorkspace(this.env, projectId);
-    if (!workspace) throw new Error("This project has no local folder connected.");
     const spec = TaskSpec.parse({ taskId: createId("task"), title: input.title, prompt: input.prompt });
     const backend = localBackend(this.env, { projectId, threadId, workspace });
     const unavailable = backend.unavailable(spec);
     if (unavailable) throw new Error(unavailable);
     // The person's own CLI does the work, so the task shows that CLI instead of an Altair harness.
-    await this.launch({ ...spec, harness: workspace.cli }, backend.id, () => backend.start(spec, {}), input.language);
+    await this.launch(
+      { ...spec, harness: workspace.cli, runnerId: workspace.runnerId },
+      backend.id,
+      () => backend.start(spec, {}),
+      input.language,
+    );
     await this.taskEvents(spec.taskId, LOCAL_PHASES);
-    return "The task is running on the person's computer. Its result arrives in a later turn; tell the person you started it, then end this turn.";
+    return `Started "${spec.title}" on the person's computer, with ${CLI_NAMES[workspace.cli]} in ${workspace.path}. Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
   }
 
   /** Records a task, starts it on its backend and shows it. */
@@ -475,9 +479,7 @@ export class ThreadAgent extends Agent<Env> {
 
   /** The backend a recorded task runs on, for cancelling it. */
   private backendOf(row: TaskRow): Pick<RunnerBackend, "cancel"> {
-    if (row.backend === "local") {
-      return { cancel: () => Promise.reject(new Error("A task on the person's computer cannot be stopped from here yet. They can stop it there.")) };
-    }
+    if (row.backend === "local") return localCanceller(this.env, (JSON.parse(row.spec) as StoredSpec).runnerId);
     return sandboxBackend(this.env, this.getMeta("thread_id")!);
   }
 
@@ -553,7 +555,7 @@ export class ThreadAgent extends Agent<Env> {
   private migrateLocalTasks() {
     const columns = this.sql<{ name: string }>`PRAGMA table_info(tasks)`;
     if (!columns.some((c) => c.name === "runner_id")) return;
-    type OldRow = { id: string; prompt: string; status: TaskStatus; result: string | null; created_at: string; seen: number };
+    type OldRow = { id: string; runner_id: string; prompt: string; status: TaskStatus; result: string | null; created_at: string; seen: number };
     const old = this.sql<OldRow>`SELECT * FROM tasks`;
     this.sql`DROP TABLE tasks`;
     this.sql`CREATE TABLE tasks (
@@ -571,7 +573,7 @@ export class ThreadAgent extends Agent<Env> {
     )`;
     for (const t of old) {
       const title = t.prompt.split("\n")[0]!.slice(0, 80) || "Task";
-      const spec = { taskId: t.id, title, prompt: t.prompt, harness: "cli", openPr: false, timeoutSec: 1800 };
+      const spec = { taskId: t.id, title, prompt: t.prompt, harness: "cli", runnerId: t.runner_id, openPr: false, timeoutSec: 1800 };
       const finished = t.status === "running" ? null : { ok: t.status === "done" };
       const progress = [...LOCAL_PHASES, ...(finished ? [{ type: "done" as const, ...finished }] : [])].reduce(reduceTask, {
         ...emptyProgress(),

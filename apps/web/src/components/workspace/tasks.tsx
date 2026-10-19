@@ -84,6 +84,7 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
   const running = task.status === "running";
   const [open, setOpen] = useState(running);
   const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
   useEffect(() => {
     if (running) setOpen(true);
   }, [running]);
@@ -120,8 +121,11 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
             disabled={stopping}
             onClick={async () => {
               setStopping(true);
+              setStopError(null);
               try {
                 await api.cancelTask(projectId, task.threadId, task.id);
+              } catch (err) {
+                setStopError(err instanceof Error ? err.message : t("tasks.stopFailed"));
               } finally {
                 setStopping(false);
               }
@@ -133,6 +137,7 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
           </button>
         )}
       </div>
+      {stopError && running && <p className="pl-6 text-xs text-bad">{stopError}</p>}
       {open && <Terminal lines={lines} />}
     </div>
   );

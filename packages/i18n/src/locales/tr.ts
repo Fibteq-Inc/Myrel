@@ -225,6 +225,13 @@ export const tr: Catalog = {
   "projectSettings.shared": "(ortak)",
   "projectSettings.missingKey":
     "Sunucuda {provider} anahtarı yok. Bir anahtar seçene kadar ajanlar bu projede yanıt veremez.",
+  "projectSettings.tasks": "Görevler",
+  "projectSettings.tasksDescription":
+    "Thread ajanlarının kodu nerede çalıştıracağı: projenin yerel klasörünün olduğu bilgisayarda, oradaki kodlama CLI'ı ile ya da buluttaki bir sandbox'ta.",
+  "projectSettings.runTasks": "Görevleri çalıştır",
+  "projectSettings.taskTarget.auto": "Otomatik: bilgisayar çevrimiçiyse orada, değilse bulutta",
+  "projectSettings.taskTarget.local": "Her zaman bilgisayarda",
+  "projectSettings.taskTarget.cloud": "Her zaman bulutta",
   "members.title": "Üyeler",
   "members.description": "Sahipler ve yöneticiler üyeleri, davetleri ve ayarları yönetir.",
   "members.empty": "Üye yok.",
@@ -479,5 +486,6 @@ export const tr: Catalog = {
   "tasks.running": "Çalışıyor",
   "tasks.done": "Bitti",
   "tasks.cancelled": "İptal edildi",
+  "tasks.stopFailed": "Görev durdurulamadı.",
   "tasks.failed": "Başarısız",
 };
