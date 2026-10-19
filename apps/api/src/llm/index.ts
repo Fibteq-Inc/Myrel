@@ -23,7 +23,8 @@ export const PROVIDERS = {
   fireworks: {
     kind: "openai",
     baseUrl: "https://api.fireworks.ai/inference/v1",
-    defaultModel: "accounts/fireworks/models/kimi-k2p6",
+    // FireRouter sends routine turns to open models and harder ones to Claude Opus.
+    defaultModel: "firerouter/opus",
     keyVar: "FIREWORKS_API_KEY",
     gatewaySlug: null,
   },

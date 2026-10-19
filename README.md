@@ -75,7 +75,7 @@ Agents call the model named by `LLM_PROVIDER` in `wrangler.jsonc`, with that pro
 
 | `LLM_PROVIDER` | Secret | Default model |
 |---|---|---|
-| `fireworks` (default) | `FIREWORKS_API_KEY` | `accounts/fireworks/models/kimi-k2p6` |
+| `fireworks` (default) | `FIREWORKS_API_KEY` | `firerouter/opus` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
 | `openai` | `OPENAI_API_KEY` | `gpt-5.1` |
 
