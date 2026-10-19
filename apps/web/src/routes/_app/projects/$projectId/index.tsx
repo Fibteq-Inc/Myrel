@@ -46,8 +46,8 @@ function ProjectChat() {
         <Link
           to="/settings/projects/$projectId"
           params={{ projectId: project.id }}
-          aria-label="Project settings"
-          title="Project settings"
+          aria-label={t("chat.projectSettings")}
+          title={t("chat.projectSettings")}
           className="-mr-2 flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
         >
           <Settings size={16} />

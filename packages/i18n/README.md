@@ -5,8 +5,8 @@ dependencies: a typed catalog per language, `{name}` parameters, plural forms
 through `Intl.PluralRules`, and small React bindings.
 
 Languages: English (`en`, the source) and Turkish (`tr`). The web app picks the
-saved choice, else the browser's languages, else English; people change it from
-the account menu or the sign-in page.
+saved choice, else the browser's languages, else English; people change it in
+Settings → Account, the account menu or the sign-in page.
 
 ## Adding a string
 

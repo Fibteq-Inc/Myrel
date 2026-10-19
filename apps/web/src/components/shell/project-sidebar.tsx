@@ -210,7 +210,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
               void navigate({ to: "/settings/projects/$projectId", params: { projectId: current } });
             }}
           >
-            Project settings
+            {t("chat.projectSettings")}
           </MenuItem>
           <MenuItem
             icon={<Plus size={15} />}
