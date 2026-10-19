@@ -1,5 +1,8 @@
 import type {
   AddProjectRepoInput,
+  Artifact,
+  ArtifactVersion,
+  ArtifactView,
   AdminSettings,
   ApiKey,
   CreateApiKeyInput,
@@ -375,6 +378,40 @@ export class ApiClient {
 
   async clearWorkspace(projectId: string) {
     await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace`, { method: "DELETE" });
+  }
+
+  // --- artifacts ---
+
+  private artifactsPath(projectId: string, artifactId?: string) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/artifacts`;
+    return artifactId ? `${base}/${encodeURIComponent(artifactId)}` : base;
+  }
+
+  async listArtifacts(projectId: string) {
+    return (await this.request<{ artifacts: Artifact[] }>(this.artifactsPath(projectId))).artifacts;
+  }
+
+  getArtifact(projectId: string, artifactId: string) {
+    return this.request<{ artifact: Artifact; versions: ArtifactVersion[] }>(this.artifactsPath(projectId, artifactId));
+  }
+
+  /** A signed, short-lived link to frame one version (default: latest) from the artifact origin. */
+  artifactView(projectId: string, artifactId: string, version?: number) {
+    const query = version ? `?version=${version}` : "";
+    return this.request<ArtifactView>(`${this.artifactsPath(projectId, artifactId)}/view${query}`);
+  }
+
+  /** One version's HTML source, as text. */
+  async artifactSource(projectId: string, artifactId: string, version: number): Promise<string> {
+    const headers: Record<string, string> = {};
+    const token = await this.tokens?.get();
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await this.fetchImpl(`${this.baseUrl}${this.artifactsPath(projectId, artifactId)}/versions/${version}/source`, {
+      headers,
+      credentials: "include",
+    });
+    if (!res.ok) throw new ApiError(res.status, null);
+    return res.text();
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

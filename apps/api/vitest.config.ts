@@ -23,6 +23,8 @@ export default defineConfig(async () => {
             GITHUB_CLIENT_SECRET: "test-client-secret",
             GITHUB_WEBHOOK_SECRET: "test-webhook-secret",
             GITHUB_APP_PRIVATE_KEY: privateKey,
+            ARTIFACTS_URL: "https://usercontent.test",
+            ARTIFACT_SIGNING_SECRET: "test-signing-secret",
           },
         },
       }),

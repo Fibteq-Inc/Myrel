@@ -2,7 +2,7 @@ import type { SocketStatus } from "@altair/client";
 import type { Thread } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, ChevronRight, ChevronsUpDown, FolderOpen, Hash, Plus, Search, Settings, SquarePen, Wifi, WifiOff } from "lucide-react";
+import { Blocks, Check, ChevronDown, ChevronRight, ChevronsUpDown, FolderOpen, Hash, Plus, Search, Settings, SquarePen, Wifi, WifiOff } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -90,6 +90,18 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
           >
             <FolderOpen size={16} aria-hidden="true" />
             Files and memory
+          </Link>
+          <Link
+            to="/projects/$projectId/artifacts"
+            params={{ projectId: project.id }}
+            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
+            activeProps={{ className: "bg-hover !text-fg font-medium" }}
+          >
+            <Blocks size={16} aria-hidden="true" />
+            Artifacts
+            {Object.keys(state.artifacts).length > 0 && (
+              <span className="ml-auto font-mono text-xs text-subtle">{Object.keys(state.artifacts).length}</span>
+            )}
           </Link>
         </div>
 

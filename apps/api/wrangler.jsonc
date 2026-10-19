@@ -25,9 +25,13 @@
     }
   ],
 
-  // Project files and message uploads, under projects/<projectId>/files/. Create the bucket once
-  // with `wrangler r2 bucket create altair-files` (or in the dashboard) before deploying.
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "altair-files" }],
+  // R2 buckets. Create each once (`wrangler r2 bucket create <name>` or in the dashboard) before deploying.
+  // FILES: project files and message uploads, under projects/<projectId>/files/.
+  // ARTIFACTS: artifact versions (HTML); the artifact Worker (apps/artifacts) serves them from its own domain.
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "altair-files" },
+    { "binding": "ARTIFACTS", "bucket_name": "altair-artifacts" }
+  ],
 
   "durable_objects": {
     "bindings": [
@@ -69,6 +73,11 @@
   // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a
   // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID,
   // GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET.
+  //
+  // Artifacts. ARTIFACTS_URL: origin of the artifact Worker, e.g. https://altair-usercontent.dev.
+  // It must be a different site from the app (not a subdomain of it). Empty = artifacts are
+  // published and listed but cannot be opened. ARTIFACT_SIGNING_SECRET (secret): shared with
+  // the artifact Worker, which only serves links signed with it.
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
@@ -78,6 +87,7 @@
     "LLM_MODEL": "",
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
-    "AI_GATEWAY_URL": ""
+    "AI_GATEWAY_URL": "",
+    "ARTIFACTS_URL": ""
   }
 }

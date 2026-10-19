@@ -9,6 +9,7 @@ import { accountRoutes } from "./routes/account";
 import { adminRoutes } from "./routes/admin";
 import { knowledgeRoutes } from "./routes/knowledge";
 import { githubRoutes } from "./routes/github";
+import { artifactRoutes } from "./routes/artifacts";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
@@ -41,6 +42,7 @@ const app = new Hono<AppEnv>()
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
+  .route("/projects/:id/artifacts", artifactRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)

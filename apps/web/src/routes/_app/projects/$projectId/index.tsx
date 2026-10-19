@@ -2,6 +2,7 @@ import { projectChat, threadByRoot, threadMessages } from "@altair/client";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { Hash, MessagesSquare, Settings } from "lucide-react";
 import { WorkspaceButton } from "../../../../components/local-folder";
+import { ArtifactCards } from "../../../../components/artifacts";
 import { Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking, ThreadCard } from "../../../../components/chat";
 import { NavToggle, PaneHeader } from "../../../../components/shell/shell";
 import { useProjectContext } from "../../../../lib/project-context";
@@ -71,6 +72,7 @@ function ProjectChat() {
                 reactions={state.reactions[m.id]}
                 decision={{ answer: answers.get(m.id), onChoose: (label) => send(label) }}
               >
+                <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
                 {thread && (
                   <ThreadCard projectId={project.id} thread={thread} replies={threadMessages(state, thread.id).length} />
                 )}

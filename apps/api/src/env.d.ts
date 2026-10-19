@@ -15,4 +15,6 @@ interface Env {
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_CLIENT_SECRET?: string;
   GITHUB_WEBHOOK_SECRET?: string;
+  /** Signs artifact links; the same value is set on the artifact Worker. */
+  ARTIFACT_SIGNING_SECRET?: string;
 }

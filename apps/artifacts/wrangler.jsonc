@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Serves published artifacts. Runs on its own domain (e.g. altair-usercontent.dev), never
+  // under the app's domain: an artifact is untrusted HTML and must not share the app's origin,
+  // cookies or storage. It can only read the artifact bucket; it has no database or auth.
+  "name": "altair-artifacts",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // Same bucket the API (apps/api) writes artifact versions to.
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "altair-artifacts" }],
+
+  // ARTIFACT_SIGNING_SECRET (secret, required): the same value as on the API Worker. Links the
+  // API signs are the only thing this Worker serves.
+  // APP_ORIGINS: comma-separated origins allowed to frame artifacts, e.g. https://altair.example.com.
+  // Empty = any origin (links are still signed and short-lived). Desktop app origins are always allowed.
+  "vars": {
+    "APP_ORIGINS": ""
+  }
+}

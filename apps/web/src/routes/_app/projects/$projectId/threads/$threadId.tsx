@@ -1,7 +1,8 @@
 import { threadMessages } from "@altair/client";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, CircleCheck, LoaderCircle, PanelRightClose, PanelRightOpen, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ArtifactCards, ThreadOutputs } from "../../../../../components/artifacts";
 import {
   Checklist,
   Composer,
@@ -18,7 +19,14 @@ import { api } from "../../../../../lib/api";
 import { useProjectContext } from "../../../../../lib/project-context";
 import { cn, GhostButton, IconButton } from "../../../../../lib/ui";
 
+type Search = { artifact?: string; version?: number };
+
 export const Route = createFileRoute("/_app/projects/$projectId/threads/$threadId")({
+  // ?artifact= opens one of the thread's outputs in the workspace; ?version= pins an older one.
+  validateSearch: (s: Record<string, unknown>): Search => ({
+    ...(typeof s.artifact === "string" && { artifact: s.artifact }),
+    ...(Number.isInteger(Number(s.version)) && Number(s.version) > 0 && { version: Number(s.version) }),
+  }),
   component: ThreadView,
 });
 
@@ -39,10 +47,19 @@ function readPanelPref() {
  */
 function ThreadView() {
   const { threadId } = Route.useParams();
+  const { artifact: openArtifact, version: artifactVersion } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { user } = Route.useRouteContext();
   const { project, names, state, status, send, emit } = useProjectContext();
   const [panelOpen, setPanelOpen] = useState(readPanelPref);
   const [mobileView, setMobileView] = useState<"messages" | "workspace">("messages");
+
+  // Opening an artifact brings the workspace into view.
+  useEffect(() => {
+    if (!openArtifact) return;
+    setPanelOpen(true);
+    if (!window.matchMedia("(min-width: 1024px)").matches) setMobileView("workspace");
+  }, [openArtifact]);
 
   const thread = state.threads[threadId];
   if (!thread) {
@@ -69,6 +86,31 @@ function ThreadView() {
   const active = !!state.active[thread.id];
   const working = thread.status === "working" && !thread.resolved;
   const showChecklist = !!thread.statusText && !thread.resolved;
+  // What this thread published, plus anything its messages delivered from elsewhere.
+  const attached = new Set(messages.flatMap((m) => m.artifacts?.map((a) => a.artifactId) ?? []));
+  const outputs = Object.values(state.artifacts)
+    .filter((a) => a.threadId === thread.id || attached.has(a.id))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const openOutput = (artifact: string | undefined, version?: number) =>
+    navigate({ search: artifact ? { artifact, version } : {}, replace: true });
+  const tabs = defaultWorkspaceTabs(thread).map((tab) =>
+    tab.id === "outputs"
+      ? {
+          ...tab,
+          count: outputs.length,
+          content: (
+            <ThreadOutputs
+              projectId={project.id}
+              thread={thread}
+              artifacts={outputs}
+              openId={openArtifact}
+              version={artifactVersion}
+              onOpen={openOutput}
+            />
+          ),
+        }
+      : tab,
+  );
 
   function togglePanel() {
     if (window.matchMedia("(min-width: 1024px)").matches) {
@@ -150,7 +192,15 @@ function ThreadView() {
                   names={names}
                   reactions={state.reactions[m.id]}
                   decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
-                />
+                >
+                  <ArtifactCards
+                    projectId={project.id}
+                    threadId={thread.id}
+                    refs={m.artifacts}
+                    artifacts={state.artifacts}
+                    openId={openArtifact}
+                  />
+                </MessageView>
               ))}
               {active && <Thinking label={state.progress[thread.id] ?? (working ? "Working" : "Thinking")} />}
             </div>
@@ -167,8 +217,9 @@ function ThreadView() {
         </section>
 
         <WorkspacePanel
-          key={thread.id}
-          tabs={defaultWorkspaceTabs(thread)}
+          key={`${thread.id}-${openArtifact ?? ""}`}
+          tabs={tabs}
+          initialTab={openArtifact ? "outputs" : undefined}
           className={cn("flex-1", mobileView === "workspace" ? "flex" : "hidden", panelOpen ? "lg:flex" : "lg:hidden")}
         />
       </div>
