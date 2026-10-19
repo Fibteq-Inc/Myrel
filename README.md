@@ -78,7 +78,7 @@ apps/web           Vite + React SPA
 packages/protocol  message/thread/project types, WebSocket events
 packages/client    typed API client + reconnecting project socket
 packages/db        Drizzle schema and D1 migrations
-packages/altair-runner    altair-runner, the local daemon for your own coding CLI
+packages/altair-runner    @fibteq/altair-runner, the local daemon for your own coding CLI (altair-runner-alias: its short npm name)
 docs/              self-hosting, architecture, maintainer notes
 ee/                enterprise features under a commercial license (empty for now)
 ```

@@ -52,14 +52,37 @@ Tasks in the same Altair thread continue the same Claude Code session (`--resume
 - The build is a single JavaScript file with no native dependencies (`dist/cli.js`), so it can be packed into one
   binary with Node SEA or `bun build --compile`.
 
-## From this repository
+## Packages
 
-Until the package is published to npm, build and run it from a checkout:
+The CLI is published as [`@fibteq/altair-runner`](https://www.npmjs.com/package/@fibteq/altair-runner).
+[`altair-runner`](https://www.npmjs.com/package/altair-runner) (in `packages/altair-runner-alias`) is a short name that
+depends on it, so `npx altair-runner` works. `npx @fibteq/altair-runner` runs the same CLI.
+
+`startRunner()` and `pair()` are exported too, for the desktop app to bundle the runner instead of shelling out to it.
+
+## From this repository
 
 ```sh
 pnpm install
-pnpm --filter altair-runner build
+pnpm --filter @fibteq/altair-runner build
 node packages/altair-runner/dist/cli.js --help
 ```
 
-`startRunner()` and `pair()` are exported too, for the desktop app to bundle the runner instead of shelling out to it.
+## Releasing
+
+Needs an npm account that is a member of the `fibteq` npm organization.
+
+1. Bump `version` in `package.json` here and in `packages/altair-runner-alias/package.json`, and `RUNNER_VERSION`
+   in `src/runner.ts` (a test checks they match). Bump `RUNNER_PROTOCOL_VERSION` in `@altair/protocol` only when the
+   wire format changes; the server refuses runners on another protocol version and tells them to update.
+2. Publish the runner first, then the short name, with `pnpm` (it replaces `workspace:` versions and uses the
+   built files from `publishConfig`):
+
+```sh
+npm login
+pnpm --filter @fibteq/altair-runner publish --access public
+pnpm --filter altair-runner publish --access public
+```
+
+`prepublishOnly` builds and tests the runner before it is published. Check the contents first with
+`pnpm --filter @fibteq/altair-runner pack` if in doubt.
