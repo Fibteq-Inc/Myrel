@@ -231,8 +231,8 @@ export const en = {
   "projectSettings.tasksDescription":
     "Where thread agents run code: on a computer with the project's local folder, using its own coding CLI, or in a sandbox in the cloud.",
   "projectSettings.runTasks": "Run tasks",
-  "projectSettings.taskTarget.auto": "Automatic: on the computer when it is online, otherwise in the cloud",
-  "projectSettings.taskTarget.local": "Always on the computer",
+  "projectSettings.taskTarget.auto": "Automatic: in the cloud, or on the computer once a local folder is connected and it is online",
+  "projectSettings.taskTarget.local": "Always on the computer (needs a local folder)",
   "projectSettings.taskTarget.cloud": "Always in the cloud",
   "members.title": "Members",
   "members.description": "Owners and admins manage members, invitations and settings.",
