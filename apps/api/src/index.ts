@@ -8,6 +8,7 @@ import { trustedOrigins } from "./origins";
 import { accountRoutes } from "./routes/account";
 import { adminRoutes } from "./routes/admin";
 import { knowledgeRoutes } from "./routes/knowledge";
+import { githubRoutes } from "./routes/github";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
 
@@ -42,6 +43,7 @@ const app = new Hono<AppEnv>()
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)
   .route("/usage", usageRoutes)
+  .route("/github", githubRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;

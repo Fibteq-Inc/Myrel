@@ -1,4 +1,6 @@
 import { Agent, getAgentByName } from "agents";
+import { listRepoFiles, readRepoFile } from "../github/files";
+import { listProjectRepos } from "../github/store";
 import { meteredForTurn } from "../usage";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
@@ -94,7 +96,13 @@ export class ThreadAgent extends Agent<Env> {
           agent: "thread",
         }),
         system: THREAD_SYSTEM,
-        prompt: threadPrompt({ ...ctx, brief: this.getMeta("brief") ?? "", lastSeenSeq, notes }),
+        prompt: threadPrompt({
+          ...ctx,
+          brief: this.getMeta("brief") ?? "",
+          lastSeenSeq,
+          notes,
+          repos: await listProjectRepos(this.env.DB, projectId),
+        }),
         tools: [
           ...threadTools({
           reply: async (text) => {
@@ -113,6 +121,8 @@ export class ThreadAgent extends Agent<Env> {
           resolve: async () => {
             resolved = true;
           },
+          listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
+          readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
           }),
           ...knowledgeTools({
             memoryRead: (name) => project.getMemory(name),

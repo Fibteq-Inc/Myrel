@@ -188,3 +188,49 @@ export const instanceSettings = sqliteTable("instance_settings", {
   value: text("value").notNull(),
   updatedAt: timestamps.updatedAt,
 });
+
+// --- GitHub (a GitHub App; see apps/api/src/github) ---
+
+/** A GitHub App installation on a user or organization account. `id` is GitHub's installation id. */
+export const githubInstallations = sqliteTable("github_installations", {
+  id: integer("id").primaryKey(),
+  accountLogin: text("account_login").notNull(),
+  accountType: text("account_type", { enum: ["User", "Organization"] }).notNull(),
+  accountAvatarUrl: text("account_avatar_url"),
+  ...timestamps,
+});
+
+/** Altair users GitHub confirmed can reach an installation (checked with their GitHub sign-in). */
+export const githubInstallationUsers = sqliteTable(
+  "github_installation_users",
+  {
+    installationId: integer("installation_id")
+      .notNull()
+      .references(() => githubInstallations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.installationId, t.userId] }), index("github_installation_users_user_id_idx").on(t.userId)],
+);
+
+/** A repository connected to a project. `repoId` is GitHub's repository id, stable across renames. */
+export const projectRepos = sqliteTable(
+  "project_repos",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    repoId: integer("repo_id").notNull(),
+    installationId: integer("installation_id")
+      .notNull()
+      .references(() => githubInstallations.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    defaultBranch: text("default_branch").notNull(),
+    private: integer("private", { mode: "boolean" }).notNull(),
+    addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.repoId] }), index("project_repos_installation_id_idx").on(t.installationId)],
+);

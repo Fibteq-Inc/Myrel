@@ -46,6 +46,10 @@ export const memoryQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "memory"], queryFn: () => api.listMemory(id) });
 export const instructionsQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "instructions"], queryFn: () => api.getInstructions(id) });
+export const githubStatusQuery = queryOptions({ queryKey: ["github"], queryFn: () => api.getGithubStatus() });
+export const githubReposQuery = queryOptions({ queryKey: ["github", "repos"], queryFn: () => api.listGithubRepos() });
+export const projectReposQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "repos"], queryFn: () => api.listProjectRepos(id) });
 /** What the current server allows (e.g. whether new accounts can be created). */
 export const serverInfoQuery = queryOptions({
   queryKey: ["server-info", server],

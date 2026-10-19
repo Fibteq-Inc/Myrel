@@ -60,6 +60,10 @@
   // LLM_PRICES: optional JSON of model prices in US dollars per million tokens, used for the
   // usage dashboard's cost estimates, e.g. {"firerouter/opus": {"input": 4, "output": 20, "cachedInput": 0.4}}.
   // Built-in prices cover Claude models; a model with no price is metered with no cost.
+  //
+  // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a
+  // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID,
+  // GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET.
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
