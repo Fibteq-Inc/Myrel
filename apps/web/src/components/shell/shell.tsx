@@ -50,22 +50,6 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
   );
 }
 
-/** A sidebar next to the rail. On phones it rides in the drawer, just right of the rail. */
-export function Sidebar({ label, children }: { label: string; children: ReactNode }) {
-  const { navOpen } = useShell();
-  return (
-    <aside
-      aria-label={label}
-      className={cn(
-        "fixed inset-y-0 left-[60px] z-40 flex w-[276px] flex-none flex-col border-r border-line bg-panel transition-transform duration-200 md:static md:translate-x-0",
-        navOpen ? "translate-x-0" : "-translate-x-[calc(100%+60px)]",
-      )}
-    >
-      {children}
-    </aside>
-  );
-}
-
 /** Opens the drawer on phones. */
 export function NavToggle() {
   const { setNavOpen } = useShell();
