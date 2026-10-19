@@ -44,6 +44,15 @@ describe("DELETE /api/projects/:id", () => {
     const thread = await agent.createThread(root.id, "Work");
     await agent.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: "a", body: "on it" });
 
+    const routine = await api(`${base}/routines`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ name: "Daily", prompt: "Summarize", schedule: { kind: "cron", cron: "0 9 * * *" } }),
+    });
+    expect(routine.status).toBeLessThan(300);
+    const alarm = () => runInDurableObject(env.PROJECT_AGENT.getByName(project.id), (_, state) => state.storage.getAlarm());
+    expect(await alarm()).not.toBeNull();
+
     expect((await api(base, { method: "DELETE", token: member.token })).status).toBe(403);
     expect((await api(base, { method: "DELETE" })).status).toBe(401);
     expect((await api(base, { method: "DELETE", token: owner.token })).status).toBe(204);
@@ -58,7 +67,8 @@ describe("DELETE /api/projects/:id", () => {
     if ("artifact" in published) {
       expect((await env.ARTIFACTS.list({ prefix: `artifacts/${published.artifact.id}/` })).objects).toEqual([]);
     }
-    // The agents' storage is gone.
+    // The agents' storage is gone, and with it the routines and their alarm.
+    expect(await alarm()).toBeNull();
     const tables = (state: DurableObjectState) =>
       state.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf%' ESCAPE '\\'").toArray();
     expect(await runInDurableObject(env.PROJECT_AGENT.getByName(project.id), (_, state) => tables(state))).toEqual([]);
