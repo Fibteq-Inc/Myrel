@@ -1,4 +1,4 @@
-import { type Message, type Project, ServerEvent } from "@altair/protocol";
+import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -143,5 +143,13 @@ describe("cors", () => {
   it("does not allow unknown origins", async () => {
     const res = await api("/api/health", { headers: { origin: "https://evil.example" } });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("GET /api/info", () => {
+  it("describes the server for connecting apps", async () => {
+    const res = await api("/api/info");
+    expect(res.status).toBe(200);
+    expect(ServerInfo.parse(await res.json())).toMatchObject({ app: "altair", apiVersion: API_VERSION, name: "Altair" });
   });
 });

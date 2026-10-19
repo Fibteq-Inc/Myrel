@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
-import { api, sessionQuery } from "../lib/api";
+import { api, canChooseServer, server, sessionQuery } from "../lib/api";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ context }) => {
+    if (canChooseServer && server === "") throw redirect({ to: "/login" });
     const session = await context.queryClient.ensureQueryData(sessionQuery);
     if (!session) throw redirect({ to: "/login" });
     return { user: session.user };

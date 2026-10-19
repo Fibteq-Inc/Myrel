@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storageTokenStore, webPlatform, webStorage } from "../src/platform";
+import { type Platform, webPlatform, webStorage } from "../src/platform";
 
 describe("webStorage", () => {
   it("falls back to memory when localStorage is unavailable", () => {
@@ -12,16 +12,9 @@ describe("webStorage", () => {
 });
 
 describe("webPlatform", () => {
-  it("uses cookies same-origin and a stored bearer token cross-origin", async () => {
-    expect(webPlatform({ crossOrigin: false }).tokens).toBeUndefined();
-    const tokens = webPlatform({ crossOrigin: true }).tokens!;
-    await tokens.set("t1");
-    expect(await tokens.get()).toBe("t1");
-  });
-
-  it("storageTokenStore round-trips through the given store", async () => {
-    const tokens = storageTokenStore(webStorage("test:"), "tok");
-    await tokens.set("abc");
-    expect(await tokens.get()).toBe("abc");
+  it("is a web platform with storage", () => {
+    const platform: Platform = webPlatform();
+    expect(platform.name).toBe("web");
+    expect(platform.storage.get("missing")).toBeNull();
   });
 });

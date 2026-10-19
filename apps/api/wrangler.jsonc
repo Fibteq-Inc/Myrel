@@ -38,5 +38,6 @@
   // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
-  "vars": { "BETTER_AUTH_URL": "", "TRUSTED_ORIGINS": "" }
+  // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Altair".
+  "vars": { "BETTER_AUTH_URL": "", "TRUSTED_ORIGINS": "", "INSTANCE_NAME": "Altair" }
 }

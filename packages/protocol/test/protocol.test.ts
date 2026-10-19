@@ -61,3 +61,12 @@ describe("ServerEvent", () => {
     expect(ServerEvent.parse({ type: "sync.result", messages: [message], hasMore: false }).type).toBe("sync.result");
   });
 });
+
+describe("ServerInfo", () => {
+  it("accepts an Altair server and rejects other apps", async () => {
+    const { API_VERSION, ServerInfo } = await import("../src/server");
+    const info = { app: "altair", apiVersion: API_VERSION, name: "Altair", auth: { emailPassword: true } };
+    expect(ServerInfo.parse(info)).toEqual(info);
+    expect(ServerInfo.safeParse({ ...info, app: "other" }).success).toBe(false);
+  });
+});
