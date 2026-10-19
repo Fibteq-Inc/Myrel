@@ -63,6 +63,11 @@
     }
   ],
 
+  // Cloudflare Artifacts (beta): one git repository per thread, where the sandbox saves each task's
+  // work so the next task continues from it. Optional: without this binding nothing is saved between
+  // tasks except what a task pushes to GitHub.
+  "artifacts": [{ "binding": "WORKSPACES", "namespace": "altair" }],
+
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
   // BETTER_AUTH_SECRET (required), KEY_ENCRYPTION_SECRET (recommended: encrypts the model keys people
   // add in Settings; falls back to BETTER_AUTH_SECRET, and changing it later makes stored keys unreadable)

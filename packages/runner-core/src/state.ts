@@ -17,7 +17,8 @@ export type TaskProgress = {
 
 export function emptyProgress(): TaskProgress {
   return {
-    phases: { prepare: "pending", clone: "pending", agent: "pending", publish: "pending" },
+    // Only tasks with a workspace save, and they say so when they start saving.
+    phases: { prepare: "pending", clone: "pending", agent: "pending", save: "skipped", publish: "pending" },
     phaseDetail: {},
     todos: [],
     lastText: null,
@@ -68,12 +69,14 @@ export const CHECKLIST_LABELS: Record<string, Labels> = {
     prepare: { todo: "Open the sandbox", doing: "Opening the sandbox", done: "Opened the sandbox", failed: "Could not open the sandbox" },
     clone: { todo: "Get the repository", doing: "Getting the repository", done: "Got the repository", failed: "Could not get the repository" },
     agent: { todo: "Do the work", doing: "Working", done: "Did the work", failed: "The work failed" },
+    save: { todo: "Save the work", doing: "Saving the work", done: "Saved the work", failed: "Could not save the work" },
     publish: { todo: "Open the pull request", doing: "Opening the pull request", done: "Opened the pull request", failed: "Could not open the pull request" },
   },
   tr: {
     prepare: { todo: "Sandbox'ı aç", doing: "Sandbox açılıyor", done: "Sandbox açıldı", failed: "Sandbox açılamadı" },
     clone: { todo: "Repoyu al", doing: "Repo alınıyor", done: "Repo alındı", failed: "Repo alınamadı" },
     agent: { todo: "İşi yap", doing: "Çalışıyor", done: "İş yapıldı", failed: "İş tamamlanamadı" },
+    save: { todo: "Çalışmayı kaydet", doing: "Çalışma kaydediliyor", done: "Çalışma kaydedildi", failed: "Çalışma kaydedilemedi" },
     publish: { todo: "Pull request aç", doing: "Pull request açılıyor", done: "Pull request açıldı", failed: "Pull request açılamadı" },
   },
 };
@@ -86,14 +89,15 @@ export const CHECKLIST_LABELS: Record<string, Labels> = {
 export function renderChecklist(title: string, p: TaskProgress, language = "en"): string {
   const labels = CHECKLIST_LABELS[language.toLowerCase().slice(0, 2)] ?? CHECKLIST_LABELS.en!;
   const lines: string[] = [title, ""];
-  const phases: Phase[] = ["prepare", "clone", "agent", "publish"];
+  const phases: Phase[] = ["prepare", "clone", "agent", "save", "publish"];
   // A task that failed outside any phase (the sandbox never started) shows it on the step it was on.
   const failedAt =
     p.finished && !p.finished.ok && !phases.some((ph) => p.phases[ph] === "failed")
       ? phases.find((ph) => p.phases[ph] === "started" || p.phases[ph] === "pending")
       : undefined;
   for (const phase of phases) {
-    const state = failedAt === phase ? "failed" : p.phases[phase];
+    // Progress stored before a phase existed has no entry for it.
+    const state = failedAt === phase ? "failed" : (p.phases[phase] ?? "skipped");
     const detail = failedAt === phase ? p.finished?.error : p.phaseDetail[phase];
     if (state === "skipped") continue;
     const label = labels[phase];

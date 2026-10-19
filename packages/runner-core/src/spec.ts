@@ -32,6 +32,17 @@ export const RepoSpec = z.object({
 });
 export type RepoSpec = z.infer<typeof RepoSpec>;
 
+/**
+ * Where a task's work is kept between tasks: a git remote the runner pushes
+ * every result to, and the next task starts from (a Cloudflare Artifacts repo
+ * per thread). Its access token is a secret and travels separately.
+ */
+export const WorkspaceSpec = z.object({
+  /** HTTPS git remote. */
+  remote: z.string().url(),
+});
+export type WorkspaceSpec = z.infer<typeof WorkspaceSpec>;
+
 /** One unit of work handed to a runner. Stored with the task, so it holds no secrets. */
 export const TaskSpec = z.object({
   taskId: z.string().min(1),
@@ -39,6 +50,7 @@ export const TaskSpec = z.object({
   prompt: z.string().min(1).max(32_000),
   harness: HarnessId.default("opencode"),
   repo: RepoSpec.optional(),
+  workspace: WorkspaceSpec.optional(),
   /** Commit, push and open (or update) a pull request when the harness finishes with changes. */
   openPr: z.boolean().default(false),
   model: ModelConfig.optional(),
@@ -53,7 +65,7 @@ export type TaskSpec = z.infer<typeof TaskSpec>;
 export type TaskSpecInput = z.input<typeof TaskSpec>;
 
 /** Steps every task goes through, shown as the first lines of the thread's checklist. */
-export const Phase = z.enum(["prepare", "clone", "agent", "publish"]);
+export const Phase = z.enum(["prepare", "clone", "agent", "save", "publish"]);
 export type Phase = z.infer<typeof Phase>;
 
 export const TodoStatus = z.enum(["pending", "in_progress", "done"]);

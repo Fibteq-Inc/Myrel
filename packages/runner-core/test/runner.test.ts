@@ -152,6 +152,61 @@ describe("task script", () => {
     ]);
   });
 
+  it("saves every result to the workspace and starts the next task from it", () => {
+    const remote = mkdtempSync(join(tmpdir(), "altair-ws-"));
+    execFileSync("git", ["init", "-q", "--bare", remote]);
+    const workspace = { remote: `file://${remote}` };
+    // Each task gets a fresh workdir, like a sandbox that went to sleep in between.
+    const run = (prompt: string) =>
+      runScript(taskEnv(spec({ harness: "shell", prompt, workspace }), shell, { workdir: mkdtempSync(join(tmpdir(), "altair-work-")) }));
+
+    const first = run("echo one > notes.txt");
+    expect(first.code).toBe(0);
+    expect(first.events.filter((e) => e.type === "phase" && e.phase === "save").map((e) => e.type === "phase" && e.state)).toEqual([
+      "started",
+      "done",
+    ]);
+
+    const second = run("cat notes.txt && echo two >> notes.txt && exit 4");
+    expect(second.code).toBe(4);
+    expect(second.events).toContainEqual({ type: "log", stream: "stdout", text: "one" });
+    expect(second.events).toContainEqual({ type: "log", stream: "system", text: "Continuing from the work saved in this thread." });
+    expect(second.events.at(-1)).toMatchObject({ type: "phase", phase: "save", state: "done" });
+
+    // Unfinished work is saved too, marked as such.
+    const log = execFileSync("git", ["--git-dir", remote, "log", "--format=%s", "main"], { encoding: "utf8" });
+    expect(log.trim().split("\n")).toEqual(["Fix the login bug (unfinished)", "Fix the login bug"]);
+  });
+
+  it("continues a repository branch from the saved work", () => {
+    const origin = mkdtempSync(join(tmpdir(), "altair-origin-"));
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: origin });
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: origin });
+    const remote = mkdtempSync(join(tmpdir(), "altair-ws-"));
+    execFileSync("git", ["init", "-q", "--bare", remote]);
+    const run = (prompt: string) =>
+      runScript(
+        taskEnv(
+          spec({ harness: "shell", prompt, repo: { url: `file://${origin}`, branch: "fix" }, workspace: { remote: `file://${remote}` } }),
+          shell,
+          { workdir: mkdtempSync(join(tmpdir(), "altair-work-")) },
+        ),
+      );
+    expect(run("echo draft > fix.txt").code).toBe(0);
+    const second = run("cat fix.txt");
+    expect(second.code).toBe(0);
+    expect(second.events).toContainEqual({ type: "log", stream: "stdout", text: "draft" });
+  });
+
+  it("goes on without saving when the workspace cannot be reached", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "altair-work-"));
+    const s = spec({ harness: "shell", prompt: "true", workspace: { remote: "file:///nonexistent/altair-ws" } });
+    const { code, events } = runScript(taskEnv(s, shell, { workdir }));
+    expect(code).toBe(0);
+    expect(events.some((e) => e.type === "phase" && e.phase === "save")).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: "log", stream: "system", text: expect.stringContaining("will not be saved") }));
+  });
+
   it("fails the agent phase with the harness's exit code", () => {
     const workdir = mkdtempSync(join(tmpdir(), "altair-work-"));
     writeFileSync(join(workdir, "x"), "");

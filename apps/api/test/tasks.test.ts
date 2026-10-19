@@ -4,6 +4,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ThreadAgent } from "../src/agents/thread-agent";
+import { threadWorkspace } from "../src/sandbox/workspace";
 import { resetFakeModel, setFakeModel } from "./fake-llm";
 
 const BASE = "http://altair.test";
@@ -107,6 +108,41 @@ describe("run_task", () => {
     expect(ssh).toMatchObject({ ok: false, error: expect.stringContaining("not a repository I can clone") });
     expect(await threadAgent.getTasks()).toEqual([]);
     ws.close();
+  });
+});
+
+describe("thread workspace", () => {
+  it("creates the thread's repository once and hands out a bare write token", async () => {
+    const repos = new Map<string, { remote: string }>();
+    const tokens: [string, number][] = [];
+    const notFound = Object.assign(new Error("missing"), { code: "NOT_FOUND" });
+    const WORKSPACES = {
+      get: async (name: string) => {
+        const repo = repos.get(name);
+        if (!repo) throw notFound;
+        return {
+          info: async () => ({ remote: repo.remote }),
+          createToken: async (scope: string, ttl: number) => {
+            tokens.push([scope, ttl]);
+            return { plaintext: `art_v1_${"a".repeat(40)}?expires=1760000000` };
+          },
+        };
+      },
+      create: async (name: string) => {
+        repos.set(name, { remote: `https://artifacts.example/altair/${name}.git` });
+        return {};
+      },
+    };
+    const ws = await threadWorkspace({ WORKSPACES } as unknown as Env, "thr_1", 2100);
+    expect(ws).toEqual({ remote: "https://artifacts.example/altair/thread-thr_1.git", token: `art_v1_${"a".repeat(40)}` });
+    await threadWorkspace({ WORKSPACES } as unknown as Env, "thr_1", 2100);
+    expect([...repos.keys()]).toEqual(["thread-thr_1"]);
+    expect(tokens).toEqual([["write", 2100], ["write", 2100]]);
+
+    // Without the binding, or when Artifacts fails, tasks run without saving.
+    expect(await threadWorkspace({} as Env, "thr_1", 60)).toBeNull();
+    const broken = { get: async () => { throw new Error("down"); } };
+    expect(await threadWorkspace({ WORKSPACES: broken } as unknown as Env, "thr_1", 60)).toBeNull();
   });
 });
 

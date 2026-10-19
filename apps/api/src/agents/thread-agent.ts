@@ -16,6 +16,7 @@ import { projectProvider, projectTaskModel } from "../keys";
 import { runLoop } from "../llm";
 import { getWorkspace } from "../runners";
 import { localBackend, normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
+import { threadWorkspace } from "../sandbox/workspace";
 import { meteredForTurn, recordTaskUsage } from "../usage";
 import { type Author, knowledgeTools } from "./knowledge";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
@@ -329,7 +330,12 @@ export class ThreadAgent extends Agent<Env> {
     const backend = sandboxBackend(this.env, threadId);
     const unavailable = backend.unavailable(spec);
     if (unavailable) throw new Error(unavailable);
-
+    // The sandbox's disk does not outlive it; the thread's workspace keeps the work between tasks.
+    const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
+    if (workspace) {
+      spec.workspace = { remote: workspace.remote };
+      secrets.ALTAIR_WORKSPACE_TOKEN = workspace.token;
+    }
     await this.launch(spec, backend.id, () => backend.start(spec, secrets), input.language);
     await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId: spec.taskId });
     return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;

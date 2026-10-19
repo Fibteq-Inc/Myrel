@@ -198,6 +198,7 @@ supply the D1 id.
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
 | `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for `run_task` (see [Code sandbox](#code-sandbox)) |
+| `WORKSPACES` | Artifacts namespace `altair` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
 
 ## Optional features
 
@@ -280,6 +281,21 @@ Its checklist and terminal output stream into the thread.
 To run without a sandbox, remove the `SANDBOX` binding and the `containers`
 block from `apps/api/wrangler.jsonc` (keep the migrations). `run_task`
 then tells the agent there is no sandbox.
+
+### Thread workspaces
+
+A container's disk does not survive its sleep. With
+[Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (beta,
+Workers Paid), each thread gets its own git repository, `thread-<thread id>`
+in the `altair` namespace. The sandbox commits and pushes every task's work
+there, unfinished work included, and the thread's next task starts from it:
+without a repository it continues in the same files, and with one it
+continues the same branch.
+
+Artifacts has no local emulator, so `wrangler dev` needs a Cloudflare login
+while the `WORKSPACES` binding is in `apps/api/wrangler.jsonc` (the API tests
+leave it out on their own). To run without it, remove the `artifacts` block;
+tasks then keep only what they push to GitHub.
 
 ### Web UI on another origin
 
