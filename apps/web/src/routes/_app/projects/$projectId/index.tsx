@@ -1,4 +1,5 @@
 import { projectChat, threadByRoot, threadMessages } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Hash, MessagesSquare } from "lucide-react";
 import { Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking, ThreadCard } from "../../../../components/chat";
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/_app/projects/$projectId/")({
 });
 
 function ProjectChat() {
+  const t = useT();
   const { user } = Route.useRouteContext();
   const { project, members, names, state, send } = useProjectContext();
   const chat = projectChat(state);
@@ -31,9 +33,9 @@ function ProjectChat() {
       <PaneHeader>
         <NavToggle />
         <Hash size={17} className="flex-none text-muted" aria-hidden="true" />
-        <h1 className="truncate text-[15px] font-semibold">Project chat</h1>
+        <h1 className="truncate text-[15px] font-semibold">{t("chat.title")}</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline">{project.name}</span>
-        <div className="ml-auto flex items-center" aria-label={`${members.length} members`}>
+        <div className="ml-auto flex items-center" aria-label={t("chat.membersLabel", { count: members.length })}>
           {members.slice(0, 4).map((m, i) => (
             <span key={m.id} title={m.name} className={i > 0 ? "-ml-2" : ""}>
               <UserAvatar id={m.id} name={m.name} size={26} className="border-2 border-ground" />
@@ -68,23 +70,21 @@ function ProjectChat() {
       </ScrollToEnd>
 
       <div className="mx-auto w-full max-w-[808px]">
-        <Composer placeholder="Give Altair a task" onSend={(body) => send(body)} autoFocus />
+        <Composer placeholder={t("chat.placeholder")} onSend={(body) => send(body)} autoFocus />
       </div>
     </main>
   );
 }
 
 function EmptyChat() {
+  const t = useT();
   return (
     <div className="flex flex-col items-center gap-2 py-20 text-center">
       <span className="mb-2 flex size-12 items-center justify-center rounded-2xl border border-line bg-raised">
         <MessagesSquare size={22} className="text-muted" aria-hidden="true" />
       </span>
-      <p className="text-base font-medium">What should Altair work on?</p>
-      <p className="max-w-sm text-[13px] text-subtle">
-        Ask for anything. Altair opens a thread for each piece of work and reports back there, so this chat stays
-        readable.
-      </p>
+      <p className="text-base font-medium">{t("chat.emptyTitle")}</p>
+      <p className="max-w-sm text-[13px] text-subtle">{t("chat.emptyBody")}</p>
     </div>
   );
 }

@@ -21,7 +21,7 @@ web app and a future mobile app.
 - **Realtime**: one `ProjectAgent` Durable Object per project ([Agents SDK](https://developers.cloudflare.com/agents/)),
   messages in its SQLite with a monotonically increasing `seq` for reconnect sync
 - **Web**: Vite, React 19, TanStack Router + Query, Tailwind CSS 4, served by the same Worker
-- **Shared**: `packages/protocol` (zod schemas), `packages/client` (fetch + WebSocket client for web and React Native)
+- **Shared**: `packages/protocol` (zod schemas), `packages/client` (fetch + WebSocket client for web and React Native), `packages/i18n` (UI strings in English and Turkish; see [its README](packages/i18n/README.md) before adding UI text)
 - **Tooling**: pnpm workspaces, Turborepo, TypeScript, Vitest (`@cloudflare/vitest-plugin`)
 
 ```
@@ -29,6 +29,7 @@ apps/api         Hono Worker, Durable Objects (ProjectAgent, ThreadAgent)
 apps/web         Vite + React SPA
 packages/protocol  message/thread/project types, WebSocket events
 packages/client    typed API client + reconnecting project socket
+packages/i18n      UI strings (en, tr) for web and mobile
 packages/db        Drizzle schema and D1 migrations
 ```
 

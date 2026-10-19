@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { ArrowUp } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
@@ -19,6 +20,7 @@ export function Composer({
   tools?: ReactNode;
   autoFocus?: boolean;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -62,11 +64,11 @@ export function Composer({
         <div className="-mr-1.5 flex items-center gap-1">
           {tools}
           <span className="ml-auto hidden pr-2 text-[11px] text-subtle sm:inline">
-            {draft ? "Shift + Enter for a new line" : ""}
+            {draft ? t("composer.newLineHint") : ""}
           </span>
           <button
             type="submit"
-            aria-label="Send"
+            aria-label={t("composer.send")}
             disabled={!draft.trim() || disabled}
             className="flex size-8 flex-none items-center justify-center rounded-[10px] bg-accent text-ground transition-opacity disabled:opacity-35 max-sm:ml-auto"
           >

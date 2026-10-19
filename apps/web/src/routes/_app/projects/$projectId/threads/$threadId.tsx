@@ -1,4 +1,5 @@
 import { threadMessages } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, CircleCheck, LoaderCircle, PanelRightClose, PanelRightOpen, RotateCcw } from "lucide-react";
 import { useState } from "react";
@@ -37,6 +38,7 @@ function readPanelPref() {
  * two take turns.
  */
 function ThreadView() {
+  const t = useT();
   const { threadId } = Route.useParams();
   const { user } = Route.useRouteContext();
   const { project, names, state, status, send, emit } = useProjectContext();
@@ -49,12 +51,12 @@ function ThreadView() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-subtle">
         {loading ? (
-          <LoaderCircle size={20} className="animate-spin" aria-label="Loading thread" />
+          <LoaderCircle size={20} className="animate-spin" aria-label={t("thread.loading")} />
         ) : (
           <>
-            <p>This thread doesn't exist or was removed.</p>
+            <p>{t("thread.missing")}</p>
             <Link to="/projects/$projectId" params={{ projectId: project.id }} className="text-[#b4beff] hover:underline">
-              Back to the project chat
+              {t("thread.backToChat")}
             </Link>
           </>
         )}
@@ -91,7 +93,7 @@ function ThreadView() {
         <Link
           to="/projects/$projectId"
           params={{ projectId: project.id }}
-          aria-label="Back to the project chat"
+          aria-label={t("thread.backToChat")}
           className="flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
         >
           <ChevronLeft size={18} />
@@ -99,33 +101,33 @@ function ThreadView() {
         <ThreadStatusIcon thread={thread} />
         <div className="flex min-w-0 flex-1 items-baseline gap-2.5">
           <h1 className="truncate text-[15px] font-semibold">{thread.title}</h1>
-          <span className="hidden flex-none text-xs text-subtle sm:inline">{threadStatus(thread).label}</span>
+          <span className="hidden flex-none text-xs text-subtle sm:inline">{threadStatus(thread, t).label}</span>
         </div>
         <IconButton
           type="button"
           onClick={togglePanel}
-          aria-label={panelShown ? "Hide workspace" : "Show workspace"}
+          aria-label={panelShown ? t("thread.hideWorkspace") : t("thread.showWorkspace")}
           aria-pressed={panelShown}
-          title={panelShown ? "Hide workspace" : "Show workspace"}
+          title={panelShown ? t("thread.hideWorkspace") : t("thread.showWorkspace")}
         >
           {panelShown ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
         </IconButton>
         {thread.resolved ? (
           <GhostButton type="button" onClick={() => emit({ type: "thread.resolve", threadId: thread.id, resolved: false })}>
             <RotateCcw size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Reopen</span>
+            <span className="hidden sm:inline">{t("thread.reopen")}</span>
           </GhostButton>
         ) : (
           <GhostButton type="button" onClick={() => emit({ type: "thread.resolve", threadId: thread.id, resolved: true })}>
             <CircleCheck size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Resolve</span>
+            <span className="hidden sm:inline">{t("thread.resolve")}</span>
           </GhostButton>
         )}
       </PaneHeader>
 
       <div className="flex min-h-0 flex-1">
         <section
-          aria-label="Thread messages"
+          aria-label={t("thread.messages")}
           className={cn(
             "min-w-0 flex-1 flex-col",
             mobileView === "workspace" ? "hidden lg:flex" : "flex",
@@ -151,18 +153,18 @@ function ThreadView() {
                   decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
                 />
               ))}
-              {active && <Thinking label={working ? "Working" : "Thinking"} />}
+              {active && <Thinking label={working ? t("message.working") : t("message.thinking")} />}
             </div>
           </ScrollToEnd>
 
           <div className="mx-auto w-full max-w-[808px]">
-            <Composer key={thread.id} placeholder="Reply in this thread" onSend={(body) => send(body, thread.id)} />
+            <Composer key={thread.id} placeholder={t("thread.placeholder")} onSend={(body) => send(body, thread.id)} />
           </div>
         </section>
 
         <WorkspacePanel
           key={thread.id}
-          tabs={defaultWorkspaceTabs(thread)}
+          tabs={defaultWorkspaceTabs(thread, t)}
           className={cn("flex-1", mobileView === "workspace" ? "flex" : "hidden", panelOpen ? "lg:flex" : "lg:hidden")}
         />
       </div>

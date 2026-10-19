@@ -1,3 +1,5 @@
+import type { Translate } from "@altair/i18n";
+import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { FileText, GitCompareArrows, type LucideIcon, SquareTerminal } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
@@ -16,35 +18,35 @@ export type WorkspaceTab = {
  * The thread's tabs as they stand today. The sandbox, runner and artifact
  * work replace each placeholder with the real view.
  */
-export function defaultWorkspaceTabs(_thread: Thread): WorkspaceTab[] {
+export function defaultWorkspaceTabs(_thread: Thread, t: Translate): WorkspaceTab[] {
   return [
     {
       id: "changes",
-      label: "Changes",
+      label: t("workspace.changes"),
       icon: GitCompareArrows,
       content: (
-        <EmptyTab icon={GitCompareArrows} title="No changes yet">
-          When this thread edits code, the diff and its pull request show up here.
+        <EmptyTab icon={GitCompareArrows} title={t("workspace.changesEmpty")}>
+          {t("workspace.changesEmptyBody")}
         </EmptyTab>
       ),
     },
     {
       id: "terminal",
-      label: "Terminal",
+      label: t("workspace.terminal"),
       icon: SquareTerminal,
       content: (
-        <EmptyTab icon={SquareTerminal} title="Nothing has run yet">
-          Commands this thread runs in its sandbox or on your runner stream here, live.
+        <EmptyTab icon={SquareTerminal} title={t("workspace.terminalEmpty")}>
+          {t("workspace.terminalEmptyBody")}
         </EmptyTab>
       ),
     },
     {
       id: "outputs",
-      label: "Outputs",
+      label: t("workspace.outputs"),
       icon: FileText,
       content: (
-        <EmptyTab icon={FileText} title="No outputs yet">
-          Files, artifacts and links this thread delivers collect here.
+        <EmptyTab icon={FileText} title={t("workspace.outputsEmpty")}>
+          {t("workspace.outputsEmptyBody")}
         </EmptyTab>
       ),
     },
@@ -62,14 +64,15 @@ export function WorkspacePanel({
   status?: ReactNode;
   className?: string;
 }) {
+  const t = useT();
   const [active, setActive] = useState(tabs[0]?.id);
   const base = useId();
   const current = tabs.find((t) => t.id === active) ?? tabs[0];
 
   return (
-    <section aria-label="Workspace" className={cn("min-w-0 flex-col bg-[#0b0b0d]", className)}>
+    <section aria-label={t("workspace.label")} className={cn("min-w-0 flex-col bg-[#0b0b0d]", className)}>
       <div className="flex h-[52px] flex-none items-center gap-1 overflow-x-auto border-b border-line px-3.5">
-        <div role="tablist" aria-label="Workspace tabs" className="flex items-center gap-1">
+        <div role="tablist" aria-label={t("workspace.tabs")} className="flex items-center gap-1">
           {tabs.map((tab) => {
             const selected = tab.id === current?.id;
             return (

@@ -35,7 +35,9 @@ Several unrelated asks in one message: start a thread on that message for the fi
 
 Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. You never approve irreversible steps on a person's behalf.
 
-Style: write in the language the people write in. Plain, warm, short sentences. No em dashes. Never show ids to people; ids are only for tool calls. When there is nothing to do, call no tools.`;
+Language: everything people read (posts, thread titles, acks) is in the language of the message you are handling. When it is too short to tell (an emoji, "ok"), use the language of the chat so far. These instructions being in English never sets the language. Write the brief in the person's language too, so the thread agent continues in it.
+
+Style: plain, warm, short sentences. No em dashes. Never show ids to people; ids are only for tool calls. When there is nothing to do, call no tools.`;
 
 export function coordinatorPrompt(input: {
   projectName: string;
