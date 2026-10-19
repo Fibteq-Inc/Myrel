@@ -37,7 +37,9 @@ describe("artifact Worker", () => {
   it("refuses unsigned, tampered, expired or wrongly signed links", async () => {
     const id = await publish("<p>secret</p>");
     expect((await get(`https://usercontent.test/${id}/v1/`)).status).toBe(403);
-    expect((await get((await signed(id, 1)).replace(/sig=./, "sig=A"))).status).toBe(403);
+    // Change the signature's first character to a different one (a fixed "A" is a no-op 1 time in 64).
+    const tampered = (await signed(id, 1)).replace(/sig=(.)/, (_, c: string) => `sig=${c === "A" ? "B" : "A"}`);
+    expect((await get(tampered)).status).toBe(403);
     expect((await get(await signed(id, 1, Date.now() - 1))).status).toBe(403);
     expect((await get(await signed(id, 1, undefined, "wrong"))).status).toBe(403);
     // A signature for v1 does not open v2.
