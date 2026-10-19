@@ -58,7 +58,28 @@ describe("ClientEvent", () => {
 describe("ServerEvent", () => {
   it("parses message.created and sync.result", () => {
     expect(ServerEvent.parse({ type: "message.created", message }).type).toBe("message.created");
-    expect(ServerEvent.parse({ type: "sync.result", messages: [message], hasMore: false }).type).toBe("sync.result");
+    const sync = ServerEvent.parse({ type: "sync.result", messages: [message], hasMore: false });
+    // Older servers send no threads or reactions.
+    expect(sync).toMatchObject({ type: "sync.result", threads: [], reactions: [] });
+  });
+
+  it("parses thread updates and agent activity", () => {
+    const now = new Date().toISOString();
+    const thread = {
+      id: createId("thread"),
+      projectId: message.projectId,
+      rootMessageId: message.id,
+      title: "Research",
+      status: "working",
+      statusText: null,
+      resolved: false,
+      label: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    expect(ServerEvent.parse({ type: "thread.updated", thread }).type).toBe("thread.updated");
+    expect(ServerEvent.safeParse({ type: "thread.updated", thread: { ...thread, status: "sleeping" } }).success).toBe(false);
+    expect(ServerEvent.parse({ type: "agent.activity", threadId: null, active: true }).type).toBe("agent.activity");
   });
 });
 

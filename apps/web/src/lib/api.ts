@@ -30,3 +30,5 @@ export const sessionQuery = queryOptions({ queryKey: ["session"], queryFn: () =>
 export const projectsQuery = queryOptions({ queryKey: ["projects"], queryFn: () => api.listProjects() });
 export const projectQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id], queryFn: () => api.getProject(id) });
+export const membersQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "members"], queryFn: () => api.listMembers(id) });

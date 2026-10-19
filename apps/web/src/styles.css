@@ -1,7 +1,29 @@
 @import "tailwindcss";
 
+/* Altair is dark-first (see the design canvas); `dark:` variants always apply. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-ground: #0e0e10;
+  --color-rail: #0a0a0c;
+  --color-panel: #121215;
+  --color-raised: #151518;
+  --color-bubble: #1e1e23;
+  --color-hover: #1c1c21;
+  --color-line: #1f1f24;
+  --color-edge: #2a2a30;
+  --color-fg: #ececee;
+  --color-body: #d4d4d8;
+  --color-muted: #a1a1aa;
+  --color-subtle: #8b8b94;
+  --color-accent: #8b9bff;
+  --color-accent-soft: #1e2142;
+  --color-ok: #4fcb8d;
+  --color-warn: #f5b94a;
+  --color-bad: #ff7b72;
 }
 
 html,
@@ -11,5 +33,58 @@ body,
 }
 
 body {
-  @apply bg-white text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100;
+  @apply bg-ground font-sans text-sm leading-normal text-fg antialiased;
+}
+
+/* Markdown in agent messages. */
+.prose-altair {
+  @apply text-body;
+  & > * + * {
+    @apply mt-3;
+  }
+  & h1,
+  & h2,
+  & h3 {
+    @apply font-semibold text-fg;
+  }
+  & h1 {
+    @apply text-lg;
+  }
+  & h2 {
+    @apply text-base;
+  }
+  & ul {
+    @apply list-disc pl-5;
+  }
+  & ol {
+    @apply list-decimal pl-5;
+  }
+  & li + li {
+    @apply mt-1;
+  }
+  & a {
+    @apply text-[#b4beff] underline-offset-2 hover:underline;
+  }
+  & strong {
+    @apply font-semibold text-fg;
+  }
+  & code {
+    @apply rounded bg-hover px-1 py-0.5 font-mono text-[0.85em] text-fg;
+  }
+  & pre {
+    @apply overflow-x-auto rounded-lg border border-line bg-rail p-3 font-mono text-xs;
+  }
+  & pre code {
+    @apply bg-transparent p-0;
+  }
+  & blockquote {
+    @apply border-l-2 border-edge pl-3 text-muted;
+  }
+  & table {
+    @apply block overflow-x-auto text-left;
+  }
+  & th,
+  & td {
+    @apply border border-line px-2 py-1;
+  }
 }

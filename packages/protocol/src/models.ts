@@ -25,20 +25,36 @@ export const Message = z.object({
 });
 export type Message = z.infer<typeof Message>;
 
+/**
+ * working: the thread agent is running a turn. blocked: it waits on the coordinator.
+ * review_ready: its turn ended and it waits on a person. done: resolved. failed: the turn errored.
+ */
 export const ThreadStatus = z.enum(["working", "blocked", "review_ready", "done", "failed"]);
 export type ThreadStatus = z.infer<typeof ThreadStatus>;
 
 export const Thread = z.object({
   id: ThreadId,
   projectId: ProjectId,
+  /** The project-chat message the thread hangs under. */
   rootMessageId: MessageId,
   title: z.string(),
   status: ThreadStatus,
+  /** The thread agent's progress checklist (`update_status`), shown while it works. */
+  statusText: z.string().nullable(),
   resolved: z.boolean(),
   label: z.string().nullable(),
   createdAt: Timestamp,
+  updatedAt: Timestamp,
 });
 export type Thread = z.infer<typeof Thread>;
+
+export const Reaction = z.object({
+  messageId: MessageId,
+  emoji: z.string().min(1).max(32),
+  authorKind: AuthorKind,
+  authorId: z.string().min(1),
+});
+export type Reaction = z.infer<typeof Reaction>;
 
 export const ProjectRole = z.enum(["owner", "member"]);
 export type ProjectRole = z.infer<typeof ProjectRole>;
@@ -55,5 +71,8 @@ export const CreateProjectInput = z.object({
   name: z.string().trim().min(1).max(120),
 });
 export type CreateProjectInput = z.infer<typeof CreateProjectInput>;
+
+export const Member = z.object({ id: z.string(), name: z.string(), role: ProjectRole });
+export type Member = z.infer<typeof Member>;
 
 export const MAX_MESSAGE_LENGTH = 32_000;
