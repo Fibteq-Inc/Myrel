@@ -11,7 +11,7 @@ import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, sh
 import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 
-export const RUNNER_VERSION = "0.2.1";
+export const RUNNER_VERSION = "0.2.2";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {

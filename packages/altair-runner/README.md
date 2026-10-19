@@ -20,6 +20,7 @@ Requires Node 22+ and at least one of `claude`, `codex` or `gemini` on your `PAT
 ```sh
 npx altair-runner pair ABCD-1234 --server https://altair.example.com   # code from Altair > Devices
 npx altair-runner service install                                      # runs now and at every login
+npx altair-runner@latest update                                        # later: update and restart it
 ```
 
 Then add folders in Altair > Devices with **Add folder**: it browses this computer's folders through the runner
@@ -42,8 +43,8 @@ cache) and registers it to start at login:
 
 It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `gemini`.
 On macOS and Linux it restarts after a crash, but not after a clean stop (the computer was removed in Altair, or
-`altair-runner start` was run somewhere else with the same pairing). Run `service install` again after updating
-(`npx altair-runner@latest service install`) or to restart it; `service status` shows its state and
+`altair-runner start` was run somewhere else with the same pairing). `altair-runner update` installs the newest version
+from npm and restarts the background runner on it (`service install` again also restarts it); `service status` shows its state and
 `service uninstall` removes it. On Linux it starts when you log in; to start at boot without logging in, run
 `loginctl enable-linger`.
 
