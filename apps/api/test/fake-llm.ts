@@ -14,13 +14,53 @@ export function setFakeModel(h: FakeHandler) {
 
 export function resetFakeModel() {
   handler = silent;
+  outbound.length = 0;
+  emails.length = 0;
+  pushStatus.clear();
 }
 
 const realFetch = globalThis.fetch;
 
+/** A notification request an agent sent out (email, Web Push, Expo), captured instead of sent. */
+export type Outbound = { url: string; headers: Headers; body: Uint8Array };
+export const outbound: Outbound[] = [];
+const OUTBOUND = ["https://exp.host/", "https://push.example.test/"];
+/** Status the fake push service answers with, per endpoint. Default 201. */
+export const pushStatus = new Map<string, number>();
+
+/** Emails sent through the EMAIL binding (Cloudflare Email Service), captured instead of sent. */
+export type SentEmail = { from: string | { name: string; email: string }; to: string; subject: string; text: string; html: string };
+export const emails: SentEmail[] = [];
+
+/**
+ * Captures sends on the Email Service binding. Bindings share one prototype in
+ * the test isolate, so patching it covers the Durable Objects' bindings too.
+ */
+export function captureEmail(binding: SendEmail) {
+  Object.getPrototypeOf(binding).send = async (message: SentEmail) => {
+    emails.push(message);
+    return { messageId: `test-${emails.length}` };
+  };
+}
+
 // Durable Objects run in the test isolate, so stubbing fetch here intercepts their model calls.
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (OUTBOUND.some((o) => url.startsWith(o))) {
+    const body = init?.body;
+    const bytes =
+      body instanceof Uint8Array ? body : typeof body === "string" ? new TextEncoder().encode(body) : new Uint8Array();
+    outbound.push({ url, headers: new Headers(init?.headers), body: bytes });
+    if (url.startsWith("https://exp.host/")) {
+      const messages = JSON.parse(new TextDecoder().decode(bytes)) as { to: string }[];
+      return Response.json({
+        data: messages.map((m) =>
+          m.to.includes("Gone") ? { status: "error", details: { error: "DeviceNotRegistered" } } : { status: "ok" },
+        ),
+      });
+    }
+    return new Response(null, { status: pushStatus.get(url) ?? 201 });
+  }
   if (!url.startsWith("https://api.fireworks.ai/")) return realFetch(input, init);
 
   const body = JSON.parse(init!.body as string) as {

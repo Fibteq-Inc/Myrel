@@ -7,6 +7,7 @@ import {
   type Message,
   type ProjectRepo,
   type ProjectWorkspace,
+  type Routine,
   type Thread,
 } from "@altair/protocol";
 import { z } from "zod";
@@ -15,11 +16,12 @@ import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./know
 import type { TaskPlace } from "../sandbox/backend";
 import { Plan } from "./plan";
 import { renderMessage } from "./render";
+import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
 import type { RunTaskInput } from "./thread-tasks";
 
 /** The thread operations the thread agent's tools act through. */
 export type ThreadHost = {
-  reply(text: string): Promise<Message>;
+  reply(text: string, needs?: ReplyNeeds): Promise<Message>;
   publishArtifact(input: { artifactId?: string; title: string; description?: string; html: string }): Promise<Artifact>;
   /** Replaces the plan shown on the thread as a checklist. */
   setPlan(plan: Plan): Promise<void>;
@@ -36,14 +38,21 @@ export type ThreadHost = {
 
 export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean };
 
+export type RoutineRun = { name: string; prompt: string; createdAt: string; isNew: boolean };
+
+/** What a reply waits on from people, which decides how loudly they are notified. */
+export type ReplyNeeds = "decision" | "blocked";
+
 export const THREAD_SYSTEM = `You are Altair, working one thread of a shared project. The coordinator opened this thread and handed you a brief. You own this thread: you decide how to do the work and you do it, then deliver the result here. To people, you and the coordinator are one assistant called Altair.
 
 Tools:
-- reply: the only way people see anything you say. Each reply is a message in this thread.
+- reply: the only way people see anything you say. Each reply is a message in this thread. Members are notified of your replies. Set needs to "blocked" when the work is stuck on something only they can change, so they are notified more urgently (ask_decision does this for decisions on its own).
 - update_plan: your plan for the work, shown at the top of the thread as a checklist with a progress bar while you work. Each call replaces the whole plan: a short title and the steps, each done, active (the one you are on now), todo, skipped (you decided not to do it) or failed. It is not a reply and notifies no one.
 - ask_decision: put a question to the person as a card with 2 to 4 options, one recommended. Use it instead of a reply whenever you need the person to choose; their pick arrives as their next message. Keep working on the recommended option meanwhile when you can.
 - publish_artifact: publish a self-contained HTML page (a report, a chart, a small app, a prototype) as an artifact people open in a viewer next to the chat. Pass artifact_id to publish a new version of an existing artifact instead of a new one; the address stays the same. The page runs sandboxed on its own origin: inline your CSS and JS, load libraries only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com or esm.sh with an exact version, and do not call any other server. Give it a <title>, a background and a layout that works at phone width. Artifacts you publish are attached to your next reply as cards, so publish first, then reply with one line about it. Use an artifact when the result is something to look at or use, or longer than about fifteen lines; answer short things in the reply itself.
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
+- create_routine, list_routines, set_routine_paused, delete_routine: scheduled wake-ups (see below).
+- create_routine, list_routines, set_routine_paused, delete_routine: scheduled wake-ups (see below).
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 - run_task: your hands. It runs a coding agent where the project's tasks run (see "Where tasks run" below): on the person's own computer, with their coding CLI (Claude Code, Codex or Gemini CLI, signed in with their own account) in the project's local folder; or in this thread's own Linux sandbox in the cloud (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. In the sandbox: with repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). When the server keeps a workspace for the thread, each task's work is saved there, finished or not: a later task without repo continues in the same files, and one with the same repo and branch continues that branch. harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. On the person's computer, repo, branch, open_pr and harness do not apply: the CLI works in the local folder, and later tasks continue the same CLI session where the CLI supports it. One task runs at a time. Its own steps show on the thread's checklist by themselves, nested under your active plan step, so keep that step active while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link if there is one. Never ask the person for passwords, tokens or API keys for it.
 - cancel_task: stop the running task.
@@ -52,6 +61,8 @@ Tools:
 - repo_list_files and repo_read_file: read the GitHub repositories connected to this project (listed in the prompt). Look at the code before answering questions about it. To change one or open a pull request, use run_task.
 
 ${KNOWLEDGE_GUIDE}
+
+${ROUTINE_GUIDE} A routine you create wakes you in this thread by default; when it runs, its prompt shows up under "Routine runs" and you do that work and reply with the result.
 
 Use run_task for anything that needs code, files, commands or the internet. When a bug is reported against a repository, the person wants the fix: run a task that reproduces it, fixes it, runs the tests and opens a pull request. Outside those tasks, the repositories and the artifacts you publish, you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
 
@@ -86,9 +97,15 @@ export function threadPrompt(input: {
   /** Where run_task would run now (the project's task target and its computer's state). */
   place?: TaskPlace;
   artifacts?: Artifact[];
+  routineRuns: RoutineRun[];
+  routines: Routine[];
+  now: Date;
+  defaultTimezone: string;
 }): string {
   const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
+  const runs = input.routineRuns.map((r) => `- ${r.createdAt}${r.isNew ? " · NEW" : ""}: "${r.name}": ${r.prompt}`);
+  const mine = input.routines.filter((r) => r.target.kind === "thread" && r.target.threadId === input.thread.id);
   const ws = input.workspace;
   const place = input.place ?? { kind: "cloud" };
   const folder = ws ? `the local folder ${ws.path} on "${ws.runnerName}"` : "";
@@ -102,7 +119,7 @@ export function threadPrompt(input: {
           }`
   }`;
   return [
-    `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}`,
+    `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
     renderKnowledge(input.knowledge),
     `## Brief from the coordinator\n${input.brief}`,
     input.repos.length
@@ -120,6 +137,8 @@ export function threadPrompt(input: {
           .map((a) => `- [${a.id}] "${a.title}" · v${a.version}${a.threadId === input.thread.id ? " · from this thread" : ""}`)
           .join("\n")}`
       : "",
+    runs.length ? `## Routine runs (scheduled tasks; do the NEW ones now)\n${runs.join("\n")}` : "",
+    mine.length ? `## Routines that wake this thread\n${mine.map(renderRoutine).join("\n")}` : "",
     input.thread.statusText ? `## Your current plan, as the thread shows it\n${input.thread.statusText}` : "",
     "Continue the work now.",
   ]
@@ -132,9 +151,15 @@ export function threadTools(host: ThreadHost): Tool[] {
     tool({
       name: "reply",
       description: "Send a message in this thread. Markdown is supported.",
-      input: z.object({ text: z.string().min(1).max(32_000) }),
-      run: async ({ text }) => {
-        await host.reply(text);
+      input: z.object({
+        text: z.string().min(1).max(32_000),
+        needs: z
+          .enum(["decision", "blocked"])
+          .optional()
+          .describe("decision: asks people to choose or approve. blocked: stuck on something only they can change."),
+      }),
+      run: async ({ text, needs }) => {
+        await host.reply(text, needs);
         return "Sent.";
       },
     }),
@@ -155,7 +180,7 @@ export function threadTools(host: ThreadHost): Tool[] {
         "Ask the person to choose, shown as a card with buttons. Options: 2 to 4, each a 1-2 word label and a one-sentence consequence. Mark one as recommended (0-based index).",
       input: Decision.extend({ context: z.string().max(1200).optional() }),
       run: async ({ context, ...decision }) => {
-        await host.reply([context, formatDecision(decision)].filter(Boolean).join("\n\n"));
+        await host.reply([context, formatDecision(decision)].filter(Boolean).join("\n\n"), "decision");
         return "Asked. The person's choice will arrive as their next message.";
       },
     }),

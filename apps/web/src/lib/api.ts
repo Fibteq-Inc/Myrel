@@ -71,3 +71,20 @@ export const projectSettingsQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "settings"], queryFn: () => api.getProjectSettings(id) });
 export const projectInvitesQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "invites"], queryFn: () => api.listProjectInvites(id) });
+
+/** The signed-in user's notifications. Polled so the bell updates on any page. */
+export const notificationsQuery = queryOptions({
+  queryKey: ["notifications"],
+  queryFn: () => api.listNotifications(),
+  refetchInterval: 30_000,
+  staleTime: 10_000,
+});
+export const notificationConfigQuery = queryOptions({
+  queryKey: ["notifications", "config"],
+  queryFn: () => api.notificationConfig(),
+  staleTime: Infinity,
+});
+export const notificationSettingsQuery = queryOptions({
+  queryKey: ["notifications", "settings"],
+  queryFn: () => api.notificationSettings(),
+});

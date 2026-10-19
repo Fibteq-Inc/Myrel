@@ -13,6 +13,8 @@ import { artifactRoutes } from "./routes/artifacts";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
+import { notificationRoutes } from "./routes/notifications";
+import { routineRoutes } from "./routes/routines";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -44,6 +46,7 @@ const app = new Hono<AppEnv>()
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
   .route("/projects/:id/artifacts", artifactRoutes)
+  .route("/projects/:projectId/routines", routineRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)
@@ -51,6 +54,7 @@ const app = new Hono<AppEnv>()
   .route("/github", githubRoutes)
   .route("/runner", runnerDeviceRoutes)
   .route("/runners", runnerRoutes)
+  .route("/notifications", notificationRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;

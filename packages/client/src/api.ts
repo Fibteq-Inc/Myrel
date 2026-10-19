@@ -34,6 +34,13 @@ import type {
   TerminalLine,
   UpdateAdminSettingsInput,
   UpdateProjectSettingsInput,
+  CreateRoutineInputRaw,
+  Notification,
+  NotificationConfig,
+  NotificationSettings,
+  PushSubscriptionInput,
+  Routine,
+  UpdateRoutineInputRaw,
   UsageSummary,
 } from "@altair/protocol";
 import type { TokenStore } from "./token-store";
@@ -450,6 +457,67 @@ export class ApiClient {
     });
     if (!res.ok) throw new ApiError(res.status, null);
     return res.text();
+  }
+
+  // --- routines ---
+
+  private routinesPath(projectId: string, routineId?: string) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/routines`;
+    return routineId ? `${base}/${encodeURIComponent(routineId)}` : base;
+  }
+
+  async listRoutines(projectId: string) {
+    return (await this.request<{ routines: Routine[] }>(this.routinesPath(projectId))).routines;
+  }
+
+  async createRoutine(projectId: string, input: CreateRoutineInputRaw) {
+    return (await this.request<{ routine: Routine }>(this.routinesPath(projectId), { method: "POST", body: input }))
+      .routine;
+  }
+
+  async updateRoutine(projectId: string, routineId: string, patch: UpdateRoutineInputRaw) {
+    const path = this.routinesPath(projectId, routineId);
+    return (await this.request<{ routine: Routine }>(path, { method: "PATCH", body: patch })).routine;
+  }
+
+  async runRoutine(projectId: string, routineId: string) {
+    const path = `${this.routinesPath(projectId, routineId)}/run`;
+    return (await this.request<{ routine: Routine }>(path, { method: "POST", body: {} })).routine;
+  }
+
+  async deleteRoutine(projectId: string, routineId: string) {
+    await this.request(this.routinesPath(projectId, routineId), { method: "DELETE" });
+  }
+
+  // --- notifications ---
+
+  listNotifications(limit = 50) {
+    return this.request<{ notifications: Notification[]; unread: number }>(`/api/notifications?limit=${limit}`);
+  }
+
+  async markNotificationsRead(ids: string[] | "all") {
+    await this.request("/api/notifications/read", { method: "POST", body: ids === "all" ? { all: true } : { ids } });
+  }
+
+  notificationConfig() {
+    return this.request<NotificationConfig>("/api/notifications/config");
+  }
+
+  notificationSettings() {
+    return this.request<NotificationSettings>("/api/notifications/settings");
+  }
+
+  updateNotificationSettings(patch: Partial<NotificationSettings>) {
+    return this.request<NotificationSettings>("/api/notifications/settings", { method: "PUT", body: patch });
+  }
+
+  /** Registers this device for push: a browser's Web Push subscription or the mobile app's Expo token. */
+  async registerPush(input: PushSubscriptionInput) {
+    await this.request("/api/notifications/subscriptions", { method: "POST", body: input });
+  }
+
+  async unregisterPush(endpoint: string) {
+    await this.request("/api/notifications/subscriptions", { method: "DELETE", body: { endpoint } });
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

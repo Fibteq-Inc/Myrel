@@ -287,3 +287,54 @@ export const projectWorkspaces = sqliteTable(
   },
   (t) => [index("project_workspaces_runner_id_idx").on(t.runnerId)],
 );
+
+// --- Notifications ---
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    threadId: text("thread_id"),
+    kind: text("kind", { enum: ["done", "ready", "decision", "blocked", "failed"] }).notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    url: text("url").notNull(),
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [index("notifications_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+/** Devices that receive push: browsers (Web Push) and native apps (Expo push tokens). */
+export const pushSubscriptions = sqliteTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["webpush", "expo"] }).notNull(),
+    /** Web Push endpoint URL, or the Expo push token. */
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh"),
+    auth: text("auth"),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [index("push_subscriptions_user_id_idx").on(t.userId)],
+);
+
+/** Per-user delivery channels. No row = defaults (both on). */
+export const notificationSettings = sqliteTable("notification_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  email: integer("email", { mode: "boolean" }).notNull().default(true),
+  push: integer("push", { mode: "boolean" }).notNull().default(true),
+  updatedAt: timestamps.updatedAt,
+});

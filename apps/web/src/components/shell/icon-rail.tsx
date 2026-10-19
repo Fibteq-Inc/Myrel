@@ -5,6 +5,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
 import { canChooseServer, server } from "../../lib/api";
 import { AltairMark, cn, UserAvatar } from "../../lib/ui";
+import { NotificationBell } from "../notifications";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
 
 type RailItem = {
@@ -87,6 +88,7 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       )}
 
       <div className="mt-auto flex flex-col items-center gap-2.5">
+        <NotificationBell />
         <Link
           to="/settings"
           aria-label={t("rail.settings")}

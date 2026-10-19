@@ -11,7 +11,8 @@
     "deploy:preview": "wrangler versions upload",
     "typecheck": "tsc",
     "test": "vitest run",
-    "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false"
+    "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false",
+    "vapid": "node scripts/vapid.mjs"
   },
   "dependencies": {
     "@altair/db": "workspace:*",

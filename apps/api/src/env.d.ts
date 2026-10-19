@@ -17,4 +17,8 @@ interface Env {
   GITHUB_WEBHOOK_SECRET?: string;
   /** Signs artifact links; the same value is set on the artifact Worker. */
   ARTIFACT_SIGNING_SECRET?: string;
+  /** Web Push signing key, base64url P-256 scalar (with the VAPID_PUBLIC_KEY var). */
+  VAPID_PRIVATE_KEY?: string;
+  /** Only needed when Expo enhanced push security is enabled. */
+  EXPO_ACCESS_TOKEN?: string;
 }

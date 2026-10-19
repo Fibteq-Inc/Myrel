@@ -22,8 +22,16 @@ import { type Author, knowledgeTools } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
+import { routineTools } from "./routine-tools";
 import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
-import { type CoordinatorNote, THREAD_SYSTEM, threadPrompt, threadTools } from "./thread-worker";
+import {
+  type CoordinatorNote,
+  type ReplyNeeds,
+  type RoutineRun,
+  THREAD_SYSTEM,
+  threadPrompt,
+  threadTools,
+} from "./thread-worker";
 
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
@@ -101,6 +109,13 @@ export class ThreadAgent extends Agent<Env> {
       stream TEXT NOT NULL,
       text TEXT NOT NULL
     )`;
+    this.sql`CREATE TABLE IF NOT EXISTS routine_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      seen INTEGER NOT NULL DEFAULT 0
+    )`;
   }
 
   /** Called by the ProjectAgent when the coordinator opens this thread. */
@@ -111,10 +126,14 @@ export class ThreadAgent extends Agent<Env> {
     await this.markDirty();
   }
 
-  /** A person wrote in the thread, or the coordinator sent a note. Task results come through taskEvents. */
+  /** A person wrote in the thread, the coordinator sent a note, or a routine ran. Task results come through taskEvents. */
   async wake(reason: ThreadWake): Promise<void> {
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
+    }
+    if (reason.kind === "routine") {
+      this.sql`INSERT INTO routine_runs (name, prompt, created_at)
+        VALUES (${reason.name}, ${reason.prompt}, ${new Date().toISOString()})`;
     }
     await this.markDirty();
   }
@@ -155,8 +174,18 @@ export class ThreadAgent extends Agent<Env> {
     const workspace = await getWorkspace(this.env, projectId);
     const place = await taskPlace(this.env, projectId);
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
+    // Only the last few runs matter; older ones are history the thread already acted on.
+    const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
+      SELECT * FROM (SELECT * FROM routine_runs ORDER BY id DESC LIMIT 5) ORDER BY id`;
+    const routineRuns: RoutineRun[] = runRows.map((r) => ({
+      name: r.name,
+      prompt: r.prompt,
+      createdAt: r.created_at,
+      isNew: r.seen === 0,
+    }));
     this.sql`UPDATE notes SET seen = 1`;
     this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
+    this.sql`UPDATE routine_runs SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
 
     // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
@@ -164,6 +193,7 @@ export class ThreadAgent extends Agent<Env> {
     let asked: boolean = false as boolean;
     // Artifacts published this turn, attached to the next reply.
     let pending: ArtifactRef[] = [];
+    let lastReply: { text: string; needs?: ReplyNeeds } | null = null as { text: string; needs?: ReplyNeeds } | null;
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
@@ -187,12 +217,16 @@ export class ThreadAgent extends Agent<Env> {
           tasks: renderTasks(tasks),
           workspace,
           place,
+          routineRuns,
+          now: new Date(),
         }),
         tools: [
           ...threadTools({
-            reply: async (text) => {
+            reply: async (text, needs) => {
               const artifacts = pending;
               pending = [];
+              // A later plain reply does not cancel an earlier ask in the same turn.
+              lastReply = { text, needs: needs ?? lastReply?.needs };
               const m = await project.sendMessage({
                 threadId,
                 authorKind: "agent",
@@ -245,6 +279,14 @@ export class ThreadAgent extends Agent<Env> {
             readText: (path) => project.readFileText(path),
             writeText: (path, content) => project.writeFileText(path, content, BY),
           }),
+          ...routineTools({
+            listRoutines: () => project.listRoutines(),
+            createRoutine: (input) => project.createRoutine(input, "agent"),
+            setPaused: (id, paused) => project.updateRoutine(id, { paused }),
+            deleteRoutine: (id) => project.deleteRoutine(id),
+            defaultTimezone: ctx.defaultTimezone,
+            threadId,
+          }),
         ],
         // The opening note and each plan update take a step of their own.
         maxSteps: 24,
@@ -258,6 +300,9 @@ export class ThreadAgent extends Agent<Env> {
         status: running ? "working" : resolved ? "done" : asked ? "blocked" : "review_ready",
         resolved: resolved && !running,
       });
+      // People hear about results and asks; a turn that only consulted the coordinator stays quiet.
+      const kind = resolved ? "done" : (lastReply?.needs ?? (lastReply && !asked ? "ready" : null));
+      if (kind) await project.notifyThread(threadId, kind, lastReply?.text ?? "");
     } catch (err) {
       console.error("thread turn failed", err);
       await project.sendMessage({
@@ -267,6 +312,7 @@ export class ThreadAgent extends Agent<Env> {
         body: `This thread's turn failed: ${err instanceof Error ? err.message : String(err)}`,
       });
       await project.updateThread(threadId, { status: "failed" });
+      await project.notifyThread(threadId, "failed", err instanceof Error ? err.message : String(err));
     } finally {
       // A running task keeps the thread visibly working.
       await project.setActivity(threadId, this.runningTask() !== null);
