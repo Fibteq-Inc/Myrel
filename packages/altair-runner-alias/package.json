@@ -1,0 +1,36 @@
+{
+  "name": "altair-runner",
+  "version": "0.1.0",
+  "description": "Short name for @fibteq/altair-runner, so `npx altair-runner` works.",
+  "license": "AGPL-3.0-only",
+  "author": "Fibteq",
+  "homepage": "https://github.com/Fibteq-Inc/altair/tree/main/packages/altair-runner#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fibteq-Inc/altair.git",
+    "directory": "packages/altair-runner-alias"
+  },
+  "bugs": "https://github.com/Fibteq-Inc/altair/issues",
+  "type": "module",
+  "bin": {
+    "altair-runner": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm LICENSE"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@fibteq/altair-runner": "workspace:^"
+  }
+}

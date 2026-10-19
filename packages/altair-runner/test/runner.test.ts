@@ -1,10 +1,11 @@
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@altair/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ADAPTERS, type ParseState } from "../src/clis";
 import { loadConfig, type RunnerConfig, SessionStore, saveConfig, shareFolder, unshareFolder } from "../src/config";
+import { RUNNER_VERSION } from "../src/runner";
 import { sharedFolder, TaskRunner } from "../src/tasks";
 
 let home: string;
@@ -143,5 +144,17 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s in %s
     const failed = await run({ folders: [{ path: folder, name: "proj2" }], access: "edit" }, folder);
     expect(failed.at(-1)).toMatchObject({ type: "task.done", ok: false });
     expect((failed.at(-1) as { result: string }).result).toContain("boom");
+  });
+});
+
+describe("package", () => {
+  it("reports the version it is published as", async () => {
+    const versions = await Promise.all(
+      ["../package.json", "../../altair-runner-alias/package.json"].map(async (p) => {
+        const pkg = JSON.parse(await readFile(new URL(p, import.meta.url), "utf8")) as { version: string };
+        return pkg.version;
+      }),
+    );
+    expect(versions).toEqual([RUNNER_VERSION, RUNNER_VERSION]);
   });
 });
