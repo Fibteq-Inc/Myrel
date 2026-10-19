@@ -21,6 +21,7 @@ type RailItem = {
 export const RAIL_ITEMS: RailItem[] = [
   { label: "Projects", icon: MessagesSquare, to: "/", match: ["/", "/projects"] },
   { label: "Artifacts", icon: Blocks },
+  // Files belong to a project: the rail links to the open project's (below).
   { label: "Files", icon: FolderOpen },
   { label: "Devices and runners", icon: MonitorSmartphone },
   { label: "Usage", icon: BarChart3, to: "/usage", match: ["/usage"] },
@@ -33,6 +34,7 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (item: RailItem) =>
     item.match?.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p))) ?? false;
+  const projectId = /^\/projects\/([^/]+)/.exec(pathname)?.[1];
 
   return (
     <nav
@@ -44,7 +46,19 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       </Link>
 
       {RAIL_ITEMS.map((item) =>
-        item.to ? (
+        item.label === "Files" && projectId ? (
+          <Link
+            key={item.label}
+            to="/projects/$projectId/files"
+            params={{ projectId }}
+            aria-label="Project files"
+            title="Project files"
+            className={itemClass}
+            activeProps={{ className: "bg-hover text-fg", "aria-current": "page" }}
+          >
+            <item.icon size={20} strokeWidth={1.8} />
+          </Link>
+        ) : item.to ? (
           <Link
             key={item.label}
             to={item.to}
@@ -60,8 +74,8 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
             key={item.label}
             type="button"
             disabled
-            aria-label={`${item.label} (coming soon)`}
-            title={`${item.label} · coming soon`}
+            aria-label={item.label === "Files" ? "Files (open a project first)" : `${item.label} (coming soon)`}
+            title={item.label === "Files" ? "Open a project to see its files" : `${item.label} · coming soon`}
             className={cn(itemClass, "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-subtle")}
           >
             <item.icon size={20} strokeWidth={1.8} />

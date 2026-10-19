@@ -63,6 +63,16 @@ Commit and push the change. Keep the database name `altair`: the deploy script
 applies migrations to the database with that name. You do not need to run the
 migrations by hand; every production deploy applies pending ones first.
 
+### Create the R2 bucket
+
+Project files and message uploads are stored in R2 (binding `FILES` in
+`apps/api/wrangler.jsonc`). Create the bucket once; a deploy fails while it is
+missing:
+
+```sh
+pnpm --filter @altair/api exec wrangler r2 bucket create altair-files
+```
+
 ## 3. Set the required secret
 
 Altair needs one secret before it can start: `BETTER_AUTH_SECRET`, which signs

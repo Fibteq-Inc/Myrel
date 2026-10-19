@@ -4,9 +4,12 @@ import { listProjectRepos } from "../github/store";
 import { meteredForTurn } from "../usage";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
+import { type Author, knowledgeTools } from "./knowledge";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { type CoordinatorNote, THREAD_SYSTEM, threadPrompt, threadTools } from "./thread-worker";
+
+const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
 export type ThreadStart = { projectId: string; threadId: string; brief: string };
 
@@ -100,7 +103,8 @@ export class ThreadAgent extends Agent<Env> {
           notes,
           repos: await listProjectRepos(this.env.DB, projectId),
         }),
-        tools: threadTools({
+        tools: [
+          ...threadTools({
           reply: async (text) => {
             const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: text });
             // Our own replies are not news on the next turn.
@@ -119,8 +123,17 @@ export class ThreadAgent extends Agent<Env> {
           },
           listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
           readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
-        }),
-        maxSteps: 12,
+          }),
+          ...knowledgeTools({
+            memoryRead: (name) => project.getMemory(name),
+            memoryWrite: (name, description, content) => project.putMemory(name, { description, content }, BY),
+            memoryDelete: (name) => project.deleteMemory(name),
+            listFiles: (prefix) => project.listFiles(prefix),
+            readText: (path) => project.readFileText(path),
+            writeText: (path, content) => project.writeFileText(path, content, BY),
+          }),
+        ],
+        maxSteps: 16,
       });
       await project.updateThread(threadId, {
         status: resolved ? "done" : asked ? "blocked" : "review_ready",

@@ -4,6 +4,7 @@ import { Hash, MessagesSquare, Settings } from "lucide-react";
 import { Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking, ThreadCard } from "../../../../components/chat";
 import { NavToggle, PaneHeader } from "../../../../components/shell/shell";
 import { useProjectContext } from "../../../../lib/project-context";
+import { api } from "../../../../lib/api";
 import { UserAvatar } from "../../../../lib/ui";
 
 export const Route = createFileRoute("/_app/projects/$projectId/")({
@@ -77,7 +78,12 @@ function ProjectChat() {
       </ScrollToEnd>
 
       <div className="mx-auto w-full max-w-[808px]">
-        <Composer placeholder="Give Altair a task" onSend={(body) => send(body)} autoFocus />
+        <Composer
+          placeholder="Give Altair a task"
+          onSend={(body, attachments) => send(body, null, attachments)}
+          onUpload={(file) => api.upload(project.id, file.name, file)}
+          autoFocus
+        />
       </div>
     </main>
   );

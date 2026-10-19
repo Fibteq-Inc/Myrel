@@ -14,6 +14,7 @@ import {
 } from "../../../../../components/chat";
 import { PaneHeader } from "../../../../../components/shell/shell";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../../../../../components/workspace/workspace-panel";
+import { api } from "../../../../../lib/api";
 import { useProjectContext } from "../../../../../lib/project-context";
 import { cn, GhostButton, IconButton } from "../../../../../lib/ui";
 
@@ -156,7 +157,12 @@ function ThreadView() {
           </ScrollToEnd>
 
           <div className="mx-auto w-full max-w-[808px]">
-            <Composer key={thread.id} placeholder="Reply in this thread" onSend={(body) => send(body, thread.id)} />
+            <Composer
+              key={thread.id}
+              placeholder="Reply in this thread"
+              onSend={(body, attachments) => send(body, thread.id, attachments)}
+              onUpload={(file) => api.upload(project.id, file.name, file)}
+            />
           </div>
         </section>
 

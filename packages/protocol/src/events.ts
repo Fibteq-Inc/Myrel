@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
+import { FilePath } from "./paths";
 import { MAX_MESSAGE_LENGTH, Message, Reaction, Thread, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
@@ -8,8 +10,11 @@ export const ClientEvent = z.discriminatedUnion("type", [
     /** Client-chosen id echoed back in `message.ack`, for optimistic UI. */
     clientId: z.string().max(64).optional(),
     threadId: ThreadId.nullable().default(null),
-    body: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH),
-  }),
+    /** May be empty when the message carries attachments. */
+    body: z.string().trim().max(MAX_MESSAGE_LENGTH),
+    /** Paths of files already uploaded to the project files (see POST /uploads). */
+    attachments: z.array(FilePath).max(MAX_ATTACHMENTS).default([]),
+  }).refine((e) => e.body.length > 0 || e.attachments.length > 0, "Write something or attach a file"),
   /** A person marks a thread resolved, or reopens it. */
   z.object({ type: z.literal("thread.resolve"), threadId: ThreadId, resolved: z.boolean() }),
   z.object({
@@ -48,6 +53,8 @@ export const ServerEvent = z.discriminatedUnion("type", [
    * Ephemeral: not replayed by sync.
    */
   z.object({ type: z.literal("agent.activity"), threadId: ThreadId.nullable(), active: z.boolean() }),
+  /** Project files, memory or instructions changed; clients refetch that list. */
+  z.object({ type: z.literal("knowledge.changed"), kind: KnowledgeKind }),
   z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;

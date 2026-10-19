@@ -1,5 +1,6 @@
 import { createDb, schema } from "@altair/db";
 import {
+  type Attachment,
   type AuthorKind,
   ClientEvent,
   createId,
@@ -15,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
 import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
+import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn } from "../usage";
 import { COORDINATOR_ID, SYSTEM_ID } from "./names";
 
@@ -30,6 +32,7 @@ type MessageRow = {
   author_kind: AuthorKind;
   author_id: string;
   body: string;
+  attachments: string | null;
   created_at: string;
 };
 
@@ -47,7 +50,9 @@ type ThreadRow = {
 
 type InboxRow = { id: number; kind: InboxItem["kind"]; payload: string };
 
-export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | "body">;
+export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | "body"> & {
+  attachments?: Attachment[];
+};
 
 export type ThreadPatch = Partial<Pick<Thread, "title" | "status" | "statusText" | "resolved" | "label">>;
 
@@ -58,6 +63,7 @@ export type ThreadContext = {
   root: Message;
   messages: Message[];
   names: Record<string, string>;
+  knowledge: KnowledgeSnapshot;
 };
 
 export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
@@ -77,6 +83,9 @@ export class ProjectAgent extends Agent<Env> {
   /** Agents currently working: null = coordinator, otherwise a thread id. In memory only. */
   private active = new Set<string | null>();
 
+  /** Project instructions, memory and the file index. */
+  readonly knowledge: KnowledgeStore;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql`CREATE TABLE IF NOT EXISTS messages (
@@ -88,6 +97,9 @@ export class ProjectAgent extends Agent<Env> {
       body TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`;
+    // Added with project files; older projects get the column here.
+    const columns = this.sql<{ name: string }>`PRAGMA table_info(messages)`;
+    if (!columns.some((c) => c.name === "attachments")) this.sql`ALTER TABLE messages ADD COLUMN attachments TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -112,6 +124,12 @@ export class ProjectAgent extends Agent<Env> {
       kind TEXT NOT NULL,
       payload TEXT NOT NULL
     )`;
+    this.knowledge = new KnowledgeStore(
+      (strings, ...values) => this.sql(strings, ...values),
+      env.FILES,
+      () => this.name,
+      (kind) => this.emit({ type: "knowledge.changed", kind }),
+    );
   }
 
   // Our clients speak the Altair protocol only; skip the SDK's state/identity frames.
@@ -149,11 +167,18 @@ export class ProjectAgent extends Agent<Env> {
         if (event.threadId && !this.getThread(event.threadId)) {
           return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
         }
+        let attachments: Attachment[];
+        try {
+          attachments = this.knowledge.attachmentsFor(event.attachments);
+        } catch (err) {
+          return send(connection, { type: "error", code: "no_file", message: (err as Error).message });
+        }
         const message = this.sendMessage({
           threadId: event.threadId,
           authorKind: "user",
           authorId: userId,
           body: event.body,
+          attachments,
         });
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
@@ -192,11 +217,13 @@ export class ProjectAgent extends Agent<Env> {
   sendMessage(input: NewMessage): Message {
     const id = createId("message");
     const createdAt = new Date().toISOString();
+    const attachments = input.attachments ?? [];
+    const stored = attachments.length ? JSON.stringify(attachments) : null;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, created_at)
-      VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${createdAt})
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, created_at)
+      VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored}, ${createdAt})
       RETURNING seq`;
-    const message: Message = { ...input, id, projectId: this.name, seq: row!.seq, createdAt };
+    const message: Message = { ...input, attachments, id, projectId: this.name, seq: row!.seq, createdAt };
     this.emit({ type: "message.created", message });
     return message;
   }
@@ -270,7 +297,7 @@ export class ProjectAgent extends Agent<Env> {
       this.toMessage(r),
     );
     const { projectName, names } = await this.directory();
-    return { projectName, thread, root, messages, names };
+    return { projectName, thread, root, messages, names, knowledge: this.knowledge.snapshot() };
   }
 
   /** A thread agent asks the coordinator for permission or direction. Callable over RPC. */
@@ -325,8 +352,15 @@ export class ProjectAgent extends Agent<Env> {
           agent: "coordinator",
         }),
         system: COORDINATOR_SYSTEM,
-        prompt: coordinatorPrompt({ projectName, names, chat, threads: this.listThreads(), inbox }),
-        tools: coordinatorTools(this.coordinatorHost()),
+        prompt: coordinatorPrompt({
+          projectName,
+          names,
+          chat,
+          threads: this.listThreads(),
+          inbox,
+          knowledge: this.knowledge.snapshot(),
+        }),
+        tools: coordinatorTools(this.coordinatorHost(), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID })),
         maxSteps: 8,
       });
     } catch (err) {
@@ -373,6 +407,70 @@ export class ProjectAgent extends Agent<Env> {
     };
   }
 
+  // ---- Knowledge (instructions, memory, files) ---------------------------
+  // Thin RPC surface over KnowledgeStore for the API routes and thread agents.
+
+  getInstructions() {
+    return this.knowledge.getInstructions();
+  }
+
+  setInstructions(text: string, by: Author) {
+    return this.knowledge.setInstructions(text, by);
+  }
+
+  listMemory() {
+    return this.knowledge.listMemory();
+  }
+
+  getMemory(name: string) {
+    return this.knowledge.getMemory(name);
+  }
+
+  putMemory(name: string, input: { description: string; content: string }, by: Author) {
+    return this.knowledge.putMemory(name, input, by);
+  }
+
+  deleteMemory(name: string) {
+    return this.knowledge.deleteMemory(name);
+  }
+
+  listFiles(prefix = "") {
+    return this.knowledge.listFiles(prefix);
+  }
+
+  getFile(path: string) {
+    return this.knowledge.getFile(path);
+  }
+
+  recordFile(file: { path: string; size: number; contentType: string }, by: Author) {
+    return this.knowledge.recordFile(file, by);
+  }
+
+  forgetFile(path: string) {
+    return this.knowledge.forgetFile(path);
+  }
+
+  async readFileText(path: string): Promise<{ found: boolean; text: string | null; size: number }> {
+    const file = this.knowledge.getFile(path);
+    if (!file) return { found: false, text: null, size: 0 };
+    return { found: true, text: await this.knowledge.readText(path), size: file.size };
+  }
+
+  writeFileText(path: string, content: string, by: Author) {
+    return this.knowledge.writeText(path, content, by);
+  }
+
+  private knowledgeHost(by: Author): KnowledgeHost {
+    return {
+      memoryRead: (name) => this.getMemory(name),
+      memoryWrite: (name, description, content) => this.putMemory(name, { description, content }, by),
+      memoryDelete: (name) => this.deleteMemory(name),
+      listFiles: (prefix) => this.listFiles(prefix),
+      readText: (path) => this.readFileText(path),
+      writeText: (path, content) => this.writeFileText(path, content, by),
+    };
+  }
+
   /** Project name and member display names, for prompts. */
   private async directory(): Promise<{ projectName: string; names: Record<string, string> }> {
     const db = createDb(this.env.DB);
@@ -402,6 +500,7 @@ export class ProjectAgent extends Agent<Env> {
       authorKind: r.author_kind,
       authorId: r.author_id,
       body: r.body,
+      attachments: r.attachments ? (JSON.parse(r.attachments) as Attachment[]) : [],
       seq: r.seq,
       createdAt: r.created_at,
     };

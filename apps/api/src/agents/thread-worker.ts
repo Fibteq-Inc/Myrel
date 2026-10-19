@@ -1,6 +1,7 @@
 import { Decision, formatDecision, type Message, type ProjectRepo, type Thread } from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
+import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
 import { renderMessage } from "./render";
 
 /** The thread operations the thread agent's tools act through. */
@@ -26,9 +27,12 @@ Tools:
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 
+- memory_read / memory_write / memory_delete, list_files / read_file / write_file: the project's memory and shared files (below).
 - repo_list_files and repo_read_file: read the GitHub repositories connected to this project (listed in the prompt). Look at the code before answering questions about it. You cannot change repositories, run code or open pull requests yet; say so when asked.
 
-Apart from those repositories you have no internet access and no files. Work from your own knowledge, say so when facts may be out of date, and be clear about what you inferred.
+${KNOWLEDGE_GUIDE}
+
+Apart from those repositories you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred.
 
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
@@ -46,12 +50,14 @@ export function threadPrompt(input: {
   names: Record<string, string>;
   lastSeenSeq: number;
   notes: CoordinatorNote[];
+  knowledge: KnowledgeSnapshot;
   repos: ProjectRepo[];
 }): string {
   const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
   return [
     `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}`,
+    renderKnowledge(input.knowledge),
     `## Brief from the coordinator\n${input.brief}`,
     input.repos.length
       ? `## GitHub repositories connected to this project\n${input.repos
