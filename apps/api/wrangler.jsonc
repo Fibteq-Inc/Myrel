@@ -49,6 +49,9 @@
   // AI_GATEWAY_URL: optional, e.g. https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway>;
   // anthropic and openai calls then go through it (AI_GATEWAY_TOKEN secret for an authenticated gateway).
   // LLM_BASE_URL: optional full override of the provider's API base URL.
+  // LLM_PRICES: optional JSON of model prices in US dollars per million tokens, used for the
+  // usage dashboard's cost estimates, e.g. {"firerouter/opus": {"input": 4, "output": 20, "cachedInput": 0.4}}.
+  // Built-in prices cover Claude models; a model with no price is metered with no cost.
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
@@ -57,6 +60,7 @@
     "LLM_PROVIDER": "fireworks",
     "LLM_MODEL": "",
     "LLM_BASE_URL": "",
+    "LLM_PRICES": "",
     "AI_GATEWAY_URL": ""
   }
 }

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { BarChart3 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, projectsQuery } from "../../lib/api";
 import { Button, errorMessage, Input } from "../../lib/ui";
@@ -28,7 +29,14 @@ function ProjectsPage() {
 
   return (
     <main className="mx-auto w-full max-w-2xl space-y-6 overflow-y-auto p-6">
-      <h1 className="text-xl font-semibold">Projects</h1>
+      <div className="flex items-center">
+        <h1 className="text-xl font-semibold">Projects</h1>
+        {/* The sidebar holds this link on wide screens. */}
+        <Link to="/usage" className="ml-auto flex items-center gap-1.5 text-[13px] text-muted hover:text-fg md:hidden">
+          <BarChart3 size={15} />
+          Usage
+        </Link>
+      </div>
       <form onSubmit={onSubmit} className="flex gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New project name" maxLength={120} />
         <Button type="submit" disabled={create.isPending || !name.trim()}>

@@ -1,4 +1,4 @@
-import type { Message, Project, ServerEvent, Thread } from "@altair/protocol";
+import type { Message, Project, ServerEvent, Thread, UsageSummary } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -31,7 +31,7 @@ async function setup() {
   ws.addEventListener("message", (e) => events.push(JSON.parse(e.data as string) as ServerEvent));
   ws.accept();
   const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
-  return { project, ws, events, agent };
+  return { project, ws, events, agent, token };
 }
 
 async function until<T>(fn: () => T | Promise<T>, what: string): Promise<NonNullable<T>> {
@@ -162,6 +162,61 @@ describe("coordinator and thread agent", () => {
     }, "system notice");
     // The fake model throws, so the coordinator reports the failure instead of going silent.
     expect(notice.body).toContain("should not be called");
+    ws.close();
+  });
+
+  it("meters every model call and reports it on the usage dashboard", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      if (isCoordinator(req)) {
+        const id = newMessageId(req.prompt);
+        return id
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Pricing", instructions: "Look into it." })] }
+          : { text: "", toolCalls: [] };
+      }
+      return { text: "", toolCalls: [call("reply", { text: "Here it is." })] };
+    });
+
+    const { project, ws, token } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "what does it cost?" }));
+
+    const usage = async (query = "") =>
+      (await (await api(`/api/usage?days=7&tzOffset=-180${query}`, { token })).json()) as UsageSummary;
+    // Coordinator: start_thread, then stop. Thread agent: reply, then stop.
+    const summary = await until(async () => {
+      const s = await usage();
+      return s.totals.calls === 4 ? s : null;
+    }, "four metered calls");
+
+    // The fake model reports 1000 input / 100 output tokens per call and firerouter/opus has no built-in price.
+    expect(summary.totals).toEqual({
+      calls: 4,
+      inputTokens: 4000,
+      cachedInputTokens: 0,
+      outputTokens: 400,
+      costMicros: 0,
+      unpricedCalls: 4,
+    });
+    expect(summary.daily).toHaveLength(7);
+    expect(summary.daily.at(-1)!.calls).toBe(4);
+    expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Altair", calls: 4 })]);
+    expect(summary.byModel).toEqual([expect.objectContaining({ provider: "fireworks", model: "firerouter/opus" })]);
+    expect(Object.fromEntries(summary.byAgent.map((a) => [a.agent, a.calls]))).toEqual({ coordinator: 2, thread: 2 });
+    expect(summary.topThreads).toEqual([expect.objectContaining({ title: "Pricing", calls: 2 })]);
+
+    const [row] = (await env.DB.prepare("SELECT user_id FROM usage_events WHERE project_id = ?").bind(project.id).all())
+      .results;
+    expect(row!.user_id).toMatch(/.+/);
+
+    // Filters: another project id matches nothing, and other people never see this usage.
+    expect((await usage("&projectId=proj_01JZZZZZZZZZZZZZZZZZZZZZZZ")).totals.calls).toBe(0);
+    const other = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `o${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "O" }),
+    });
+    const theirs = await api("/api/usage", { token: other.headers.get("set-auth-token")! });
+    expect(((await theirs.json()) as UsageSummary).totals.calls).toBe(0);
+    expect((await api("/api/usage")).status).toBe(401);
     ws.close();
   });
 });
