@@ -51,7 +51,9 @@
     { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
   ],
 
-  // The sandbox image (git, gh, jq, Node, OpenCode). Wrangler builds it with Docker on deploy.
+  // The sandbox image (git, gh, jq, Node, OpenCode). With "dockerfile" Wrangler rebuilds it on every
+  // deploy. The sandbox image workflow pushes it to Cloudflare's registry and opens a pull request
+  // that swaps this for a pinned "image", so deploys skip the build (packages/sandbox-image/pin.mjs).
   "containers": [
     {
       "name": "altair-sandbox",
