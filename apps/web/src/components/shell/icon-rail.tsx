@@ -9,7 +9,7 @@ type RailItem = {
   label: string;
   icon: LucideIcon;
   /** Where it goes. No `to` = not built yet; shown dimmed. */
-  to?: "/" | "/usage";
+  to?: "/" | "/usage" | "/devices";
   /** Path prefixes that light it up. */
   match?: string[];
 };
@@ -23,7 +23,7 @@ export const RAIL_ITEMS: RailItem[] = [
   { label: "Artifacts", icon: Blocks },
   // Files belong to a project: the rail links to the open project's (below).
   { label: "Files", icon: FolderOpen },
-  { label: "Devices and runners", icon: MonitorSmartphone },
+  { label: "Devices", icon: MonitorSmartphone, to: "/devices", match: ["/devices"] },
   { label: "Usage", icon: BarChart3, to: "/usage", match: ["/usage"] },
 ];
 

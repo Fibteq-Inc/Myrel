@@ -1,7 +1,7 @@
 # Self-hosting Fibteq Altair on Cloudflare
 
 Altair runs as a single Cloudflare Worker named `altair`. The same Worker serves
-the web app, the HTTP API and two Durable Object classes, and keeps accounts and
+the web app, the HTTP API and three Durable Object classes, and keeps accounts and
 projects in a D1 database. This guide sets up your own copy and keeps it
 deploying from Git with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
 
@@ -189,6 +189,7 @@ supply the D1 id.
 | `DB` | D1 database | Accounts, sessions, projects, membership |
 | `PROJECT_AGENT` | Durable Object (`ProjectAgent`) | One per project: coordinator, project chat, live WebSocket |
 | `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
+| `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the altair-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
 
 ## Optional features

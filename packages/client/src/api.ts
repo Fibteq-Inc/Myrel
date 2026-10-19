@@ -18,9 +18,13 @@ import type {
   ProjectRepo,
   ProjectRole,
   ProjectSettings,
+  ProjectWorkspace,
   ProviderId,
   ProviderInfo,
   PutMemoryInput,
+  Runner,
+  RunnerPairingCode,
+  SetWorkspaceInput,
   UpdateAdminSettingsInput,
   UpdateProjectSettingsInput,
   UsageSummary,
@@ -337,6 +341,40 @@ export class ApiClient {
     const query = new URLSearchParams({ days: String(input.days), tzOffset: String(input.tzOffset ?? 0) });
     if (input.projectId) query.set("projectId", input.projectId);
     return this.request<UsageSummary>(`/api/usage?${query}`);
+  }
+
+  // --- local computers (altair-runner) ---
+
+  async listRunners() {
+    return (await this.request<{ runners: Runner[] }>("/api/runners")).runners;
+  }
+
+  /** A short-lived code for `altair-runner pair`. */
+  createPairingCode() {
+    return this.request<RunnerPairingCode>("/api/runners/pairing", { method: "POST", body: {} });
+  }
+
+  removeRunner(id: string) {
+    return this.request<{ ok: true }>(`/api/runners/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async getWorkspace(projectId: string) {
+    return (
+      await this.request<{ workspace: ProjectWorkspace | null }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`)
+    ).workspace;
+  }
+
+  async setWorkspace(projectId: string, input: SetWorkspaceInput) {
+    return (
+      await this.request<{ workspace: ProjectWorkspace }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`, {
+        method: "PUT",
+        body: input,
+      })
+    ).workspace;
+  }
+
+  async clearWorkspace(projectId: string) {
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace`, { method: "DELETE" });
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

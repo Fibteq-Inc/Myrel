@@ -1,3 +1,4 @@
+import { createId, type ProjectWorkspace } from "@altair/protocol";
 import { Agent, getAgentByName } from "agents";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listProjectRepos } from "../github/store";
@@ -5,9 +6,10 @@ import { meteredForTurn } from "../usage";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
 import { type Author, knowledgeTools } from "./knowledge";
+import { getWorkspace } from "../runners";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
-import { type CoordinatorNote, THREAD_SYSTEM, threadPrompt, threadTools } from "./thread-worker";
+import { type CoordinatorNote, type LocalTask, THREAD_SYSTEM, threadPrompt, threadTools } from "./thread-worker";
 
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
@@ -15,12 +17,25 @@ export type ThreadStart = { projectId: string; threadId: string; brief: string }
 
 type NoteRow = { id: number; body: string; created_at: string; seen: number };
 
+type TaskRow = {
+  id: string;
+  runner_id: string;
+  prompt: string;
+  status: LocalTask["status"];
+  result: string | null;
+  created_at: string;
+  seen: number;
+};
+
+/** Task results are cut to this many characters in the prompt. */
+const MAX_TASK_RESULT = 20_000;
+
 /**
  * One instance per thread (named by thread id). Runs the thread agent: each
  * wake queues a turn that reads the thread from the ProjectAgent, calls the
  * model and acts through reply / update_status / request_coordinator.
  * Messages themselves live in the ProjectAgent; this DO keeps the brief,
- * coordinator notes and a read cursor.
+ * coordinator notes, local tasks (run on the person's computer) and a read cursor.
  */
 export class ThreadAgent extends Agent<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -29,6 +44,15 @@ export class ThreadAgent extends Agent<Env> {
     this.sql`CREATE TABLE IF NOT EXISTS notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      seen INTEGER NOT NULL DEFAULT 0
+    )`;
+    this.sql`CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      runner_id TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      status TEXT NOT NULL,
+      result TEXT,
       created_at TEXT NOT NULL,
       seen INTEGER NOT NULL DEFAULT 0
     )`;
@@ -42,10 +66,15 @@ export class ThreadAgent extends Agent<Env> {
     await this.markDirty();
   }
 
-  /** A person wrote in the thread, or the coordinator sent a note. */
+  /** A person wrote in the thread, the coordinator sent a note, or a local task finished. */
   async wake(reason: ThreadWake): Promise<void> {
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
+    }
+    if (reason.kind === "task") {
+      const status: LocalTask["status"] = reason.ok ? "done" : "failed";
+      this.sql`UPDATE tasks SET status = ${status}, result = ${reason.result}, seen = 0
+        WHERE id = ${reason.taskId} AND status = 'running'`;
     }
     await this.markDirty();
   }
@@ -76,8 +105,16 @@ export class ThreadAgent extends Agent<Env> {
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
+    const tasks: LocalTask[] = this.sql<TaskRow>`SELECT * FROM tasks ORDER BY created_at`.map((t) => ({
+      prompt: t.prompt,
+      status: t.status,
+      result: t.result && t.result.length > MAX_TASK_RESULT ? `${t.result.slice(0, MAX_TASK_RESULT)}\n[cut]` : t.result,
+      isNew: t.seen === 0 && t.status !== "running",
+    }));
+    const workspace = await getWorkspace(this.env, projectId);
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     this.sql`UPDATE notes SET seen = 1`;
+    this.sql`UPDATE tasks SET seen = 1 WHERE status != 'running'`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
 
     // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
@@ -102,6 +139,8 @@ export class ThreadAgent extends Agent<Env> {
           lastSeenSeq,
           notes,
           repos: await listProjectRepos(this.env.DB, projectId),
+          tasks,
+          workspace,
         }),
         tools: [
           ...threadTools({
@@ -123,6 +162,7 @@ export class ThreadAgent extends Agent<Env> {
           },
           listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
           readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+          runLocalTask: workspace ? (prompt) => this.runLocalTask(projectId, threadId, workspace, prompt) : undefined,
           }),
           ...knowledgeTools({
             memoryRead: (name) => project.getMemory(name),
@@ -136,7 +176,7 @@ export class ThreadAgent extends Agent<Env> {
         maxSteps: 16,
       });
       await project.updateThread(threadId, {
-        status: resolved ? "done" : asked ? "blocked" : "review_ready",
+        status: resolved ? "done" : this.hasRunningTask() ? "working" : asked ? "blocked" : "review_ready",
         resolved,
       });
     } catch (err) {
@@ -149,8 +189,27 @@ export class ThreadAgent extends Agent<Env> {
       });
       await project.updateThread(threadId, { status: "failed" });
     } finally {
-      await project.setActivity(threadId, false);
+      // A task still running on the person's computer keeps the thread visibly working.
+      await project.setActivity(threadId, this.hasRunningTask());
     }
+  }
+
+  private async runLocalTask(projectId: string, threadId: string, workspace: ProjectWorkspace, prompt: string) {
+    // Recorded before sending: a fast task can finish and wake us before startTask returns.
+    const taskId = createId("task");
+    this.sql`INSERT INTO tasks (id, runner_id, prompt, status, result, created_at, seen)
+      VALUES (${taskId}, ${workspace.runnerId}, ${prompt}, 'running', ${null}, ${new Date().toISOString()}, 0)`;
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, workspace.runnerId);
+    const started = await runner.startTask({ taskId, projectId, threadId, folder: workspace.path, cli: workspace.cli, prompt });
+    if (!started.ok) {
+      this.sql`DELETE FROM tasks WHERE id = ${taskId}`;
+      return started.reason;
+    }
+    return "The task is running on the person's computer. Its result arrives in a later turn; tell the person you started it, then end this turn.";
+  }
+
+  private hasRunningTask(): boolean {
+    return this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM tasks WHERE status = 'running'`[0]!.n > 0;
   }
 
   private getMeta(key: string): string | null {

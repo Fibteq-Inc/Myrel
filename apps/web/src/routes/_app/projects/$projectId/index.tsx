@@ -1,6 +1,7 @@
 import { projectChat, threadByRoot, threadMessages } from "@altair/client";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { Hash, MessagesSquare, Settings } from "lucide-react";
+import { WorkspaceButton } from "../../../../components/local-folder";
 import { Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking, ThreadCard } from "../../../../components/chat";
 import { NavToggle, PaneHeader } from "../../../../components/shell/shell";
 import { useProjectContext } from "../../../../lib/project-context";
@@ -34,7 +35,10 @@ function ProjectChat() {
         <Hash size={17} className="flex-none text-muted" aria-hidden="true" />
         <h1 className="truncate text-[15px] font-semibold">Project chat</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline">{project.name}</span>
-        <div className="ml-auto flex items-center" aria-label={`${members.length} members`}>
+        <div className="ml-auto">
+          <WorkspaceButton project={project} />
+        </div>
+        <div className="ml-1 flex items-center" aria-label={`${members.length} members`}>
           {members.slice(0, 4).map((m, i) => (
             <span key={m.id} title={m.name} className={i > 0 ? "-ml-2" : ""}>
               <UserAvatar id={m.id} name={m.name} size={26} className="border-2 border-ground" />

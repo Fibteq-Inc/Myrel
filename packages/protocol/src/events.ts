@@ -52,9 +52,17 @@ export const ServerEvent = z.discriminatedUnion("type", [
    * An agent started or stopped working. threadId null = the coordinator in the project chat.
    * Ephemeral: not replayed by sync.
    */
-  z.object({ type: z.literal("agent.activity"), threadId: ThreadId.nullable(), active: z.boolean() }),
+  z.object({
+    type: z.literal("agent.activity"),
+    threadId: ThreadId.nullable(),
+    active: z.boolean(),
+    /** What the agent is doing, e.g. a local task's latest step. */
+    label: z.string().max(200).optional(),
+  }),
   /** Project files, memory or instructions changed; clients refetch that list. */
   z.object({ type: z.literal("knowledge.changed"), kind: KnowledgeKind }),
+  /** The project's local folder changed, or its computer came online or went offline. */
+  z.object({ type: z.literal("workspace.changed") }),
   z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
