@@ -5,6 +5,8 @@ export const ID_PREFIXES = {
   thread: "thr",
   project: "proj",
   usage: "use",
+  apiKey: "key",
+  invite: "inv",
   task: "task",
 } as const;
 

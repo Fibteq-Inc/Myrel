@@ -1,7 +1,8 @@
+import type { InstanceRole } from "@altair/protocol";
 import { createMiddleware } from "hono/factory";
 import { createAuth } from "./auth";
 
-export type SessionUser = { id: string; name: string; email: string };
+export type SessionUser = { id: string; name: string; email: string; role: InstanceRole };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
 
 /**
@@ -16,7 +17,13 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const session = await createAuth(c.env).api.getSession({ headers });
   if (!session) return c.json({ error: "unauthorized" }, 401);
 
-  const { id, name, email } = session.user;
-  c.set("user", { id, name, email });
+  const { id, name, email, role } = session.user;
+  c.set("user", { id, name, email, role: role === "admin" ? "admin" : "user" });
+  await next();
+});
+
+/** For server administration routes; runs after requireUser. */
+export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
   await next();
 });

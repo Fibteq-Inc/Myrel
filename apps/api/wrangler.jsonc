@@ -53,16 +53,20 @@
   ],
 
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
-  // BETTER_AUTH_SECRET (required) and the model keys below. There is no `secrets.required` list on
+  // BETTER_AUTH_SECRET (required), KEY_ENCRYPTION_SECRET (recommended: encrypts the model keys people
+  // add in Settings; falls back to BETTER_AUTH_SECRET, and changing it later makes stored keys unreadable)
+  // and the model keys below. There is no `secrets.required` list on
   // purpose: with one, `wrangler dev` drops every .dev.vars secret not on it, so the optional
   // model keys could not be used locally.
   // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
   // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Altair".
-  // SIGNUP_ENABLED: "true" lets anyone create an account; otherwise only existing accounts can sign in.
+  // SIGNUP_ENABLED: "true" lets anyone create an account; otherwise only existing accounts and invited
+  // people can. Admins can change it at runtime in Settings, which then takes precedence.
   //
-  // Models (see src/llm/index.ts). LLM_PROVIDER: fireworks (default), anthropic or openai.
+  // Models (see src/llm/index.ts): the server default. Each project can pick its own provider, model
+  // and key in its settings (src/keys.ts). LLM_PROVIDER: fireworks (default), anthropic or openai.
   // The provider's key is a secret: FIREWORKS_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY.
   // LLM_MODEL: empty = the provider's default model.
   // AI_GATEWAY_URL: optional, e.g. https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway>;

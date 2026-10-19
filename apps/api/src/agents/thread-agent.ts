@@ -10,7 +10,8 @@ import {
   TaskSpec,
 } from "@altair/runner-core";
 import { Agent, getAgentByName } from "agents";
-import { createProvider, runLoop, taskModel } from "../llm";
+import { projectProvider, projectTaskModel } from "../keys";
+import { runLoop } from "../llm";
 import { normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
 import { meteredForTurn, recordTaskUsage } from "../usage";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
@@ -115,7 +116,7 @@ export class ThreadAgent extends Agent<Env> {
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
 
-    const llm = createProvider(this.env);
+    const llm = await projectProvider(this.env, projectId);
     if (!llm.ok) {
       await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
       await project.updateThread(threadId, { status: "failed" });
@@ -221,7 +222,7 @@ export class ThreadAgent extends Agent<Env> {
     const secrets: Record<string, string> = {};
     let model: TaskSpec["model"];
     if (harness !== "shell") {
-      const m = taskModel(this.env);
+      const m = await projectTaskModel(this.env, projectId);
       if (!m.ok) throw new Error(m.reason);
       if (harness === "claude-code" && m.model.kind !== "anthropic") {
         throw new Error("Claude Code needs an Anthropic model, and this server uses another provider. Use opencode.");

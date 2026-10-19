@@ -12,7 +12,8 @@ import {
 } from "@altair/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { createProvider, runLoop } from "../llm";
+import { projectProvider } from "../keys";
+import { runLoop } from "../llm";
 import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
 import { meteredForTurn } from "../usage";
 import { COORDINATOR_ID, SYSTEM_ID } from "./names";
@@ -309,7 +310,7 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`DELETE FROM coordinator_inbox WHERE id <= ${rows.at(-1)!.id}`;
     const inbox = rows.map((r) => JSON.parse(r.payload) as InboxItem);
 
-    const llm = createProvider(this.env);
+    const llm = await projectProvider(this.env, this.name);
     if (!llm.ok) {
       this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
       return;
