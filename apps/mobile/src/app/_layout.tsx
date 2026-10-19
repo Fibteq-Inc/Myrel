@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DarkTheme, SplashScreen, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { AppI18n } from "../lib/i18n";
 import { unregisterPush } from "../lib/push";
 import { SessionProvider, useSession } from "../lib/session";
 import { colors } from "../theme";
@@ -18,17 +19,19 @@ const theme = {
 export default function RootLayout() {
   return (
     <ThemeProvider value={theme}>
-      <QueryClientProvider client={queryClient}>
-        <SessionProvider
-          onSignOut={async (api) => {
-            await unregisterPush(api);
-            queryClient.clear();
-          }}
-        >
-          <StatusBar style="light" />
-          <Routes />
-        </SessionProvider>
-      </QueryClientProvider>
+      <AppI18n>
+        <QueryClientProvider client={queryClient}>
+          <SessionProvider
+            onSignOut={async (api) => {
+              await unregisterPush(api);
+              queryClient.clear();
+            }}
+          >
+            <StatusBar style="light" />
+            <Routes />
+          </SessionProvider>
+        </QueryClientProvider>
+      </AppI18n>
     </ThemeProvider>
   );
 }

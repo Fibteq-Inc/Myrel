@@ -8,8 +8,10 @@ import {
 } from "@altair/client";
 import type { ClientEventInput } from "@altair/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppState } from "react-native";
-import { useApi } from "./session";
+import { filesQueryKey } from "./queries";
+import { useSession } from "./session";
 
 type Action =
   | Parameters<typeof applyEvent>[1]
@@ -46,7 +48,8 @@ export function useProject() {
  * anyway; push notifications cover that time) and catches up by seq on return.
  */
 export function ProjectProvider({ projectId, children }: { projectId: string; children: ReactNode }) {
-  const api = useApi();
+  const { api, server } = useSession();
+  const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, emptyProjectState);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const socketRef = useRef<ProjectSocket | null>(null);
@@ -56,7 +59,12 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
       onMessage: (message) => dispatch({ type: "message", message }),
-      onEvent: (event) => dispatch(event),
+      onEvent: (event) => {
+        if (event.type === "knowledge.changed" && event.kind === "files") {
+          void queryClient.invalidateQueries({ queryKey: filesQueryKey(server, projectId) });
+        }
+        dispatch(event);
+      },
       onStatus: (s) => {
         setStatus(s);
         // Activity is not replayed; after reconnecting, the sync re-sends what is still running.
@@ -79,7 +87,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
       sub.remove();
       socket.close();
     };
-  }, [api, projectId]);
+  }, [api, server, projectId, queryClient]);
 
   const send = useCallback(
     (body: string, threadId: string | null = null) => socketRef.current?.sendMessage(body, { threadId }),

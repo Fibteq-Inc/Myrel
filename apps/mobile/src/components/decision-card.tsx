@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import * as Haptics from "expo-haptics";
 import { CircleCheck, CircleHelp } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -19,6 +20,7 @@ export function DecisionCard({
   /** Missing when the viewer cannot answer here. */
   onChoose?: (label: string) => void;
 }) {
+  const t = useT();
   const answered = answer !== undefined;
   const chosen = chosenOption(decision, answer);
 
@@ -27,7 +29,7 @@ export function DecisionCard({
       <View style={styles.kicker}>
         {answered ? <CircleCheck size={15} color={colors.subtle} /> : <CircleHelp size={15} color={colors.warn} />}
         <Text style={{ fontSize: 13, color: answered ? colors.subtle : colors.warn }}>
-          {answered ? "Answered" : "Your call"}
+          {answered ? t("decision.answered") : t("decision.yourCall")}
         </Text>
       </View>
       <Text style={styles.question}>{decision.question}</Text>
@@ -40,7 +42,7 @@ export function DecisionCard({
               key={option.label}
               accessibilityRole="button"
               accessibilityState={{ disabled: answered || !onChoose, selected: picked }}
-              accessibilityHint={recommended ? "Recommended" : undefined}
+              accessibilityHint={recommended ? t("decision.recommended") : undefined}
               disabled={answered || !onChoose}
               onPress={() => {
                 void Haptics.selectionAsync();
@@ -60,10 +62,10 @@ export function DecisionCard({
             >
               <View style={styles.optionHead}>
                 <Text style={styles.optionLabel}>{option.label}</Text>
-                {recommended && <Text style={styles.recommended}>recommended</Text>}
+                {recommended && <Text style={styles.recommended}>{t("decision.recommended")}</Text>}
                 {picked && (
                   <View style={{ marginLeft: "auto" }}>
-                    <CircleCheck size={15} color={colors.accent} accessibilityLabel="Chosen" />
+                    <CircleCheck size={15} color={colors.accent} accessibilityLabel={t("decision.chosen")} />
                   </View>
                 )}
               </View>

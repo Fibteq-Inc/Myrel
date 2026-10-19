@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { type Href, useRouter } from "expo-router";
 import { ChevronRight, SquareTerminal } from "lucide-react-native";
@@ -10,8 +11,9 @@ import { threadActivity, ThreadStatusIcon } from "./thread-status";
  * count, and a live line with what the thread is doing right now.
  */
 export function ThreadCard({ projectId, thread, replies }: { projectId: string; thread: Thread; replies: number }) {
+  const t = useT();
   const router = useRouter();
-  const activity = threadActivity(thread);
+  const activity = threadActivity(thread, t);
   const live = thread.status === "working" && !thread.resolved;
   return (
     <Pressable
@@ -25,7 +27,7 @@ export function ThreadCard({ projectId, thread, replies }: { projectId: string; 
         <Text style={styles.title} numberOfLines={1}>
           {thread.title}
         </Text>
-        <Text style={styles.replies}>{replies === 1 ? "1 reply" : `${replies} replies`}</Text>
+        <Text style={styles.replies}>{t("threadCard.replies", { count: replies })}</Text>
         <ChevronRight size={15} color={colors.subtle} />
       </View>
       <View style={styles.foot}>

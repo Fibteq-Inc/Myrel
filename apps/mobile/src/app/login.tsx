@@ -1,3 +1,5 @@
+import { LOCALE_NAMES, LOCALES } from "@altair/i18n";
+import { useI18n, useT } from "@altair/i18n/react";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -6,6 +8,7 @@ import { useSession } from "../lib/session";
 import { colors } from "../theme";
 
 export default function LoginScreen() {
+  const t = useT();
   const session = useSession();
   const [editingServer, setEditingServer] = useState(session.server === "");
 
@@ -26,15 +29,36 @@ export default function LoginScreen() {
               <SignInForm />
               <Pressable onPress={() => setEditingServer(true)} style={styles.serverRow} accessibilityRole="button">
                 <Text style={styles.serverText} numberOfLines={1}>
-                  {session.info?.name ?? "Server"} · {hostOf(session.server)}
+                  {session.info?.name ?? t("settings.server")} · {hostOf(session.server)}
                 </Text>
-                <Text style={styles.link}>Change</Text>
+                <Text style={styles.link}>{t("server.change")}</Text>
               </Pressable>
             </>
           )}
+          <LanguageSwitch />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+/** Language choice before signing in, as on the web sign-in page. */
+export function LanguageSwitch() {
+  const { locale, setLocale } = useI18n();
+  return (
+    <View style={styles.languages} accessibilityRole="radiogroup">
+      {LOCALES.map((l) => (
+        <Pressable
+          key={l}
+          accessibilityRole="radio"
+          accessibilityState={{ selected: l === locale }}
+          onPress={() => setLocale(l)}
+          hitSlop={8}
+        >
+          <Text style={[styles.language, l === locale && { color: colors.fg }]}>{LOCALE_NAMES[l]}</Text>
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
@@ -44,6 +68,7 @@ function hostOf(origin: string) {
 
 /** Lets the user point the app at any Altair server, e.g. a self-hosted one. */
 function ServerForm({ onDone }: { onDone: () => void }) {
+  const t = useT();
   const session = useSession();
   const [value, setValue] = useState(session.server ? hostOf(session.server) : "");
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +81,7 @@ function ServerForm({ onDone }: { onDone: () => void }) {
       await session.chooseServer(value);
       onDone();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, t("common.error")));
     } finally {
       setPending(false);
     }
@@ -64,8 +89,8 @@ function ServerForm({ onDone }: { onDone: () => void }) {
 
   return (
     <View style={styles.form}>
-      <Text style={styles.title}>Connect to a server</Text>
-      <Text style={styles.hint}>Enter the address of your Altair server, hosted or self-hosted.</Text>
+      <Text style={styles.title}>{t("mobile.serverTitle")}</Text>
+      <Text style={styles.hint}>{t("mobile.serverHint")}</Text>
       <Input
         value={value}
         onChangeText={setValue}
@@ -74,15 +99,15 @@ function ServerForm({ onDone }: { onDone: () => void }) {
         textContentType="URL"
         returnKeyType="go"
         onSubmitEditing={submit}
-        accessibilityLabel="Server address"
+        accessibilityLabel={t("server.label")}
       />
       {error && <Text style={styles.error}>{error}</Text>}
       <Button onPress={submit} pending={pending} disabled={!value.trim()}>
-        Connect
+        {t("server.connect")}
       </Button>
       {session.server !== "" && (
         <Button variant="ghost" onPress={onDone}>
-          Cancel
+          {t("mobile.cancel")}
         </Button>
       )}
     </View>
@@ -90,6 +115,7 @@ function ServerForm({ onDone }: { onDone: () => void }) {
 }
 
 function SignInForm() {
+  const t = useT();
   const session = useSession();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -106,21 +132,21 @@ function SignInForm() {
       if (mode === "signup") await session.signUp({ email, password, name });
       else await session.signIn({ email, password });
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, t("common.error")));
       setPending(false);
     }
   }
 
   return (
     <View style={styles.form}>
-      <Text style={styles.title}>{mode === "signin" ? "Sign in to Altair" : "Create an account"}</Text>
+      <Text style={styles.title}>{mode === "signin" ? t("login.signInTitle") : t("login.signUpTitle")}</Text>
       {mode === "signup" && (
-        <Input value={name} onChangeText={setName} placeholder="Name" autoCapitalize="words" textContentType="name" />
+        <Input value={name} onChangeText={setName} placeholder={t("login.name")} autoCapitalize="words" textContentType="name" />
       )}
       <Input
         value={email}
         onChangeText={setEmail}
-        placeholder="Email"
+        placeholder={t("login.email")}
         keyboardType="email-address"
         textContentType="emailAddress"
         autoComplete="email"
@@ -128,7 +154,7 @@ function SignInForm() {
       <Input
         value={password}
         onChangeText={setPassword}
-        placeholder="Password"
+        placeholder={t("login.password")}
         secureTextEntry
         textContentType={mode === "signin" ? "password" : "newPassword"}
         autoComplete={mode === "signin" ? "current-password" : "new-password"}
@@ -137,28 +163,29 @@ function SignInForm() {
       />
       {error && <Text style={styles.error}>{error}</Text>}
       <Button onPress={submit} pending={pending} disabled={!email || password.length < 8}>
-        {mode === "signin" ? "Sign in" : "Sign up"}
+        {mode === "signin" ? t("login.signIn") : t("login.signUp")}
       </Button>
       {signUpAllowed ? (
         <Pressable onPress={() => setMode(mode === "signin" ? "signup" : "signin")} accessibilityRole="button">
           <Text style={[styles.hint, { textAlign: "center" }]}>
-            {mode === "signin" ? "No account? Sign up" : "Have an account? Sign in"}
+            {mode === "signin" ? t("login.toSignUp") : t("login.toSignIn")}
           </Text>
         </Pressable>
       ) : (
-        <Text style={[styles.hint, { textAlign: "center" }]}>New sign-ups are closed on this server.</Text>
+        <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.signUpClosed")}</Text>
       )}
     </View>
   );
 }
 
 function Offline() {
+  const t = useT();
   const session = useSession();
   return (
     <View style={styles.form}>
-      <Text style={styles.title}>Can't reach {hostOf(session.server)}</Text>
-      <Text style={styles.hint}>Check your connection and try again.</Text>
-      <Button onPress={session.retry}>Try again</Button>
+      <Text style={styles.title}>{t("mobile.offlineTitle", { host: hostOf(session.server) })}</Text>
+      <Text style={styles.hint}>{t("mobile.offlineBody")}</Text>
+      <Button onPress={session.retry}>{t("mobile.retry")}</Button>
     </View>
   );
 }
@@ -174,4 +201,6 @@ const styles = StyleSheet.create({
   serverRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   serverText: { flex: 1, color: colors.subtle, fontSize: 13 },
   link: { color: colors.link, fontSize: 13 },
+  languages: { flexDirection: "row", justifyContent: "center", gap: 20 },
+  language: { color: colors.subtle, fontSize: 13 },
 });

@@ -17,3 +17,16 @@ export function useOpenLink() {
     [router],
   );
 }
+
+/** Opens one of the project's artifacts in the in-app viewer; `version` pins an older one. */
+export function useOpenArtifact(projectId: string) {
+  const router = useRouter();
+  return useCallback(
+    (artifactId: string, version?: number) =>
+      router.push({
+        pathname: "/artifact",
+        params: { projectId, artifactId, ...(version ? { version: String(version) } : {}) },
+      }),
+    [router, projectId],
+  );
+}

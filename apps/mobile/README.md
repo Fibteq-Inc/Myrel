@@ -9,7 +9,11 @@ What it does:
 - Connects to any Altair server (hosted or self-hosted). The address is checked with
   `GET /api/info`, and sign-ins are kept per server in the iOS Keychain / Android Keystore.
 - Signs in with email and password and talks to the API with a bearer token (no cookies).
-- Project chat and thread views, with live progress checklists and thread cards.
+- The same project tabs as the web app: Conversation, Threads, Artifacts, Files and Usage.
+  Threads show the agent's plan as a live checklist; replies show where they ran, the model,
+  time, tokens and cost.
+- English and Turkish, from the shared `@altair/i18n` catalog: the device language by default,
+  changeable on the sign-in screen and in Settings.
 - Decision cards answered with one tap: the chosen option is sent as your reply.
 - Links in messages, artifacts above all, open in an in-app WebView.
 - Push notifications: registers the device's Expo push token at `POST /api/notifications/subscriptions`,

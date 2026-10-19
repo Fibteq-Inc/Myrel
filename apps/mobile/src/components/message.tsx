@@ -1,10 +1,13 @@
-import type { Message, Reaction } from "@altair/protocol";
-import { CircleAlert } from "lucide-react-native";
+import { useT } from "@altair/i18n/react";
+import type { Artifact, Attachment, Message, Reaction } from "@altair/protocol";
+import { CircleAlert, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { colors, radius } from "../theme";
+import { ArtifactCards } from "./artifact-card";
 import { type DecisionHandlers, MessageMarkdown } from "./markdown";
-import { AltairMark, relativeTime, Spinner } from "./ui";
+import { MessageStatsLine } from "./message-stats";
+import { AltairMark, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
 
@@ -19,7 +22,9 @@ export function MessageView({
   names,
   reactions,
   decision,
+  artifacts,
   onLink,
+  onOpenArtifact,
   children,
 }: {
   message: Message;
@@ -27,9 +32,14 @@ export function MessageView({
   names: Names;
   reactions?: Reaction[];
   decision?: DecisionHandlers;
+  artifacts: Record<string, Artifact>;
   onLink: (href: string) => void;
+  onOpenArtifact: (artifactId: string, version?: number) => void;
   children?: ReactNode;
 }) {
+  const t = useT();
+  const relativeTime = useRelativeTime();
+
   if (message.authorKind === "system") {
     return (
       <View style={styles.system}>
@@ -46,8 +56,13 @@ export function MessageView({
       <View style={styles.agent}>
         <AltairMark size={28} />
         <View style={{ flex: 1, minWidth: 0, gap: 8, paddingTop: 2 }}>
-          <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />
+          {!!message.body && <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />}
+          <Attachments attachments={message.attachments} />
+          {!!message.artifacts?.length && (
+            <ArtifactCards refs={message.artifacts} artifacts={artifacts} onOpen={onOpenArtifact} />
+          )}
           {children}
+          {message.stats && <MessageStatsLine stats={message.stats} />}
           <View style={styles.meta}>
             <Reactions reactions={reactions} />
             <Text style={styles.time}>{relativeTime(message.createdAt)}</Text>
@@ -60,14 +75,33 @@ export function MessageView({
   const mine = message.authorId === me;
   return (
     <View style={styles.user}>
-      {!mine && <Text style={styles.author}>{names[message.authorId] ?? "Member"}</Text>}
-      <View style={styles.bubble}>
-        <Text selectable style={styles.bubbleText}>
-          {message.body}
-        </Text>
-      </View>
+      {!mine && <Text style={styles.author}>{names[message.authorId] ?? t("common.member")}</Text>}
+      {!!message.body && (
+        <View style={styles.bubble}>
+          <Text selectable style={styles.bubbleText}>
+            {message.body}
+          </Text>
+        </View>
+      )}
+      <Attachments attachments={message.attachments} />
       <Reactions reactions={reactions} />
       {children && <View style={{ width: "100%" }}>{children}</View>}
+    </View>
+  );
+}
+
+function Attachments({ attachments }: { attachments?: Attachment[] }) {
+  if (!attachments?.length) return null;
+  return (
+    <View style={styles.attachments}>
+      {attachments.map((a) => (
+        <View key={a.path} style={styles.attachment}>
+          <Paperclip size={13} color={colors.subtle} />
+          <Text style={styles.attachmentName} numberOfLines={1}>
+            {a.name}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -90,13 +124,15 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label = "Thinking" }: { label?: string }) {
+export function Thinking({ label }: { label: string }) {
   return (
     <View style={styles.agent} accessibilityRole="progressbar" accessibilityLabel={label}>
       <AltairMark size={28} />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }}>
         <Spinner size={15} color={colors.subtle} />
-        <Text style={{ color: colors.subtle, fontSize: 15 }}>{label}…</Text>
+        <Text style={{ color: colors.subtle, fontSize: 15, flexShrink: 1 }} numberOfLines={2}>
+          {label}…
+        </Text>
       </View>
     </View>
   );
@@ -130,6 +166,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   bubbleText: { color: colors.fg, fontSize: 16, lineHeight: 22 },
+  attachments: { flexDirection: "row", flexWrap: "wrap", gap: 6, maxWidth: "85%" },
+  attachment: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.edge,
+    backgroundColor: colors.raised,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    maxWidth: 220,
+  },
+  attachmentName: { color: colors.body, fontSize: 13, flexShrink: 1 },
   reaction: {
     borderRadius: 999,
     borderWidth: 1,

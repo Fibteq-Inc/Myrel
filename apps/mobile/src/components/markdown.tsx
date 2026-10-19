@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
@@ -46,13 +47,14 @@ function CodeBlock({
   containerStyle?: ViewStyle;
   textStyle?: TextStyle;
 }) {
+  const t = useT();
   return (
     <View style={[containerStyle, styles.code]}>
       <View style={styles.codeHead}>
         <Text style={styles.codeLang}>{language || "text"}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Copy code"
+          accessibilityLabel={t("common.copy")}
           hitSlop={10}
           onPress={() => void Clipboard.setStringAsync(text)}
         >

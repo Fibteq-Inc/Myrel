@@ -1,4 +1,5 @@
 import { threadMessages } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { ChevronDown, ChevronUp, CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useMemo, useState } from "react";
@@ -12,6 +13,7 @@ import { colors } from "../../../../../theme";
 import { useNames } from "../../../../../lib/use-names";
 
 export default function ThreadScreen() {
+  const t = useT();
   const { threadId } = useLocalSearchParams<{ threadId: string }>();
   const { user } = useSession();
   const { projectId, state, send, emit } = useProject();
@@ -34,12 +36,12 @@ export default function ThreadScreen() {
         <Checklist text={thread.statusText} live={live} />
       ) : (
         <Text style={styles.collapsed} numberOfLines={1}>
-          {threadStatus(thread).label}
+          {threadStatus(thread, t).label}
         </Text>
       )}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={checklistOpen ? "Hide progress" : "Show progress"}
+        accessibilityLabel={checklistOpen ? t("mobile.hideProgress") : t("mobile.showProgress")}
         hitSlop={8}
         onPress={() => setChecklistOpen((v) => !v)}
         style={styles.toggle}
@@ -62,13 +64,13 @@ export default function ThreadScreen() {
                 </Text>
               </View>
             ) : (
-              <Text style={styles.titleText}>Thread</Text>
+              <Text style={styles.titleText}>{t("thread.loading")}</Text>
             ),
           headerRight: () =>
             thread ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={thread.resolved ? "Reopen thread" : "Mark resolved"}
+                accessibilityLabel={thread.resolved ? t("thread.reopen") : t("thread.resolve")}
                 hitSlop={10}
                 onPress={() => emit({ type: "thread.resolve", threadId, resolved: !thread.resolved })}
                 style={styles.resolve}
@@ -87,8 +89,10 @@ export default function ThreadScreen() {
         me={user?.id ?? ""}
         names={names}
         reactions={state.reactions}
-        working={!!state.active[threadId]}
-        placeholder="Reply in this thread"
+        artifacts={state.artifacts}
+        projectId={projectId}
+        working={state.active[threadId] ? (state.progress[threadId] ?? t("message.working")) : null}
+        placeholder={t("thread.placeholder")}
         onSend={onSend}
         header={header}
       />

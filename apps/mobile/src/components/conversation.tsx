@@ -1,9 +1,9 @@
-import type { Message, Reaction } from "@altair/protocol";
+import type { Artifact, Message, Reaction } from "@altair/protocol";
 import { type ReactNode, useMemo } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
-import { useOpenLink } from "../lib/links";
+import { useOpenArtifact, useOpenLink } from "../lib/links";
 import { Composer } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
 
@@ -17,6 +17,8 @@ export function Conversation({
   me,
   names,
   reactions,
+  artifacts,
+  projectId,
   working,
   placeholder,
   onSend,
@@ -28,7 +30,10 @@ export function Conversation({
   me: string;
   names: Names;
   reactions: Record<string, Reaction[]>;
-  working: boolean;
+  artifacts: Record<string, Artifact>;
+  projectId: string;
+  /** Null when idle; otherwise what to show while the agent works. */
+  working: string | null;
   placeholder: string;
   onSend: (body: string) => void;
   /** Pinned above the list (e.g. a thread's checklist). */
@@ -39,6 +44,7 @@ export function Conversation({
 }) {
   const insets = useSafeAreaInsets();
   const openLink = useOpenLink();
+  const openArtifact = useOpenArtifact(projectId);
   const answers = useMemo(() => decisionAnswers(messages), [messages]);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
   const data = useMemo(() => [...messages].reverse(), [messages]);
@@ -53,7 +59,7 @@ export function Conversation({
         contentContainerStyle={styles.list}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={working ? <Thinking label="Working" /> : undefined}
+        ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
         ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
         renderItem={({ item }) => (
           <MessageView
@@ -61,7 +67,9 @@ export function Conversation({
             me={me}
             names={names}
             reactions={reactions[item.id]}
+            artifacts={artifacts}
             onLink={openLink}
+            onOpenArtifact={openArtifact}
             decision={
               item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
             }

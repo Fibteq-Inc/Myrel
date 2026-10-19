@@ -1,52 +1,67 @@
-import { parseChecklist } from "@altair/client";
-import { CircleCheck, CircleDashed } from "lucide-react-native";
+import { checklistProgress, parseChecklist } from "@altair/client";
+import { useT } from "@altair/i18n/react";
+import { CircleCheck, CircleDashed, CircleMinus, CircleX } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 import { colors, mono } from "../theme";
 import { Spinner } from "./ui";
 
-/** A thread agent's `update_status` checklist with a progress bar. */
+/**
+ * A thread agent's plan as a checklist with a progress bar. A task's own steps
+ * are indented under the plan step they run in; skipped steps stay visible,
+ * struck through.
+ */
 export function Checklist({ text, live = true }: { text: string; live?: boolean }) {
+  const t = useT();
   const { title, items } = parseChecklist(text);
   if (items.length === 0) return <Text style={styles.plain}>{text}</Text>;
-  const done = items.filter((i) => i.state === "done").length;
+  const { done, total } = checklistProgress(items);
   return (
     <View style={{ gap: 10 }}>
       <View style={styles.head}>
         <Text style={styles.title} numberOfLines={1}>
-          {title || "Progress"}
+          {title || t("checklist.progress")}
         </Text>
         <Text style={styles.count}>
-          {done} / {items.length}
+          {done} / {total}
         </Text>
       </View>
       <View
         accessibilityRole="progressbar"
-        accessibilityValue={{ min: 0, max: items.length, now: done }}
+        accessibilityLabel={t("checklist.progress")}
+        accessibilityValue={{ min: 0, max: total, now: done }}
         style={styles.track}
       >
-        <View style={[styles.bar, { width: `${(done / items.length) * 100}%` }]} />
+        <View style={[styles.bar, { width: `${total ? (done / total) * 100 : 0}%` }]} />
       </View>
       <View style={{ gap: 8 }}>
-        {items.map((item, i) => (
-          <View key={i} style={styles.item}>
-            <View style={{ marginTop: 2 }}>
-              {item.state === "done" && <CircleCheck size={16} color={colors.ok} accessibilityLabel="Done" />}
-              {item.state === "active" &&
-                (live ? <Spinner size={16} /> : <CircleDashed size={16} color={colors.accent} />)}
-              {item.state === "todo" && <CircleDashed size={16} color={colors.subtle} />}
+        {items.map((item, i) => {
+          const nested = item.depth > 0;
+          const size = nested ? 14 : 16;
+          return (
+            <View key={i} style={[styles.item, { marginLeft: item.depth * 22 }]}>
+              <View style={{ marginTop: 2 }}>
+                {item.state === "done" && <CircleCheck size={size} color={colors.ok} accessibilityLabel={t("checklist.done")} />}
+                {item.state === "active" &&
+                  (live ? <Spinner size={size} /> : <CircleDashed size={size} color={colors.accent} accessibilityLabel={t("checklist.stopped")} />)}
+                {item.state === "todo" && <CircleDashed size={size} color={colors.subtle} accessibilityLabel={t("checklist.todo")} />}
+                {item.state === "failed" && <CircleX size={size} color={colors.bad} accessibilityLabel={t("checklist.failed")} />}
+                {item.state === "skipped" && <CircleMinus size={size} color={colors.subtle} accessibilityLabel={t("checklist.skipped")} />}
+              </View>
+              <Text
+                style={[
+                  styles.itemText,
+                  nested && { fontSize: 13, lineHeight: 19 },
+                  item.state === "done" && { color: colors.muted },
+                  item.state === "active" && { color: colors.fg, fontWeight: "600" },
+                  (item.state === "todo" || item.state === "failed") && { color: colors.subtle },
+                  item.state === "skipped" && { color: colors.subtle, textDecorationLine: "line-through" },
+                ]}
+              >
+                {item.text}
+              </Text>
             </View>
-            <Text
-              style={[
-                styles.itemText,
-                item.state === "done" && { color: colors.muted },
-                item.state === "active" && { color: colors.fg, fontWeight: "600" },
-                item.state === "todo" && { color: colors.subtle },
-              ]}
-            >
-              {item.text}
-            </Text>
-          </View>
-        ))}
+          );
+        })}
       </View>
     </View>
   );

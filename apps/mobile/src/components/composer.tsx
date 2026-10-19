@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { ArrowUp } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
@@ -13,6 +14,7 @@ export function Composer({
   onSend: (body: string) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const [body, setBody] = useState("");
   const canSend = body.trim().length > 0 && !disabled;
 
@@ -35,7 +37,7 @@ export function Composer({
       />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Send"
+        accessibilityLabel={t("composer.send")}
         disabled={!canSend}
         onPress={send}
         style={[styles.send, !canSend && { opacity: 0.4 }]}

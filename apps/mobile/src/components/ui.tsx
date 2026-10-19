@@ -1,5 +1,6 @@
 import { LoaderCircle } from "lucide-react-native";
-import { type ReactNode, useEffect, useRef } from "react";
+import { useI18n } from "@altair/i18n/react";
+import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -16,8 +17,8 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { colors, radius } from "../theme";
 
-export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Something went wrong";
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 export function Button({
@@ -82,7 +83,7 @@ export function Spinner({ size = 16, color = colors.accent }: { size?: number; c
   }, [turn]);
   const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
-    <Animated.View style={{ transform: [{ rotate }] }} accessibilityLabel="Loading">
+    <Animated.View style={{ transform: [{ rotate }] }} accessibilityElementsHidden importantForAccessibility="no">
       <LoaderCircle size={size} color={color} />
     </Animated.View>
   );
@@ -112,13 +113,20 @@ export function AltairMark({ size = 28 }: { size?: number }) {
   );
 }
 
-export function relativeTime(iso: string, now = Date.now()) {
-  const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
-  if (s < 60) return "now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+/** "now", "5m", "3h", "2d", then a short date, in the app's language. */
+export function useRelativeTime() {
+  const { t, locale } = useI18n();
+  return useCallback(
+    (iso: string, now = Date.now()) => {
+      const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
+      if (s < 60) return t("time.now");
+      if (s < 3600) return t("time.minutes", { count: Math.floor(s / 60) });
+      if (s < 86400) return t("time.hours", { count: Math.floor(s / 3600) });
+      if (s < 7 * 86400) return t("time.days", { count: Math.floor(s / 86400) });
+      return new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric" });
+    },
+    [t, locale],
+  );
 }
 
 const styles = StyleSheet.create({

@@ -1,15 +1,18 @@
+import { useT } from "@altair/i18n/react";
 import type { Project } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
-import { ChevronRight, FolderClosed, LogOut, Plus } from "lucide-react-native";
+import { ChevronRight, FolderClosed, Plus, Settings } from "lucide-react-native";
 import { useState } from "react";
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
-import { Button, errorMessage, Input, relativeTime, Spinner } from "../../components/ui";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { Button, errorMessage, Input, Spinner, useRelativeTime } from "../../components/ui";
 import { useSession } from "../../lib/session";
 import { colors, radius } from "../../theme";
 
 export default function ProjectsScreen() {
-  const { api, user, server, signOut } = useSession();
+  const t = useT();
+  const relativeTime = useRelativeTime();
+  const { api, server } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
   const projects = useQuery({ queryKey: ["projects", server], queryFn: () => api.listProjects() });
@@ -25,24 +28,18 @@ export default function ProjectsScreen() {
     },
   });
 
-  function confirmSignOut() {
-    Alert.alert("Sign out?", `You are signed in as ${user?.email}.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: () => void signOut() },
-    ]);
-  }
-
   return (
     <>
       <Stack.Screen
         options={{
+          title: t("projects.title"),
           headerRight: () => (
             <View style={{ flexDirection: "row", gap: 18 }}>
-              <Pressable accessibilityLabel="New project" hitSlop={10} onPress={() => setCreating((v) => !v)}>
+              <Pressable accessibilityLabel={t("mobile.newProject")} hitSlop={10} onPress={() => setCreating((v) => !v)}>
                 <Plus size={22} color={colors.fg} />
               </Pressable>
-              <Pressable accessibilityLabel="Sign out" hitSlop={10} onPress={confirmSignOut}>
-                <LogOut size={20} color={colors.subtle} />
+              <Pressable accessibilityLabel={t("settings.title")} hitSlop={10} onPress={() => router.push("/settings")}>
+                <Settings size={20} color={colors.subtle} />
               </Pressable>
             </View>
           ),
@@ -66,15 +63,15 @@ export default function ProjectsScreen() {
               <Input
                 value={name}
                 onChangeText={setName}
-                placeholder="Project name"
+                placeholder={t("projects.name")}
                 autoFocus
                 autoCapitalize="sentences"
                 returnKeyType="done"
                 onSubmitEditing={() => name.trim() && create.mutate(name.trim())}
               />
-              {create.error && <Text style={styles.error}>{errorMessage(create.error)}</Text>}
+              {create.error && <Text style={styles.error}>{errorMessage(create.error, t("common.error"))}</Text>}
               <Button onPress={() => create.mutate(name.trim())} pending={create.isPending} disabled={!name.trim()}>
-                Create project
+                {t("projects.create")}
               </Button>
             </View>
           ) : undefined
@@ -86,16 +83,16 @@ export default function ProjectsScreen() {
             </View>
           ) : projects.error ? (
             <View style={styles.empty}>
-              <Text style={styles.error}>{errorMessage(projects.error)}</Text>
+              <Text style={styles.error}>{errorMessage(projects.error, t("common.error"))}</Text>
               <Button variant="ghost" onPress={() => void projects.refetch()}>
-                Try again
+                {t("mobile.retry")}
               </Button>
             </View>
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>No projects yet</Text>
-              <Text style={styles.emptyHint}>Create one to start working with Altair.</Text>
-              <Button onPress={() => setCreating(true)}>New project</Button>
+              <Text style={styles.emptyTitle}>{t("projects.start")}</Text>
+              <Text style={styles.emptyHint}>{t("projects.intro")}</Text>
+              <Button onPress={() => setCreating(true)}>{t("mobile.newProject")}</Button>
             </View>
           )
         }
@@ -113,7 +110,7 @@ export default function ProjectsScreen() {
                 {item.name}
               </Text>
               <Text style={styles.meta}>
-                {item.role === "owner" ? "Owner" : "Member"} · {relativeTime(item.createdAt)}
+                {item.role === "owner" ? t("projects.owner") : t("projects.member")} · {relativeTime(item.createdAt)}
               </Text>
             </View>
             <ChevronRight size={16} color={colors.subtle} />
@@ -149,6 +146,6 @@ const styles = StyleSheet.create({
   meta: { color: colors.subtle, fontSize: 13 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
   emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600" },
-  emptyHint: { color: colors.subtle, fontSize: 14 },
+  emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center", paddingHorizontal: 24 },
   error: { color: colors.bad, fontSize: 14 },
 });
