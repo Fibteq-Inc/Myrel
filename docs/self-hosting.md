@@ -186,7 +186,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `RUNNER_HARNESS` | `opencode` | Default coding agent in the sandbox: `opencode` or `claude-code` (Claude models only). |
 | `RUNNER_MODEL` | empty | Model for the coding agent; empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
-| `EMAIL_FROM` | empty | Sender for notification emails, e.g. `Altair <altair@example.com>`. |
+| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Altair <altair@example.com>`. Empty turns email off. |
 | `VAPID_PUBLIC_KEY` | empty | Web Push public key. |
 | `VAPID_SUBJECT` | empty | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
 
