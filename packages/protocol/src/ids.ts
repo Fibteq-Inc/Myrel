@@ -4,6 +4,9 @@ export const ID_PREFIXES = {
   message: "cmsg",
   thread: "thr",
   project: "proj",
+  usage: "use",
+  apiKey: "key",
+  invite: "inv",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

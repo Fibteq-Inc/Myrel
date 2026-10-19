@@ -16,7 +16,12 @@ type OpenAiResponse = {
       tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[];
     };
   }[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  model?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 };
 
 export type OpenAiCompatibleOptions = {
@@ -66,7 +71,9 @@ export function openAiCompatible(opts: OpenAiCompatibleOptions): ModelProvider {
         usage: data.usage && {
           inputTokens: data.usage.prompt_tokens ?? 0,
           outputTokens: data.usage.completion_tokens ?? 0,
+          cachedInputTokens: data.usage.prompt_tokens_details?.cached_tokens ?? 0,
         },
+        model: data.model,
       };
     },
   };

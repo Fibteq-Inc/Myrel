@@ -26,12 +26,15 @@ export type ChatRequest = {
   maxTokens?: number;
 };
 
-export type Usage = { inputTokens: number; outputTokens: number };
+/** inputTokens counts every input token, cached ones included. */
+export type Usage = { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 
 export type ChatResponse = {
   text: string;
   toolCalls: ToolCall[];
   usage?: Usage;
+  /** The model the provider reports answering, which a router may pick per call. */
+  model?: string;
 };
 
 export interface ModelProvider {

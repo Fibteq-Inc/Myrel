@@ -1,100 +1,132 @@
-# Altair
+# Fibteq Altair
 
-Altair is an open-source, self-hostable workspace for working with AI agents in
-projects, in the spirit of Claude Projects: a project chat with a coordinator,
-threads where agents do the work, artifacts, and memory. It runs entirely on
-Cloudflare (Workers, Durable Objects, D1, R2) and has a typed API shared by the
-web app and a future mobile app.
+**An open-source, self-hostable workspace where AI agents do the work inside your projects.**
 
-> Status: phase 1. Ask for something in the project chat and the coordinator
-> opens a thread for it; the thread's agent answers there, shows its progress
-> checklist, and asks the coordinator when something is beyond its scope.
-> Agents only talk for now: no tools, sandbox or web access yet.
+Fibteq Altair gives a team a project chat with a coordinator agent in it. Ask for
+something and the coordinator opens a thread for it; a thread agent takes the
+task, shows its progress as a live checklist, and answers in the thread. When
+something is beyond its scope, the thread agent asks the coordinator for
+direction, much like a teammate would. Projects keep their artifacts, files and
+memory in one place. The idea is close to Claude Projects, but open, multi-model
+and running on your own Cloudflare account.
 
-## Stack
+> **Status: early (phase 1).** The project chat, coordinator and thread agents
+> work end to end, but agents only talk for now: no tools, sandbox, file
+> storage or web access yet. Expect breaking changes. See the [roadmap](#roadmap).
+
+## Why Altair
+
+- **Coordinator and threads.** One agent routes, many agents work. The
+  coordinator never does the work itself; each thread agent owns its task and
+  asks for permission or direction when it needs it.
+- **Any model.** Fireworks, Anthropic and OpenAI out of the box, optionally
+  through Cloudflare AI Gateway. Bring your own key.
+- **Yours to run.** One Cloudflare Worker, Durable Objects and a D1 database.
+  No servers to manage, and the free tier is enough to try it.
+- **Apps that follow you.** The web app is served by the same Worker. The
+  desktop and mobile apps (planned) connect to any Altair server you point them at.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  clients["Web, desktop and mobile apps"]
+  subgraph worker["Cloudflare Worker: altair"]
+    assets["Static assets<br/>(apps/web)"]
+    api["Hono API /api/*<br/>Better Auth"]
+    pa["ProjectAgent DO<br/>coordinator, project chat"]
+    ta["ThreadAgent DO<br/>one per thread"]
+  end
+  d1[("D1<br/>users, projects")]
+  llm["LLM provider<br/>Fireworks, Anthropic, OpenAI<br/>optionally via AI Gateway"]
+  clients --> assets
+  clients --> api
+  clients -- WebSocket --> pa
+  api --> d1
+  pa -- start_thread, message_thread --> ta
+  ta -- request_coordinator --> pa
+  pa --> llm
+  ta --> llm
+```
 
 - **API**: [Hono](https://hono.dev) on Cloudflare Workers, [Better Auth](https://better-auth.com)
-  (email + password, bearer tokens for mobile), D1 via [Drizzle](https://orm.drizzle.team)
-- **Agents**: the coordinator runs in the `ProjectAgent` and only routes (`post_message`, `start_thread`,
-  `message_thread`, `react`); each thread has a `ThreadAgent` that does the work (`reply`, `update_status`,
-  `request_coordinator`, `resolve_thread`). Both use a small provider-neutral loop in `apps/api/src/llm`.
-- **Realtime**: one `ProjectAgent` Durable Object per project ([Agents SDK](https://developers.cloudflare.com/agents/)),
-  messages in its SQLite with a monotonically increasing `seq` for reconnect sync
-- **Web**: Vite, React 19, TanStack Router + Query, Tailwind CSS 4, served by the same Worker
-- **Shared**: `packages/protocol` (zod schemas), `packages/client` (fetch + WebSocket client for web and React Native)
-- **Tooling**: pnpm workspaces, Turborepo, TypeScript, Vitest (`@cloudflare/vitest-plugin`)
+  (email and password, bearer tokens for apps), D1 through [Drizzle](https://orm.drizzle.team).
+- **Agents**: one `ProjectAgent` Durable Object per project runs the coordinator
+  (`post_message`, `start_thread`, `message_thread`, `react`). Each thread has a
+  `ThreadAgent` that does the work (`reply`, `update_status`, `request_coordinator`,
+  `resolve_thread`). Both use a small provider-neutral loop in `apps/api/src/llm`.
+- **Realtime**: messages live in the project's Durable Object SQLite with a
+  monotonically increasing `seq`, so clients resync after reconnecting.
+- **Web**: Vite, React 19, TanStack Router and Query, Tailwind CSS 4.
+- **Shared**: `packages/protocol` (zod schemas) and `packages/client` (fetch and
+  WebSocket client for web, desktop and React Native).
+
+More detail is in [docs/architecture.md](docs/architecture.md).
 
 ```
-apps/api         Hono Worker, Durable Objects (ProjectAgent, ThreadAgent)
-apps/web         Vite + React SPA
+apps/api           Hono Worker, Durable Objects (ProjectAgent, ThreadAgent)
+apps/web           Vite + React SPA
 packages/protocol  message/thread/project types, WebSocket events
 packages/client    typed API client + reconnecting project socket
 packages/db        Drizzle schema and D1 migrations
+docs/              self-hosting, architecture, maintainer notes
+ee/                enterprise features under a commercial license (empty for now)
 ```
 
-## Quickstart
+## Quick start (local)
 
 Requires Node 22+ and pnpm 10.
 
 ```sh
 pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars    # set BETTER_AUTH_SECRET and a model key
-pnpm db:migrate:local                               # wrangler d1 migrations apply altair --local
+pnpm db:migrate:local                               # applies D1 migrations to the local database
 pnpm dev                                            # API on :8787, web on http://localhost:5173
 ```
 
-Other scripts: `pnpm typecheck`, `pnpm test`, `pnpm build`.
-After changing `packages/db/src/schema.ts`, run `pnpm db:generate` to create a migration.
+Open http://localhost:5173, create an account (sign-ups are on locally), create a
+project and ask for something in the project chat.
 
-## Deploy
+Other scripts: `pnpm typecheck`, `pnpm test`, `pnpm build`. After changing
+`packages/db/src/schema.ts`, run `pnpm db:generate` to create a migration.
 
-Altair deploys with [Cloudflare Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/): every push to `main` builds and deploys the `altair` Worker.
+## Self-hosting
 
-One-time setup:
+Altair runs on your own Cloudflare account and deploys with
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), so
+every push to your `main` branch ships. The
+[self-hosting guide](docs/self-hosting.md) covers the D1 database, the build
+settings, every variable and secret, model providers, AI Gateway, sign-ups and
+connecting the apps.
 
-1. Create the D1 database (`pnpm --filter @altair/api exec wrangler d1 create altair`) and put its id in `apps/api/wrangler.jsonc`.
-2. Set the auth secret, which also creates the Worker if it does not exist yet:
-   `pnpm --filter @altair/api exec wrangler secret put BETTER_AUTH_SECRET` (value: `openssl rand -base64 32`).
-3. In the Cloudflare dashboard, open Workers & Pages → `altair` → Settings → Build → Connect, pick this repository, and set:
+## Roadmap
 
-   | Setting | Value |
-   |---|---|
-   | Branch | `main` |
-   | Root directory | `/` |
-   | Build command | `pnpm build:api` |
-   | Deploy command | `pnpm run deploy` |
-   | Non-production branch deploy command | `pnpm run deploy:preview` |
-
-`pnpm run deploy` applies pending D1 migrations, then runs `wrangler deploy`. Other branches (pull requests) only upload a preview version with `wrangler versions upload`; previews share the production D1 database, so they never run migrations.
-
-Manual deploy from a laptop: `pnpm build:api && pnpm run deploy`.
-
-### Models
-
-Agents call the model named by `LLM_PROVIDER` in `wrangler.jsonc`, with that provider's key as a Worker secret:
-
-| `LLM_PROVIDER` | Secret | Default model |
+| Phase | What it adds | State |
 |---|---|---|
-| `fireworks` (default) | `FIREWORKS_API_KEY` | `firerouter/opus` |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
-| `openai` | `OPENAI_API_KEY` | `gpt-5.1` |
+| 0 | Monorepo, auth, D1, deploy pipeline | Done |
+| 1 | Talking coordinator and thread agents | Done |
+| 2 | Threads that do work: sandboxed runners (OpenCode first), project files on R2, GitHub (clone, branch, PR) | Next |
+| 3 | Artifacts, project memory, decision cards, mobile app (Expo) | Planned |
+| 4 | Events and routines (webhooks, schedules), local `altair-runner` for your own CLI subscriptions, MCP connectors, desktop app (Tauri) | Planned |
+| 5 | Members and roles, billing for the hosted service, enterprise features, one-click deploy | Planned |
 
-Set the key with `pnpm --filter @altair/api exec wrangler secret put FIREWORKS_API_KEY` (or in the dashboard under Settings → Variables and Secrets), and override the model with `LLM_MODEL`. Without a key, the project chat shows which secret is missing.
+## Contributing
 
-To route calls through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) (logs, caching, cost tracking), set `AI_GATEWAY_URL` to `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>`; Anthropic and OpenAI calls then go through it, and `AI_GATEWAY_TOKEN` (secret) authenticates an authenticated gateway. Fireworks has no built-in gateway route: add it to the gateway as a custom provider and put that URL in `LLM_BASE_URL`.
-
-### Web UI on another origin
-
-The Worker serves the web app same-origin, using session cookies. To run the UI elsewhere (the desktop app, a separate domain), build it with `VITE_API_URL=https://<api-origin>`. It then uses bearer tokens, and the API must allow its origin through `TRUSTED_ORIGINS`; the desktop app origins are always allowed.
-
-### Connecting apps to a self-hosted server
-
-The desktop and mobile apps are not tied to one server. On the sign-in screen the user enters any Altair address; the app checks `GET /api/info` (it must be an Altair server with the same API version) and keeps a separate sign-in per server. Set `INSTANCE_NAME` in `wrangler.jsonc` to name your deployment.
-
-### Sign-ups
-
-New accounts are off by default: only existing accounts can sign in. Set `SIGNUP_ENABLED` to `"true"` in `wrangler.jsonc` to let anyone register (`.dev.vars.example` turns it on for local development).
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first; you
+will be asked to sign the [Contributor License Agreement](CLA.md) on your first
+pull request. Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-[AGPL-3.0](LICENSE)
+Fibteq Altair is open core:
+
+- Everything outside `ee/` is licensed under the
+  [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). If you run
+  a modified Altair as a network service, you must offer its source to its users.
+- Code in [`ee/`](ee/) is licensed under the
+  [Fibteq Altair Enterprise License](ee/LICENSE). It is source-available but
+  needs a commercial license for production use.
+
+"Fibteq" and "Fibteq Altair" are names of Fibteq. The licenses cover the code,
+not the names or logos; a fork you distribute should use its own name.

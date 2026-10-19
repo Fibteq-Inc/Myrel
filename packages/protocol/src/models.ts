@@ -56,7 +56,8 @@ export const Reaction = z.object({
 });
 export type Reaction = z.infer<typeof Reaction>;
 
-export const ProjectRole = z.enum(["owner", "member"]);
+/** owner: everything, incl. ownership. admin: manages members, invites and settings. member: works in the project. */
+export const ProjectRole = z.enum(["owner", "admin", "member"]);
 export type ProjectRole = z.infer<typeof ProjectRole>;
 
 export const Project = z.object({
@@ -72,7 +73,13 @@ export const CreateProjectInput = z.object({
 });
 export type CreateProjectInput = z.infer<typeof CreateProjectInput>;
 
-export const Member = z.object({ id: z.string(), name: z.string(), role: ProjectRole });
+export const Member = z.object({
+  id: z.string(),
+  name: z.string(),
+  role: ProjectRole,
+  /** Shown to project owners and admins only. */
+  email: z.string().optional(),
+});
 export type Member = z.infer<typeof Member>;
 
 export const MAX_MESSAGE_LENGTH = 32_000;
