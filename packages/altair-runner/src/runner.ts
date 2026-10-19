@@ -7,10 +7,11 @@ import {
   ServerToRunner,
 } from "@altair/protocol";
 import { detectClis } from "./clis";
-import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore } from "./config";
+import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
+import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 
-export const RUNNER_VERSION = "0.1.0";
+export const RUNNER_VERSION = "0.2.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -82,6 +83,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       platform: platform(),
       folders: config.folders,
       clis,
+      features: ["folders"],
       running: tasks.runningIds(),
     });
   tasks.setSender(send);
@@ -102,6 +104,21 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     socket?.close(1000);
     status({ state: "stopped", reason: stopReason });
     finish();
+  };
+
+  // Folder requests from the web app: browse folders, share or stop sharing one.
+  const answer = async (frame: Extract<ServerToRunner, { requestId: string }>) => {
+    const { requestId } = frame;
+    if (frame.type === "dirs.list") return send({ type: "dirs", requestId, ...(await listDirs(frame.path)) });
+    config = await loadConfig();
+    if (frame.type === "folder.share") {
+      const path = await shareableFolder(frame.path);
+      if (shareFolder(config, path)) log(`Shared ${path} (from Altair)`);
+    } else if (unshareFolder(config, frame.path)) {
+      log(`Stopped sharing ${frame.path} (from Altair)`);
+    }
+    await saveConfig(config);
+    send({ type: "folders", requestId, folders: config.folders });
   };
 
   const connect = () => {
@@ -127,6 +144,11 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       if (frame.type === "task.start") {
         status({ state: "task", taskId: frame.taskId, event: "started" });
         void tasks.start(frame);
+      }
+      if (frame.type === "dirs.list" || frame.type === "folder.share" || frame.type === "folder.unshare") {
+        void answer(frame).catch((err: unknown) =>
+          send({ type: "request.failed", requestId: frame.requestId, message: errorText(err) }),
+        );
       }
     };
     ws.onclose = (e) => {
@@ -159,4 +181,8 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
 
   log(`Sharing ${config.folders.length} folder(s); CLIs found: ${clis.map((c) => c.id).join(", ") || "none"}`);
   return { stop, done };
+}
+
+function errorText(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).slice(0, 500);
 }

@@ -10,7 +10,7 @@ Gemini CLI.
 - The CLI runs with **your own login on your computer**. altair-runner never reads, sends or stores your Claude,
   OpenAI or Google credentials. The only secret it keeps is its own Altair runner token, in
   `~/.altair-runner/config.json` (readable by you only).
-- It only works in folders you shared with `altair-runner share`. A path from the server that is not one of them
+- It only works in folders you shared, from Altair > Devices or with `altair-runner share`. A path from the server that is not one of them
   (after resolving symlinks) is refused.
 
 ## Use
@@ -18,17 +18,38 @@ Gemini CLI.
 Requires Node 22+ and at least one of `claude`, `codex` or `gemini` on your `PATH`, already signed in.
 
 ```sh
-altair-runner pair ABCD-1234 --server https://altair.example.com   # code from Altair > Devices
-cd ~/code/my-project && altair-runner share                        # repeat for each folder
-altair-runner start                                                # leave it running
+npx altair-runner pair ABCD-1234 --server https://altair.example.com   # code from Altair > Devices
+npx altair-runner service install                                      # runs now and at every login
 ```
 
-Other commands: `altair-runner status`, `altair-runner unshare <folder>`, `altair-runner logout`.
-Folders shared while `start` is running show up in Altair within a few seconds.
+Then add folders in Altair > Devices with **Add folder**: it browses this computer's folders through the runner
+(folder names only, never files) and shares the one you pick. The home folder itself and the disk root cannot be
+shared. From a terminal, `altair-runner share [folder]` and `altair-runner unshare <folder>` do the same.
+
+Other commands: `altair-runner status`, `altair-runner logout`, and `altair-runner start` to run it in a terminal
+instead of in the background (Ctrl+C stops it).
+
+### In the background
+
+`altair-runner service install` copies the runner to `~/.altair-runner/bin` (so it keeps working after npx clears its
+cache) and registers it to start at login:
+
+| OS | How | Logs |
+|---|---|---|
+| macOS | launchd agent `~/Library/LaunchAgents/io.fibteq.altair-runner.plist` | `~/.altair-runner/runner.log` |
+| Linux | systemd user service `altair-runner.service` | `journalctl --user -u altair-runner` |
+| Windows | `altair-runner.vbs` in the Startup folder | `~/.altair-runner/runner.log` |
+
+It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `gemini`.
+On macOS and Linux it restarts after a crash, but not after a clean stop (the computer was removed in Altair, or
+`altair-runner start` was run somewhere else with the same pairing). Run `service install` again after updating
+(`npx altair-runner@latest service install`) or to restart it; `service status` shows its state and
+`service uninstall` removes it. On Linux it starts when you log in; to start at boot without logging in, run
+`loginctl enable-linger`.
 
 ### What the CLI may do
 
-`altair-runner start --access <level>` (saved for next time):
+`altair-runner start --access <level>` or `altair-runner service install --access <level>` (saved for next time):
 
 | level | Claude Code | Codex | Gemini CLI |
 |---|---|---|---|
