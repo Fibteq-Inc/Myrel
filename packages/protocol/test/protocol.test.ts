@@ -87,7 +87,8 @@ describe("ServerInfo", () => {
   it("accepts an Altair server and rejects other apps", async () => {
     const { API_VERSION, ServerInfo } = await import("../src/server");
     const info = { app: "altair", apiVersion: API_VERSION, name: "Altair", auth: { emailPassword: true } };
-    expect(ServerInfo.parse(info)).toEqual(info);
+    // Servers that predate the sign-up switch always allowed sign-up.
+    expect(ServerInfo.parse(info)).toEqual({ ...info, auth: { emailPassword: true, signUp: true } });
     expect(ServerInfo.safeParse({ ...info, app: "other" }).success).toBe(false);
   });
 });

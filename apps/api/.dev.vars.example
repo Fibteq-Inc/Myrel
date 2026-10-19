@@ -2,5 +2,7 @@ BETTER_AUTH_SECRET=change-me-to-a-long-random-string
 # Vite dev server proxies /api to wrangler dev, so the browser origin is :5173.
 BETTER_AUTH_URL=http://localhost:5173
 TRUSTED_ORIGINS=http://localhost:5173
+# Let anyone create an account locally (off by default in wrangler.jsonc).
+SIGNUP_ENABLED=true
 # Model key for the default provider (LLM_PROVIDER in wrangler.jsonc).
 FIREWORKS_API_KEY=

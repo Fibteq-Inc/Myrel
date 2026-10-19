@@ -91,6 +91,10 @@ The Worker serves the web app same-origin, using session cookies. To run the UI 
 
 The desktop and mobile apps are not tied to one server. On the sign-in screen the user enters any Altair address; the app checks `GET /api/info` (it must be an Altair server with the same API version) and keeps a separate sign-in per server. Set `INSTANCE_NAME` in `wrangler.jsonc` to name your deployment.
 
+### Sign-ups
+
+New accounts are off by default: only existing accounts can sign in. Set `SIGNUP_ENABLED` to `"true"` in `wrangler.jsonc` to let anyone register (`.dev.vars.example` turns it on for local development).
+
 ## License
 
 [AGPL-3.0](LICENSE)

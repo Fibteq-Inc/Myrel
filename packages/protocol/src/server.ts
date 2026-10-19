@@ -13,6 +13,10 @@ export const ServerInfo = z.object({
   apiVersion: z.number().int().positive(),
   /** Display name of this deployment, e.g. "Altair Cloud" or a company's self-hosted instance. */
   name: z.string(),
-  auth: z.object({ emailPassword: z.boolean() }),
+  auth: z.object({
+    emailPassword: z.boolean(),
+    /** Whether new accounts can be created. Older servers do not send it and always allowed it. */
+    signUp: z.boolean().default(true),
+  }),
 });
 export type ServerInfo = z.infer<typeof ServerInfo>;

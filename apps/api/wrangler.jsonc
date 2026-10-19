@@ -41,6 +41,7 @@
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
   // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Altair".
+  // SIGNUP_ENABLED: "true" lets anyone create an account; otherwise only existing accounts can sign in.
   //
   // Models (see src/llm/index.ts). LLM_PROVIDER: fireworks (default), anthropic or openai.
   // The provider's key is a secret: FIREWORKS_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY.
@@ -52,6 +53,7 @@
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
     "INSTANCE_NAME": "Altair",
+    "SIGNUP_ENABLED": "false",
     "LLM_PROVIDER": "fireworks",
     "LLM_MODEL": "",
     "LLM_BASE_URL": "",

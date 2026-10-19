@@ -13,6 +13,7 @@ export default defineConfig(async () => {
             BETTER_AUTH_SECRET: "test-secret-at-least-32-characters-long",
             // Model calls are answered by test/fake-llm.ts.
             FIREWORKS_API_KEY: "test-fireworks-key",
+            SIGNUP_ENABLED: "true",
           },
         },
       }),
