@@ -43,13 +43,25 @@ After changing `packages/db/src/schema.ts`, run `pnpm db:generate` to create a m
 
 ## Deploy
 
-```sh
-cd apps/api
-pnpm exec wrangler d1 create altair       # put the database_id in wrangler.jsonc
-pnpm exec wrangler d1 migrations apply altair --remote
-pnpm exec wrangler secret put BETTER_AUTH_SECRET
-cd ../.. && pnpm build && pnpm --filter @altair/api deploy
-```
+Altair deploys with [Cloudflare Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/): every push to `main` builds and deploys the `altair` Worker.
+
+One-time setup:
+
+1. Create the D1 database (`pnpm --filter @altair/api exec wrangler d1 create altair`) and put its id in `apps/api/wrangler.jsonc`.
+2. Set the auth secret, which also creates the Worker if it does not exist yet:
+   `pnpm --filter @altair/api exec wrangler secret put BETTER_AUTH_SECRET` (value: `openssl rand -base64 32`).
+3. In the Cloudflare dashboard, open Workers & Pages → `altair` → Settings → Build → Connect, pick this repository, and set:
+
+   | Setting | Value |
+   |---|---|
+   | Branch | `main` |
+   | Root directory | `/` |
+   | Build command | `pnpm build:api` |
+   | Deploy command | `pnpm run deploy` |
+
+`pnpm run deploy` applies pending D1 migrations, then runs `wrangler deploy`.
+
+Manual deploy from a laptop: `pnpm build:api && pnpm run deploy`.
 
 ## License
 
