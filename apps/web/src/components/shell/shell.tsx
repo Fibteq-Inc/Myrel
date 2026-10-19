@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { useRouterState } from "@tanstack/react-router";
 import { Menu as MenuIcon } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
@@ -14,6 +15,7 @@ export const useShell = () => useContext(ShellContext);
  * sidebar and a main pane). On phones the rail and sidebar slide in as a drawer.
  */
 export function AppShell({ rail, children }: { rail: ReactNode; children: ReactNode }) {
+  const t = useT();
   const [navOpen, setNavOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
@@ -25,7 +27,7 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
       <div className="flex h-full overflow-hidden">
         <div
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:z-50 md:translate-x-0",
             navOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -34,7 +36,7 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
         {navOpen && (
           <button
             type="button"
-            aria-label="Close menu"
+            aria-label={t("shell.closeMenu")}
             onClick={() => setNavOpen(false)}
             className="fixed inset-0 z-30 bg-black/60 md:hidden"
           />
@@ -66,8 +68,9 @@ export function Sidebar({ label, children }: { label: string; children: ReactNod
 /** Opens the drawer on phones; hidden from md up. */
 export function NavToggle() {
   const { setNavOpen } = useShell();
+  const t = useT();
   return (
-    <IconButton type="button" aria-label="Open menu" onClick={() => setNavOpen(true)} className="-ml-1.5 md:hidden">
+    <IconButton type="button" aria-label={t("shell.openMenu")} onClick={() => setNavOpen(true)} className="-ml-1.5 md:hidden">
       <MenuIcon size={18} />
     </IconButton>
   );

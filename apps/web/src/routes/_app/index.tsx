@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, FolderPlus } from "lucide-react";
@@ -13,6 +14,7 @@ export const Route = createFileRoute("/_app/")({
 });
 
 function ProjectsPage() {
+  const t = useT();
   const { data: projects } = useSuspenseQuery(projectsQuery);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -33,9 +35,9 @@ function ProjectsPage() {
 
   return (
     <>
-      <Sidebar label="Projects">
+      <Sidebar label={t("projects.title")}>
         <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
-          <span className="text-[15px] font-semibold">Projects</span>
+          <span className="text-[15px] font-semibold">{t("projects.title")}</span>
           <span className="ml-auto font-mono text-xs text-subtle">{projects.length}</span>
         </div>
         <ul className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
@@ -63,36 +65,36 @@ function ProjectsPage() {
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-12 sm:py-20">
             <div className="flex flex-col items-center gap-3 text-center">
               <AltairMark size={44} />
-              <h1 className="text-2xl font-semibold tracking-tight">Start a project</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">{t("projects.start")}</h1>
               <p className="max-w-md text-[13px] text-subtle">
-                A project is one shared chat. Ask for work there and Altair opens a thread for each task.
+                {t("projects.intro")}
               </p>
             </div>
 
             <form onSubmit={onSubmit} className="flex gap-2">
               <label htmlFor="project-name" className="sr-only">
-                Project name
+                {t("projects.name")}
               </label>
               <Input
                 id="project-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Project name"
+                placeholder={t("projects.name")}
                 maxLength={120}
                 className="h-10"
                 autoFocus
               />
               <Button type="submit" disabled={create.isPending || !name.trim()} className="h-10">
                 <FolderPlus size={16} aria-hidden="true" />
-                Create
+                {t("projects.create")}
               </Button>
             </form>
-            {create.error && <p className="-mt-5 text-sm text-bad">{errorMessage(create.error)}</p>}
+            {create.error && <p className="-mt-5 text-sm text-bad">{errorMessage(create.error, t)}</p>}
 
             {projects.length > 0 && (
               <section aria-labelledby="recent" className="flex flex-col gap-2.5">
                 <h2 id="recent" className="text-xs text-subtle">
-                  Your projects
+                  {t("projects.yours")}
                 </h2>
                 <ul className="grid gap-2.5 sm:grid-cols-2">
                   {projects.map((p) => (
@@ -106,7 +108,7 @@ function ProjectsPage() {
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate font-medium">{p.name}</span>
                           <span className="text-xs text-subtle">
-                            {p.role === "owner" ? "Owner" : "Member"}
+                            {p.role === "owner" ? t("projects.owner") : t("projects.member")}
                           </span>
                         </span>
                         <ArrowRight

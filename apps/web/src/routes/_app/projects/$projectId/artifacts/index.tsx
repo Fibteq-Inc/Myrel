@@ -1,4 +1,5 @@
 import { artifactList } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Blocks } from "lucide-react";
 import { ArtifactList, Empty } from "../../../../../components/artifacts";
@@ -11,6 +12,7 @@ export const Route = createFileRoute("/_app/projects/$projectId/artifacts/")({
 
 /** The project's Library: every artifact its threads published, newest first. */
 function ProjectArtifacts() {
+  const t = useT();
   const { project, state } = useProjectContext();
   const items = artifactList(state).map((a) => ({ ...a, origin: a.threadId ? state.threads[a.threadId]?.title : undefined }));
   return (
@@ -18,7 +20,7 @@ function ProjectArtifacts() {
       <PaneHeader>
         <NavToggle />
         <Blocks size={17} className="flex-none text-muted" aria-hidden="true" />
-        <h1 className="truncate text-[15px] font-semibold">Artifacts</h1>
+        <h1 className="truncate text-[15px] font-semibold">{t("sidebar.artifacts")}</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline">{project.name}</span>
         {items.length > 0 && <span className="ml-auto font-mono text-xs text-subtle">{items.length}</span>}
       </PaneHeader>
@@ -29,8 +31,8 @@ function ProjectArtifacts() {
             empty={
               <Empty
                 icon={<Blocks size={20} className="text-subtle" aria-hidden="true" />}
-                title="Nothing here yet"
-                body="Pages, reports and prototypes Altair publishes in this project's threads collect here."
+                title={t("artifacts.projectEmpty")}
+                body={t("artifacts.projectEmptyBody")}
               />
             }
           />

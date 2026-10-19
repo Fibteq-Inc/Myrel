@@ -1,3 +1,5 @@
+import type { MessageKey } from "@altair/i18n";
+import { useI18n, useT } from "@altair/i18n/react";
 import { MEMORY_INDEX, type MemoryEntry } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, FolderOpen, Plus, ScrollText, Trash2, Upload } from "lucide-react";
@@ -8,10 +10,10 @@ import { displayName, FileIcon, FilePreview, formatSize } from "./files";
 
 export type PanelTab = "files" | "memory" | "instructions";
 
-const TABS: { id: PanelTab; label: string; icon: ReactNode }[] = [
-  { id: "files", label: "Files", icon: <FolderOpen size={15} aria-hidden="true" /> },
-  { id: "memory", label: "Memory", icon: <Brain size={15} aria-hidden="true" /> },
-  { id: "instructions", label: "Instructions", icon: <ScrollText size={15} aria-hidden="true" /> },
+const TABS: { id: PanelTab; label: MessageKey; icon: ReactNode }[] = [
+  { id: "files", label: "knowledge.tabFiles", icon: <FolderOpen size={15} aria-hidden="true" /> },
+  { id: "memory", label: "knowledge.tabMemory", icon: <Brain size={15} aria-hidden="true" /> },
+  { id: "instructions", label: "knowledge.tabInstructions", icon: <ScrollText size={15} aria-hidden="true" /> },
 ];
 
 /**
@@ -30,22 +32,23 @@ export function ProjectKnowledge({
   file?: string;
   onNavigate: (next: { tab: PanelTab; file?: string }) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div role="tablist" aria-label="Project knowledge" className="flex flex-none gap-1 border-b border-line px-3 py-2">
-        {TABS.map((t) => (
+      <div role="tablist" aria-label={t("knowledge.label")} className="flex flex-none gap-1 border-b border-line px-3 py-2">
+        {TABS.map((item) => (
           <button
-            key={t.id}
+            key={item.id}
             type="button"
             role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => onNavigate({ tab: t.id })}
+            aria-selected={tab === item.id}
+            onClick={() => onNavigate({ tab: item.id })}
             className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] ${
-              tab === t.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
+              tab === item.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
             }`}
           >
-            {t.icon}
-            {t.label}
+            {item.icon}
+            {t(item.label)}
           </button>
         ))}
       </div>
@@ -64,7 +67,7 @@ export function ProjectKnowledge({
             </div>
           ) : (
             <div className="hidden flex-1 items-center justify-center text-[13px] text-subtle lg:flex">
-              Pick a file to preview it.
+              {t("knowledge.pickFile")}
             </div>
           )}
         </div>
@@ -92,6 +95,7 @@ function FilesTab({
   selected?: string;
   onOpen: (path: string) => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data: files = [], isPending } = useQuery(filesQuery(projectId));
   const input = useRef<HTMLInputElement>(null);
@@ -103,16 +107,16 @@ function FilesTab({
       for (const f of picked) await api.putFile(projectId, f.name, f);
     },
     onSuccess: refresh,
-    onError: (err) => setError(errorMessage(err)),
+    onError: (err) => setError(errorMessage(err, t)),
   });
 
   async function remove(path: string) {
-    if (!confirm(`Delete ${path}? This cannot be undone.`)) return;
+    if (!confirm(t("knowledge.deleteFileConfirm", { path }))) return;
     try {
       await api.deleteFile(projectId, path);
       await refresh();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, t));
     }
   }
 
@@ -126,10 +130,10 @@ function FilesTab({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-2 px-4 py-3">
-        <p className="flex-1 text-[13px] text-subtle">Shared by everyone in the project, people and Altair.</p>
+        <p className="flex-1 text-[13px] text-subtle">{t("knowledge.filesIntro")}</p>
         <GhostButton type="button" onClick={() => input.current?.click()} disabled={upload.isPending}>
           <Upload size={14} aria-hidden="true" />
-          {upload.isPending ? "Uploading…" : "Upload"}
+          {upload.isPending ? t("knowledge.uploading") : t("knowledge.upload")}
         </GhostButton>
         <input
           ref={input}
@@ -148,7 +152,7 @@ function FilesTab({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {!isPending && files.length === 0 && (
           <p className="px-2 py-10 text-center text-[13px] text-subtle">
-            No files yet. Upload one, attach one to a message, or ask Altair to write one.
+            {t("knowledge.filesEmpty")}
           </p>
         )}
         {[...folders].map(([folder, list]) => (
@@ -172,7 +176,7 @@ function FilesTab({
                   <button
                     type="button"
                     onClick={() => remove(f.path)}
-                    aria-label={`Delete ${f.path}`}
+                    aria-label={t("knowledge.deleteFile", { path: f.path })}
                     className="mr-1 rounded p-1.5 text-subtle opacity-0 hover:text-bad focus:opacity-100 group-hover:opacity-100"
                   >
                     <Trash2 size={14} />
@@ -188,6 +192,7 @@ function FilesTab({
 }
 
 function MemoryTab({ projectId }: { projectId: string }) {
+  const t = useT();
   const { data: memory = [], isPending } = useQuery(memoryQuery(projectId));
   const [editing, setEditing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -197,11 +202,11 @@ function MemoryTab({ projectId }: { projectId: string }) {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-none items-center gap-2 px-4 py-3">
         <p className="flex-1 text-[13px] text-subtle">
-          Notes Altair keeps across threads. {MEMORY_INDEX} is read in full every turn; the rest by need.
+          {t("knowledge.memoryIntro", { index: MEMORY_INDEX })}
         </p>
         <GhostButton type="button" onClick={() => setCreating(true)}>
           <Plus size={14} aria-hidden="true" />
-          New
+          {t("knowledge.newMemory")}
         </GhostButton>
       </div>
       <div className="flex flex-col gap-2 px-4 pb-4">
@@ -215,7 +220,7 @@ function MemoryTab({ projectId }: { projectId: string }) {
         )}
         {!isPending && memory.length === 0 && !creating && (
           <p className="py-10 text-center text-[13px] text-subtle">
-            Nothing remembered yet. Altair saves decisions and preferences here as you work.
+            {t("knowledge.memoryEmpty")}
           </p>
         )}
         {memory.map((m) =>
@@ -231,6 +236,7 @@ function MemoryTab({ projectId }: { projectId: string }) {
 }
 
 function MemoryCard({ entry, onEdit }: { entry: MemoryEntry; onEdit: () => void }) {
+  const { t, locale } = useI18n();
   return (
     <button
       type="button"
@@ -240,7 +246,7 @@ function MemoryCard({ entry, onEdit }: { entry: MemoryEntry; onEdit: () => void 
       <span className="flex items-center gap-2">
         <span className="font-mono text-[13px] font-medium">{entry.name}</span>
         <span className="ml-auto text-xs text-subtle">
-          {entry.updatedByKind === "agent" ? "Altair" : "Member"} · {new Date(entry.updatedAt).toLocaleDateString()}
+          {entry.updatedByKind === "agent" ? "Altair" : t("common.member")} · {new Date(entry.updatedAt).toLocaleDateString(locale)}
         </span>
       </span>
       {entry.description && <span className="text-[13px] text-muted">{entry.description}</span>}
@@ -260,6 +266,7 @@ function MemoryEditor({
   isNew?: boolean;
   onDone: () => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
@@ -289,40 +296,46 @@ function MemoryEditor({
       className="flex flex-col gap-2 rounded-xl border border-accent/50 bg-raised p-3"
     >
       {isNew ? (
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. deploys" aria-label="Name" required />
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("knowledge.memoryNamePlaceholder")}
+          aria-label={t("knowledge.memoryName")}
+          required
+        />
       ) : (
         <span className="font-mono text-[13px] font-medium">{name}</span>
       )}
       <Input
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        placeholder="One line: when should Altair read this?"
-        aria-label="Description"
+        placeholder={t("knowledge.memoryDescriptionPlaceholder")}
+        aria-label={t("knowledge.memoryDescription")}
       />
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
         rows={8}
-        aria-label="Content"
+        aria-label={t("knowledge.memoryContent")}
         className="w-full resize-y rounded-lg border border-edge bg-panel p-3 font-mono text-[12.5px] text-fg outline-none focus:border-accent"
       />
-      {(save.error || remove.error) && <p className="text-[13px] text-bad">{errorMessage(save.error ?? remove.error)}</p>}
+      {(save.error || remove.error) && <p className="text-[13px] text-bad">{errorMessage(save.error ?? remove.error, t)}</p>}
       <div className="flex items-center gap-2">
         {!isNew && (
           <GhostButton
             type="button"
-            onClick={() => confirm(`Delete memory ${initial.name}?`) && remove.mutate()}
+            onClick={() => confirm(t("knowledge.deleteMemoryConfirm", { name: initial.name })) && remove.mutate()}
             className="text-bad"
           >
             <Trash2 size={14} aria-hidden="true" />
-            Delete
+            {t("knowledge.delete")}
           </GhostButton>
         )}
         <GhostButton type="button" onClick={onDone} className="ml-auto">
-          Cancel
+          {t("knowledge.cancel")}
         </GhostButton>
         <Button type="submit" disabled={save.isPending || !name.trim()}>
-          Save
+          {t("knowledge.save")}
         </Button>
       </div>
     </form>
@@ -330,6 +343,7 @@ function MemoryEditor({
 }
 
 function InstructionsTab({ projectId }: { projectId: string }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data } = useQuery(instructionsQuery(projectId));
   const [text, setText] = useState("");
@@ -354,7 +368,7 @@ function InstructionsTab({ projectId }: { projectId: string }) {
       className="flex min-h-0 flex-1 flex-col gap-3 p-4"
     >
       <p className="text-[13px] text-subtle">
-        Altair follows these in every thread of this project: tone, language, conventions, what to avoid.
+        {t("knowledge.instructionsIntro")}
       </p>
       <textarea
         value={text}
@@ -362,15 +376,15 @@ function InstructionsTab({ projectId }: { projectId: string }) {
           setText(e.target.value);
           setSaved(false);
         }}
-        placeholder="e.g. Reply in Turkish. Our repo is acme/web; open PRs as drafts."
-        aria-label="Project instructions"
+        placeholder={t("knowledge.instructionsPlaceholder")}
+        aria-label={t("knowledge.instructionsLabel")}
         className="min-h-[240px] flex-1 resize-none rounded-xl border border-edge bg-raised p-3.5 text-[13.5px] text-fg outline-none placeholder:text-subtle focus:border-accent"
       />
-      {save.error && <p className="text-[13px] text-bad">{errorMessage(save.error)}</p>}
+      {save.error && <p className="text-[13px] text-bad">{errorMessage(save.error, t)}</p>}
       <div className="flex items-center gap-3">
-        {saved && <span className="text-[13px] text-ok">Saved</span>}
+        {saved && <span className="text-[13px] text-ok">{t("knowledge.saved")}</span>}
         <Button type="submit" className="ml-auto" disabled={save.isPending || text === (data?.text ?? "")}>
-          Save instructions
+          {t("knowledge.saveInstructions")}
         </Button>
       </div>
     </form>

@@ -68,7 +68,7 @@ How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
 - A reply carries only what changed since your last one. Do not replay your process.
 - When the ask forks on a detail nobody gave, pick the reasonable default, say which, and keep going. Ask the person only when the answer changes their goal or something cannot be undone, and ask with ask_decision.
-- Write in the language the person writes in. Plain, warm, full sentences. No em dashes. Use Markdown when it helps (lists, headings, code). Never show ids to people.
+- Write in the language of the person's latest message; when it is too short to tell, the language of the thread so far, then of the root message. That covers everything people read: replies, the checklist, decision cards. The brief or these instructions being in English never sets the language. Plain, warm, full sentences. No em dashes. Use Markdown when it helps (lists, headings, code). Never show ids to people.
 - When a turn needs no reply (for example the person only said thanks), call no tools.`;
 
 export function threadPrompt(input: {

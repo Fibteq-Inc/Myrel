@@ -10,6 +10,7 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react";
+import { useT } from "@altair/i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { EmptyTab, type WorkspaceTab } from "./workspace-panel";
@@ -22,7 +23,7 @@ type TaskData = { projectId: string; tasks: Task[]; output: Record<string, Termi
  */
 export function withTasks(tabs: WorkspaceTab[], data: TaskData): WorkspaceTab[] {
   if (data.tasks.length === 0) return tabs;
-  const prs = data.tasks.filter((t) => t.prUrl).length;
+  const prs = data.tasks.filter((task) => task.prUrl).length;
   return tabs.map((tab) => {
     if (tab.id === "terminal") return { ...tab, count: data.tasks.length, content: <TerminalTab {...data} /> };
     if (tab.id === "changes") return { ...tab, count: prs || undefined, content: <ChangesTab tasks={data.tasks} /> };
@@ -34,43 +35,44 @@ export function withTasks(tabs: WorkspaceTab[], data: TaskData): WorkspaceTab[] 
 function TerminalTab({ projectId, tasks, output }: TaskData) {
   return (
     <div className="flex flex-col gap-3 p-4">
-      {tasks.map((t) => (
-        <TaskRow key={t.id} projectId={projectId} task={t} lines={output[t.id] ?? []} />
+      {tasks.map((task) => (
+        <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} />
       ))}
     </div>
   );
 }
 
 function ChangesTab({ tasks }: { tasks: Task[] }) {
-  const finished = tasks.filter((t) => t.status !== "running");
+  const t = useT();
+  const finished = tasks.filter((task) => task.status !== "running");
   if (finished.length === 0) {
     return (
-      <EmptyTab icon={GitPullRequest} title="Work in progress">
-        The task's pull request and summary show up here when it finishes.
+      <EmptyTab icon={GitPullRequest} title={t("tasks.inProgressTitle")}>
+        {t("tasks.inProgressBody")}
       </EmptyTab>
     );
   }
   return (
     <ul className="flex flex-col gap-3 p-4">
-      {[...finished].reverse().map((t) => (
-        <li key={t.id} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3.5">
+      {[...finished].reverse().map((task) => (
+        <li key={task.id} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3.5">
           <div className="flex items-center gap-2 text-[13px]">
-            <StatusIcon status={t.status} />
-            <span className="min-w-0 flex-1 truncate font-medium">{t.title}</span>
-            {t.prUrl && (
+            <StatusIcon status={task.status} />
+            <span className="min-w-0 flex-1 truncate font-medium">{task.title}</span>
+            {task.prUrl && (
               <a
-                href={t.prUrl}
+                href={task.prUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs text-accent hover:bg-hover"
               >
                 <GitPullRequest size={12} aria-hidden="true" />
-                Pull request
+                {t("tasks.pullRequest")}
                 <ExternalLink size={11} aria-hidden="true" />
               </a>
             )}
           </div>
-          {t.summary && <p className="line-clamp-6 whitespace-pre-wrap text-[13px] text-muted">{t.summary}</p>}
+          {task.summary && <p className="line-clamp-6 whitespace-pre-wrap text-[13px] text-muted">{task.summary}</p>}
         </li>
       ))}
     </ul>
@@ -78,6 +80,7 @@ function ChangesTab({ tasks }: { tasks: Task[] }) {
 }
 
 function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; lines: TerminalLine[] }) {
+  const t = useT();
   const running = task.status === "running";
   const [open, setOpen] = useState(running);
   const [stopping, setStopping] = useState(false);
@@ -107,7 +110,7 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
             rel="noreferrer"
             className="flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs text-accent hover:bg-hover"
           >
-            Pull request
+            {t("tasks.pullRequest")}
             <ExternalLink size={12} aria-hidden="true" />
           </a>
         )}
@@ -126,7 +129,7 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
             className="flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs text-muted hover:bg-hover hover:text-fg disabled:opacity-50"
           >
             <Square size={11} aria-hidden="true" />
-            Stop
+            {t("tasks.stop")}
           </button>
         )}
       </div>
@@ -136,6 +139,7 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
 }
 
 function Terminal({ lines }: { lines: TerminalLine[] }) {
+  const t = useT();
   const ref = useRef<HTMLPreElement>(null);
   const pinned = useRef(true);
   useEffect(() => {
@@ -146,14 +150,14 @@ function Terminal({ lines }: { lines: TerminalLine[] }) {
     <pre
       ref={ref}
       role="log"
-      aria-label="Terminal output"
+      aria-label={t("tasks.terminalOutput")}
       onScroll={(e) => {
         const el = e.currentTarget;
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
       className="max-h-64 overflow-auto rounded-lg border border-line bg-[#08080a] px-3 py-2 font-mono text-[12px] leading-[1.55] text-body"
     >
-      {lines.length === 0 && <span className="text-subtle">Waiting for output…</span>}
+      {lines.length === 0 && <span className="text-subtle">{t("tasks.waiting")}</span>}
       {lines.map((l, i) => (
         <div
           key={i}
@@ -167,8 +171,9 @@ function Terminal({ lines }: { lines: TerminalLine[] }) {
 }
 
 function StatusIcon({ status }: { status: Task["status"] }) {
-  if (status === "running") return <LoaderCircle size={14} className="flex-none animate-spin text-accent" aria-label="Running" />;
-  if (status === "done") return <CircleCheck size={14} className="flex-none text-ok" aria-label="Done" />;
-  if (status === "cancelled") return <CircleSlash size={14} className="flex-none text-subtle" aria-label="Cancelled" />;
-  return <CircleAlert size={14} className="flex-none text-bad" aria-label="Failed" />;
+  const t = useT();
+  if (status === "running") return <LoaderCircle size={14} className="flex-none animate-spin text-accent" aria-label={t("tasks.running")} />;
+  if (status === "done") return <CircleCheck size={14} className="flex-none text-ok" aria-label={t("tasks.done")} />;
+  if (status === "cancelled") return <CircleSlash size={14} className="flex-none text-subtle" aria-label={t("tasks.cancelled")} />;
+  return <CircleAlert size={14} className="flex-none text-bad" aria-label={t("tasks.failed")} />;
 }

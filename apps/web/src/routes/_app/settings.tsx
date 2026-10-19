@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { ChevronLeft, Folder, KeyRound, Mail, Server, UserRound } from "lucide-react";
@@ -10,6 +11,7 @@ export const Route = createFileRoute("/_app/settings")({
 });
 
 function SettingsLayout() {
+  const t = useT();
   const { data: me } = useQuery(meQuery);
   const { data: projects = [] } = useQuery(projectsQuery);
   const { data: invites = [] } = useQuery(myInvitesQuery);
@@ -17,22 +19,22 @@ function SettingsLayout() {
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <nav
-        aria-label="Settings"
+        aria-label={t("settings.title")}
         className="flex-none border-b border-line px-3 py-3 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:py-5"
       >
         <Link to="/" className="mb-3 flex items-center gap-1.5 px-2 text-[13px] text-subtle hover:text-fg">
-          <ChevronLeft size={14} /> Back
+          <ChevronLeft size={14} /> {t("settings.back")}
         </Link>
-        <h1 className="mb-2 px-2 text-base font-semibold">Settings</h1>
+        <h1 className="mb-2 px-2 text-base font-semibold">{t("settings.title")}</h1>
         <ul className="flex gap-1 overflow-x-auto md:block md:space-y-0.5">
           <NavItem to="/settings" icon={<UserRound size={15} />} exact>
-            Account
+            {t("settings.account")}
           </NavItem>
           <NavItem to="/settings/keys" icon={<KeyRound size={15} />}>
-            Model keys
+            {t("settings.keys")}
           </NavItem>
           <NavItem to="/settings/invites" icon={<Mail size={15} />}>
-            Invitations
+            {t("settings.invites")}
             {invites.length > 0 && (
               <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold text-ground">
                 {invites.length}
@@ -41,13 +43,13 @@ function SettingsLayout() {
           </NavItem>
           {me?.role === "admin" && (
             <NavItem to="/settings/server" icon={<Server size={15} />}>
-              Server
+              {t("settings.server")}
             </NavItem>
           )}
         </ul>
         {projects.length > 0 && (
           <>
-            <div className="mb-1 mt-5 hidden px-2 text-xs text-subtle md:block">Projects</div>
+            <div className="mb-1 mt-5 hidden px-2 text-xs text-subtle md:block">{t("settings.projects")}</div>
             <ul className="hidden space-y-0.5 md:block">
               {projects.map((p) => (
                 <li key={p.id}>

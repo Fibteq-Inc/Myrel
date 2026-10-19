@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, SquareTerminal } from "lucide-react";
@@ -9,7 +10,8 @@ import { threadActivity, ThreadStatusIcon } from "./thread-status";
  * count, and a live line with what the thread is doing right now.
  */
 export function ThreadCard({ projectId, thread, replies }: { projectId: string; thread: Thread; replies: number }) {
-  const activity = threadActivity(thread);
+  const t = useT();
+  const activity = threadActivity(thread, t);
   const live = thread.status === "working" && !thread.resolved;
   return (
     <Link
@@ -22,7 +24,7 @@ export function ThreadCard({ projectId, thread, replies }: { projectId: string; 
         <ThreadStatusIcon thread={thread} />
         <span className="truncate font-semibold">{thread.title}</span>
         <span className="ml-auto flex-none text-xs text-subtle">
-          {replies === 1 ? "1 reply" : `${replies} replies`}
+          {t("threadCard.replies", { count: replies })}
         </span>
         <ChevronRight
           size={15}
