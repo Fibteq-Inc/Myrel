@@ -14,6 +14,7 @@ import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
 import type { TaskPlace } from "../sandbox/backend";
+import type { WorkspaceView } from "../sandbox/workspace";
 import { Plan } from "./plan";
 import { renderMessage } from "./render";
 import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
@@ -30,6 +31,8 @@ export type ThreadHost = {
   /** Starts a task in the sandbox; throws when it cannot. */
   runTask(input: RunTaskInput): Promise<string>;
   cancelTask(): Promise<string>;
+  /** The work this thread's cloud tasks saved: a folder listing or a file. Null when nothing was saved. */
+  readWorkspace(path: string): Promise<WorkspaceView | null>;
   /** Directory listing of a connected repository. */
   listRepoFiles(repo: string, path: string, ref?: string): Promise<string>;
   /** Text of one file in a connected repository. */
@@ -56,6 +59,7 @@ Tools:
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 - run_task: your hands. It runs a coding agent where the project's tasks run (see "Where tasks run" below): on the person's own computer, with their coding CLI (Claude Code, Codex or Gemini CLI, signed in with their own account) in the project's local folder; or in this thread's own Linux sandbox in the cloud (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. In the sandbox: with repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). When the server keeps a workspace for the thread, each task's work is saved there, finished or not: a later task without repo continues in the same files, and one with the same repo and branch continues that branch. harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. On the person's computer, repo, branch, open_pr and harness do not apply: the CLI works in the local folder, and later tasks continue the same CLI session where the CLI supports it. One task runs at a time. Its own steps show on the thread's checklist by themselves, nested under your active plan step, so keep that step active while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link if there is one. Never ask the person for passwords, tokens or API keys for it.
 - cancel_task: stop the running task.
+- workspace_read: look at the files this thread's cloud tasks saved, and their history, without starting a task. Pass a folder to list it or a file to read it. Use it to check a task's results before you report them.
 
 - memory_read / memory_write / memory_delete, list_files / read_file / write_file: the project's memory and shared files (below).
 - repo_list_files and repo_read_file: read the GitHub repositories connected to this project (listed in the prompt). Look at the code before answering questions about it. To change one or open a pull request, use run_task.
@@ -218,6 +222,26 @@ export function threadTools(host: ThreadHost): Tool[] {
         ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
       }),
       run: ({ repo, path, ref }) => host.listRepoFiles(repo, path, ref),
+    }),
+    tool({
+      name: "workspace_read",
+      description: "List a folder or read a file in the work this thread's cloud tasks saved. Path is relative to the workspace root; empty for the root.",
+      input: z.object({ path: z.string().max(1000).optional() }),
+      run: async ({ path }) => {
+        const view = await host.readWorkspace(path ?? "");
+        if (!view) return "Nothing is saved yet: the workspace fills once a cloud task finishes.";
+        const history = view.commits.slice(0, 5).map((c) => `- ${c.at} ${c.message}`).join("\n");
+        let body: string;
+        if (view.file) {
+          body =
+            view.file.text === null
+              ? `${view.file.path} is a binary file (${view.file.size} bytes).`
+              : `${view.file.path}${view.file.truncated ? " (cut)" : ""}:\n${view.file.text}`;
+        } else if (view.entries) {
+          body = view.entries.length ? view.entries.map((e) => `${e.type === "folder" ? "📁" : "  "} ${e.path}${e.type === "folder" ? "/" : ""}`).join("\n") : "(empty folder)";
+        } else body = `${path} does not exist on ${view.ref}.`;
+        return `Branch ${view.ref}. Latest saves:\n${history}\n\n${body}`;
+      },
     }),
     tool({
       name: "repo_read_file",

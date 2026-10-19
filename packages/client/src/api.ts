@@ -31,6 +31,7 @@ import type {
   RunnerPairingCode,
   SetWorkspaceInput,
   Task,
+  ThreadFiles,
   TerminalLine,
   UpdateAdminSettingsInput,
   UpdateProjectSettingsInput,
@@ -359,6 +360,12 @@ export class ApiClient {
   async listTasks(projectId: string, threadId: string) {
     const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/tasks`;
     return (await this.request<{ tasks: (Task & { log: TerminalLine[] })[] }>(path)).tasks;
+  }
+
+  /** What the thread's cloud tasks saved: history and the folder or file at `path`. Null when nothing was saved. */
+  async threadFiles(projectId: string, threadId: string, path = "") {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/files`;
+    return (await this.request<{ workspace: ThreadFiles | null }>(`${base}?path=${encodeURIComponent(path)}`)).workspace;
   }
 
   cancelTask(projectId: string, threadId: string, taskId: string) {

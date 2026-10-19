@@ -8,6 +8,7 @@ import {
   type RunnerEvent,
   type TaskProgress,
   TaskSpec,
+  workingBranch,
 } from "@altair/runner-core";
 import { Agent, getAgentByName } from "agents";
 import { listRepoFiles, readRepoFile } from "../github/files";
@@ -16,7 +17,7 @@ import { projectProvider, projectTaskModel } from "../keys";
 import { runLoop } from "../llm";
 import { getWorkspace } from "../runners";
 import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBackend, taskPlace } from "../sandbox/backend";
-import { threadWorkspace } from "../sandbox/workspace";
+import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { meteredForTurn, recordTaskUsage, taskCostMicros, taskRuntime, TurnMeter } from "../usage";
 import { type Author, knowledgeTools } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
@@ -282,6 +283,7 @@ export class ThreadAgent extends Agent<Env> {
               return started.message;
             },
             cancelTask: () => this.cancelRunningTask(),
+            readWorkspace: (path) => this.readWorkspace(path),
           }),
           ...knowledgeTools({
             memoryRead: (name) => project.getMemory(name),
@@ -441,6 +443,11 @@ export class ThreadAgent extends Agent<Env> {
       secrets.ALTAIR_WORKSPACE_TOKEN = workspace.token;
     }
     await this.launch(spec, backend.id, () => backend.start(spec, secrets), input.language);
+    if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
+      await this.taskEvents(spec.taskId, [
+        { type: "log", stream: "system", text: "This thread's workspace could not be opened, so this task's work will not be saved for the next one." },
+      ]);
+    }
     await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId: spec.taskId });
     return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
   }
@@ -629,6 +636,17 @@ export class ThreadAgent extends Agent<Env> {
   private runningTask(): TaskRow | null {
     const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running' LIMIT 1`;
     return row ?? null;
+  }
+
+  /**
+   * The work this thread's cloud tasks saved: history and one folder or file, on the branch of
+   * the latest sandbox task unless `ref` is given. Null when nothing was saved. Callable over RPC.
+   */
+  async readWorkspace(path = "", ref?: string): Promise<WorkspaceView | null> {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE backend = 'sandbox' ORDER BY created_at DESC LIMIT 1`;
+    if (!row) return null;
+    const branch = ref || workingBranch(JSON.parse(row.spec) as StoredSpec);
+    return readWorkspace(this.env, this.ids().threadId, branch, path);
   }
 
   private taskRows(): TaskRow[] {

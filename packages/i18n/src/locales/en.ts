@@ -520,6 +520,17 @@ export const en = {
   "tasks.cancelled": "Cancelled",
   "tasks.stopFailed": "Could not stop the task.",
   "tasks.failed": "Failed",
+  "files.workspace": "Files",
+  "files.workspaceEmpty": "Nothing saved yet",
+  "files.workspaceEmptyBody": "Files this thread's cloud tasks create show up here once a task finishes.",
+  "files.workspaceError": "Could not load the saved files.",
+  "files.workspacePath": "Folder",
+  "files.workspaceRoot": "Workspace",
+  "files.workspaceBinary": "Binary file ({size} bytes), not shown.",
+  "files.workspaceTruncated": "Only the start of this file is shown.",
+  "files.workspaceEmptyFolder": "This folder is empty.",
+  "files.workspaceMissing": "This path is not in the saved work.",
+  "files.workspaceHistory": "Saves",
 
   // Routines
   "routines.title": "Routines",

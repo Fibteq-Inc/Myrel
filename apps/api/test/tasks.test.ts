@@ -4,7 +4,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ThreadAgent } from "../src/agents/thread-agent";
-import { threadWorkspace } from "../src/sandbox/workspace";
+import { readWorkspace, threadWorkspace } from "../src/sandbox/workspace";
 import { resetFakeModel, setFakeModel } from "./fake-llm";
 
 const BASE = "http://altair.test";
@@ -182,6 +182,61 @@ describe("thread workspace", () => {
     expect(await threadWorkspace({} as Env, "thr_1", 60)).toBeNull();
     const broken = { get: async () => { throw new Error("down"); } };
     expect(await threadWorkspace({ WORKSPACES: broken } as unknown as Env, "thr_1", 60)).toBeNull();
+  });
+});
+
+describe("reading a thread's workspace", () => {
+  it("lists folders, reads files and returns the history, without a sandbox", async () => {
+    const trees: Record<string, ArtifactsTreeEntry[]> = {
+      root: [
+        { name: "src", mode: "40000", hash: "t-src", type: "tree" },
+        { name: "README.md", mode: "100644", hash: "b-readme", type: "blob" },
+        { name: "logo.png", mode: "100644", hash: "b-png", type: "blob" },
+      ],
+      "t-src": [{ name: "index.ts", mode: "100644", hash: "b-index", type: "blob" }],
+    };
+    const blobs: Record<string, Uint8Array> = {
+      "b-readme": new TextEncoder().encode("# Demo\n"),
+      "b-index": new TextEncoder().encode("export {};\n"),
+      "b-png": new Uint8Array([137, 80, 0, 1]),
+    };
+    const refs: string[] = [];
+    const repo = {
+      log: async ({ ref }: { ref: string }) => {
+        refs.push(ref);
+        return ref === "main" ? [{ hash: "c2", treeHash: "root", message: "Second", committedAt: 1760000100 }] : [];
+      },
+      readTree: async (hash: string) => trees[hash] ?? null,
+      readBlob: async (hash: string) => (blobs[hash] ? new Blob([blobs[hash]!]) : null),
+    };
+    const notFound = Object.assign(new Error("missing"), { code: "NOT_FOUND" });
+    const env = {
+      WORKSPACES: { get: async (name: string) => { if (name !== "thread-thr_1") throw notFound; return repo; } },
+    } as unknown as Env;
+
+    const root = await readWorkspace(env, "thr_1", "main");
+    expect(root).toMatchObject({
+      ref: "main",
+      commits: [{ hash: "c2", message: "Second", at: "2025-10-09T08:55:00.000Z" }],
+      entries: [
+        { name: "src", path: "src", type: "folder" },
+        { name: "logo.png", path: "logo.png", type: "file" },
+        { name: "README.md", path: "README.md", type: "file" },
+      ],
+      file: null,
+    });
+    expect((await readWorkspace(env, "thr_1", "main", "src"))!.entries).toEqual([{ name: "index.ts", path: "src/index.ts", type: "file" }]);
+    expect((await readWorkspace(env, "thr_1", "main", "src/index.ts"))!.file).toEqual({
+      path: "src/index.ts", text: "export {};\n", size: 11, truncated: false,
+    });
+    expect((await readWorkspace(env, "thr_1", "main", "logo.png"))!.file).toMatchObject({ text: null, size: 4 });
+    // Paths cannot climb out, and missing ones say so.
+    expect((await readWorkspace(env, "thr_1", "main", "../README.md"))!.file?.path).toBe("README.md");
+    expect(await readWorkspace(env, "thr_1", "main", "nope")).toMatchObject({ entries: null, file: null });
+    // Nothing saved on the branch, no repository, or no binding: nothing to show.
+    expect(await readWorkspace(env, "thr_1", "altair/other")).toBeNull();
+    expect(await readWorkspace(env, "thr_2", "main")).toBeNull();
+    expect(await readWorkspace({} as Env, "thr_1", "main")).toBeNull();
   });
 });
 

@@ -67,11 +67,11 @@ export function ThreadPanel({
     .filter((a) => a.threadId === threadId || attached.has(a.id))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const tabs = thread
-    ? withTasks(defaultWorkspaceTabs(thread, t), {
-        projectId: project.id,
-        tasks: threadTasks(state, thread.id),
-        output: state.output,
-      }).map((tab) =>
+    ? withTasks(
+        defaultWorkspaceTabs(thread, t),
+        { projectId: project.id, threadId: thread.id, tasks: threadTasks(state, thread.id), output: state.output },
+        t,
+      ).map((tab) =>
         tab.id === "outputs"
           ? {
               ...tab,
