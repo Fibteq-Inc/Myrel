@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectFile,
   PutMemoryInput,
+  UsageSummary,
 } from "@altair/protocol";
 import type { TokenStore } from "./token-store";
 
@@ -179,6 +180,15 @@ export class ApiClient {
     const url = `${projectPath(projectId)}/uploads?name=${encodeURIComponent(name)}`;
     const init = { method: "POST", body, contentType: body.type || "application/octet-stream" };
     return (await this.sendJson<{ file: ProjectFile }>(url, init)).file;
+  }
+
+  // --- usage ---
+
+  /** Model usage across the caller's projects, bucketed by day in the caller's time zone. */
+  getUsage(input: { days: number; projectId?: string | null; tzOffset?: number }) {
+    const query = new URLSearchParams({ days: String(input.days), tzOffset: String(input.tzOffset ?? 0) });
+    if (input.projectId) query.set("projectId", input.projectId);
+    return this.request<UsageSummary>(`/api/usage?${query}`);
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

@@ -32,6 +32,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     turns: body.messages.length - 1,
   });
   return Response.json({
+    usage: { prompt_tokens: 1000, completion_tokens: 100 },
     choices: [
       {
         message: {

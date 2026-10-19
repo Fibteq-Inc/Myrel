@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
-import { Folder, LogOut, Plus } from "lucide-react";
+import { BarChart3, Folder, LogOut, Plus } from "lucide-react";
 import { api, canChooseServer, projectsQuery, server, sessionQuery } from "../lib/api";
 import { AltairMark, IconButton, initials } from "../lib/ui";
 
@@ -57,6 +57,16 @@ function AppLayout() {
             </li>
           ))}
         </ul>
+        <div className="px-2 pb-2">
+          <Link
+            to="/usage"
+            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
+            activeProps={{ className: "bg-hover text-fg" }}
+          >
+            <BarChart3 size={15} className="flex-none" />
+            Usage
+          </Link>
+        </div>
         <div className="flex items-center gap-2.5 border-t border-line px-3 py-3">
           <span
             aria-hidden="true"

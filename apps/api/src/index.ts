@@ -6,6 +6,7 @@ import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
 import { knowledgeRoutes } from "./routes/knowledge";
 import { projectRoutes } from "./routes/projects";
+import { usageRoutes } from "./routes/usage";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { ThreadAgent } from "./agents/thread-agent";
@@ -35,6 +36,7 @@ const app = new Hono<AppEnv>()
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)
+  .route("/usage", usageRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;

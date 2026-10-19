@@ -96,3 +96,40 @@ export const projectMembers = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.userId] }), index("project_members_user_id_idx").on(t.userId)],
 );
+
+/**
+ * One row per model call. Written at call time with the price that applied then, so the
+ * table doubles as the metering ledger for billing. No foreign keys on purpose: usage
+ * records must outlive the projects, threads and users they mention.
+ */
+export const usageEvents = sqliteTable(
+  "usage_events",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    projectId: text("project_id").notNull(),
+    /** null = the coordinator's call. */
+    threadId: text("thread_id"),
+    /** The person whose message started the turn, when there was one. */
+    userId: text("user_id"),
+    agent: text("agent", { enum: ["coordinator", "thread"] }).notNull(),
+    /** Groups the model calls of one agent turn. */
+    turnId: text("turn_id").notNull(),
+    provider: text("provider").notNull(),
+    /** The model that was asked for, e.g. "firerouter/opus". */
+    model: text("model").notNull(),
+    /** The model the provider says answered, when it differs (routers). */
+    servedModel: text("served_model"),
+    /** All input tokens, cached ones included. */
+    inputTokens: integer("input_tokens").notNull(),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull(),
+    /** Estimated cost in millionths of a US dollar; null when the model has no known price. */
+    costMicros: integer("cost_micros"),
+    latencyMs: integer("latency_ms").notNull(),
+  },
+  (t) => [
+    index("usage_events_project_created_idx").on(t.projectId, t.createdAt),
+    index("usage_events_user_created_idx").on(t.userId, t.createdAt),
+  ],
+);

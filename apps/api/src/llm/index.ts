@@ -3,6 +3,8 @@ import { openAiCompatible } from "./openai";
 import type { ModelProvider } from "./types";
 
 export * from "./loop";
+export * from "./metering";
+export * from "./pricing";
 export * from "./types";
 
 type ProviderDef = {
@@ -52,6 +54,8 @@ export type LlmEnv = {
   LLM_PROVIDER?: string;
   LLM_MODEL?: string;
   LLM_BASE_URL?: string;
+  /** JSON price overrides in $/1M tokens, see ./pricing.ts. */
+  LLM_PRICES?: string;
   AI_GATEWAY_URL?: string;
   AI_GATEWAY_TOKEN?: string;
   FIREWORKS_API_KEY?: string;

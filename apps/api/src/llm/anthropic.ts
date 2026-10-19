@@ -9,7 +9,13 @@ type AnthropicMessage = { role: "user" | "assistant"; content: string | Block[] 
 
 type AnthropicResponse = {
   content?: Block[];
-  usage?: { input_tokens?: number; output_tokens?: number };
+  model?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
 };
 
 export type AnthropicOptions = {
@@ -53,10 +59,16 @@ export function anthropic(opts: AnthropicOptions): ModelProvider {
           .map((b) => b.text)
           .join(""),
         toolCalls: blocks.flatMap((b) => (b.type === "tool_use" ? [{ id: b.id, name: b.name, input: b.input }] : [])),
+        // Anthropic counts cache reads and writes outside input_tokens; fold them in.
         usage: data.usage && {
-          inputTokens: data.usage.input_tokens ?? 0,
+          inputTokens:
+            (data.usage.input_tokens ?? 0) +
+            (data.usage.cache_read_input_tokens ?? 0) +
+            (data.usage.cache_creation_input_tokens ?? 0),
           outputTokens: data.usage.output_tokens ?? 0,
+          cachedInputTokens: data.usage.cache_read_input_tokens ?? 0,
         },
+        model: data.model,
       };
     },
   };
