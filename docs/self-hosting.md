@@ -168,6 +168,9 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
+| `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for `run_task`: `lite`, `basic`, `standard-1` … `standard-4`. |
+| `RUNNER_HARNESS` | `opencode` | Default coding agent in the sandbox: `opencode` or `claude-code` (Claude models only). |
+| `RUNNER_MODEL` | empty | Model for the coding agent; empty uses the agents' model. |
 
 ### Bindings
 
@@ -180,6 +183,7 @@ supply the D1 id.
 | `PROJECT_AGENT` | Durable Object (`ProjectAgent`) | One per project: coordinator, project chat, live WebSocket |
 | `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
+| `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for `run_task` (see [Code sandbox](#code-sandbox)) |
 
 ## Optional features
 
@@ -199,6 +203,29 @@ rate limits and cost tracking to model calls.
 
 Fireworks has no built-in AI Gateway route. Add it to the gateway as a custom
 provider and put that URL in `LLM_BASE_URL`.
+
+### Code sandbox
+
+Thread agents get hands through the `run_task` tool: it starts a coding agent
+(OpenCode by default) in the thread's own Linux container, which clones the
+repository, edits code, runs commands and tests, and can open a pull request.
+Its checklist and terminal output stream into the thread.
+
+- It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
+  which is on the Workers Paid plan.
+- The image is `packages/sandbox-image/Dockerfile` (git, gh, jq, Node 22,
+  Python, OpenCode, Claude Code). Wrangler builds it with Docker on every
+  build and deploy, including `wrangler deploy --dry-run`, so the build
+  machine needs Docker. Workers Builds and GitHub's `ubuntu-latest` runners have it.
+- The coding agent uses the project's model and key (the same ones the agents
+  use). `RUNNER_MODEL` picks a different model for it.
+- Cloning private repositories and opening pull requests uses the project's
+  GitHub connection. Public repositories clone without it.
+- Containers sleep after 10 idle minutes; a thread's next task wakes its own.
+
+To run without a sandbox, remove the `SANDBOX` binding, its `v2` migration
+entry and the `containers` block from `apps/api/wrangler.jsonc`. `run_task`
+then tells the agent there is no sandbox.
 
 ### Web UI on another origin
 
