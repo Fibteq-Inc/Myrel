@@ -1,4 +1,12 @@
-import { ApiClient, currentServer, type Platform, saveServer, tokenStoreFor, webPlatform } from "@altair/client";
+import {
+  ApiClient,
+  currentServer,
+  type Platform,
+  probeServer,
+  saveServer,
+  tokenStoreFor,
+  webPlatform,
+} from "@altair/client";
 import { QueryClient, queryOptions } from "@tanstack/react-query";
 
 // The desktop shell can inject its own platform (keychain, native dialogs) before the app boots.
@@ -32,3 +40,9 @@ export const projectQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id], queryFn: () => api.getProject(id) });
 export const membersQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "members"], queryFn: () => api.listMembers(id) });
+/** What the current server allows (e.g. whether new accounts can be created). */
+export const serverInfoQuery = queryOptions({
+  queryKey: ["server-info", server],
+  queryFn: () => probeServer(server || location.origin),
+  staleTime: Infinity,
+});

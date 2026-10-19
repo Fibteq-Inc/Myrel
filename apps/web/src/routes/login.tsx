@@ -1,7 +1,7 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
-import { api, canChooseServer, server, sessionQuery } from "../lib/api";
+import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
 import { ServerPicker } from "../lib/server-picker";
 import { Button, errorMessage, Input } from "../lib/ui";
 
@@ -20,6 +20,8 @@ function LoginPage() {
   const [pending, setPending] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { data: info } = useQuery({ ...serverInfoQuery, enabled: !canChooseServer || server !== "" });
+  const signUpAllowed = info?.auth.signUp !== false;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -65,13 +67,17 @@ function LoginPage() {
           <Button type="submit" disabled={pending} className="w-full">
             {mode === "signin" ? "Sign in" : "Sign up"}
           </Button>
-          <button
-            type="button"
-            className="w-full text-sm text-subtle hover:underline"
-            onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-          >
-            {mode === "signin" ? "No account? Sign up" : "Have an account? Sign in"}
-          </button>
+          {signUpAllowed ? (
+            <button
+              type="button"
+              className="w-full text-sm text-subtle hover:underline"
+              onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+            >
+              {mode === "signin" ? "No account? Sign up" : "Have an account? Sign in"}
+            </button>
+          ) : (
+            <p className="text-center text-sm text-subtle">New sign-ups are closed on this server.</p>
+          )}
         </form>
       )}
     </main>

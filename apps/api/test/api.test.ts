@@ -1,5 +1,6 @@
 import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@altair/protocol";
 import { getAgentByName } from "agents";
+import { createAuth } from "../src/auth";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -156,6 +157,32 @@ describe("GET /api/info", () => {
   it("describes the server for connecting apps", async () => {
     const res = await api("/api/info");
     expect(res.status).toBe(200);
-    expect(ServerInfo.parse(await res.json())).toMatchObject({ app: "altair", apiVersion: API_VERSION, name: "Altair" });
+    expect(ServerInfo.parse(await res.json())).toMatchObject({
+      app: "altair",
+      apiVersion: API_VERSION,
+      name: "Altair",
+      auth: { emailPassword: true, signUp: true },
+    });
+  });
+});
+
+describe("sign-up switch", () => {
+  it("refuses new accounts unless SIGNUP_ENABLED is true, but still signs existing users in", async () => {
+    const email = `u${crypto.randomUUID()}@example.com`;
+    await signUp(email);
+    const closed = createAuth({ ...env, SIGNUP_ENABLED: "false" } as Env);
+    const req = (path: string, body: unknown) =>
+      closed.handler(
+        new Request(`${BASE}/api/auth/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const refused = await req("sign-up/email", { email: `n${email}`, password: "correct-horse-battery", name: "New" });
+    expect(refused.ok).toBe(false);
+    const signedIn = await req("sign-in/email", { email, password: "correct-horse-battery" });
+    expect(signedIn.status).toBe(200);
   });
 });

@@ -11,11 +11,16 @@ export function createAuth(env: Env) {
     basePath: "/api/auth",
     trustedOrigins: trustedOrigins(env),
     database: drizzleAdapter(createDb(env.DB), { provider: "sqlite", schema }),
-    emailAndPassword: { enabled: true },
+    emailAndPassword: { enabled: true, disableSignUp: !signUpEnabled(env) },
     // Bearer tokens let native clients (desktop, Expo) authenticate without cookies.
     plugins: [bearer()],
     telemetry: { enabled: false },
   });
+}
+
+/** New accounts are off unless SIGNUP_ENABLED is "true" (wrangler.jsonc). */
+export function signUpEnabled(env: Env) {
+  return env.SIGNUP_ENABLED === "true";
 }
 
 export type Auth = ReturnType<typeof createAuth>;

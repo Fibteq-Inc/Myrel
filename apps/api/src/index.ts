@@ -1,7 +1,7 @@
 import { API_VERSION, type ServerInfo } from "@altair/protocol";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createAuth } from "./auth";
+import { createAuth, signUpEnabled } from "./auth";
 import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
 import { projectRoutes } from "./routes/projects";
@@ -27,7 +27,7 @@ const app = new Hono<AppEnv>()
       app: "altair",
       apiVersion: API_VERSION,
       name: c.env.INSTANCE_NAME || "Altair",
-      auth: { emailPassword: true },
+      auth: { emailPassword: true, signUp: signUpEnabled(c.env) },
     } satisfies ServerInfo),
   )
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
