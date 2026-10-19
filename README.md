@@ -58,8 +58,9 @@ One-time setup:
    | Root directory | `/` |
    | Build command | `pnpm build:api` |
    | Deploy command | `pnpm run deploy` |
+   | Non-production branch deploy command | `pnpm run deploy:preview` |
 
-`pnpm run deploy` applies pending D1 migrations, then runs `wrangler deploy`.
+`pnpm run deploy` applies pending D1 migrations, then runs `wrangler deploy`. Other branches (pull requests) only upload a preview version with `wrangler versions upload`; previews share the production D1 database, so they never run migrations.
 
 Manual deploy from a laptop: `pnpm build:api && pnpm run deploy`.
 
