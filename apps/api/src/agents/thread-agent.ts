@@ -516,6 +516,18 @@ export class ThreadAgent extends Agent<Env> {
     }
   }
 
+  /**
+   * For project deletion: stops a running task and erases this thread's storage and schedules.
+   * Returns whether the thread ever used a cloud sandbox, which then needs wiping too.
+   */
+  async wipe(): Promise<{ usedSandbox: boolean }> {
+    const usedSandbox = this.sql<{ n: number }>`SELECT count(*) AS n FROM tasks WHERE backend = 'sandbox'`[0]!.n > 0;
+    if (this.runningTask()) await this.cancelRunningTask();
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    return { usedSandbox };
+  }
+
   /** Schedule callback: a task its runner never finished (the container went away). */
   async taskWatchdog(payload: { taskId: string }): Promise<void> {
     await this.taskEvents(payload.taskId, [

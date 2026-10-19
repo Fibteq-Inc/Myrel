@@ -246,6 +246,18 @@ export const en = {
   "projectInvites.invite": "Invite",
   "projectInvites.pending": "Pending · {role} · invited by {name}",
   "projectInvites.revoke": "Revoke",
+  "deleteProject.title": "Delete project",
+  "deleteProject.description": "Deletes the project for everyone: its chat, threads, files, artifacts, memory and settings. This cannot be undone.",
+  "deleteProject.button": "Delete project",
+  "deleteProject.confirmTitle": "Delete {name}?",
+  "deleteProject.confirmBody": {
+    one: "Everything in this project is deleted, including running tasks. This cannot be undone.",
+    other: "Everything in this project is deleted for all {count} members, including running tasks. This cannot be undone.",
+  },
+  "deleteProject.typeName": "Type {name} to confirm",
+  "deleteProject.confirm": "Delete forever",
+  "deleteProject.cancel": "Cancel",
+  "deleteProject.deleting": "Deleting…",
 
   // Usage
   "usage.title": "Usage",
