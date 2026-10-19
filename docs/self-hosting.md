@@ -1,0 +1,262 @@
+# Self-hosting Fibteq Altair on Cloudflare
+
+Altair runs as a single Cloudflare Worker named `altair`. The same Worker serves
+the web app, the HTTP API and two Durable Object classes, and keeps accounts and
+projects in a D1 database. This guide sets up your own copy and keeps it
+deploying from Git with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
+
+- [What you need](#what-you-need)
+- [1. Get the code](#1-get-the-code)
+- [2. Create the D1 database](#2-create-the-d1-database)
+- [3. Set the required secret](#3-set-the-required-secret)
+- [4. Connect Workers Builds](#4-connect-workers-builds)
+- [5. Pick a model provider](#5-pick-a-model-provider)
+- [6. Create the first account](#6-create-the-first-account)
+- [Configuration reference](#configuration-reference)
+- [Optional features](#optional-features)
+- [Updating](#updating)
+- [Deploy to Cloudflare button](#deploy-to-cloudflare-button)
+- [Troubleshooting](#troubleshooting)
+
+## What you need
+
+- A Cloudflare account. The Workers Free plan is enough to try Altair; heavier
+  use (long agent turns, many projects) fits the Workers Paid plan better.
+- A GitHub or GitLab account for Workers Builds.
+- An API key for at least one model provider: Fireworks, Anthropic or OpenAI.
+- Locally: Node 22+ and pnpm 10 (only for the one-time setup commands).
+
+## 1. Get the code
+
+Fork `Fibteq-Inc/altair` (or push a copy to your own repository), then clone it
+and install dependencies:
+
+```sh
+git clone https://github.com/<you>/altair.git
+cd altair
+pnpm install
+pnpm --filter @altair/api exec wrangler login
+```
+
+## 2. Create the D1 database
+
+```sh
+pnpm --filter @altair/api exec wrangler d1 create altair
+```
+
+Copy the `database_id` it prints into `apps/api/wrangler.jsonc`, replacing the
+id that is there (that one belongs to the Fibteq deployment and will not work
+in your account):
+
+```jsonc
+"d1_databases": [
+  {
+    "binding": "DB",
+    "database_name": "altair",
+    "database_id": "<your database id>",
+    "migrations_dir": "../../packages/db/migrations"
+  }
+]
+```
+
+Commit and push the change. Keep the database name `altair`: the deploy script
+applies migrations to the database with that name. You do not need to run the
+migrations by hand; every production deploy applies pending ones first.
+
+### Create the R2 bucket
+
+Project files and message uploads are stored in R2 (binding `FILES` in
+`apps/api/wrangler.jsonc`). Create the bucket once; a deploy fails while it is
+missing:
+
+```sh
+pnpm --filter @altair/api exec wrangler r2 bucket create altair-files
+```
+
+## 3. Set the required secret
+
+Altair needs one secret before it can start: `BETTER_AUTH_SECRET`, which signs
+sessions. Setting it also creates the `altair` Worker if it does not exist yet.
+
+```sh
+openssl rand -base64 32    # copy the output
+pnpm --filter @altair/api exec wrangler secret put BETTER_AUTH_SECRET
+```
+
+Do not change this secret later unless you want to sign everyone out.
+
+## 4. Connect Workers Builds
+
+In the Cloudflare dashboard, open **Workers & Pages → altair → Settings → Build**,
+choose **Connect**, pick your repository and set:
+
+| Setting | Value |
+|---|---|
+| Production branch | `main` |
+| Root directory | `/` |
+| Build command | `pnpm build:api` |
+| Deploy command | `pnpm run deploy` |
+| Non-production branch deploy command | `pnpm run deploy:preview` |
+
+What each command does:
+
+- `pnpm build:api` builds the web app and bundles the Worker (a `wrangler deploy --dry-run`).
+- `pnpm run deploy` applies pending D1 migrations to the remote database, then runs `wrangler deploy`.
+- `pnpm run deploy:preview` uploads a preview version with `wrangler versions upload`
+  for every other branch. Previews share the production D1 database, so they
+  never run migrations. A pull request that adds a migration only works in
+  preview after it reaches `main`.
+
+Trigger the first build by pushing to `main` (or with **Retry build**). When it
+finishes, the Worker is live at `https://altair.<your-subdomain>.workers.dev`.
+To use your own domain, add it under **Settings → Domains & Routes**.
+
+You can also deploy from a laptop without Workers Builds:
+`pnpm build:api && pnpm run deploy`.
+
+## 5. Pick a model provider
+
+Agents call the provider named by `LLM_PROVIDER`, using that provider's key.
+
+| `LLM_PROVIDER` | Secret | Default model |
+|---|---|---|
+| `fireworks` (default) | `FIREWORKS_API_KEY` | `firerouter/opus` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
+| `openai` | `OPENAI_API_KEY` | `gpt-5.1` |
+
+Set the key:
+
+```sh
+pnpm --filter @altair/api exec wrangler secret put FIREWORKS_API_KEY
+```
+
+or add it in the dashboard under **Settings → Variables and Secrets** (type
+*Secret*). To use another provider or model, change `LLM_PROVIDER` and
+`LLM_MODEL` in `apps/api/wrangler.jsonc` and push. If the key is missing, the
+project chat says which secret to set instead of answering.
+
+## 6. Create the first account
+
+Sign-ups are off by default, so nobody can register on a fresh public server.
+To create your own account:
+
+1. Set `SIGNUP_ENABLED` to `"true"` in `apps/api/wrangler.jsonc` and push (or
+   set it as a plain-text variable in the dashboard).
+2. Open your Altair URL and create your account.
+3. Set `SIGNUP_ENABLED` back to `"false"` and push, unless you want open sign-ups.
+
+## Configuration reference
+
+Plain variables live in `vars` in `apps/api/wrangler.jsonc` and are committed
+with the code. Secrets are set with `wrangler secret put` or in the dashboard
+and never committed. Locally, both go in `apps/api/.dev.vars` (copy
+`.dev.vars.example`).
+
+> Values set in the dashboard as plain-text variables are overwritten by
+> `vars` in `wrangler.jsonc` on the next deploy. Change them in the file
+> instead, or remove them from the file first.
+
+### Secrets
+
+| Secret | Needed for | Required |
+|---|---|---|
+| `BETTER_AUTH_SECRET` | Signing sessions and tokens | Always |
+| `FIREWORKS_API_KEY` | Agents, when `LLM_PROVIDER` is `fireworks` | For that provider |
+| `ANTHROPIC_API_KEY` | Agents, when `LLM_PROVIDER` is `anthropic` | For that provider |
+| `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
+| `AI_GATEWAY_TOKEN` | Calling an authenticated AI Gateway | Only with `AI_GATEWAY_URL` on an authenticated gateway |
+
+### Variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BETTER_AUTH_URL` | empty | Public origin, for example `https://altair.example.com`. Inferred from the request when empty. |
+| `TRUSTED_ORIGINS` | empty | Extra comma-separated origins allowed to call the API cross-origin. The desktop app origins are always allowed. |
+| `INSTANCE_NAME` | `Altair` | Name shown to apps that connect to this server. |
+| `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. |
+| `LLM_PROVIDER` | `fireworks` | `fireworks`, `anthropic` or `openai`. |
+| `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
+| `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
+| `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
+
+### Bindings
+
+These are declared in `apps/api/wrangler.jsonc` and created on deploy; you only
+supply the D1 id.
+
+| Binding | Type | Used for |
+|---|---|---|
+| `DB` | D1 database | Accounts, sessions, projects, membership |
+| `PROJECT_AGENT` | Durable Object (`ProjectAgent`) | One per project: coordinator, project chat, live WebSocket |
+| `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
+| `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
+
+## Optional features
+
+Each feature that needs extra setup gets a section here. Contributors: when a
+change adds a secret, variable or binding, add it to the reference tables above
+and describe the setup in a section below.
+
+### Cloudflare AI Gateway
+
+[AI Gateway](https://developers.cloudflare.com/ai-gateway/) adds logs, caching,
+rate limits and cost tracking to model calls.
+
+1. Create a gateway in the dashboard under **AI → AI Gateway**.
+2. Set `AI_GATEWAY_URL` to `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>`.
+   Anthropic and OpenAI calls then go through it.
+3. If the gateway is authenticated, set the `AI_GATEWAY_TOKEN` secret.
+
+Fireworks has no built-in AI Gateway route. Add it to the gateway as a custom
+provider and put that URL in `LLM_BASE_URL`.
+
+### Web UI on another origin
+
+The Worker serves the web app on the same origin, using session cookies. To
+serve the UI somewhere else (another domain, the desktop app), build it with
+`VITE_API_URL=https://<api-origin>`. It then signs in with bearer tokens, and
+the API must allow its origin through `TRUSTED_ORIGINS`.
+
+### Desktop and mobile apps
+
+The apps are not tied to one server. On the sign-in screen the user enters any
+Altair address; the app checks `GET /api/info` (it must be an Altair server
+with the same API version) and keeps a separate sign-in per server. Set
+`INSTANCE_NAME` so people can tell your server apart.
+
+## Updating
+
+Pull changes from upstream into your fork and push to `main`:
+
+```sh
+git remote add upstream https://github.com/Fibteq-Inc/altair.git   # once
+git fetch upstream
+git merge upstream/main
+git push
+```
+
+Workers Builds deploys the new version and applies new migrations. Keep your
+own `database_id` when resolving the conflict in `wrangler.jsonc`. Read the
+release notes before updating while Altair is pre-1.0: migrations only move
+forward, so back up D1 first (**D1 → altair → Time Travel** can restore to a
+point in time).
+
+## Deploy to Cloudflare button
+
+A one-click "Deploy to Cloudflare" button is planned but not available yet. The
+button provisions the resources declared in a Worker's Wrangler config, but it
+does not fully support monorepos: an app in a subdirectory must carry all of its
+dependencies, and `apps/api` depends on workspace packages. Until the repository
+has a layout the button can build, use the steps above.
+
+## Troubleshooting
+
+- **The project chat says a secret is missing.** Set the key for the provider in
+  `LLM_PROVIDER` and redeploy, or wait a few seconds for the secret to apply.
+- **Build fails on `d1 migrations apply`.** The `database_id` in `wrangler.jsonc`
+  does not belong to your account, or the database is not named `altair`.
+- **Sign-in works locally but not in production.** Check `BETTER_AUTH_URL`
+  matches your public origin, or leave it empty.
+- **Cross-origin requests are rejected.** Add the UI's origin to `TRUSTED_ORIGINS`.
+- **Nobody can register.** Sign-ups are off by default; see
+  [Create the first account](#6-create-the-first-account).
