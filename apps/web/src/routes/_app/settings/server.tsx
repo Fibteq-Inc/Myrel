@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Notice, Section } from "../../../components/settings";
 import { adminSettingsQuery, api, serverInfoQuery } from "../../../lib/api";
 import { errorMessage } from "../../../lib/ui";
+import { Switch } from "../../../components/ui/controls";
 
 export const Route = createFileRoute("/_app/settings/server")({
   component: ServerSettings,
@@ -26,9 +27,8 @@ function ServerSettings() {
     <>
       <Section title={t("server.signUps")} description={t("server.signUpsDescription")}>
         <label className="flex items-start gap-3 rounded-xl border border-line bg-raised px-4 py-3">
-          <input
-            type="checkbox"
-            className="mt-1"
+          <Switch
+            className="mt-0.5"
             checked={settings?.signUpEnabled ?? false}
             disabled={!settings || update.isPending}
             onChange={(e) => update.mutate(e.target.checked)}

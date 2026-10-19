@@ -42,9 +42,10 @@ function ProjectSettingsDialog({ projectId, onClose }: { projectId: string; onCl
   return (
     <dialog
       ref={ref}
+      {...{ closedby: "any" }}
       aria-labelledby="project-settings-title"
       onClose={onClose}
-      // A click on the backdrop lands on the dialog itself.
+      // A click on the backdrop lands on the dialog itself (for browsers without closedby).
       onClick={(e) => e.target === e.currentTarget && onClose()}
       className="m-auto max-h-[min(860px,calc(100dvh-48px))] w-[min(720px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-line bg-ground p-0 text-fg shadow-2xl backdrop:bg-black/60 max-sm:h-dvh max-sm:max-h-none max-sm:w-screen max-sm:max-w-none max-sm:rounded-none open:flex"
     >

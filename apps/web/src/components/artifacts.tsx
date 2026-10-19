@@ -20,6 +20,8 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { cn, IconButton, useRelativeTime } from "../lib/ui";
+import { useProjectView } from "./project-view";
+import { Select } from "./ui/controls";
 
 /**
  * Artifacts in the UI: cards under the messages that delivered them, the viewer
@@ -44,7 +46,7 @@ export function artifactAppUrl(projectId: string, artifactId: string) {
 
 /**
  * Cards for the artifacts a message delivered. Inside a thread they open the
- * artifact in the thread's workspace; elsewhere, on the artifact's own page.
+ * artifact in the thread's workspace; elsewhere, in the project's artifacts tab.
  */
 export function ArtifactCards({
   projectId,
@@ -61,6 +63,7 @@ export function ArtifactCards({
   openId?: string;
 }) {
   const t = useT();
+  const { go } = useProjectView();
   const cards = refs ?? [];
   if (cards.length === 0) return null;
   return (
@@ -98,15 +101,14 @@ export function ArtifactCards({
             {body}
           </Link>
         ) : (
-          <Link
+          <button
+            type="button"
             key={`${a.artifactId}-${a.version}`}
-            to="/projects/$projectId/artifacts/$artifactId"
-            params={{ projectId, artifactId: a.artifactId }}
-            search={{ version }}
-            className={className}
+            onClick={() => go("artifacts", { item: a.artifactId, v: version })}
+            className={cn(className, "w-full text-left")}
           >
             {body}
-          </Link>
+          </button>
         );
       })}
     </div>
@@ -179,14 +181,14 @@ export function ArtifactViewer({
         <AppWindow size={16} className="flex-none text-accent" aria-hidden="true" />
         <h2 className="min-w-0 flex-1 truncate text-[14px] font-semibold">{artifact?.title ?? t("artifacts.artifact")}</h2>
         {versions.length > 1 && (
-          <select
+          <Select
             aria-label={t("artifacts.version")}
             value={version}
             onChange={(e) => {
               const v = Number(e.target.value);
               onVersionChange(v === artifact?.version ? undefined : v);
             }}
-            className="h-7 flex-none rounded-md border border-edge bg-raised px-1.5 text-xs text-muted outline-none hover:text-fg"
+            className="h-7 w-auto flex-none rounded-md px-2 text-xs text-muted hover:text-fg"
           >
             {versions.map((v) => (
               <option key={v.version} value={v.version}>
@@ -194,7 +196,7 @@ export function ArtifactViewer({
                 {v.version === artifact?.version ? ` ${t("artifacts.latest")}` : ""}
               </option>
             ))}
-          </select>
+          </Select>
         )}
         <div className="flex flex-none items-center gap-0.5">
           <Tabs value={tab} onChange={setTab} />

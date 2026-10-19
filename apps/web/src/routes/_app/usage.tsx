@@ -9,6 +9,7 @@ import { type ChartMetric, SERIES, UsageChart } from "../../components/usage-cha
 import { api, projectsQuery } from "../../lib/api";
 import { formatCost, useFormat } from "../../lib/format";
 import { errorMessage } from "../../lib/ui";
+import { Select } from "../../components/ui/controls";
 
 type Search = { days?: number; project?: string };
 
@@ -45,11 +46,11 @@ function UsagePage() {
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-5 px-4 py-6 sm:px-6">
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <Select
               aria-label={t("usage.project")}
               value={project ?? ""}
               onChange={(e) => setSearch({ project: e.target.value || undefined })}
-              className="h-8 max-w-[240px] rounded-lg border border-edge bg-raised px-2.5 text-[13px] text-fg outline-none focus:border-accent"
+              className="h-8 w-auto max-w-[240px] text-[13px]"
             >
               <option value="">{t("usage.allProjects")}</option>
               {projects.map((p) => (
@@ -57,7 +58,7 @@ function UsagePage() {
                   {p.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Segmented
               label={t("usage.range")}
               value={days}

@@ -37,9 +37,6 @@ export const tr: Catalog = {
   // Shell
   "shell.openMenu": "Menüyü aç",
   "shell.closeMenu": "Menüyü kapat",
-  "shell.showSidebar": "Kenar çubuğunu göster",
-  "shell.hideSidebar": "Kenar çubuğunu gizle",
-  "shell.backToChat": "Proje sohbetine dön",
   "rail.main": "Ana menü",
   "rail.home": "Altair ana sayfa",
   "rail.projects": "Projeler",
@@ -62,10 +59,8 @@ export const tr: Catalog = {
   "projects.member": "Üye",
 
   // Project sidebar
-  "sidebar.label": "Proje ve thread'ler",
   "sidebar.searchThreads": "Thread'lerde ara",
   "sidebar.newRequest": "Yeni istek",
-  "sidebar.projectChat": "Proje sohbeti",
   "sidebar.threads": "Thread'ler",
   "sidebar.noMatch": "Eşleşen thread yok.",
   "sidebar.noThreads": "Altair bir iş üstlendiğinde thread'ler burada açılır.",
@@ -74,15 +69,16 @@ export const tr: Catalog = {
   "sidebar.members": { other: "{count} üye" },
   "sidebar.current": "Şu anki",
   "sidebar.newProject": "Yeni proje",
-  "connection.open": "Canlı",
-  "connection.openDetail": "Güncellemeler anında geliyor",
+  "tabs.label": "Proje bölümleri",
+  "tabs.chat": "Konuşma",
+  "tabs.files": "Dosyalar",
+  "threads.open": "Açık",
   "connection.connecting": "Bağlanıyor",
   "connection.connectingDetail": "Sunucuya ulaşılıyor",
   "connection.closed": "Çevrimdışı",
   "connection.closedDetail": "Arka planda yeniden deneniyor",
 
   // Project chat
-  "chat.title": "Proje sohbeti",
   "chat.membersLabel": { other: "{count} üye" },
   "chat.placeholder": "Altair'e bir görev ver",
   "chat.emptyTitle": "Altair ne üzerinde çalışsın?",
@@ -140,7 +136,6 @@ export const tr: Catalog = {
   "workspace.outputsEmptyBody": "Bu thread'in teslim ettiği dosyalar, artifact'ler ve bağlantılar burada toplanır.",
   // Project chat header
   "chat.projectSettings": "Proje ayarları",
-  "chat.artifactsCount": "Artifact'ler ({count})",
   "projectSettings.dialogTitle": "{name} ayarları",
   "projectSettings.close": "Ayarları kapat",
   "rail.usage": "Kullanım",
@@ -316,6 +311,7 @@ export const tr: Catalog = {
   "github.search": "Depolarda ara",
   "github.noMatch": "Eşleşen başka depo yok.",
   "github.noneVisible": "Uygulama henüz hiçbir depoyu göremiyor.",
+  "common.cancel": "Vazgeç",
   "common.loading": "Yükleniyor",
 
   // Shell and chat additions
