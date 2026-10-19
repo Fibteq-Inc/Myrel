@@ -119,6 +119,9 @@
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
     "ARTIFACTS_URL": "https://altair-artifacts.fibteq.workers.dev",
+
+    "GITHUB_APP_ID": "5386818",
+    "GITHUB_APP_SLUG": "fibteq",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_HARNESS": "opencode",
     "RUNNER_MODEL": ""
