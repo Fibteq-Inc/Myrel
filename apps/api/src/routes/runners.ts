@@ -52,6 +52,18 @@ export const runnerDeviceRoutes = new Hono<AppEnv>()
     });
     return c.json({ runner: { id, name: input.data.name }, token } satisfies PairRunnerResult, 201);
   })
+  // Whether the runner's token is still valid, so it can tell "unpaired" from "server unreachable".
+  .get("/me", async (c) => {
+    const token = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    const [runner] = token
+      ? await createDb(c.env.DB)
+          .select({ id: runners.id, name: runners.name })
+          .from(runners)
+          .where(eq(runners.tokenHash, await sha256Hex(token)))
+      : [];
+    if (!runner) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ runner });
+  })
   // The runner's live connection. Token in `Authorization: Bearer`.
   .get("/connect", async (c) => {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {

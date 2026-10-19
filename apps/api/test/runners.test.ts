@@ -95,6 +95,16 @@ describe("pairing", () => {
     expect(await listRunners(await signUp())).toEqual([]);
   });
 
+  it("tells a runner whether its token is still valid", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const me = (t?: string) => api("/api/runner/me", { token: t });
+    expect(await (await me(token)).json()).toEqual({ runner: { id: runner.id, name: "Laptop" } });
+    expect((await me()).status).toBe(401);
+    expect((await api(`/api/runners/${runner.id}`, { method: "DELETE", token: user })).status).toBe(200);
+    expect((await me(token)).status).toBe(401);
+  });
+
   it("refuses connections without a valid token", async () => {
     expect((await api("/api/runner/connect", { headers: { upgrade: "websocket" } })).status).toBe(401);
     expect((await api("/api/runner/connect", { token: "art_nope", headers: { upgrade: "websocket" } })).status).toBe(401);
