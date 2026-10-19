@@ -1,19 +1,68 @@
 name: sandbox image
 
-# `pnpm build` no longer builds the sandbox image, so check the Dockerfile here when it changes.
+# Deploys use a prebuilt sandbox image pinned in apps/api/wrangler.jsonc, so they don't rebuild it.
+# Pull requests that change the Dockerfile only build it. On main (or when run by hand) the image is
+# pushed to Cloudflare's registry and a pull request pins the new digest.
+# Needs the repository secrets CLOUDFLARE_API_TOKEN (Account > Containers: Edit) and
+# CLOUDFLARE_ACCOUNT_ID.
 on:
   pull_request:
     paths: ["packages/sandbox-image/**"]
   push:
     branches: [main]
     paths: ["packages/sandbox-image/**"]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   build:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - run: docker build --platform linux/amd64 packages/sandbox-image
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build and push
+        working-directory: apps/api
+        run: pnpm exec wrangler containers build ../../packages/sandbox-image -t "altair-sandbox:${GITHUB_SHA::12}" --push
+      - name: Find the digest
+        id: digest
+        run: |
+          ref=$(docker image ls --digests --format '{{.Repository}}@{{.Digest}}' \
+            | grep -E '^registry\.cloudflare\.com/[a-z0-9]+/altair-sandbox@sha256:' | head -1)
+          test -n "$ref" || { echo "No registry digest found"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Pushed \`$ref\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Open a pull request pinning it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ steps.digest.outputs.ref }}
+        run: |
+          node packages/sandbox-image/pin.mjs "$REF"
+          if git diff --quiet; then echo "Already pinned"; exit 0; fi
+          branch="sandbox-image/${GITHUB_SHA::12}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "chore(sandbox): pin the sandbox image built from ${GITHUB_SHA::12}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(sandbox): pin the sandbox image built from ${GITHUB_SHA::12}" \
+            --body "Points apps/api/wrangler.jsonc at \`$REF\`, so deploys use this image instead of rebuilding it."
