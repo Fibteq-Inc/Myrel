@@ -1,6 +1,6 @@
 import { projectChat, threadByRoot, threadMessages } from "@altair/client";
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { Hash, MessagesSquare } from "lucide-react";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { Hash, MessagesSquare, Settings } from "lucide-react";
 import { Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking, ThreadCard } from "../../../../components/chat";
 import { NavToggle, PaneHeader } from "../../../../components/shell/shell";
 import { useProjectContext } from "../../../../lib/project-context";
@@ -41,6 +41,15 @@ function ProjectChat() {
           ))}
           {members.length > 4 && <span className="ml-1.5 text-xs text-subtle">+{members.length - 4}</span>}
         </div>
+        <Link
+          to="/settings/projects/$projectId"
+          params={{ projectId: project.id }}
+          aria-label="Project settings"
+          title="Project settings"
+          className="-mr-2 flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
+        >
+          <Settings size={16} />
+        </Link>
       </PaneHeader>
 
       <ScrollToEnd dep={chat.length + (thinking ? 1 : 0)} className="flex-1 overflow-y-auto">

@@ -70,15 +70,15 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       )}
 
       <div className="mt-auto flex flex-col items-center gap-2.5">
-        <button
-          type="button"
-          disabled
-          aria-label="Settings (coming soon)"
-          title="Settings · coming soon"
-          className={cn(itemClass, "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-subtle")}
+        <Link
+          to="/settings"
+          aria-label="Settings"
+          title="Settings"
+          aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+          className={cn(itemClass, pathname.startsWith("/settings") && "bg-hover text-fg")}
         >
           <Settings size={20} strokeWidth={1.8} />
-        </button>
+        </Link>
         <Menu
           label="Account"
           side="right"

@@ -4,3 +4,4 @@ export * from "./events";
 export * from "./server";
 export * from "./decision";
 export * from "./usage";
+export * from "./settings";

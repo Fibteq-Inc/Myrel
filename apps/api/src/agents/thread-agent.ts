@@ -1,6 +1,7 @@
 import { Agent, getAgentByName } from "agents";
-import { createProvider, runLoop } from "../llm";
 import { meteredForTurn } from "../usage";
+import { projectProvider } from "../keys";
+import { runLoop } from "../llm";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { type CoordinatorNote, THREAD_SYSTEM, threadPrompt, threadTools } from "./thread-worker";
@@ -61,7 +62,7 @@ export class ThreadAgent extends Agent<Env> {
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
 
-    const llm = createProvider(this.env);
+    const llm = await projectProvider(this.env, projectId);
     if (!llm.ok) {
       await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
       await project.updateThread(threadId, { status: "failed" });
