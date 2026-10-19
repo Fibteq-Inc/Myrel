@@ -15,11 +15,11 @@ describe("ApiClient", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       },
     });
-    await api.registerPushDevice({ token: "ExponentPushToken[x]", platform: "ios" });
+    await api.request("/api/notifications/subscriptions", { method: "POST", body: { kind: "expo", token: "t" } });
     const [call] = calls;
-    expect(call?.url).toBe("https://altair.example.com/api/push/devices");
+    expect(call?.url).toBe("https://altair.example.com/api/notifications/subscriptions");
     expect(call?.init.credentials).toBe("omit");
     expect(call?.init.headers).toMatchObject({ origin: "altair://", authorization: "Bearer tok" });
-    expect(JSON.parse(String(call?.init.body))).toEqual({ token: "ExponentPushToken[x]", platform: "ios" });
+    expect(JSON.parse(String(call?.init.body))).toEqual({ kind: "expo", token: "t" });
   });
 });

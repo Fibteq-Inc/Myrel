@@ -9,6 +9,8 @@ import { platform } from "./platform";
 import { notificationPath } from "./push-target";
 
 const TOKEN_KEY = "push-token";
+/** The notifications API's push subscriptions (an Expo token is one kind of subscription). */
+const SUBSCRIPTIONS = "/api/notifications/subscriptions";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -40,7 +42,7 @@ export async function registerForPush(api: ApiClient): Promise<void> {
   const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
   if (!projectId) return;
   const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-  await api.registerPushDevice({ token, platform: Platform.OS === "ios" ? "ios" : "android" });
+  await api.request(SUBSCRIPTIONS, { method: "POST", body: { kind: "expo", token } });
   await platform.storage.set(TOKEN_KEY, token);
 }
 
@@ -49,7 +51,7 @@ export async function unregisterPush(api: ApiClient): Promise<void> {
   const token = await platform.storage.get(TOKEN_KEY);
   if (!token) return;
   await platform.storage.set(TOKEN_KEY, null);
-  await api.unregisterPushDevice(token);
+  await api.request(SUBSCRIPTIONS, { method: "DELETE", body: { endpoint: token } });
 }
 
 /** Opens the project or thread a tapped notification points at. */

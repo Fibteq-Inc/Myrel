@@ -12,7 +12,7 @@ What it does:
 - Project chat and thread views, with live progress checklists and thread cards.
 - Decision cards answered with one tap: the chosen option is sent as your reply.
 - Links in messages, artifacts above all, open in an in-app WebView.
-- Push notifications: registers the device's Expo push token at `POST /api/push/devices`,
+- Push notifications: registers the device's Expo push token at `POST /api/notifications/subscriptions`,
   and tapping a notification opens its project or thread (`data: { projectId, threadId }`).
   The live socket closes in the background and catches up by `seq` when the app returns.
 
