@@ -268,17 +268,12 @@ Its checklist and terminal output stream into the thread.
 
 - It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
   which is on the Workers Paid plan.
-- The image is `packages/sandbox-image/Dockerfile` (git, gh, jq, Node 22,
-  Python, OpenCode, Claude Code). Wrangler builds it with Docker on
-  `wrangler deploy` and `wrangler versions upload`, so the deploying machine
-  needs Docker. Workers Builds and GitHub's `ubuntu-latest` runners have it.
-  `pnpm build` skips the image (`--containers-rollout=none`) and runs without Docker.
-  To stop deploys rebuilding it, add the repository secrets `CLOUDFLARE_API_TOKEN`
-  (Account → Containers: Edit) and `CLOUDFLARE_ACCOUNT_ID`, then run the **sandbox image**
-  workflow. It pushes the image to Cloudflare's registry and opens a pull request that pins
-  its digest in `apps/api/wrangler.jsonc`. It runs again by itself whenever the Dockerfile
-  changes on main. GitHub must allow Actions to create pull requests (Settings → Actions →
-  General).
+- No image is built or pushed, so deploys need no Docker. Containers start from
+  Cloudflare's managed `cloudflare/debian-trixie` image (Node.js on Debian). The
+  first task on a server installs the tools once (git, gh, jq, ripgrep, Python,
+  OpenCode, Claude Code; `apps/api/src/sandbox/setup.ts`), which takes a few
+  minutes, and snapshots the result. Every thread's container then starts from that
+  snapshot. Changing `setup.ts` makes the next task build a fresh one.
 - The coding agent uses the project's model and key (the same ones the agents
   use). `RUNNER_MODEL` picks a different model for it.
 - Cloning private repositories and opening pull requests uses the project's
