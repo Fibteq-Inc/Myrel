@@ -1,5 +1,5 @@
-import { useRouterState } from "@tanstack/react-router";
-import { Menu as MenuIcon } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
+import { ChevronLeft, Menu as MenuIcon } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { cn, IconButton } from "../../lib/ui";
 
@@ -79,5 +79,20 @@ export function PaneHeader({ children, className = "" }: { children: ReactNode; 
     <header className={cn("flex h-14 flex-none items-center gap-2.5 border-b border-line px-4 sm:px-5", className)}>
       {children}
     </header>
+  );
+}
+
+/** Back to the project chat, from a page that replaces it (files, artifacts). */
+export function BackToChat({ projectId }: { projectId: string }) {
+  return (
+    <Link
+      to="/projects/$projectId"
+      params={{ projectId }}
+      aria-label="Back to the project chat"
+      title="Back to the project chat"
+      className="-ml-1 flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
+    >
+      <ChevronLeft size={18} />
+    </Link>
   );
 }

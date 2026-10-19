@@ -2,7 +2,7 @@ import { artifactList } from "@altair/client";
 import { createFileRoute } from "@tanstack/react-router";
 import { Blocks } from "lucide-react";
 import { ArtifactList, Empty } from "../../../../../components/artifacts";
-import { NavToggle, PaneHeader } from "../../../../../components/shell/shell";
+import { BackToChat, NavToggle, PaneHeader } from "../../../../../components/shell/shell";
 import { useProjectContext } from "../../../../../lib/project-context";
 
 export const Route = createFileRoute("/_app/projects/$projectId/artifacts/")({
@@ -17,6 +17,7 @@ function ProjectArtifacts() {
     <main className="flex min-h-0 flex-1 flex-col">
       <PaneHeader>
         <NavToggle />
+        <BackToChat projectId={project.id} />
         <Blocks size={17} className="flex-none text-muted" aria-hidden="true" />
         <h1 className="truncate text-[15px] font-semibold">Artifacts</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline">{project.name}</span>
