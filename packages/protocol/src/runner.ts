@@ -36,7 +36,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
  */
-export const RunnerFeature = z.enum(["folders"]);
+export const RunnerFeature = z.enum(["folders", "cancel"]);
 export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /** What the runner last told the server about the computer. */
@@ -91,6 +91,8 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     ok: z.boolean(),
     /** The CLI's final answer, or what went wrong. */
     result: z.string().max(MAX_TASK_TEXT),
+    /** Stopped because the server asked ("task.cancel"). */
+    cancelled: z.boolean().optional(),
   }),
   z.object({ type: z.literal("ping") }),
   // Answers to the server's folder requests (feature "folders").
@@ -113,6 +115,8 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     cli: CliId,
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
   }),
+  /** Stop a running task. The runner answers with its "task.done" (cancelled: true). Needs feature "cancel". */
+  z.object({ type: z.literal("task.cancel"), taskId: TaskId }),
   z.object({ type: z.literal("pong") }),
   /** List the folders inside `path` (the home folder when absent). Answered with "dirs". */
   z.object({ type: z.literal("dirs.list"), requestId: RunnerRequestId, path: z.string().max(1024).optional() }),

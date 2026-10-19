@@ -1,8 +1,11 @@
-import type { ProjectWorkspace } from "@altair/protocol";
+import { createDb, schema } from "@altair/db";
+import { type ProjectWorkspace, TaskTarget } from "@altair/protocol";
 import type { RunnerBackend, TaskSpec } from "@altair/runner-core";
 import { getAgentByName } from "agents";
+import { eq } from "drizzle-orm";
 import { githubConfigured } from "../github/app";
 import { projectRepoToken } from "../github/store";
+import { getWorkspace } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts). */
 export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
@@ -47,9 +50,47 @@ export function localBackend(
       });
       if (!started.ok) throw new Error(started.reason);
     },
-    cancel: async () => {
-      throw new Error("A task on the person's computer cannot be stopped from here yet. They can stop it there.");
+    ...localCanceller(env, workspace.runnerId),
+  };
+}
+
+/** Stops a task on the person's computer, through the runner that is running it. */
+export function localCanceller(env: Env, runnerId: string | undefined): Pick<RunnerBackend, "cancel"> {
+  return {
+    cancel: async (taskId: string) => {
+      if (!runnerId) throw new Error("This task is on the person's computer; they can stop it there.");
+      const runner = await getAgentByName(env.RUNNER_AGENT, runnerId);
+      const result = await runner.cancelTask(taskId);
+      if (!result.ok) throw new Error(result.reason);
     },
+  };
+}
+
+export type TaskPlace =
+  | { kind: "local"; workspace: ProjectWorkspace }
+  | { kind: "cloud" }
+  | { kind: "error"; message: string };
+
+/**
+ * Where the project's next task runs, by its task target setting: on the
+ * person's computer when the project has a local folder there and the
+ * computer is online (auto), or always one place (local, cloud).
+ */
+export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace> {
+  const [row] = await createDb(env.DB)
+    .select({ taskTarget: schema.projects.taskTarget })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId));
+  const target = TaskTarget.catch("auto").parse(row?.taskTarget);
+  if (target === "cloud") return { kind: "cloud" };
+  const workspace = await getWorkspace(env, projectId);
+  if (workspace?.online) return { kind: "local", workspace };
+  if (target === "auto") return { kind: "cloud" };
+  return {
+    kind: "error",
+    message: workspace
+      ? "This project runs tasks on the person's computer, and it is offline. Ask them to start altair-runner on it."
+      : "This project runs tasks on the person's computer, but no local folder is connected. They can connect one from the project header.",
   };
 }
 

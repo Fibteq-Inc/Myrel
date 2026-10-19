@@ -12,8 +12,6 @@ export type RunTaskInput = {
   openPr?: boolean;
   /** Language of the thread, for the checklist labels. */
   language?: string;
-  /** Run it with the CLI on the person's computer (run_local_task) instead of the sandbox. */
-  local?: boolean;
 };
 
 export type TaskWithLog = Task & { log: TerminalLine[] };

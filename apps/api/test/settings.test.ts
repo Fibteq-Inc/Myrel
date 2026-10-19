@@ -125,7 +125,16 @@ describe("project settings", () => {
     const { settings } = await json<{ settings: ProjectSettings }>(
       patch(alice.token, { keyId: aliceKey.id, model: "claude-opus-5-5", name: "Renamed" }),
     );
-    expect(settings).toEqual({ name: "Renamed", provider: "anthropic", model: "claude-opus-5-5", keyId: aliceKey.id });
+    expect(settings).toEqual({
+      name: "Renamed",
+      provider: "anthropic",
+      model: "claude-opus-5-5",
+      keyId: aliceKey.id,
+      taskTarget: "auto",
+    });
+    const cloud = await json<{ settings: ProjectSettings }>(patch(alice.token, { taskTarget: "cloud" }));
+    expect(cloud.settings.taskTarget).toBe("cloud");
+    expect((await patch(alice.token, { taskTarget: "moon" })).status).toBe(400);
 
     let seen: { url: string; key: string | null; model: string } | undefined;
     const llm = await projectProvider(env, project.id, (async (input: RequestInfo | URL, init?: RequestInit) => {

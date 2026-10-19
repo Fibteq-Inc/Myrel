@@ -277,6 +277,10 @@ Its checklist and terminal output stream into the thread.
 - Cloning private repositories and opening pull requests uses the project's
   GitHub connection. Public repositories clone without it.
 - Containers sleep after 10 idle minutes; a thread's next task wakes its own.
+- Each project chooses where tasks run under **Settings → Tasks**: automatic
+  (on the computer with the project's local folder while `altair-runner` is
+  online there, otherwise in this sandbox), always on that computer, or always
+  in the cloud.
 
 To run without a sandbox, remove the `SANDBOX` binding and the `containers`
 block from `apps/api/wrangler.jsonc` (keep the migrations). `run_task`

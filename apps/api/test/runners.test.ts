@@ -237,7 +237,7 @@ describe("local workspace", () => {
       }
       return {
         text: "",
-        toolCalls: [call("run_local_task", { prompt: "Run pnpm test" }), call("reply", { text: "Testleri bilgisayarında çalıştırıyorum." })],
+        toolCalls: [call("run_task", { title: "Testler", prompt: "Run pnpm test" }), call("reply", { text: "Testleri bilgisayarında çalıştırıyorum." })],
       };
     });
 
@@ -283,6 +283,61 @@ describe("local workspace", () => {
     await until(async () => (await agent.getThread(threadId))?.status === "review_ready", "idle again");
 
     chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("runs tasks where the project's setting says and stops them on the computer", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
+    });
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Testler");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+
+    // Auto: the computer is online, so the task goes there.
+    expect(await threadAgent.startTask({ title: "Testler", prompt: "Run pnpm test" })).toMatchObject({ ok: true });
+    const start = await until(
+      () => runnerSide.frames.find((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start"),
+      "task.start",
+    );
+    const cancel = await api(`/api/projects/${project.id}/threads/${thread.id}/tasks/${start.taskId}/cancel`, { method: "POST", token: user, body: "{}" });
+    expect(cancel.status).toBe(200);
+    await until(() => runnerSide.frames.some((f) => f.type === "task.cancel" && f.taskId === start.taskId), "task.cancel");
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "cancelled", "cancelled");
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "local", harness: "claude" });
+
+    // Cloud: the same project sends tasks to the sandbox, which this test runtime does not have.
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "cloud" }) });
+    await threadAgent.startTask({ title: "Bulut", prompt: "echo hi", harness: "shell" });
+    await until(async () => (await threadAgent.getTasks())[1]?.status === "failed", "cloud task");
+    expect((await threadAgent.getTasks())[1]).toMatchObject({ backend: "sandbox" });
+
+    // Local with the computer offline: refused, with the reason.
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "local" }) });
+    runnerSide.ws.close();
+    await until(async () => !(await listRunners(user))[0]?.online, "offline");
+    expect(await threadAgent.startTask({ title: "x", prompt: "y" })).toMatchObject({ ok: false, error: expect.stringContaining("offline") });
+  });
+
+  it("asks older runners to update before stopping their tasks", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const runnerAgent = await getAgentByName(env.RUNNER_AGENT, runner.id);
+    const taskId = "task_01JTEST0000000000000000009";
+    await runnerAgent.startTask({ taskId, projectId: "proj_x", threadId: "thr_01JTEST0000000000000000000", folder: "/x", cli: "claude", prompt: "p" });
+    expect(await runnerAgent.cancelTask(taskId)).toMatchObject({ ok: false, reason: expect.stringContaining("Update altair-runner") });
     runnerSide.ws.close();
   });
 });

@@ -1,4 +1,4 @@
-import type { InviteRole, ProjectRole, ProviderId } from "@altair/protocol";
+import type { InviteRole, ProjectRole, ProviderId, TaskTarget } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
@@ -66,11 +66,13 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
   const [provider, setProvider] = useState<ProviderId | "">(settings.provider ?? "");
   const [model, setModel] = useState(settings.model ?? "");
   const [keyId, setKeyId] = useState(settings.keyId ?? "");
+  const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   useEffect(() => {
     setName(settings.name);
     setProvider(settings.provider ?? "");
     setModel(settings.model ?? "");
     setKeyId(settings.keyId ?? "");
+    setTaskTarget(settings.taskTarget);
   }, [settings]);
 
   const save = useMutation({
@@ -80,6 +82,7 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
         provider: provider || null,
         model: model.trim() || null,
         keyId: keyId || null,
+        taskTarget,
       }),
     onSuccess: (s) => {
       queryClient.setQueryData(projectSettingsQuery(projectId).queryKey, s);
@@ -173,6 +176,19 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
             The server has no {providerInfo.name} key, so agents cannot answer in this project until you pick one.
           </Notice>
         )}
+      </Section>
+
+      <Section
+        title="Tasks"
+        description="Where thread agents run code: on a computer with the project's local folder, using its own coding CLI, or in a sandbox in the cloud."
+      >
+        <Field label="Run tasks">
+          <Select value={taskTarget} onChange={(e) => setTaskTarget(e.target.value as TaskTarget)} disabled={!canManage}>
+            <option value="auto">Automatic: on the computer when it is online, otherwise in the cloud</option>
+            <option value="local">Always on the computer</option>
+            <option value="cloud">Always in the cloud</option>
+          </Select>
+        </Field>
       </Section>
 
       {canManage && (

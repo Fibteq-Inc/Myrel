@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
+import type { TaskPlace } from "../sandbox/backend";
 import { renderMessage } from "./render";
 import type { RunTaskInput } from "./thread-tasks";
 
@@ -30,7 +31,6 @@ export type ThreadHost = {
   /** Text of one file in a connected repository. */
   readRepoFile(repo: string, path: string, ref?: string): Promise<string>;
   /** Present when the project has a local folder: runs a task there and returns what to tell the model. */
-  runLocalTask?: (input: { title: string; prompt: string; language?: string }) => Promise<string>;
 };
 
 export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean };
@@ -44,16 +44,15 @@ Tools:
 - publish_artifact: publish a self-contained HTML page (a report, a chart, a small app, a prototype) as an artifact people open in a viewer next to the chat. Pass artifact_id to publish a new version of an existing artifact instead of a new one; the address stays the same. The page runs sandboxed on its own origin: inline your CSS and JS, load libraries only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com or esm.sh with an exact version, and do not call any other server. Give it a <title>, a background and a layout that works at phone width. Artifacts you publish are attached to your next reply as cards, so publish first, then reply with one line about it. Use an artifact when the result is something to look at or use, or longer than about fifteen lines; answer short things in the reply itself.
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
-- run_task: your hands. It starts a coding agent in this thread's own Linux sandbox (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. With repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). When the server keeps a workspace for the thread, each task's work is saved there, finished or not: a later task without repo continues in the same files, and one with the same repo and branch continues that branch. harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. One task runs at a time. Its progress shows on the thread's checklist by itself, so do not call update_status while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link.
+- run_task: your hands. It runs a coding agent where the project's tasks run (see "Where tasks run" below): on the person's own computer, with their coding CLI (Claude Code, Codex or Gemini CLI, signed in with their own account) in the project's local folder; or in this thread's own Linux sandbox in the cloud (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. In the sandbox: with repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead); each task's work is saved for the next one when the server keeps a workspace for the thread; harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. On the person's computer, repo, branch, open_pr and harness do not apply: the CLI works in the local folder, and later tasks continue the same CLI session where the CLI supports it. One task runs at a time. Its progress shows on the thread's checklist by itself, so do not call update_status while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link if there is one. Never ask the person for passwords, tokens or API keys for it.
 - cancel_task: stop the running task.
 
 - memory_read / memory_write / memory_delete, list_files / read_file / write_file: the project's memory and shared files (below).
 - repo_list_files and repo_read_file: read the GitHub repositories connected to this project (listed in the prompt). Look at the code before answering questions about it. To change one or open a pull request, use run_task.
-- run_local_task (only when the project has a local folder connected): hand a task to the coding CLI on the person's own computer (Claude Code, Codex or Gemini CLI, signed in with their own account), working in that folder. Use it for anything that needs the project's files: reading code, editing, running commands or tests. Write the prompt as a complete, self-contained instruction; the CLI does not see this thread, but later tasks in this thread continue the same CLI session where the CLI supports it. Like run_task, its progress shows on the checklist and its result arrives in a later turn under "Tasks", so after starting one, tell the person briefly and end the turn. Never ask the person for passwords, tokens or API keys for it.
 
 ${KNOWLEDGE_GUIDE}
 
-Use run_task for anything that needs code, commands or the internet, and run_local_task instead when the work needs the person's local folder. When a bug is reported against a repository, the person wants the fix: run a task that reproduces it, fixes it, runs the tests and opens a pull request. Outside those tasks, the repositories and the artifacts you publish, you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
+Use run_task for anything that needs code, files, commands or the internet. When a bug is reported against a repository, the person wants the fix: run a task that reproduces it, fixes it, runs the tests and opens a pull request. Outside those tasks, the repositories and the artifacts you publish, you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
 
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
@@ -76,14 +75,24 @@ export function threadPrompt(input: {
   /** Rendered "Tasks" section (thread-tasks.ts), empty when none ran. */
   tasks?: string;
   workspace?: ProjectWorkspace | null;
+  /** Where run_task would run now (the project's task target and its computer's state). */
+  place?: TaskPlace;
   artifacts?: Artifact[];
 }): string {
   const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
   const ws = input.workspace;
-  const workspace = ws
-    ? `## Local folder\n${ws.path} on "${ws.runnerName}", using ${CLI_NAMES[ws.cli]}. The computer is ${ws.online ? "online" : "offline right now, so run_local_task will fail until the person starts altair-runner again"}.`
-    : "## Local folder\nNone connected.";
+  const place = input.place ?? { kind: "cloud" };
+  const folder = ws ? `the local folder ${ws.path} on "${ws.runnerName}"` : "";
+  const workspace = `## Where tasks run\n${
+    place.kind === "local"
+      ? `On the person's computer: ${folder}, with ${CLI_NAMES[place.workspace.cli]}.`
+      : place.kind === "error"
+        ? `Nowhere right now: ${place.message}`
+        : `In this thread's cloud sandbox.${
+            ws && !ws.online ? ` The project has ${folder}, but that computer is offline.` : ws ? ` The project also has ${folder}, but its setting sends tasks to the cloud.` : " No local folder is connected."
+          }`
+  }`;
   return [
     `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}`,
     renderKnowledge(input.knowledge),
@@ -164,7 +173,6 @@ export function threadTools(host: ThreadHost): Tool[] {
         return "Sent to the coordinator. Its answer will arrive in a later turn.";
       },
     }),
-    ...(host.runLocalTask ? [localTaskTool(host.runLocalTask)] : []),
     tool({
       name: "repo_list_files",
       description: "List a directory in a connected GitHub repository. Use path \"\" for the root.",
@@ -227,18 +235,4 @@ export function threadTools(host: ThreadHost): Tool[] {
       },
     }),
   ];
-}
-
-function localTaskTool(run: NonNullable<ThreadHost["runLocalTask"]>): Tool {
-  return tool({
-    name: "run_local_task",
-    description:
-      "Run a task with the coding CLI on the person's computer, in the project's local folder. Returns at once; the result arrives in a later turn.",
-    input: z.object({
-      title: z.string().min(1).max(120).optional().describe("Short name for the task, in the person's language."),
-      prompt: z.string().min(1).max(32_000),
-      language: z.string().max(10).optional().describe("The person's language code, e.g. tr or en, for the checklist."),
-    }),
-    run: async ({ title, prompt, language }) => run({ title: title ?? prompt.split("\n")[0]!.slice(0, 80), prompt, language }),
-  });
 }
