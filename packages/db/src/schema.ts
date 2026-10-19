@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestamps = {
   createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -19,6 +19,8 @@ export const user = sqliteTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
   image: text("image"),
+  /** Instance role: admins manage server settings and shared model keys. */
+  role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
   ...timestamps,
 });
 
@@ -73,12 +75,36 @@ export const verification = sqliteTable(
 
 // --- Altair ---
 
+/**
+ * Bring-your-own model keys. `ownerId` is a user id, or null for instance keys that admins
+ * share with every project on the server. `secret` is AES-GCM ciphertext (see apps/api/src/crypto.ts);
+ * `hint` is the last few characters, the only part ever shown again.
+ */
+export const apiKeys = sqliteTable(
+  "api_keys",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    label: text("label").notNull(),
+    secret: text("secret").notNull(),
+    hint: text("hint").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("api_keys_owner_id_idx").on(t.ownerId)],
+);
+
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   createdBy: text("created_by")
     .notNull()
     .references(() => user.id),
+  /** Model settings; null = the server default (LLM_PROVIDER / LLM_MODEL). */
+  llmProvider: text("llm_provider"),
+  llmModel: text("llm_model"),
+  /** Key the project's agents call the model with; null = an instance key for the provider. */
+  llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
   ...timestamps,
 });
 
@@ -91,7 +117,7 @@ export const projectMembers = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["owner", "member"] }).notNull(),
+    role: text("role", { enum: ["owner", "admin", "member"] }).notNull(),
     createdAt: timestamps.createdAt,
   },
   (t) => [primaryKey({ columns: [t.projectId, t.userId] }), index("project_members_user_id_idx").on(t.userId)],
@@ -133,3 +159,32 @@ export const usageEvents = sqliteTable(
     index("usage_events_user_created_idx").on(t.userId, t.createdAt),
   ],
 );
+
+/** Pending invitations to a project. The invitee accepts after signing in with `email`. */
+export const projectInvites = sqliteTable(
+  "project_invites",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Stored lowercased. */
+    email: text("email").notNull(),
+    role: text("role", { enum: ["admin", "member"] }).notNull(),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [
+    uniqueIndex("project_invites_project_email_idx").on(t.projectId, t.email),
+    index("project_invites_email_idx").on(t.email),
+  ],
+);
+
+/** Server-wide settings that admins change at runtime; they override the matching wrangler vars. */
+export const instanceSettings = sqliteTable("instance_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamps.updatedAt,
+});

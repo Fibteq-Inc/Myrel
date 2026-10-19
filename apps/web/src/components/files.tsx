@@ -1,5 +1,6 @@
 import type { Attachment, ProjectFile } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
@@ -35,28 +36,23 @@ export function FileIcon({ path, contentType, size = 15 }: { path: string; conte
   return <Icon size={size} className="flex-none text-muted" aria-hidden="true" />;
 }
 
-/** Files on a message, as chips that open a preview. */
-export function AttachmentList({
-  attachments,
-  onOpen,
-}: {
-  attachments?: Attachment[];
-  onOpen: (path: string) => void;
-}) {
+/** Files on a message, as chips that open the file in the project's files. */
+export function AttachmentList({ projectId, attachments }: { projectId: string; attachments?: Attachment[] }) {
   if (!attachments?.length) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {attachments.map((a) => (
-        <button
+        <Link
           key={a.path}
-          type="button"
-          onClick={() => onOpen(a.path)}
-          className="flex max-w-[260px] items-center gap-2 rounded-lg border border-edge bg-raised px-2.5 py-1.5 text-left text-[13px] hover:bg-hover"
+          to="/projects/$projectId/files"
+          params={{ projectId }}
+          search={{ file: a.path }}
+          className="flex max-w-[260px] items-center gap-2 rounded-lg border border-edge bg-raised px-2.5 py-1.5 text-left text-[13px] text-fg hover:bg-hover"
         >
           <FileIcon path={a.path} contentType={a.contentType} />
-          <span className="truncate">{a.name.replace(/^[0-9a-z]+-/, "")}</span>
+          <span className="truncate">{displayName(a.path)}</span>
           <span className="flex-none text-xs text-subtle">{formatSize(a.size)}</span>
-        </button>
+        </Link>
       ))}
     </div>
   );

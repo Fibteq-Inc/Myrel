@@ -71,11 +71,8 @@ body {
   & code {
     @apply rounded bg-hover px-1 py-0.5 font-mono text-[0.85em] text-fg;
   }
-  & pre {
-    @apply overflow-x-auto rounded-lg border border-line bg-rail p-3 font-mono text-xs;
-  }
   & pre code {
-    @apply bg-transparent p-0;
+    @apply bg-transparent p-0 text-body;
   }
   & blockquote {
     @apply border-l-2 border-edge pl-3 text-muted;

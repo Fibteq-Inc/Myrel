@@ -52,3 +52,15 @@ export const serverInfoQuery = queryOptions({
   queryFn: () => probeServer(server || location.origin),
   staleTime: Infinity,
 });
+
+// --- settings ---
+
+export const meQuery = queryOptions({ queryKey: ["me"], queryFn: () => api.getMe() });
+export const providersQuery = queryOptions({ queryKey: ["providers"], queryFn: () => api.listProviders() });
+export const keysQuery = queryOptions({ queryKey: ["keys"], queryFn: () => api.listKeys() });
+export const myInvitesQuery = queryOptions({ queryKey: ["invites"], queryFn: () => api.listMyInvites() });
+export const adminSettingsQuery = queryOptions({ queryKey: ["admin-settings"], queryFn: () => api.getAdminSettings() });
+export const projectSettingsQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "settings"], queryFn: () => api.getProjectSettings(id) });
+export const projectInvitesQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "invites"], queryFn: () => api.listProjectInvites(id) });

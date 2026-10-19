@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClientEvent, createId, Message, Project, ServerEvent } from "../src";
+import { ClientEvent, createId, formatDecision, Message, parseDecision, Project, ServerEvent } from "../src";
 
 const message = {
   id: createId("message"),
@@ -98,5 +98,30 @@ describe("ServerInfo", () => {
     // Servers that predate the sign-up switch always allowed sign-up.
     expect(ServerInfo.parse(info)).toEqual({ ...info, auth: { emailPassword: true, signUp: true } });
     expect(ServerInfo.safeParse({ ...info, app: "other" }).success).toBe(false);
+  });
+});
+
+describe("decision blocks", () => {
+  it("round-trips through a fenced block", () => {
+    const block = formatDecision({
+      question: "Which currency?",
+      options: [{ label: "TRY", consequence: "Local buyers" }, { label: "USD" }],
+      recommended: 0,
+    });
+    expect(block.startsWith("```decision\n")).toBe(true);
+    const json = block.slice("```decision\n".length, -"\n```".length);
+    expect(parseDecision(json)).toEqual({
+      question: "Which currency?",
+      options: [
+        { label: "TRY", consequence: "Local buyers" },
+        { label: "USD", consequence: "" },
+      ],
+      recommended: 0,
+    });
+  });
+
+  it("rejects malformed blocks", () => {
+    expect(parseDecision("not json")).toBeNull();
+    expect(parseDecision(JSON.stringify({ question: "Q", options: [{ label: "only one" }] }))).toBeNull();
   });
 });

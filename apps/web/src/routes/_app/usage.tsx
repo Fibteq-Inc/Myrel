@@ -1,8 +1,9 @@
 import { USAGE_RANGES, type UsageSummary, type UsageTotals } from "@altair/protocol";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BarChart3, Bot, ChevronLeft, Coins, Info, MessagesSquare, Network, Workflow } from "lucide-react";
+import { BarChart3, Bot, Coins, Info, MessagesSquare, Network, Workflow } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { NavToggle } from "../../components/shell/shell";
 import { type ChartMetric, SERIES, UsageChart } from "../../components/usage-chart";
 import { api, projectsQuery } from "../../lib/api";
 import { formatCost, formatTokens } from "../../lib/format";
@@ -34,9 +35,7 @@ function UsagePage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 flex-none items-center gap-3 border-b border-line px-4 sm:px-5">
-        <Link to="/" aria-label="All projects" className="-ml-1 rounded-lg p-1 text-muted hover:bg-hover md:hidden">
-          <ChevronLeft size={18} />
-        </Link>
+        <NavToggle />
         <BarChart3 size={17} className="text-muted" aria-hidden="true" />
         <h1 className="text-[15px] font-semibold">Usage</h1>
       </header>

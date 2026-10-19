@@ -1,9 +1,9 @@
 import { MEMORY_INDEX, type MemoryEntry } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, FolderOpen, Plus, ScrollText, Trash2, Upload, X } from "lucide-react";
+import { Brain, FolderOpen, Plus, ScrollText, Trash2, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, filesQuery, instructionsQuery, memoryQuery } from "../lib/api";
-import { Button, errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
+import { Button, errorMessage, GhostButton, Input } from "../lib/ui";
 import { displayName, FileIcon, FilePreview, formatSize } from "./files";
 
 export type PanelTab = "files" | "memory" | "instructions";
@@ -14,60 +14,84 @@ const TABS: { id: PanelTab; label: string; icon: ReactNode }[] = [
   { id: "instructions", label: "Instructions", icon: <ScrollText size={15} aria-hidden="true" /> },
 ];
 
-/** The project's shared knowledge: files, memory and instructions. Opens beside the chat. */
-export function ProjectPanel({
+/**
+ * The project's shared knowledge, one tab at a time: files (with a preview
+ * beside the list), memory and instructions. Rendered by the project's
+ * /files route, under the shell's pane header.
+ */
+export function ProjectKnowledge({
   projectId,
   tab,
   file,
   onNavigate,
-  onClose,
 }: {
   projectId: string;
   tab: PanelTab;
   file?: string;
   onNavigate: (next: { tab: PanelTab; file?: string }) => void;
-  onClose: () => void;
 }) {
   return (
-    <section
-      aria-label="Project knowledge"
-      className="flex min-w-0 flex-1 flex-col border-l border-line bg-[#0c0c0e] lg:max-w-[600px]"
-    >
-      <header className="flex h-14 flex-none items-center gap-1 border-b border-line px-3">
-        <div role="tablist" className="flex gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              onClick={() => onNavigate({ tab: t.id })}
-              className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] ${
-                tab === t.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
-              }`}
-            >
-              {t.icon}
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <IconButton type="button" onClick={onClose} aria-label="Close panel" className="ml-auto">
-          <X size={17} />
-        </IconButton>
-      </header>
-      {tab === "files" &&
-        (file ? (
-          <FilePreview projectId={projectId} path={file} onClose={() => onNavigate({ tab: "files" })} />
-        ) : (
-          <FilesTab projectId={projectId} onOpen={(path) => onNavigate({ tab: "files", file: path })} />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div role="tablist" aria-label="Project knowledge" className="flex flex-none gap-1 border-b border-line px-3 py-2">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => onNavigate({ tab: t.id })}
+            className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] ${
+              tab === t.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
+            }`}
+          >
+            {t.icon}
+            {t.label}
+          </button>
         ))}
-      {tab === "memory" && <MemoryTab projectId={projectId} />}
-      {tab === "instructions" && <InstructionsTab projectId={projectId} />}
-    </section>
+      </div>
+      {tab === "files" && (
+        <div className="flex min-h-0 flex-1">
+          <div
+            className={`min-w-0 flex-col lg:flex lg:max-w-[420px] lg:border-r lg:border-line ${
+              file ? "hidden" : "flex"
+            } flex-1`}
+          >
+            <FilesTab projectId={projectId} selected={file} onOpen={(path) => onNavigate({ tab: "files", file: path })} />
+          </div>
+          {file ? (
+            <div className="flex min-w-0 flex-1 flex-col bg-[#0b0b0d]">
+              <FilePreview projectId={projectId} path={file} onClose={() => onNavigate({ tab: "files" })} />
+            </div>
+          ) : (
+            <div className="hidden flex-1 items-center justify-center text-[13px] text-subtle lg:flex">
+              Pick a file to preview it.
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "memory" && (
+        <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col">
+          <MemoryTab projectId={projectId} />
+        </div>
+      )}
+      {tab === "instructions" && (
+        <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col">
+          <InstructionsTab projectId={projectId} />
+        </div>
+      )}
+    </div>
   );
 }
 
-function FilesTab({ projectId, onOpen }: { projectId: string; onOpen: (path: string) => void }) {
+function FilesTab({
+  projectId,
+  selected,
+  onOpen,
+}: {
+  projectId: string;
+  selected?: string;
+  onOpen: (path: string) => void;
+}) {
   const queryClient = useQueryClient();
   const { data: files = [], isPending } = useQuery(filesQuery(projectId));
   const input = useRef<HTMLInputElement>(null);
@@ -132,7 +156,10 @@ function FilesTab({ projectId, onOpen }: { projectId: string; onOpen: (path: str
             {folder && <div className="px-2 pb-1 pt-2 font-mono text-xs text-subtle">{folder}/</div>}
             <ul>
               {list.map((f) => (
-                <li key={f.path} className="group flex items-center rounded-lg hover:bg-hover">
+                <li
+                  key={f.path}
+                  className={`group flex items-center rounded-lg hover:bg-hover ${f.path === selected ? "bg-hover" : ""}`}
+                >
                   <button
                     type="button"
                     onClick={() => onOpen(f.path)}
