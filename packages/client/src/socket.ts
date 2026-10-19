@@ -57,8 +57,14 @@ export class ProjectSocket {
     else this.outbox.push(data);
   }
 
-  sendMessage(body: string, opts: { threadId?: string | null; clientId?: string } = {}) {
-    this.send({ type: "message.send", body, threadId: opts.threadId ?? null, clientId: opts.clientId });
+  sendMessage(body: string, opts: { threadId?: string | null; clientId?: string; attachments?: string[] } = {}) {
+    this.send({
+      type: "message.send",
+      body,
+      threadId: opts.threadId ?? null,
+      clientId: opts.clientId,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+    });
   }
 
   private async open() {

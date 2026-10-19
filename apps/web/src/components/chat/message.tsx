@@ -3,6 +3,7 @@ import type { Message, Reaction } from "@altair/protocol";
 import { CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { AltairMark, useRelativeTime } from "../../lib/ui";
+import { AttachmentList } from "../files";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 
 export type Names = Record<string, string>;
@@ -44,6 +45,7 @@ export function MessageView({
         <AltairMark size={28} />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
           <MessageMarkdown body={message.body} decision={decision} />
+          <AttachmentList projectId={message.projectId} attachments={message.attachments} />
           {children}
           <div className="-ml-1.5 -mt-1 flex items-center gap-1">
             <Reactions reactions={reactions} />
@@ -63,8 +65,13 @@ export function MessageView({
   return (
     <div className="group flex flex-col items-end gap-1.5">
       {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? t("common.member")}</span>}
-      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
-        {message.body}
+      {message.body && (
+        <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
+          {message.body}
+        </div>
+      )}
+      <div className="flex max-w-[85%] justify-end">
+        <AttachmentList projectId={message.projectId} attachments={message.attachments} />
       </div>
       <Reactions reactions={reactions} />
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}

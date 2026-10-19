@@ -44,6 +44,7 @@ describe("ClientEvent", () => {
     expect(ClientEvent.parse({ type: "message.send", body: "  hi " })).toEqual({
       type: "message.send",
       threadId: null,
+      attachments: [],
       body: "hi",
     });
   });
@@ -52,6 +53,13 @@ describe("ClientEvent", () => {
     expect(ClientEvent.safeParse({ type: "message.send", body: "   " }).success).toBe(false);
     expect(ClientEvent.safeParse({ type: "sync", afterSeq: -1 }).success).toBe(false);
     expect(ClientEvent.safeParse({ type: "nope" }).success).toBe(false);
+  });
+
+  it("accepts a message that only carries attachments, with safe paths", () => {
+    const ok = { type: "message.send", body: "", attachments: ["uploads/abc-report.pdf"] };
+    expect(ClientEvent.safeParse(ok).success).toBe(true);
+    expect(ClientEvent.safeParse({ ...ok, attachments: ["../secret"] }).success).toBe(false);
+    expect(ClientEvent.safeParse({ ...ok, attachments: ["/abs/path"] }).success).toBe(false);
   });
 });
 

@@ -1,7 +1,7 @@
 # Self-hosting Fibteq Altair on Cloudflare
 
 Altair runs as a single Cloudflare Worker named `altair`. The same Worker serves
-the web app, the HTTP API and two Durable Object classes, and keeps accounts and
+the web app, the HTTP API and three Durable Object classes, and keeps accounts and
 projects in a D1 database. This guide sets up your own copy and keeps it
 deploying from Git with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
 
@@ -62,6 +62,16 @@ in your account):
 Commit and push the change. Keep the database name `altair`: the deploy script
 applies migrations to the database with that name. You do not need to run the
 migrations by hand; every production deploy applies pending ones first.
+
+### Create the R2 bucket
+
+Project files and message uploads are stored in R2 (binding `FILES` in
+`apps/api/wrangler.jsonc`). Create the bucket once; a deploy fails while it is
+missing:
+
+```sh
+pnpm --filter @altair/api exec wrangler r2 bucket create altair-files
+```
 
 ## 3. Set the required secret
 
@@ -155,6 +165,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `ANTHROPIC_API_KEY` | Agents, when `LLM_PROVIDER` is `anthropic` | For that provider |
 | `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
 | `AI_GATEWAY_TOKEN` | Calling an authenticated AI Gateway | Only with `AI_GATEWAY_URL` on an authenticated gateway |
+| `ARTIFACT_SIGNING_SECRET` | Signing artifact links; set the same value on the artifact Worker | To view artifacts |
 
 ### Variables
 
@@ -168,6 +179,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
+| `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://altair-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
 
 ### Bindings
 
@@ -179,7 +191,9 @@ supply the D1 id.
 | `DB` | D1 database | Accounts, sessions, projects, membership |
 | `PROJECT_AGENT` | Durable Object (`ProjectAgent`) | One per project: coordinator, project chat, live WebSocket |
 | `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
+| `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the altair-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
+| `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 
 ## Optional features
 
@@ -199,6 +213,46 @@ rate limits and cost tracking to model calls.
 
 Fireworks has no built-in AI Gateway route. Add it to the gateway as a custom
 provider and put that URL in `LLM_BASE_URL`.
+
+### Artifacts
+
+Thread agents publish HTML pages with `publish_artifact`. Each publish is an
+immutable version in the `altair-artifacts` R2 bucket
+(`artifacts/{id}/v{n}/index.html`); the app's address for an artifact stays the
+same and opens the latest version. Artifacts are untrusted HTML, so a second
+Worker, `altair-artifacts` (`apps/artifacts`), serves them from **a different
+site** than the app: its own `workers.dev` address
+(`https://altair-artifacts.<your-subdomain>.workers.dev`) works, as does a
+separate domain such as `altair-usercontent.dev`, but never a subdomain of the
+app's domain. It sends a strict CSP that
+sandboxes each page into an opaque origin, and it only serves links the API
+signed within the last hour.
+
+1. Create the bucket **before** deploying the API, since it binds it:
+   `pnpm --filter @altair/api exec wrangler r2 bucket create altair-artifacts`.
+2. Pick one random value (`openssl rand -base64 32`) and set it as
+   `ARTIFACT_SIGNING_SECRET` on both Workers:
+   `pnpm --filter @altair/api exec wrangler secret put ARTIFACT_SIGNING_SECRET` and
+   `pnpm --filter @altair/artifacts exec wrangler secret put ARTIFACT_SIGNING_SECRET`.
+3. Add a second Workers Builds project on the same repository:
+
+   | Setting | Value |
+   |---|---|
+   | Root directory | `/` |
+   | Build command | `pnpm --filter @altair/artifacts build` |
+   | Deploy command | `pnpm run deploy:artifacts` |
+   | Non-production branch deploy command | `pnpm run deploy:artifacts:preview` |
+
+4. Optionally attach a separate domain to `altair-artifacts` under
+   **Settings → Domains & Routes**; otherwise use its `workers.dev` address.
+5. Set `ARTIFACTS_URL` in `apps/api/wrangler.jsonc` to that origin, and
+   `APP_ORIGINS` in `apps/artifacts/wrangler.jsonc` to the app's origin (only
+   those pages may frame artifacts; empty allows any). The values in the repo
+   are Fibteq's own deployment; replace them with yours.
+
+Without `ARTIFACTS_URL`, artifacts are still published, listed and readable as
+code, but the preview stays off. Locally, `pnpm dev` runs the artifact Worker
+on `:8788`; copy `apps/artifacts/.dev.vars.example` too.
 
 ### Web UI on another origin
 

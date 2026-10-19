@@ -10,6 +10,7 @@ import {
   type ProjectRole,
   type ProjectSettings,
   UpdateMemberInput,
+  SetWorkspaceInput,
   UpdateProjectSettingsInput,
 } from "@altair/protocol";
 import { getAgentByName } from "agents";
@@ -19,8 +20,9 @@ import { USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
 import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
+import { getWorkspace, notifyProject, parseInfo } from "../runners";
 
-const { apiKeys, projects, projectInvites, projectMembers, projectRepos, user } = schema;
+const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
 
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
@@ -291,6 +293,51 @@ export const projectRoutes = new Hono<AppEnv>()
     const agent = await getAgentByName(c.env.PROJECT_AGENT, id);
     return c.json(await agent.getMessagesAfter(after));
   })
+  // The local folder this project works in, on one of the user's computers.
+  .get("/:id/workspace", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  .put("/:id/workspace", async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    const project = await findMembership(c.env, id, userId);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const input = SetWorkspaceInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+
+    // Only your own computers, and only a folder you shared on it with `altair-runner share`.
+    const db = createDb(c.env.DB);
+    const [runner] = await db
+      .select()
+      .from(runners)
+      .where(and(eq(runners.id, input.data.runnerId), eq(runners.userId, userId)));
+    if (!runner) return c.json({ error: "invalid_input", message: "Unknown computer." }, 400);
+    const info = parseInfo(runner.info);
+    if (!info?.folders.some((f) => f.path === input.data.path)) {
+      return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
+    }
+
+    const now = new Date();
+    const values = { ...input.data, updatedAt: now };
+    await db
+      .insert(projectWorkspaces)
+      .values({ projectId: id, createdBy: userId, createdAt: now, ...values })
+      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, createdBy: userId } });
+    await notifyProject(c.env, id);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  .delete("/:id/workspace", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    await createDb(c.env.DB).delete(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
+    await notifyProject(c.env, id);
+    return c.json({ workspace: null });
+  })
   .get("/:id/ws", async (c) => {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
       return c.json({ error: "expected_websocket" }, 426);
@@ -306,7 +353,7 @@ export const projectRoutes = new Hono<AppEnv>()
     return agent.fetch(new Request(c.req.raw, { headers }));
   });
 
-async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
+export async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
   const [row] = await createDb(env.DB)
     .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
     .from(projectMembers)

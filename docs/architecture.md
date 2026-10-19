@@ -30,7 +30,8 @@ Everything runs in one Cloudflare Worker (`apps/api`):
 | Global data | D1, schema in `packages/db` | Users, sessions, projects, members |
 | Project chat | `ProjectAgent` Durable Object | One per project; messages in its SQLite with a `seq`; WebSocket fan-out |
 | Coordinator | `apps/api/src/agents/coordinator.ts` | Tools: `post_message`, `start_thread`, `message_thread`, `react` |
-| Thread | `ThreadAgent` Durable Object | One per thread; tools: `reply`, `update_status`, `request_coordinator`, `resolve_thread` |
+| Thread | `ThreadAgent` Durable Object | One per thread; tools: `reply`, `update_status`, `request_coordinator`, `resolve_thread`, `run_local_task` |
+| Local runner | `RunnerAgent` Durable Object, `packages/altair-runner` | One per paired computer; holds the runner's outbound WebSocket, sends tasks, wakes the thread with each result |
 | Model calls | `apps/api/src/llm` | Small provider-neutral loop; Fireworks, Anthropic, OpenAI; optional AI Gateway |
 | Web app | `apps/web`, served as static assets | Vite, React 19, TanStack Router and Query, Tailwind CSS 4 |
 
@@ -49,10 +50,13 @@ main additions:
   interface is swappable; OpenCode comes first because it works with many
   models, and others (Claude Agent SDK, Goose, OpenHands) can follow.
 - **Project files and artifacts (phases 2 and 3)** on R2.
-- **Local runner (phase 4).** `altair-runner` runs on the user's machine and
-  opens an outbound WebSocket to the thread, so people can use their own Claude
-  Code, Codex or Gemini CLI subscription. Subscription credentials never leave
-  their machine.
+- **Local runner (shipped).** `altair-runner` pairs with an account through a
+  one-time code from the Devices page, then keeps an outbound WebSocket to a
+  `RunnerAgent`. A project picks one of the folders shared on that computer and a
+  CLI (Claude Code, Codex or Gemini CLI). The thread agent's `run_local_task`
+  sends the prompt there; the CLI runs with the user's own login, and its answer
+  comes back as a later turn. Subscription credentials never leave the computer;
+  the server stores only a hash of the runner's own token.
 - **Mobile (Expo) and desktop (Tauri 2) apps** reuse `packages/client` and can
   connect to any Altair server.
 

@@ -1,22 +1,35 @@
 import type {
   AddProjectRepoInput,
+  Artifact,
+  ArtifactVersion,
+  ArtifactView,
   AdminSettings,
   ApiKey,
   CreateApiKeyInput,
   CreateInviteInput,
   CreateProjectInput,
+  Instructions,
   GithubRepo,
   GithubStatus,
   Invite,
   Me,
   Member,
+  MemoryEntry,
   Message,
   Project,
+  ProjectFile,
   ProjectRepo,
   ProjectRole,
   ProjectSettings,
+  ProjectWorkspace,
   ProviderId,
   ProviderInfo,
+  PutMemoryInput,
+  Runner,
+  RunnerDirListing,
+  RunnerFolder,
+  RunnerPairingCode,
+  SetWorkspaceInput,
   UpdateAdminSettingsInput,
   UpdateProjectSettingsInput,
   UsageSummary,
@@ -57,21 +70,38 @@ export class ApiClient {
   }
 
   async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const res = await this.send(path, {
+      method: init.method,
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      contentType: init.body === undefined ? undefined : "application/json",
+    });
+    const text = await res.text();
+    const data: unknown = text ? JSON.parse(text) : null;
+    if (!res.ok) throw new ApiError(res.status, data);
+    return data as T;
+  }
+
+  /** Raw fetch with auth applied. Use `request` for JSON endpoints. */
+  async send(path: string, init: { method?: string; body?: BodyInit; contentType?: string } = {}): Promise<Response> {
     const headers: Record<string, string> = { accept: "application/json" };
-    if (init.body !== undefined) headers["content-type"] = "application/json";
+    if (init.contentType) headers["content-type"] = init.contentType;
     const token = await this.tokens?.get();
     if (token) headers.authorization = `Bearer ${token}`;
 
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: init.method ?? "GET",
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.body,
       credentials: "include",
     });
     // Better Auth's bearer plugin returns the session token in this header.
     const issued = res.headers.get("set-auth-token");
     if (issued) await this.tokens?.set(issued);
+    return res;
+  }
 
+  private async sendJson<T>(path: string, init: { method: string; body: BodyInit; contentType: string }): Promise<T> {
+    const res = await this.send(path, init);
     const text = await res.text();
     const data: unknown = text ? JSON.parse(text) : null;
     if (!res.ok) throw new ApiError(res.status, data);
@@ -256,6 +286,59 @@ export class ApiClient {
     );
   }
 
+  // --- project knowledge: instructions, memory, files ---
+
+  async getInstructions(projectId: string) {
+    return (await this.request<{ instructions: Instructions }>(`${projectPath(projectId)}/instructions`)).instructions;
+  }
+
+  async setInstructions(projectId: string, text: string) {
+    const path = `${projectPath(projectId)}/instructions`;
+    return (await this.request<{ instructions: Instructions }>(path, { method: "PUT", body: { text } })).instructions;
+  }
+
+  async listMemory(projectId: string) {
+    return (await this.request<{ memory: MemoryEntry[] }>(`${projectPath(projectId)}/memory`)).memory;
+  }
+
+  async putMemory(projectId: string, name: string, input: PutMemoryInput) {
+    const path = `${projectPath(projectId)}/memory/${encodeURIComponent(name)}`;
+    return (await this.request<{ memory: MemoryEntry }>(path, { method: "PUT", body: input })).memory;
+  }
+
+  async deleteMemory(projectId: string, name: string) {
+    await this.request(`${projectPath(projectId)}/memory/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  async listFiles(projectId: string, prefix = "") {
+    const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
+    return (await this.request<{ files: ProjectFile[] }>(`${projectPath(projectId)}/files${query}`)).files;
+  }
+
+  /** A file's bytes. Fetched (not linked) so bearer-token apps can preview too. */
+  async getFile(projectId: string, path: string): Promise<Blob> {
+    const res = await this.send(`${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    return res.blob();
+  }
+
+  async putFile(projectId: string, path: string, body: Blob) {
+    const url = `${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`;
+    const init = { method: "PUT", body, contentType: body.type || "application/octet-stream" };
+    return (await this.sendJson<{ file: ProjectFile }>(url, init)).file;
+  }
+
+  async deleteFile(projectId: string, path: string) {
+    await this.request(`${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+  }
+
+  /** Uploads a file to attach to a message; send its `path` in `message.send`'s attachments. */
+  async upload(projectId: string, name: string, body: Blob) {
+    const url = `${projectPath(projectId)}/uploads?name=${encodeURIComponent(name)}`;
+    const init = { method: "POST", body, contentType: body.type || "application/octet-stream" };
+    return (await this.sendJson<{ file: ProjectFile }>(url, init)).file;
+  }
+
   // --- usage ---
 
   /** Model usage across the caller's projects, bucketed by day in the caller's time zone. */
@@ -263,6 +346,95 @@ export class ApiClient {
     const query = new URLSearchParams({ days: String(input.days), tzOffset: String(input.tzOffset ?? 0) });
     if (input.projectId) query.set("projectId", input.projectId);
     return this.request<UsageSummary>(`/api/usage?${query}`);
+  }
+
+  // --- local computers (altair-runner) ---
+
+  async listRunners() {
+    return (await this.request<{ runners: Runner[] }>("/api/runners")).runners;
+  }
+
+  /** A short-lived code for `altair-runner pair`. */
+  createPairingCode() {
+    return this.request<RunnerPairingCode>("/api/runners/pairing", { method: "POST", body: {} });
+  }
+
+  removeRunner(id: string) {
+    return this.request<{ ok: true }>(`/api/runners/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** Folders inside `path` on one of your computers (its home folder when absent). */
+  listRunnerDirs(id: string, path?: string) {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.request<RunnerDirListing>(`/api/runners/${encodeURIComponent(id)}/dirs${query}`);
+  }
+
+  /** Shares a folder on one of your computers, so projects can work in it. */
+  async shareRunnerFolder(id: string, path: string) {
+    return (
+      await this.request<{ folders: RunnerFolder[] }>(`/api/runners/${encodeURIComponent(id)}/folders`, {
+        method: "POST",
+        body: { path },
+      })
+    ).folders;
+  }
+
+  async unshareRunnerFolder(id: string, path: string) {
+    const url = `/api/runners/${encodeURIComponent(id)}/folders?path=${encodeURIComponent(path)}`;
+    return (await this.request<{ folders: RunnerFolder[] }>(url, { method: "DELETE" })).folders;
+  }
+
+  async getWorkspace(projectId: string) {
+    return (
+      await this.request<{ workspace: ProjectWorkspace | null }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`)
+    ).workspace;
+  }
+
+  async setWorkspace(projectId: string, input: SetWorkspaceInput) {
+    return (
+      await this.request<{ workspace: ProjectWorkspace }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`, {
+        method: "PUT",
+        body: input,
+      })
+    ).workspace;
+  }
+
+  async clearWorkspace(projectId: string) {
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace`, { method: "DELETE" });
+  }
+
+  // --- artifacts ---
+
+  private artifactsPath(projectId: string, artifactId?: string) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/artifacts`;
+    return artifactId ? `${base}/${encodeURIComponent(artifactId)}` : base;
+  }
+
+  async listArtifacts(projectId: string) {
+    return (await this.request<{ artifacts: Artifact[] }>(this.artifactsPath(projectId))).artifacts;
+  }
+
+  getArtifact(projectId: string, artifactId: string) {
+    return this.request<{ artifact: Artifact; versions: ArtifactVersion[] }>(this.artifactsPath(projectId, artifactId));
+  }
+
+  /** A signed, short-lived link to frame one version (default: latest) from the artifact origin. */
+  artifactView(projectId: string, artifactId: string, version?: number) {
+    const query = version ? `?version=${version}` : "";
+    return this.request<ArtifactView>(`${this.artifactsPath(projectId, artifactId)}/view${query}`);
+  }
+
+  /** One version's HTML source, as text. */
+  async artifactSource(projectId: string, artifactId: string, version: number): Promise<string> {
+    const headers: Record<string, string> = {};
+    const token = await this.tokens?.get();
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await this.fetchImpl(`${this.baseUrl}${this.artifactsPath(projectId, artifactId)}/versions/${version}/source`, {
+      headers,
+      credentials: "include",
+    });
+    if (!res.ok) throw new ApiError(res.status, null);
+    return res.text();
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

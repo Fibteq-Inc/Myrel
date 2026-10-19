@@ -11,7 +11,7 @@ type RailItem = {
   label: MessageKey;
   icon: LucideIcon;
   /** Where it goes. No `to` = not built yet; shown dimmed. */
-  to?: "/" | "/usage";
+  to?: "/" | "/usage" | "/devices" | "/artifacts";
   /** Path prefixes that light it up. */
   match?: string[];
 };
@@ -22,9 +22,10 @@ type RailItem = {
  */
 export const RAIL_ITEMS: RailItem[] = [
   { label: "rail.projects", icon: MessagesSquare, to: "/", match: ["/", "/projects"] },
-  { label: "rail.artifacts", icon: Blocks },
+  { label: "rail.artifacts", icon: Blocks, to: "/artifacts", match: ["/artifacts"] },
+  // Files belong to a project: the rail links to the open project's (below).
   { label: "rail.files", icon: FolderOpen },
-  { label: "rail.devices", icon: MonitorSmartphone },
+  { label: "rail.devices", icon: MonitorSmartphone, to: "/devices", match: ["/devices"] },
   { label: "rail.usage", icon: BarChart3, to: "/usage", match: ["/usage"] },
 ];
 
@@ -36,6 +37,7 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (item: RailItem) =>
     item.match?.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p))) ?? false;
+  const projectId = /^\/projects\/([^/]+)/.exec(pathname)?.[1];
 
   return (
     <nav
@@ -47,7 +49,19 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       </Link>
 
       {RAIL_ITEMS.map((item) =>
-        item.to ? (
+        item.label === "rail.files" && projectId ? (
+          <Link
+            key={item.label}
+            to="/projects/$projectId/files"
+            params={{ projectId }}
+            aria-label={t("rail.projectFiles")}
+            title={t("rail.projectFiles")}
+            className={itemClass}
+            activeProps={{ className: "bg-hover text-fg", "aria-current": "page" }}
+          >
+            <item.icon size={20} strokeWidth={1.8} />
+          </Link>
+        ) : item.to ? (
           <Link
             key={item.label}
             to={item.to}
@@ -63,8 +77,8 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
             key={item.label}
             type="button"
             disabled
-            aria-label={t("common.comingSoon", { label: t(item.label) })}
-            title={t("common.comingSoonTitle", { label: t(item.label) })}
+            aria-label={item.label === "rail.files" ? t("rail.filesNoProject") : t("common.comingSoon", { label: t(item.label) })}
+            title={item.label === "rail.files" ? t("rail.filesNoProjectTitle") : t("common.comingSoonTitle", { label: t(item.label) })}
             className={cn(itemClass, "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-subtle")}
           >
             <item.icon size={20} strokeWidth={1.8} />
