@@ -138,7 +138,7 @@
     "RUNNER_MODEL": "",
     "DEFAULT_TIMEZONE": "UTC",
     "EMAIL_FROM": "Altair <altair@fibteq.app>",
-    "VAPID_PUBLIC_KEY": "",
-    "VAPID_SUBJECT": ""
+    "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
+    "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
   }
 }
