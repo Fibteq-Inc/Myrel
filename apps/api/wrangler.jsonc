@@ -32,10 +32,15 @@
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
-      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" }
+      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" },
+      // One per paired computer running altair-runner.
+      { "name": "RUNNER_AGENT", "class_name": "RunnerAgent" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["RunnerAgent"] }
+  ],
 
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
   // BETTER_AUTH_SECRET (required), KEY_ENCRYPTION_SECRET (recommended: encrypts the model keys people

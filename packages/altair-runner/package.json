@@ -1,0 +1,32 @@
+{
+  "name": "altair-runner",
+  "version": "0.1.0",
+  "description": "Connects your computer to Altair so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "altair-runner": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --target=node22 --format=esm --minify --outfile=dist/cli.js",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@altair/protocol": "workspace:*",
+    "@types/node": "22.19.1",
+    "esbuild": "0.28.2",
+    "vitest": "5.0.5"
+  }
+}

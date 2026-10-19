@@ -234,3 +234,54 @@ export const projectRepos = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.repoId] }), index("project_repos_installation_id_idx").on(t.installationId)],
 );
+
+// --- Local runners (altair-runner on the user's computer) ---
+
+export const runners = sqliteTable(
+  "runners",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** SHA-256 of the runner's secret token, hex. The token itself is only on the computer. */
+    tokenHash: text("token_hash").notNull().unique(),
+    /** JSON RunnerInfo from the runner's last hello (folders, CLIs, version), or null. */
+    info: text("info"),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+    ...timestamps,
+  },
+  (t) => [index("runners_user_id_idx").on(t.userId)],
+);
+
+/** Short-lived codes shown in the web app and typed into `altair-runner pair`. */
+export const runnerPairings = sqliteTable("runner_pairings", {
+  /** SHA-256 of the normalized code, hex. */
+  codeHash: text("code_hash").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestamps.createdAt,
+});
+
+/** The local folder (on one of the owner's runners) a project works in. One per project. */
+export const projectWorkspaces = sqliteTable(
+  "project_workspaces",
+  {
+    projectId: text("project_id")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    cli: text("cli", { enum: ["claude", "codex", "gemini"] }).notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (t) => [index("project_workspaces_runner_id_idx").on(t.runnerId)],
+);

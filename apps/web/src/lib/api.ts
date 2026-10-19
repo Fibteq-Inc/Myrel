@@ -50,6 +50,9 @@ export const githubStatusQuery = queryOptions({ queryKey: ["github"], queryFn: (
 export const githubReposQuery = queryOptions({ queryKey: ["github", "repos"], queryFn: () => api.listGithubRepos() });
 export const projectReposQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "repos"], queryFn: () => api.listProjectRepos(id) });
+export const runnersQuery = queryOptions({ queryKey: ["runners"], queryFn: () => api.listRunners() });
+export const workspaceQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "workspace"], queryFn: () => api.getWorkspace(id) });
 /** What the current server allows (e.g. whether new accounts can be created). */
 export const serverInfoQuery = queryOptions({
   queryKey: ["server-info", server],

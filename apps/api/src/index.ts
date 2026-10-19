@@ -11,8 +11,10 @@ import { knowledgeRoutes } from "./routes/knowledge";
 import { githubRoutes } from "./routes/github";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
+import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 
 export { ProjectAgent } from "./agents/project-agent";
+export { RunnerAgent } from "./agents/runner-agent";
 export { ThreadAgent } from "./agents/thread-agent";
 
 const app = new Hono<AppEnv>()
@@ -44,6 +46,8 @@ const app = new Hono<AppEnv>()
   .route("/projects", knowledgeRoutes)
   .route("/usage", usageRoutes)
   .route("/github", githubRoutes)
+  .route("/runner", runnerDeviceRoutes)
+  .route("/runners", runnerRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;

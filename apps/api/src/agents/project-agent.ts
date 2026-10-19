@@ -80,8 +80,8 @@ const COORDINATOR_HISTORY = 40;
 export class ProjectAgent extends Agent<Env> {
   static override options = { sendIdentityOnConnect: false };
 
-  /** Agents currently working: null = coordinator, otherwise a thread id. In memory only. */
-  private active = new Set<string | null>();
+  /** Agents currently working (null = coordinator, otherwise a thread id) and what they are doing. In memory only. */
+  private active = new Map<string | null, string | undefined>();
 
   /** Project instructions, memory and the file index. */
   readonly knowledge: KnowledgeStore;
@@ -205,7 +205,9 @@ export class ProjectAgent extends Agent<Env> {
           threads: this.listThreads(),
           reactions: this.reactionsFor(page.messages.map((m) => m.id)),
         });
-        for (const threadId of this.active) send(connection, { type: "agent.activity", threadId, active: true });
+        for (const [threadId, label] of this.active) {
+          send(connection, { type: "agent.activity", threadId, active: true, label });
+        }
         return;
       }
     }
@@ -305,12 +307,17 @@ export class ProjectAgent extends Agent<Env> {
     await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason });
   }
 
-  /** Thread agents report when they start and stop working. Callable over RPC. */
-  setActivity(threadId: string | null, active: boolean): void {
-    if (active === this.active.has(threadId)) return;
-    if (active) this.active.add(threadId);
+  /** Agents report when they start and stop working, and optionally what they are doing. Callable over RPC. */
+  setActivity(threadId: string | null, active: boolean, label?: string): void {
+    if (active === this.active.has(threadId) && label === this.active.get(threadId)) return;
+    if (active) this.active.set(threadId, label);
     else this.active.delete(threadId);
-    this.emit({ type: "agent.activity", threadId, active });
+    this.emit({ type: "agent.activity", threadId, active, label });
+  }
+
+  /** The project's local folder changed or its computer connected/disconnected. Callable over RPC. */
+  workspaceChanged(): void {
+    this.emit({ type: "workspace.changed" });
   }
 
   private async wakeThread(threadId: string, reason: ThreadWake) {
@@ -523,7 +530,10 @@ export class ProjectAgent extends Agent<Env> {
 }
 
 /** Why a thread agent is woken. */
-export type ThreadWake = { kind: "message"; messageId: string } | { kind: "coordinator"; note: string };
+export type ThreadWake =
+  | { kind: "message"; messageId: string }
+  | { kind: "coordinator"; note: string }
+  | { kind: "task"; taskId: string; ok: boolean; result: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

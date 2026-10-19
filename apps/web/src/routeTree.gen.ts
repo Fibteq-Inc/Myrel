@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppDevicesRouteImport } from './routes/_app/devices'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppUsageRouteImport } from './routes/_app/usage'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app/projects/$projectId'
@@ -36,6 +37,11 @@ const LoginRoute = LoginRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
@@ -101,6 +107,7 @@ const AppProjectsProjectIdThreadsThreadIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
+  '/devices': typeof AppDevicesRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/usage': typeof AppUsageRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
@@ -115,6 +122,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/devices': typeof AppDevicesRoute
   '/usage': typeof AppUsageRoute
   '/': typeof AppIndexRoute
   '/settings/invites': typeof AppSettingsInvitesRoute
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/_app/devices': typeof AppDevicesRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/usage': typeof AppUsageRoute
   '/_app/': typeof AppIndexRoute
@@ -148,6 +157,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/devices'
     | '/settings'
     | '/usage'
     | '/projects/$projectId'
@@ -162,6 +172,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/devices'
     | '/usage'
     | '/'
     | '/settings/invites'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_app'
     | '/login'
+    | '/_app/devices'
     | '/_app/settings'
     | '/_app/usage'
     | '/_app/'
@@ -216,6 +228,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/devices': {
+      id: '/_app/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings': {
@@ -335,6 +354,7 @@ const AppProjectsProjectIdRouteWithChildren =
   AppProjectsProjectIdRoute._addFileChildren(AppProjectsProjectIdRouteChildren)
 
 interface AppRouteChildren {
+  AppDevicesRoute: typeof AppDevicesRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppUsageRoute: typeof AppUsageRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -342,6 +362,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppDevicesRoute: AppDevicesRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppUsageRoute: AppUsageRoute,
   AppIndexRoute: AppIndexRoute,

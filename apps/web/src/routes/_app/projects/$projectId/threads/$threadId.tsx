@@ -152,7 +152,7 @@ function ThreadView() {
                   decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
                 />
               ))}
-              {active && <Thinking label={working ? "Working" : "Thinking"} />}
+              {active && <Thinking label={state.progress[thread.id] ?? (working ? "Working" : "Thinking")} />}
             </div>
           </ScrollToEnd>
 

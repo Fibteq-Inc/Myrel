@@ -11,9 +11,11 @@ export type ProjectState = {
   reactions: Record<string, Reaction[]>;
   /** Agents working right now: "" is the coordinator, otherwise a thread id. */
   active: Record<string, true>;
+  /** What an active agent is doing, when it said (e.g. a task on the person's computer). */
+  progress: Record<string, string>;
 };
 
-export const emptyProjectState: ProjectState = { messages: [], threads: {}, reactions: {}, active: {} };
+export const emptyProjectState: ProjectState = { messages: [], threads: {}, reactions: {}, active: {}, progress: {} };
 
 export function applyMessage(state: ProjectState, message: Message): ProjectState {
   return { ...state, messages: [...state.messages, message] };
@@ -29,9 +31,12 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
     case "agent.activity": {
       const key = event.threadId ?? "";
       const active = { ...state.active };
+      const progress = { ...state.progress };
       if (event.active) active[key] = true;
       else delete active[key];
-      return { ...state, active };
+      if (event.active && event.label) progress[key] = event.label;
+      else delete progress[key];
+      return { ...state, active, progress };
     }
     case "sync.result": {
       const threads = { ...state.threads };
