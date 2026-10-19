@@ -10,7 +10,7 @@ import { cn, Kbd, relativeTime } from "../../lib/ui";
 import { threadActivity, ThreadStatusIcon } from "../chat/thread-status";
 import { useOpenProjectSettings } from "../project-settings-dialog";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
-import { Sidebar } from "./shell";
+import { Sidebar, SidebarCollapse } from "./shell";
 
 /** The project's sidebar: project switcher, search, project chat, threads, connection. */
 export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
@@ -40,9 +40,14 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
   }, [state.threads, query]);
 
   return (
-    <Sidebar label="Project and threads">
+    <Sidebar label="Project and threads" collapsible>
       <div className="flex flex-col gap-3 px-3.5 pb-2.5 pt-3.5">
-        <ProjectSwitcher current={project.id} name={project.name} memberCount={members.length} />
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <ProjectSwitcher current={project.id} name={project.name} memberCount={members.length} />
+          </div>
+          <SidebarCollapse />
+        </div>
         <div className="flex gap-2">
           <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[#26262b] bg-[#19191d] px-2.5 text-subtle focus-within:border-edge">
             <Search size={15} aria-hidden="true" />

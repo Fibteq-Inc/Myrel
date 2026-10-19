@@ -1,11 +1,24 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ChevronLeft, Menu as MenuIcon } from "lucide-react";
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { ChevronLeft, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { cn, IconButton } from "../../lib/ui";
 
-type Shell = { navOpen: boolean; setNavOpen: (open: boolean) => void };
+type Shell = {
+  navOpen: boolean;
+  setNavOpen: (open: boolean) => void;
+  /** A collapsible sidebar is folded away on wide screens. */
+  sidebarHidden: boolean;
+  setSidebarHidden: (hidden: boolean) => void;
+};
 
-const ShellContext = createContext<Shell>({ navOpen: false, setNavOpen: () => {} });
+const ShellContext = createContext<Shell>({
+  navOpen: false,
+  setNavOpen: () => {},
+  sidebarHidden: false,
+  setSidebarHidden: () => {},
+});
+
+const SIDEBAR_KEY = "altair.sidebarHidden";
 
 export const useShell = () => useContext(ShellContext);
 
@@ -15,13 +28,28 @@ export const useShell = () => useContext(ShellContext);
  */
 export function AppShell({ rail, children }: { rail: ReactNode; children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
+  const [sidebarHidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setSidebarHidden = useCallback((hidden: boolean) => {
+    setHidden(hidden);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, hidden ? "1" : "0");
+    } catch {
+      // Private mode: the choice lasts until reload.
+    }
+  }, []);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Navigating closes the drawer.
   useEffect(() => setNavOpen(false), [pathname]);
 
   return (
-    <ShellContext.Provider value={{ navOpen, setNavOpen }}>
+    <ShellContext.Provider value={{ navOpen, setNavOpen, sidebarHidden, setSidebarHidden }}>
       <div className="flex h-full overflow-hidden">
         <div
           className={cn(
@@ -46,16 +74,18 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
 }
 
 /**
- * A sidebar next to the rail. On phones it rides in the drawer, just right of the rail.
+ * A sidebar next to the rail. On phones it rides in the drawer, just right of
+ * the rail. A `collapsible` one can be folded away on wide screens.
  */
-export function Sidebar({ label, children }: { label: string; children: ReactNode }) {
-  const { navOpen } = useShell();
+export function Sidebar({ label, collapsible, children }: { label: string; collapsible?: boolean; children: ReactNode }) {
+  const { navOpen, sidebarHidden } = useShell();
   return (
     <aside
       aria-label={label}
       className={cn(
         "fixed inset-y-0 left-[60px] z-40 flex w-[276px] flex-none flex-col border-r border-line bg-panel transition-transform duration-200 md:static md:translate-x-0",
         navOpen ? "translate-x-0" : "-translate-x-[calc(100%+60px)]",
+        collapsible && sidebarHidden && "md:hidden",
       )}
     >
       {children}
@@ -63,12 +93,41 @@ export function Sidebar({ label, children }: { label: string; children: ReactNod
   );
 }
 
-/** Opens the drawer on phones; hidden from md up. */
+/** Opens the drawer on phones; on wider screens, unfolds a collapsed sidebar. */
 export function NavToggle() {
-  const { setNavOpen } = useShell();
+  const { setNavOpen, sidebarHidden, setSidebarHidden } = useShell();
   return (
-    <IconButton type="button" aria-label="Open menu" onClick={() => setNavOpen(true)} className="-ml-1.5 md:hidden">
-      <MenuIcon size={18} />
+    <>
+      <IconButton type="button" aria-label="Open menu" onClick={() => setNavOpen(true)} className="-ml-1.5 md:hidden">
+        <MenuIcon size={18} />
+      </IconButton>
+      {sidebarHidden && (
+        <IconButton
+          type="button"
+          aria-label="Show sidebar"
+          title="Show sidebar"
+          onClick={() => setSidebarHidden(false)}
+          className="-ml-1.5 max-md:hidden"
+        >
+          <PanelLeftOpen size={18} />
+        </IconButton>
+      )}
+    </>
+  );
+}
+
+/** Folds a collapsible sidebar away on wide screens; NavToggle brings it back. */
+export function SidebarCollapse() {
+  const { setSidebarHidden } = useShell();
+  return (
+    <IconButton
+      type="button"
+      aria-label="Hide sidebar"
+      title="Hide sidebar"
+      onClick={() => setSidebarHidden(true)}
+      className="size-9 flex-none max-md:hidden"
+    >
+      <PanelLeftClose size={17} />
     </IconButton>
   );
 }
