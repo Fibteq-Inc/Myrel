@@ -284,6 +284,11 @@ export class ProjectAgent extends Agent<Env> {
     this.emit({ type: "agent.activity", threadId, active });
   }
 
+  /** A thread's task changed or printed output; relay it to clients. Callable over RPC. */
+  broadcastTask(event: Extract<ServerEvent, { type: "task.updated" | "task.output" }>): void {
+    this.emit(event);
+  }
+
   private async wakeThread(threadId: string, reason: ThreadWake) {
     const agent = await getAgentByName(this.env.THREAD_AGENT, threadId);
     await agent.wake(reason);

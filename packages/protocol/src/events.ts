@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_MESSAGE_LENGTH, Message, Reaction, Thread, ThreadId } from "./models";
+import { MAX_MESSAGE_LENGTH, Message, Reaction, Task, TaskId, TerminalLine, Thread, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
@@ -48,6 +48,10 @@ export const ServerEvent = z.discriminatedUnion("type", [
    * Ephemeral: not replayed by sync.
    */
   z.object({ type: z.literal("agent.activity"), threadId: ThreadId.nullable(), active: z.boolean() }),
+  /** A task started, finished or changed. */
+  z.object({ type: z.literal("task.updated"), task: Task }),
+  /** New terminal output from a running task. Ephemeral: earlier output comes from the tasks endpoint. */
+  z.object({ type: z.literal("task.output"), taskId: TaskId, threadId: ThreadId, lines: z.array(TerminalLine) }),
   z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;

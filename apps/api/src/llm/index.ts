@@ -1,6 +1,7 @@
 import { anthropic } from "./anthropic";
 import { openAiCompatible } from "./openai";
 import type { ModelProvider } from "./types";
+import type { ModelConfig } from "@altair/runner";
 
 export * from "./loop";
 export * from "./types";
@@ -61,8 +62,10 @@ export type LlmEnv = {
 
 export type ProviderResult = { ok: true; provider: ModelProvider } | { ok: false; reason: string };
 
-/** Builds the configured provider, or explains which setting is missing. */
-export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch): ProviderResult {
+type Resolved = { id: ProviderId; def: ProviderDef; apiKey: string; baseUrl: string; headers: Record<string, string>; model: string };
+
+/** Reads the provider settings, or explains which one is missing. */
+function resolveProvider(env: LlmEnv): { ok: true; value: Resolved } | { ok: false; reason: string } {
   const id = (env.LLM_PROVIDER || DEFAULT_PROVIDER) as ProviderId;
   const def: ProviderDef | undefined = PROVIDERS[id];
   if (!def) {
@@ -77,10 +80,31 @@ export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch): ProviderR
     ? { "cf-aig-authorization": `Bearer ${env.AI_GATEWAY_TOKEN}` }
     : {};
   const model = env.LLM_MODEL || def.defaultModel;
+  return { ok: true, value: { id, def, apiKey, baseUrl, headers, model } };
+}
 
+/** Builds the configured provider, or explains which setting is missing. */
+export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch): ProviderResult {
+  const r = resolveProvider(env);
+  if (!r.ok) return r;
+  const { id, def, apiKey, baseUrl, headers, model } = r.value;
   const provider =
     def.kind === "anthropic"
       ? anthropic({ model, baseUrl, apiKey, headers, fetch: fetchImpl })
       : openAiCompatible({ id, model, baseUrl, apiKey, headers, fetch: fetchImpl });
   return { ok: true, provider };
+}
+
+/**
+ * The model a coding harness should use for run_task: the same provider as
+ * the agents, with RUNNER_MODEL overriding the model. The key goes to the
+ * sandbox as a secret, never into the stored task.
+ */
+export function taskModel(
+  env: LlmEnv & { RUNNER_MODEL?: string },
+): { ok: true; model: ModelConfig; apiKey: string } | { ok: false; reason: string } {
+  const r = resolveProvider(env);
+  if (!r.ok) return r;
+  const { id, def, apiKey, baseUrl, model } = r.value;
+  return { ok: true, model: { kind: def.kind, provider: id, id: env.RUNNER_MODEL || model, baseUrl }, apiKey };
 }

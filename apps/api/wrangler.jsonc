@@ -28,10 +28,29 @@
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
-      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" }
+      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" },
+      // One Linux container per thread for run_task (src/sandbox). Needs Cloudflare Containers
+      // (Workers Paid plan). Remove this binding and the "containers" block to run without it:
+      // run_task then tells the agent there is no sandbox.
+      { "name": "SANDBOX", "class_name": "Sandbox" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["Sandbox"] }
+  ],
+
+  // The sandbox image (git, gh, jq, Node, OpenCode). Wrangler builds it with Docker on deploy.
+  "containers": [
+    {
+      "name": "altair-sandbox",
+      "class_name": "Sandbox",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "runner": { "dockerfile": "../../packages/sandbox-image/Dockerfile" }
+      }
+    }
+  ],
 
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
   // BETTER_AUTH_SECRET (required) and the model keys below. There is no `secrets.required` list on
@@ -49,6 +68,10 @@
   // AI_GATEWAY_URL: optional, e.g. https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway>;
   // anthropic and openai calls then go through it (AI_GATEWAY_TOKEN secret for an authenticated gateway).
   // LLM_BASE_URL: optional full override of the provider's API base URL.
+  // Sandbox (run_task). Repository access comes from the project's GitHub connection.
+  // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
+  // RUNNER_HARNESS: default coding harness, opencode (default) or claude-code.
+  // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
@@ -57,6 +80,9 @@
     "LLM_PROVIDER": "fireworks",
     "LLM_MODEL": "",
     "LLM_BASE_URL": "",
-    "AI_GATEWAY_URL": ""
+    "AI_GATEWAY_URL": "",
+    "SANDBOX_INSTANCE_TYPE": "standard-1",
+    "RUNNER_HARNESS": "opencode",
+    "RUNNER_MODEL": ""
   }
 }

@@ -8,6 +8,7 @@ import { projectRoutes } from "./routes/projects";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { ThreadAgent } from "./agents/thread-agent";
+export { Sandbox } from "./sandbox/sandbox";
 
 const app = new Hono<AppEnv>()
   .basePath("/api")

@@ -62,13 +62,13 @@ export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
 }
 
-export type ChecklistItem = { state: "done" | "active" | "todo"; text: string };
+export type ChecklistItem = { state: "done" | "active" | "todo" | "failed"; text: string };
 
-/** Parses an `update_status` checklist: a header line, then ✓ / ✱ / ○ steps. */
+/** Parses an `update_status` checklist: a header line, then ✓ / ✱ / ○ steps (✗ marks a failed step). */
 export function parseChecklist(text: string): { title: string; items: ChecklistItem[] } {
   // The just-finished step may be bolded: **✓ step**.
   const lines = text.split("\n").map((l) => l.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim());
-  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo" };
+  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo", "✗": "failed" };
   const items: ChecklistItem[] = [];
   let title = "";
   for (const line of lines) {

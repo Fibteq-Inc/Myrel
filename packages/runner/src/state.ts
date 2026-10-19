@@ -60,12 +60,22 @@ export function reduceTask(p: TaskProgress, e: RunnerEvent): TaskProgress {
   }
 }
 
-/** Checklist labels, in the order phases run. */
-export const PHASE_LABELS: Record<Phase, { todo: string; doing: string; done: string }> = {
-  prepare: { todo: "Open the sandbox", doing: "Opening the sandbox", done: "Opened the sandbox" },
-  clone: { todo: "Get the repository", doing: "Getting the repository", done: "Got the repository" },
-  agent: { todo: "Do the work", doing: "Working", done: "Did the work" },
-  publish: { todo: "Open the pull request", doing: "Opening the pull request", done: "Opened the pull request" },
+type Labels = Record<Phase, { todo: string; doing: string; done: string; failed: string }>;
+
+/** Checklist labels per language, phases in the order they run. Unknown languages use English. */
+export const CHECKLIST_LABELS: Record<string, Labels> = {
+  en: {
+    prepare: { todo: "Open the sandbox", doing: "Opening the sandbox", done: "Opened the sandbox", failed: "Could not open the sandbox" },
+    clone: { todo: "Get the repository", doing: "Getting the repository", done: "Got the repository", failed: "Could not get the repository" },
+    agent: { todo: "Do the work", doing: "Working", done: "Did the work", failed: "The work failed" },
+    publish: { todo: "Open the pull request", doing: "Opening the pull request", done: "Opened the pull request", failed: "Could not open the pull request" },
+  },
+  tr: {
+    prepare: { todo: "Sandbox'ı aç", doing: "Sandbox açılıyor", done: "Sandbox açıldı", failed: "Sandbox açılamadı" },
+    clone: { todo: "Repoyu al", doing: "Repo alınıyor", done: "Repo alındı", failed: "Repo alınamadı" },
+    agent: { todo: "İşi yap", doing: "Çalışıyor", done: "İş yapıldı", failed: "İş tamamlanamadı" },
+    publish: { todo: "Pull request aç", doing: "Pull request açılıyor", done: "Pull request açıldı", failed: "Pull request açılamadı" },
+  },
 };
 
 /**
@@ -73,14 +83,22 @@ export const PHASE_LABELS: Record<Phase, { todo: string; doing: string; done: st
  * harness's own plan nested under the agent phase. Same format as
  * `update_status` (✓ done, ✱ in progress, ○ not started).
  */
-export function renderChecklist(title: string, p: TaskProgress): string {
+export function renderChecklist(title: string, p: TaskProgress, language = "en"): string {
+  const labels = CHECKLIST_LABELS[language.toLowerCase().slice(0, 2)] ?? CHECKLIST_LABELS.en!;
   const lines: string[] = [title, ""];
-  for (const phase of Object.keys(PHASE_LABELS) as Phase[]) {
-    const state = p.phases[phase];
+  const phases: Phase[] = ["prepare", "clone", "agent", "publish"];
+  // A task that failed outside any phase (the sandbox never started) shows it on the step it was on.
+  const failedAt =
+    p.finished && !p.finished.ok && !phases.some((ph) => p.phases[ph] === "failed")
+      ? phases.find((ph) => p.phases[ph] === "started" || p.phases[ph] === "pending")
+      : undefined;
+  for (const phase of phases) {
+    const state = failedAt === phase ? "failed" : p.phases[phase];
+    const detail = failedAt === phase ? p.finished?.error : p.phaseDetail[phase];
     if (state === "skipped") continue;
-    const label = PHASE_LABELS[phase];
+    const label = labels[phase];
     if (state === "done") lines.push(`✓ ${label.done}`);
-    else if (state === "failed") lines.push(`✗ ${label.doing} failed${p.phaseDetail[phase] ? `: ${p.phaseDetail[phase]}` : ""}`);
+    else if (state === "failed") lines.push(`✗ ${label.failed}${detail ? `: ${clip(detail, 120)}` : ""}`);
     else if (state === "started") {
       const doing = phase === "agent" && p.lastTool ? `${label.doing}: ${clip(p.lastTool, 50)}` : label.doing;
       lines.push(`✱ ${doing}`);

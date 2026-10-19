@@ -54,6 +54,19 @@ export const projectRoutes = new Hono<AppEnv>()
     const agent = await getAgentByName(c.env.PROJECT_AGENT, id);
     return c.json(await agent.getMessagesAfter(after));
   })
+  .get("/:id/threads/:threadId/tasks", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    return c.json({ tasks: await agent.getTasks() });
+  })
+  .post("/:id/threads/:threadId/tasks/:taskId/cancel", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    const cancelled = await agent.cancelTask(c.req.param("taskId"));
+    return cancelled ? c.json({ ok: true }) : c.json({ error: "not_running" }, 409);
+  })
   .get("/:id/ws", async (c) => {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
       return c.json({ error: "expected_websocket" }, 426);
@@ -77,6 +90,13 @@ async function findMembership(env: Env, projectId: string, userId: string): Prom
     .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
     .limit(1);
   return row ? toProject(row) : null;
+}
+
+/** The thread's id when it exists in a project the user belongs to. */
+async function findThread(env: Env, projectId: string, threadId: string, userId: string): Promise<string | null> {
+  if (!(await findMembership(env, projectId, userId))) return null;
+  const project = await getAgentByName(env.PROJECT_AGENT, projectId);
+  return (await project.getThread(threadId)) ? threadId : null;
 }
 
 function toProject(row: { id: string; name: string; role: Project["role"]; createdAt: Date }): Project {
