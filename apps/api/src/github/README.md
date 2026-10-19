@@ -6,15 +6,14 @@ agents can then read the code in those repositories. Cloning, running code and o
 requests build on the same app in a later phase, which is why the permissions below already
 include write access.
 
-## Quick setup from the browser
+## Quick setup
 
-Open [`scripts/create-github-app.html`](../../../../scripts/create-github-app.html) in a browser
-(double-click it; nothing has to run). Type your Altair address, the GitHub organization and an
-app name, and click **Create on GitHub**. Altair's settings go to GitHub as a
+From the repository root run `node scripts/create-github-app.mjs` (Node 18+, no install) and open
+http://localhost:8765. The Altair address, organization and app name are prefilled; change them
+with `--origin`, `--org` and `--name`. **Create on GitHub** sends Altair's settings to GitHub as a
 [manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest),
-so GitHub only asks you to confirm. GitHub then sends you to your Altair address with
-`?code=…` in the address bar; paste that code into the page and it shows the six values to
-add as Worker secrets (step 2). The keys are shown once, so copy them before closing the page.
+so GitHub only asks you to confirm, then sends you back to the local page with the six values to
+add as Worker secrets (step 2). The keys are shown once, so copy them before stopping the script.
 
 The manual steps below do the same thing by hand.
 
