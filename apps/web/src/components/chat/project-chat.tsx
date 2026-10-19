@@ -2,12 +2,14 @@ import { projectChat, threadByRoot, threadMessages } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import { Link } from "@tanstack/react-router";
 import { Blocks, FolderOpen, Hash, MessagesSquare, Settings } from "lucide-react";
+import { useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn } from "../../lib/ui";
 import { ArtifactCards } from "../artifacts";
 import { WorkspaceButton } from "../local-folder";
 import { useOpenProjectSettings } from "../project-settings-dialog";
+import { RoutinesButton, RoutinesPanel } from "../routines";
 import { NavToggle, PaneHeader } from "../shell/shell";
 import { Composer } from "./composer";
 import { decisionAnswers, MessageView, Thinking } from "./message";
@@ -23,6 +25,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   const { project, names, state, send } = useProjectContext();
   const openSettings = useOpenProjectSettings();
   const artifacts = Object.keys(state.artifacts).length;
+  const routines = Object.values(state.routines);
+  const [routinesOpen, setRoutinesOpen] = useState(false);
   const chat = projectChat(state);
   const roots = threadByRoot(state);
   const answers = decisionAnswers(chat);
@@ -62,6 +66,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
               </span>
             )}
           </Link>
+          <RoutinesButton onClick={() => setRoutinesOpen(true)} count={routines.length} className={headerIcon} />
           <button
             type="button"
             onClick={openSettings}
@@ -73,6 +78,14 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           </button>
         </div>
       </PaneHeader>
+      {routinesOpen && (
+        <RoutinesPanel
+          projectId={project.id}
+          routines={routines}
+          threads={Object.values(state.threads)}
+          onClose={() => setRoutinesOpen(false)}
+        />
+      )}
 
       <ScrollToEnd dep={chat.length + (thinking ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6">

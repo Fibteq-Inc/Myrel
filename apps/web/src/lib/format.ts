@@ -28,6 +28,36 @@ export function formatDay(date: string, long = false, locale: Locale = "en") {
   });
 }
 
+/** "now", "5 minutes ago", "in 3 hours", "Oct 19": for notification and schedule times. */
+export function formatRelative(iso: string, locale: Locale = "en", now = Date.now()) {
+  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const diff = Date.parse(iso) - now;
+  const abs = Math.abs(diff);
+  if (abs < 45_000) return relative.format(0, "second");
+  if (abs < 3600_000) return relative.format(Math.round(diff / 60_000), "minute");
+  if (abs < 86400_000) return relative.format(Math.round(diff / 3600_000), "hour");
+  if (abs < 7 * 86400_000) return relative.format(Math.round(diff / 86400_000), "day");
+  return new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric" });
+}
+
+/** A local date and time, e.g. "Mon, Oct 20, 09:00". */
+export function formatDateTime(iso: string, locale: Locale = "en") {
+  return new Date(iso).toLocaleString(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+/** A weekday's name, 0 = Sunday. */
+export function formatWeekday(day: number, locale: Locale = "en") {
+  // 2026-10-18 was a Sunday.
+  return new Date(Date.UTC(2026, 9, 18 + (day % 7))).toLocaleDateString(locale, { weekday: "long", timeZone: "UTC" });
+}
+
 /** The formatters above in the user's language. */
 export function useFormat() {
   const { locale } = useI18n();
@@ -35,5 +65,8 @@ export function useFormat() {
     tokens: (n: number) => formatTokens(n, locale),
     cost: (micros: number) => formatCost(micros, locale),
     day: (date: string, long = false) => formatDay(date, long, locale),
+    relative: (iso: string) => formatRelative(iso, locale),
+    dateTime: (iso: string) => formatDateTime(iso, locale),
+    weekday: (day: number) => formatWeekday(day, locale),
   };
 }

@@ -13,7 +13,7 @@ export type NotifyInput = {
   kind: NotificationKind;
   title: string;
   body: string;
-  /** App path, e.g. /projects/proj_…?thread=thr_… */
+  /** App path, e.g. /projects/proj_…/threads/thr_… */
   path: string;
   /** Public origin for links in emails; null leaves links out. */
   origin: string | null;

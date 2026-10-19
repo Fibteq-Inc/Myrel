@@ -21,7 +21,7 @@ export const Notification = z.object({
   title: z.string(),
   /** A short excerpt of what happened, plain text. */
   body: z.string(),
-  /** App path to open, e.g. /projects/proj_…?thread=thr_… */
+  /** App path to open, e.g. /projects/proj_…/threads/thr_… */
   url: z.string(),
   readAt: Timestamp.nullable(),
   createdAt: Timestamp,
