@@ -114,20 +114,36 @@ export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
 }
 
-export type ChecklistItem = { state: "done" | "active" | "todo" | "failed"; text: string };
+export type ChecklistItem = {
+  state: "done" | "active" | "todo" | "skipped" | "failed";
+  text: string;
+  /** 0 for a step of the agent's plan; 1 and 2 for the steps of a task nested under it. */
+  depth: number;
+};
 
-/** Parses an `update_status` checklist: a header line, then ✓ / ✱ / ○ steps (✗ marks a failed step). */
+/**
+ * Parses a thread's checklist: a header line, then ✓ / ✱ / ○ steps (✗ marks a
+ * failed step, – one the agent decided to skip). Indented steps belong to the
+ * step above them.
+ */
 export function parseChecklist(text: string): { title: string; items: ChecklistItem[] } {
-  // The just-finished step may be bolded: **✓ step**.
-  const lines = text.split("\n").map((l) => l.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim());
-  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo", "✗": "failed" };
+  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo", "–": "skipped", "✗": "failed" };
   const items: ChecklistItem[] = [];
   let title = "";
-  for (const line of lines) {
+  for (const raw of text.split("\n")) {
+    const indent = raw.length - raw.trimStart().length;
+    // The just-finished step may be bolded: **✓ step**.
+    const line = raw.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim();
     if (!line) continue;
     const state = marks[line[0]!];
-    if (state) items.push({ state, text: line.slice(1).trim() });
+    if (state) items.push({ state, text: line.slice(1).trim(), depth: Math.min(2, Math.floor(indent / 2)) });
     else if (!title && items.length === 0) title = line;
   }
   return { title, items };
+}
+
+/** How far a checklist is: its top-level steps done, out of those not skipped. */
+export function checklistProgress(items: ChecklistItem[]): { done: number; total: number } {
+  const steps = items.filter((i) => i.depth === 0 && i.state !== "skipped");
+  return { done: steps.filter((i) => i.state === "done").length, total: steps.length };
 }

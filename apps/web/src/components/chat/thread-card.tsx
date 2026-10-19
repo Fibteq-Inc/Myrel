@@ -38,7 +38,13 @@ export function ThreadCard({ projectId, thread, replies }: { projectId: string; 
       >
         {live && <SquareTerminal size={13} className="flex-none text-subtle" aria-hidden="true" />}
         <span className="truncate">{activity.label}</span>
-        {live && <span aria-hidden="true" className="ml-auto size-1.5 flex-none animate-pulse rounded-full bg-accent" />}
+        {live && activity.progress && <span className="ml-auto flex-none text-subtle">{activity.progress}</span>}
+        {live && (
+          <span
+            aria-hidden="true"
+            className={cn("size-1.5 flex-none animate-pulse rounded-full bg-accent", !activity.progress && "ml-auto")}
+          />
+        )}
       </span>
     </Link>
   );

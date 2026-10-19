@@ -5,6 +5,7 @@ import {
   applyMessage,
   applyTasks,
   artifactList,
+  checklistProgress,
   emptyProjectState,
   parseChecklist,
   projectChat,
@@ -94,12 +95,27 @@ describe("project state", () => {
     expect(parseChecklist("Research\n\n✓ Read docs\n**✓ Compared options**\n✱ Writing summary\n○ Reply")).toEqual({
       title: "Research",
       items: [
-        { state: "done", text: "Read docs" },
-        { state: "done", text: "Compared options" },
-        { state: "active", text: "Writing summary" },
-        { state: "todo", text: "Reply" },
+        { state: "done", text: "Read docs", depth: 0 },
+        { state: "done", text: "Compared options", depth: 0 },
+        { state: "active", text: "Writing summary", depth: 0 },
+        { state: "todo", text: "Reply", depth: 0 },
       ],
     });
+  });
+
+  it("parses skipped steps and a task's steps nested under the plan", () => {
+    const { items } = parseChecklist("Fix\n\n✓ Read code\n✱ Fix bug\n  ✓ Sandbox ready\n  ✱ Agent working\n    ✓ edit a.ts\n– Deploy\n○ Reply");
+    expect(items.map((i) => [i.state, i.depth])).toEqual([
+      ["done", 0],
+      ["active", 0],
+      ["done", 1],
+      ["active", 1],
+      ["done", 2],
+      ["skipped", 0],
+      ["todo", 0],
+    ]);
+    // Only the plan's own steps count, and a skipped step is not work left.
+    expect(checklistProgress(items)).toEqual({ done: 1, total: 3 });
   });
 });
 

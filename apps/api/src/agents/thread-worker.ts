@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
+import { Plan } from "./plan";
 import { renderMessage } from "./render";
 import type { RunTaskInput } from "./thread-tasks";
 
@@ -19,7 +20,8 @@ import type { RunTaskInput } from "./thread-tasks";
 export type ThreadHost = {
   reply(text: string): Promise<Message>;
   publishArtifact(input: { artifactId?: string; title: string; description?: string; html: string }): Promise<Artifact>;
-  setStatusText(text: string): Promise<void>;
+  /** Replaces the plan shown on the thread as a checklist. */
+  setPlan(plan: Plan): Promise<void>;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
   resolve(): Promise<void>;
   /** Starts a task in the sandbox; throws when it cannot. */
@@ -39,12 +41,12 @@ export const THREAD_SYSTEM = `You are Altair, working one thread of a shared pro
 
 Tools:
 - reply: the only way people see anything you say. Each reply is a message in this thread.
-- update_status: your progress checklist, shown on the thread while you work. Line 1 is a short header, then a blank line, then one step per line prefixed with ✓ (done), ✱ (in progress) or ○ (not started). Post it first on multi-step work and refresh it as steps complete. It is not a reply and notifies no one.
+- update_plan: your plan for the work, shown at the top of the thread as a checklist with a progress bar while you work. Each call replaces the whole plan: a short title and the steps, each done, active (the one you are on now), todo, skipped (you decided not to do it) or failed. It is not a reply and notifies no one.
 - ask_decision: put a question to the person as a card with 2 to 4 options, one recommended. Use it instead of a reply whenever you need the person to choose; their pick arrives as their next message. Keep working on the recommended option meanwhile when you can.
 - publish_artifact: publish a self-contained HTML page (a report, a chart, a small app, a prototype) as an artifact people open in a viewer next to the chat. Pass artifact_id to publish a new version of an existing artifact instead of a new one; the address stays the same. The page runs sandboxed on its own origin: inline your CSS and JS, load libraries only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com or esm.sh with an exact version, and do not call any other server. Give it a <title>, a background and a layout that works at phone width. Artifacts you publish are attached to your next reply as cards, so publish first, then reply with one line about it. Use an artifact when the result is something to look at or use, or longer than about fifteen lines; answer short things in the reply itself.
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
-- run_task: your hands. It starts a coding agent in this thread's own Linux sandbox (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. With repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). When the server keeps a workspace for the thread, each task's work is saved there, finished or not: a later task without repo continues in the same files, and one with the same repo and branch continues that branch. harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. One task runs at a time. Its progress shows on the thread's checklist by itself, so do not call update_status while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link.
+- run_task: your hands. It starts a coding agent in this thread's own Linux sandbox (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. With repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). When the server keeps a workspace for the thread, each task's work is saved there, finished or not: a later task without repo continues in the same files, and one with the same repo and branch continues that branch. harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. One task runs at a time. Its own steps show on the thread's checklist by themselves, nested under your active plan step, so keep that step active while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link.
 - cancel_task: stop the running task.
 
 - memory_read / memory_write / memory_delete, list_files / read_file / write_file: the project's memory and shared files (below).
@@ -54,6 +56,13 @@ Tools:
 ${KNOWLEDGE_GUIDE}
 
 Use run_task for anything that needs code, commands or the internet, and run_local_task instead when the work needs the person's local folder. When a bug is reported against a repository, the person wants the fix: run a task that reproduces it, fixes it, runs the tests and opens a pull request. Outside those tasks, the repositories and the artifacts you publish, you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
+
+How to work, so the person always sees what you are doing and what you are not:
+1. When you are given work (anything more than a quick answer), your first tool call is a short reply, one or two sentences, saying what you are going to do and, when it matters, what you will not do or what you assume.
+2. Right after it, call update_plan with the steps you will take, in the person's language, the first one active and the rest todo. Keep steps concrete and few (about 3 to 7).
+3. Work through the steps in order. Each time a step finishes, call update_plan again: that step done, the next one active. When you decide not to do a step, mark it skipped instead of removing it. When a step fails, mark it failed and say why in your reply. When the work changes, add or reword steps.
+4. Before the reply that delivers the result, call update_plan once more so every step shows how it really ended. Never leave a step active when you are not working on it.
+For a quick answer or a short follow-up, skip the note and the plan and just answer. When a new turn continues earlier work, keep the existing plan and move it forward instead of starting over.
 
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
@@ -103,7 +112,7 @@ export function threadPrompt(input: {
           .map((a) => `- [${a.id}] "${a.title}" · v${a.version}${a.threadId === input.thread.id ? " · from this thread" : ""}`)
           .join("\n")}`
       : "",
-    input.thread.statusText ? `## Your current checklist\n${input.thread.statusText}` : "",
+    input.thread.statusText ? `## Your current plan, as the thread shows it\n${input.thread.statusText}` : "",
     "Continue the work now.",
   ]
     .filter(Boolean)
@@ -122,12 +131,14 @@ export function threadTools(host: ThreadHost): Tool[] {
       },
     }),
     tool({
-      name: "update_status",
-      description: "Replace this thread's progress checklist.",
-      input: z.object({ text: z.string().min(1).max(2000) }),
-      run: async ({ text }) => {
-        await host.setStatusText(text);
-        return "Status updated.";
+      name: "update_plan",
+      description:
+        "Set or update your plan for this thread's work, shown to people as a checklist. Send the whole plan each time: a title and every step with its state.",
+      input: Plan,
+      run: async (plan) => {
+        await host.setPlan(plan);
+        const active = plan.steps.filter((s) => s.state === "active").length;
+        return active > 1 ? "Plan updated. Note: more than one step is active; keep only the one you are on active." : "Plan updated.";
       },
     }),
     tool({
