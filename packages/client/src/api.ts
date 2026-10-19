@@ -25,6 +25,7 @@ import type {
   ProviderId,
   ProviderInfo,
   PutMemoryInput,
+  PairRunnerResult,
   Runner,
   RunnerDirListing,
   RunnerFolder,
@@ -391,6 +392,11 @@ export class ApiClient {
   /** A short-lived code for `altair-runner pair`. */
   createPairingCode() {
     return this.request<RunnerPairingCode>("/api/runners/pairing", { method: "POST", body: {} });
+  }
+
+  /** Trades a pairing code for a runner login, as `altair-runner pair` does (the desktop app pairs itself). */
+  pairRunner(input: { code: string; name: string; hostname?: string; platform?: string }) {
+    return this.request<PairRunnerResult>("/api/runner/pair", { method: "POST", body: input });
   }
 
   removeRunner(id: string) {

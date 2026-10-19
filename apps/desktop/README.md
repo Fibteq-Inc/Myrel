@@ -13,13 +13,27 @@ before the app loads:
 | Links | opened in the default browser |
 | `altair://` links | `altair://connect?server=https://altair.example.com` switches server after a confirmation; any other path opens that page, e.g. `altair://projects/<id>` |
 | Updates | checks GitHub releases at startup and offers to install |
+| Local folders | the bundled `altair-runner` (see below) |
 
 The app is not tied to one server: on first launch it asks for an Altair address (hosted or self-hosted)
-and checks it with `GET /api/info`. A build can preselect a server with `VITE_API_URL`.
+and checks it with `GET /api/info`. A build can preselect a server with `VITE_API_URL`; release builds
+default to `https://altair.fibteq.io` (repository variable `ALTAIR_DESKTOP_API_URL` overrides it).
+
+## Bundled altair-runner
+
+`packages/altair-runner` ships inside the app as a Tauri sidecar, compiled to one executable with
+`bun build --compile` (`scripts/build-runner.mjs`, run before every `tauri dev` / `tauri build`). On the
+Devices page, **Connect this computer** pairs it in one click: the app asks the server for a pairing code,
+trades it for a runner login and keeps that login in the OS keychain. The runner gets it through
+`ALTAIR_SERVER` / `ALTAIR_RUNNER_TOKEN` and never writes it to disk. It runs while the app is open, starts
+again at the next launch, and gets the login shell's `PATH` so it finds `claude`, `codex` and `gemini`.
+Folders are shared from the Devices page like for any other computer; they live in the app data folder
+(`runner/config.json`), separate from a terminal `npx altair-runner` install.
 
 ## Develop
 
-Install the [Tauri prerequisites](https://tauri.app/start/prerequisites/) (Rust, plus WebKitGTK on Linux), then:
+Install the [Tauri prerequisites](https://tauri.app/start/prerequisites/) (Rust, plus WebKitGTK on Linux) and
+[Bun](https://bun.sh) (to compile the runner), then:
 
 ```sh
 pnpm install

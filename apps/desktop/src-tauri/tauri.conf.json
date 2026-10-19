@@ -3,9 +3,9 @@
   "productName": "Altair",
   "identifier": "io.fibteq.altair",
   "build": {
-    "beforeDevCommand": "pnpm exec vite",
+    "beforeDevCommand": "node scripts/build-runner.mjs && pnpm exec vite",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm exec vite build",
+    "beforeBuildCommand": "node scripts/build-runner.mjs && pnpm exec vite build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -44,16 +44,27 @@
       "minimumSystemVersion": "11.0"
     },
     "linux": {
-      "deb": { "depends": [] }
-    }
+      "deb": {
+        "depends": []
+      }
+    },
+    "externalBin": [
+      "binaries/altair-runner"
+    ]
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["altair"] }
+      "desktop": {
+        "schemes": [
+          "altair"
+        ]
+      }
     },
     "updater": {
       "pubkey": "",
-      "endpoints": ["https://github.com/Fibteq-Inc/altair/releases/latest/download/latest.json"]
+      "endpoints": [
+        "https://github.com/Fibteq-Inc/altair/releases/latest/download/latest.json"
+      ]
     }
   }
 }

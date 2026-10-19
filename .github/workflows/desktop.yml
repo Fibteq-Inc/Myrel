@@ -18,7 +18,9 @@ on:
     paths:
       - apps/desktop/**
       - apps/web/**
+      - packages/altair-runner/**
       - packages/client/**
+      - packages/i18n/**
       - packages/protocol/**
       - pnpm-lock.yaml
       - .github/workflows/desktop.yml
@@ -56,6 +58,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Compiles the bundled altair-runner sidecar into one executable (apps/desktop/scripts/build-runner.mjs).
+      - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
@@ -103,7 +107,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_API_URL: ${{ vars.ALTAIR_DESKTOP_API_URL }}
+          VITE_API_URL: ${{ vars.ALTAIR_DESKTOP_API_URL || 'https://altair.fibteq.io' }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
