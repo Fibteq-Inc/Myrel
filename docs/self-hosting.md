@@ -223,8 +223,8 @@ Its checklist and terminal output stream into the thread.
   GitHub connection. Public repositories clone without it.
 - Containers sleep after 10 idle minutes; a thread's next task wakes its own.
 
-To run without a sandbox, remove the `SANDBOX` binding, its `v2` migration
-entry and the `containers` block from `apps/api/wrangler.jsonc`. `run_task`
+To run without a sandbox, remove the `SANDBOX` binding and the `containers`
+block from `apps/api/wrangler.jsonc` (keep the migrations). `run_task`
 then tells the agent there is no sandbox.
 
 ### Web UI on another origin
