@@ -98,6 +98,7 @@ export const tr: Catalog = {
   "checklist.inProgress": "Devam ediyor",
   "checklist.stopped": "Burada durdu",
   "checklist.todo": "Başlamadı",
+  "checklist.skipped": "Atlandı",
   "decision.answered": "Yanıtlandı",
   "decision.yourCall": "Karar senin",
   "decision.recommended": "önerilen",

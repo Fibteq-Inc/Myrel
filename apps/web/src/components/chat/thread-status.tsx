@@ -1,4 +1,4 @@
-import { parseChecklist } from "@altair/client";
+import { checklistProgress, parseChecklist } from "@altair/client";
 import type { MessageKey, Translate } from "@altair/i18n";
 import type { Thread } from "@altair/protocol";
 import { CircleAlert, CircleCheck, CircleDot, CirclePause, LoaderCircle } from "lucide-react";
@@ -23,18 +23,27 @@ export function threadStatus(thread: Thread, t: Translate) {
   return { label: t(label), tone };
 }
 
-/** What the thread is doing right now: its active checklist step, else its status. */
-export function threadActivity(thread: Thread, t: Translate) {
+/**
+ * What the thread is doing right now: its active checklist step and how far
+ * its plan is (e.g. "2/5"), else its status.
+ */
+export function threadActivity(thread: Thread, t: Translate): { label: string; tone: string; progress?: string } {
   if (thread.status === "working" && !thread.resolved && thread.statusText) {
-    const step = currentStep(thread.statusText);
-    if (step) return { label: step, tone: "text-muted" };
+    const { items } = parseChecklist(thread.statusText);
+    const step = activeStep(items);
+    const { done, total } = checklistProgress(items);
+    if (step) return { label: step, tone: "text-muted", progress: total > 1 ? `${done}/${total}` : undefined };
   }
   return threadStatus(thread, t);
 }
 
 export function currentStep(statusText: string) {
-  const { items } = parseChecklist(statusText);
-  return items.find((i) => i.state === "active")?.text ?? null;
+  return activeStep(parseChecklist(statusText).items);
+}
+
+/** The innermost active step: a running task's own step says more than the plan step it sits under. */
+function activeStep(items: ReturnType<typeof parseChecklist>["items"]) {
+  return items.findLast((i) => i.state === "active")?.text ?? null;
 }
 
 export function ThreadStatusIcon({ thread, size = 16 }: { thread: Thread; size?: number }) {

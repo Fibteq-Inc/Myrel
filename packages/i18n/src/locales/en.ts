@@ -101,6 +101,7 @@ export const en = {
   "checklist.inProgress": "In progress",
   "checklist.stopped": "Stopped here",
   "checklist.todo": "Not started",
+  "checklist.skipped": "Skipped",
   "decision.answered": "Answered",
   "decision.yourCall": "Your call",
   "decision.recommended": "recommended",
