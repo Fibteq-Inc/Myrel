@@ -1,4 +1,5 @@
-@import "tailwindcss";
+/* Scan apps/web for classes even when another app (apps/desktop) builds this stylesheet. */
+@import "tailwindcss" source("..");
 
 /* Altair is dark-first (see the design canvas); `dark:` variants always apply. */
 @custom-variant dark (&:where(.dark, .dark *));

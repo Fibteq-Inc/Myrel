@@ -1,0 +1,37 @@
+{
+  "name": "@altair/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "vite build",
+    "bundle": "tauri build",
+    "icons": "tauri icon icon.svg",
+    "tauri": "tauri",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@altair/client": "workspace:*",
+    "@altair/web": "workspace:*",
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-deep-link": "2.6.2",
+    "@tauri-apps/plugin-dialog": "2.8.3",
+    "@tauri-apps/plugin-fs": "2.7.1",
+    "@tauri-apps/plugin-notification": "2.7.0",
+    "@tauri-apps/plugin-opener": "2.7.2",
+    "@tauri-apps/plugin-process": "2.4.0",
+    "@tauri-apps/plugin-store": "2.5.0",
+    "@tauri-apps/plugin-updater": "2.14.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/router-plugin": "1.168.47",
+    "@tauri-apps/cli": "2.12.3",
+    "@types/node": "22.20.5",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.4"
+  }
+}
