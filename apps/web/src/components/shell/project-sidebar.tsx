@@ -1,4 +1,6 @@
 import type { SocketStatus } from "@altair/client";
+import type { Translate } from "@altair/i18n";
+import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -6,7 +8,7 @@ import { Check, ChevronDown, ChevronRight, ChevronsUpDown, Plus, Search, Setting
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
-import { cn, Kbd, relativeTime } from "../../lib/ui";
+import { cn, Kbd, useRelativeTime } from "../../lib/ui";
 import { threadActivity, ThreadStatusIcon } from "../chat/thread-status";
 import { useOpenProjectSettings } from "../project-settings-dialog";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
@@ -14,6 +16,7 @@ import { Sidebar, SidebarCollapse } from "./shell";
 
 /** The project's sidebar: project switcher, search, project chat, threads, connection. */
 export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
+  const t = useT();
   const { project, members, state, status } = useProjectContext();
   const [query, setQuery] = useState("");
   const [showResolved, setShowResolved] = useState(false);
@@ -40,7 +43,7 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
   }, [state.threads, query]);
 
   return (
-    <Sidebar label="Project and threads" collapsible>
+    <Sidebar label={t("sidebar.label")} collapsible>
       <div className="flex flex-col gap-3 px-3.5 pb-2.5 pt-3.5">
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
@@ -56,8 +59,8 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search threads"
-              aria-label="Search threads"
+              placeholder={t("sidebar.searchThreads")}
+              aria-label={t("sidebar.searchThreads")}
               className="min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-subtle"
             />
             <span className="hidden md:inline">
@@ -67,8 +70,8 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
           <Link
             to="/projects/$projectId"
             params={{ projectId: project.id }}
-            aria-label="New request"
-            title="New request"
+            aria-label={t("sidebar.newRequest")}
+            title={t("sidebar.newRequest")}
             className="flex size-9 flex-none items-center justify-center rounded-lg border border-[#26262b] bg-[#19191d] text-fg hover:bg-hover"
           >
             <SquarePen size={16} />
@@ -79,12 +82,12 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         <div className="px-2 pt-1">
           <div className="flex items-center px-2.5 pb-1.5 text-xs text-subtle">
-            Threads
+            {t("sidebar.threads")}
             <span className="ml-auto font-mono">{open.length}</span>
           </div>
           {open.length === 0 && (
             <p className="px-2.5 py-2 text-[13px] text-subtle">
-              {query ? "No threads match." : "Threads open here when Altair takes on work."}
+              {query ? t("sidebar.noMatch") : t("sidebar.noThreads")}
             </p>
           )}
           <ul className="flex flex-col gap-0.5">
@@ -104,7 +107,7 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
                 className="mt-3 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-subtle hover:text-fg"
               >
                 {showResolved ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
-                Resolved
+                {t("sidebar.resolved")}
                 <span className="ml-auto font-mono">{resolved.length}</span>
               </button>
               {showResolved && (
@@ -127,7 +130,9 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
 }
 
 function ThreadRow({ projectId, thread }: { projectId: string; thread: Thread }) {
-  const activity = threadActivity(thread);
+  const t = useT();
+  const relativeTime = useRelativeTime();
+  const activity = threadActivity(thread, t);
   return (
     <Link
       to="/projects/$projectId/threads/$threadId"
@@ -156,9 +161,10 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
   const { data: projects = [] } = useQuery(projectsQuery);
   const navigate = useNavigate();
   const openSettings = useOpenProjectSettings();
+  const t = useT();
   return (
     <Menu
-      label="Switch project"
+      label={t("sidebar.switchProject")}
       className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1.5 text-left hover:bg-hover"
       panelClassName="w-[248px]"
       trigger={
@@ -166,7 +172,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
           <ProjectBadge name={name} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate font-semibold">{name}</span>
-            <span className="text-xs text-subtle">{memberCount === 1 ? "1 member" : `${memberCount} members`}</span>
+            <span className="text-xs text-subtle">{t("sidebar.members", { count: memberCount })}</span>
           </span>
           <ChevronsUpDown size={15} className="flex-none text-subtle" aria-hidden="true" />
         </>
@@ -174,7 +180,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
     >
       {(close) => (
         <>
-          <MenuLabel>Projects</MenuLabel>
+          <MenuLabel>{t("projects.title")}</MenuLabel>
           <div className="max-h-72 overflow-y-auto">
             {projects.map((p) => (
               <MenuItem
@@ -186,7 +192,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
                 }}
               >
                 <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                {p.id === current && <Check size={14} className="flex-none text-accent" aria-label="Current" />}
+                {p.id === current && <Check size={14} className="flex-none text-accent" aria-label={t("sidebar.current")} />}
               </MenuItem>
             ))}
           </div>
@@ -198,7 +204,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
               openSettings();
             }}
           >
-            Project settings
+            {t("chat.projectSettings")}
           </MenuItem>
           <MenuItem
             icon={<Plus size={15} />}
@@ -207,7 +213,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
               void navigate({ to: "/" });
             }}
           >
-            New project
+            {t("sidebar.newProject")}
           </MenuItem>
         </>
       )}
@@ -228,14 +234,19 @@ export function ProjectBadge({ name, size = 28 }: { name: string; size?: number 
   );
 }
 
-const CONNECTION: Record<SocketStatus, { label: string; detail: string; dot: string }> = {
-  open: { label: "Live", detail: "Updates arrive as they happen", dot: "bg-ok shadow-[0_0_0_3px_rgba(79,203,141,0.18)]" },
-  connecting: { label: "Connecting", detail: "Reaching the server", dot: "bg-warn" },
-  closed: { label: "Offline", detail: "Retrying in the background", dot: "bg-bad" },
+const CONNECTION: Record<SocketStatus, (t: Translate) => { label: string; detail: string; dot: string }> = {
+  open: (t) => ({
+    label: t("connection.open"),
+    detail: t("connection.openDetail"),
+    dot: "bg-ok shadow-[0_0_0_3px_rgba(79,203,141,0.18)]",
+  }),
+  connecting: (t) => ({ label: t("connection.connecting"), detail: t("connection.connectingDetail"), dot: "bg-warn" }),
+  closed: (t) => ({ label: t("connection.closed"), detail: t("connection.closedDetail"), dot: "bg-bad" }),
 };
 
 function ConnectionCard({ status }: { status: SocketStatus }) {
-  const c = CONNECTION[status] ?? CONNECTION.connecting;
+  const t = useT();
+  const c = (CONNECTION[status] ?? CONNECTION.connecting)(t);
   return (
     <div className="mx-3 mb-3.5 flex items-center gap-2.5 rounded-[10px] border border-[#26262b] bg-[#16161a] px-3 py-2.5">
       {status === "closed" ? (

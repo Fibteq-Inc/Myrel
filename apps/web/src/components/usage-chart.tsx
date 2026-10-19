@@ -1,6 +1,7 @@
+import { useT } from "@altair/i18n/react";
 import type { UsageDay } from "@altair/protocol";
 import { useLayoutEffect, useRef, useState } from "react";
-import { formatCost, formatDay, formatTokens } from "../lib/format";
+import { useFormat } from "../lib/format";
 
 export type ChartMetric = "tokens" | "cost";
 
@@ -13,6 +14,8 @@ const GAP = 2;
 
 /** Daily bars: input + output tokens stacked, or estimated cost. Hover a day for its numbers. */
 export function UsageChart({ days, metric }: { days: UsageDay[]; metric: ChartMetric }) {
+  const t = useT();
+  const { tokens: formatTokens, cost: formatCost, day: formatDay } = useFormat();
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
 
@@ -26,7 +29,7 @@ export function UsageChart({ days, metric }: { days: UsageDay[]; metric: ChartMe
   const barW = Math.max(2, Math.min(28, step * 0.62));
   const y = (v: number) => PAD.top + plotH - (max ? (v / max) * plotH : 0);
   const fmt = (v: number) => (metric === "tokens" ? formatTokens(v) : formatCost(v));
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => t * max);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * max);
   const labelEvery = Math.ceil(days.length / Math.max(1, Math.floor(plotW / 64)));
   const colors = metric === "tokens" ? [SERIES.input, SERIES.output] : [SERIES.input];
 
@@ -35,12 +38,12 @@ export function UsageChart({ days, metric }: { days: UsageDay[]; metric: ChartMe
   return (
     <div ref={ref} className="relative" onMouseLeave={() => setHover(null)}>
       {width > 0 && (
-        <svg width={width} height={HEIGHT} role="img" aria-label={`Daily ${metric === "tokens" ? "tokens" : "estimated cost"}`}>
-          {ticks.map((t, i) => (
+        <svg width={width} height={HEIGHT} role="img" aria-label={metric === "tokens" ? t("usage.chartTokens") : t("usage.chartCost")}>
+          {ticks.map((tick, i) => (
             <g key={i}>
-              <line x1={PAD.left} x2={width - PAD.right} y1={y(t)} y2={y(t)} stroke="var(--color-line)" />
-              <text x={PAD.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-subtle text-[11px] tabular-nums">
-                {fmt(t)}
+              <line x1={PAD.left} x2={width - PAD.right} y1={y(tick)} y2={y(tick)} stroke="var(--color-line)" />
+              <text x={PAD.left - 8} y={y(tick)} dy="0.32em" textAnchor="end" className="fill-subtle text-[11px] tabular-nums">
+                {fmt(tick)}
               </text>
             </g>
           ))}
@@ -96,16 +99,16 @@ export function UsageChart({ days, metric }: { days: UsageDay[]; metric: ChartMe
           rows={
             metric === "tokens"
               ? [
-                  { color: SERIES.input, label: "Input", value: formatTokens(hovered.inputTokens) },
-                  { color: SERIES.output, label: "Output", value: formatTokens(hovered.outputTokens) },
-                  { label: "Cost", value: formatCost(hovered.costMicros) },
+                  { color: SERIES.input, label: t("usage.input"), value: formatTokens(hovered.inputTokens) },
+                  { color: SERIES.output, label: t("usage.output"), value: formatTokens(hovered.outputTokens) },
+                  { label: t("usage.costShort"), value: formatCost(hovered.costMicros) },
                 ]
               : [
-                  { color: SERIES.input, label: "Cost", value: formatCost(hovered.costMicros) },
-                  { label: "Tokens", value: formatTokens(hovered.inputTokens + hovered.outputTokens) },
+                  { color: SERIES.input, label: t("usage.costShort"), value: formatCost(hovered.costMicros) },
+                  { label: t("usage.tokens"), value: formatTokens(hovered.inputTokens + hovered.outputTokens) },
                 ]
           }
-          footer={`${hovered.calls} model call${hovered.calls === 1 ? "" : "s"}`}
+          footer={t("usage.modelCalls", { count: hovered.calls })}
         />
       )}
     </div>

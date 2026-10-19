@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { ProjectFile } from "@altair/protocol";
 import { ArrowUp, Paperclip } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
@@ -28,6 +29,7 @@ export function Composer({
   tools?: ReactNode;
   autoFocus?: boolean;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -42,7 +44,7 @@ export function Composer({
       setPending((list) => [...list, { id, name: file.name }]);
       onUpload(file).then(
         (uploaded) => setPending((list) => list.map((p) => (p.id === id ? { ...p, file: uploaded } : p))),
-        (err) => setPending((list) => list.map((p) => (p.id === id ? { ...p, error: errorMessage(err) } : p))),
+        (err) => setPending((list) => list.map((p) => (p.id === id ? { ...p, error: errorMessage(err, t) } : p))),
       );
     }
   }
@@ -110,8 +112,8 @@ export function Composer({
                   e.stopPropagation();
                   picker.current?.click();
                 }}
-                aria-label="Attach files"
-                title="Attach files"
+                aria-label={t("composer.attach")}
+                title={t("composer.attach")}
                 className="flex size-8 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
               >
                 <Paperclip size={16} />
@@ -130,11 +132,11 @@ export function Composer({
           )}
           {tools}
           <span className="ml-auto hidden pr-2 text-[11px] text-subtle sm:inline">
-            {draft ? "Shift + Enter for a new line" : ""}
+            {draft ? t("composer.newLineHint") : ""}
           </span>
           <button
             type="submit"
-            aria-label="Send"
+            aria-label={t("composer.send")}
             disabled={(!draft.trim() && ready.length === 0) || uploading || disabled}
             className="flex size-8 flex-none items-center justify-center rounded-[10px] bg-accent text-ground transition-opacity disabled:opacity-35 max-sm:ml-auto"
           >

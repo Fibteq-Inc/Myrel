@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { DECISION_LANG, parseDecision } from "@altair/protocol";
 import { Check, Copy } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -55,13 +56,15 @@ function CodeBlock({ lang, children }: { lang?: string; children: string }) {
   );
 }
 
-export function CopyButton({ text, className = "", label = "Copy" }: { text: string; className?: string; label?: string }): ReactNode {
+export function CopyButton({ text, className = "", label }: { text: string; className?: string; label?: string }): ReactNode {
+  const t = useT();
   const [copied, setCopied] = useState(false);
+  label ??= t("common.copy");
   return (
     <button
       type="button"
-      aria-label={copied ? "Copied" : label}
-      title={copied ? "Copied" : label}
+      aria-label={copied ? t("common.copied") : label}
+      title={copied ? t("common.copied") : label}
       onClick={async () => {
         await navigator.clipboard.writeText(text);
         setCopied(true);

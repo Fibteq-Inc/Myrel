@@ -1,4 +1,5 @@
 import type { Artifact, ArtifactRef, Thread } from "@altair/protocol";
+import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -18,7 +19,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { cn, IconButton, relativeTime } from "../lib/ui";
+import { cn, IconButton, useRelativeTime } from "../lib/ui";
 
 /**
  * Artifacts in the UI: cards under the messages that delivered them, the viewer
@@ -59,6 +60,7 @@ export function ArtifactCards({
   artifacts: Record<string, Artifact>;
   openId?: string;
 }) {
+  const t = useT();
   const cards = refs ?? [];
   if (cards.length === 0) return null;
   return (
@@ -79,7 +81,7 @@ export function ArtifactCards({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13.5px] font-semibold">{current?.title ?? a.title}</span>
               <span className="block truncate text-xs text-subtle">
-                {version ? `Version ${a.version} · latest is ${latest}` : `Artifact · version ${a.version}`}
+                {version ? t("artifacts.olderVersion", { version: a.version, latest }) : t("artifacts.cardVersion", { version: a.version })}
               </span>
             </span>
             <ChevronRight size={15} className="flex-none text-subtle group-hover:text-muted" aria-hidden="true" />
@@ -135,6 +137,7 @@ export function ArtifactViewer({
   leading?: ReactNode;
   className?: string;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<"preview" | "code">("preview");
   const [reloads, setReloads] = useState(0);
   const detail = useQuery(artifactQuery(projectId, artifactId));
@@ -168,16 +171,16 @@ export function ArtifactViewer({
 
   return (
     <section
-      aria-label={artifact ? `Artifact: ${artifact.title}` : "Artifact"}
+      aria-label={artifact ? t("artifacts.labelNamed", { title: artifact.title }) : t("artifacts.artifact")}
       className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}
     >
       <div className="flex h-[52px] flex-none items-center gap-2 border-b border-line px-3">
         {leading}
         <AppWindow size={16} className="flex-none text-accent" aria-hidden="true" />
-        <h2 className="min-w-0 flex-1 truncate text-[14px] font-semibold">{artifact?.title ?? "Artifact"}</h2>
+        <h2 className="min-w-0 flex-1 truncate text-[14px] font-semibold">{artifact?.title ?? t("artifacts.artifact")}</h2>
         {versions.length > 1 && (
           <select
-            aria-label="Version"
+            aria-label={t("artifacts.version")}
             value={version}
             onChange={(e) => {
               const v = Number(e.target.value);
@@ -188,7 +191,7 @@ export function ArtifactViewer({
             {versions.map((v) => (
               <option key={v.version} value={v.version}>
                 v{v.version}
-                {v.version === artifact?.version ? " (latest)" : ""}
+                {v.version === artifact?.version ? ` ${t("artifacts.latest")}` : ""}
               </option>
             ))}
           </select>
@@ -197,15 +200,15 @@ export function ArtifactViewer({
           <Tabs value={tab} onChange={setTab} />
           <IconButton
             type="button"
-            aria-label="Reload"
-            title="Reload"
+            aria-label={t("artifacts.reload")}
+            title={t("artifacts.reload")}
             onClick={() => setReloads((n) => n + 1)}
             className="max-sm:hidden"
           >
             <RotateCw size={15} />
           </IconButton>
           <CopyLink url={artifactAppUrl(projectId, artifactId)} />
-          <IconButton type="button" aria-label="Download HTML" title="Download HTML" onClick={download} className="max-sm:hidden">
+          <IconButton type="button" aria-label={t("artifacts.download")} title={t("artifacts.download")} onClick={download} className="max-sm:hidden">
             <Download size={15} />
           </IconButton>
           {view.data?.url && (
@@ -213,8 +216,8 @@ export function ArtifactViewer({
               href={view.data.url}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Open in a new tab"
-              title="Open in a new tab"
+              aria-label={t("artifacts.openTab")}
+              title={t("artifacts.openTab")}
               className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
             >
               <ExternalLink size={15} />
@@ -225,7 +228,7 @@ export function ArtifactViewer({
 
       <div className="relative min-h-0 flex-1">
         {detail.isError ? (
-          <Empty title="This artifact could not be found" body="It may belong to another project, or the link is wrong." />
+          <Empty title={t("artifacts.notFound")} body={t("artifacts.notFoundBody")} />
         ) : tab === "code" ? (
           source.data !== undefined ? (
             <pre className="absolute inset-0 overflow-auto bg-rail p-4 font-mono text-xs leading-relaxed text-body">
@@ -236,14 +239,14 @@ export function ArtifactViewer({
           )
         ) : view.data && !view.data.url ? (
           <Empty
-            title="Previews are not set up on this server"
-            body="Set ARTIFACTS_URL and ARTIFACT_SIGNING_SECRET on the API Worker and deploy the artifact Worker. The Code tab still works."
+            title={t("artifacts.noPreviews")}
+            body={t("artifacts.noPreviewsBody")}
           />
         ) : view.data?.url ? (
           <iframe
             key={`${view.data.url}-${reloads}`}
             src={view.data.url}
-            title={artifact?.title ?? "Artifact"}
+            title={artifact?.title ?? t("artifacts.artifact")}
             sandbox={IFRAME_SANDBOX}
             referrerPolicy="no-referrer"
             className="absolute inset-0 size-full border-0 bg-white"
@@ -257,6 +260,7 @@ export function ArtifactViewer({
 }
 
 function Tabs({ value, onChange }: { value: "preview" | "code"; onChange: (v: "preview" | "code") => void }) {
+  const t = useT();
   const item = (v: "preview" | "code", label: string, icon: ReactNode) => (
     <button
       type="button"
@@ -273,14 +277,15 @@ function Tabs({ value, onChange }: { value: "preview" | "code"; onChange: (v: "p
     </button>
   );
   return (
-    <div role="tablist" aria-label="View" className="mr-1 flex rounded-lg border border-edge bg-raised p-0.5">
-      {item("preview", "Preview", <Eye size={13} aria-hidden="true" />)}
-      {item("code", "Code", <Code size={13} aria-hidden="true" />)}
+    <div role="tablist" aria-label={t("artifacts.view")} className="mr-1 flex rounded-lg border border-edge bg-raised p-0.5">
+      {item("preview", t("artifacts.preview"), <Eye size={13} aria-hidden="true" />)}
+      {item("code", t("artifacts.code"), <Code size={13} aria-hidden="true" />)}
     </div>
   );
 }
 
 function CopyLink({ url }: { url: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   async function copy() {
     // The in-app address is stable and opens the latest version; signed links expire.
@@ -289,7 +294,7 @@ function CopyLink({ url }: { url: string }) {
     setTimeout(() => setCopied(false), 1500);
   }
   return (
-    <IconButton type="button" aria-label="Copy link" title="Copy link" onClick={copy} className="max-sm:hidden">
+    <IconButton type="button" aria-label={copied ? t("common.copied") : t("artifacts.copyLink")} title={t("artifacts.copyLink")} onClick={copy} className="max-sm:hidden">
       {copied ? <Check size={15} className="text-ok" /> : <LinkIcon size={15} />}
     </IconButton>
   );
@@ -324,6 +329,8 @@ export function ArtifactList({
   onSelect?: (artifact: Artifact) => void;
   empty: ReactNode;
 }) {
+  const t = useT();
+  const relativeTime = useRelativeTime();
   const [query, setQuery] = useState("");
   const shown = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
@@ -359,14 +366,14 @@ export function ArtifactList({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search artifacts"
-            aria-label="Search artifacts"
+            placeholder={t("artifacts.search")}
+            aria-label={t("artifacts.search")}
             className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-subtle"
           />
         </label>
       )}
       {shown.length === 0 ? (
-        <p className="px-3 py-6 text-center text-[13px] text-subtle">No artifact matches “{query}”.</p>
+        <p className="px-3 py-6 text-center text-[13px] text-subtle">{t("artifacts.noMatch", { query })}</p>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {shown.map((a) => (
@@ -411,6 +418,7 @@ export function ThreadOutputs({
   /** Open an artifact (undefined = back to the list), at a version (undefined = latest). */
   onOpen: (artifactId: string | undefined, version?: number) => void;
 }) {
+  const t = useT();
   if (openId) {
     return (
       <ArtifactViewer
@@ -419,7 +427,7 @@ export function ThreadOutputs({
         artifactId={openId}
         version={version}
         onVersionChange={(v) => onOpen(openId, v)}
-        leading={<ViewerBack label="All outputs" onClick={() => onOpen(undefined)} />}
+        leading={<ViewerBack label={t("artifacts.allOutputs")} onClick={() => onOpen(undefined)} />}
         className="h-full"
       />
     );
@@ -432,8 +440,8 @@ export function ThreadOutputs({
         empty={
           <Empty
             icon={<Blocks size={20} className="text-subtle" aria-hidden="true" />}
-            title="No outputs yet"
-            body={`Pages, reports and prototypes published in “${thread.title}” collect here.`}
+            title={t("workspace.outputsEmpty")}
+            body={t("artifacts.threadEmpty", { title: thread.title })}
           />
         }
       />
@@ -444,9 +452,10 @@ export function ThreadOutputs({
 // ---- Helpers ---------------------------------------------------------------
 
 function Loading() {
+  const t = useT();
   return (
     <div className="flex h-full min-h-40 items-center justify-center text-subtle" role="status">
-      <LoaderCircle size={18} className="animate-spin" aria-label="Loading" />
+      <LoaderCircle size={18} className="animate-spin" aria-label={t("common.loading")} />
     </div>
   );
 }

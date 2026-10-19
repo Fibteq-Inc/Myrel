@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
@@ -27,6 +28,7 @@ export const useShell = () => useContext(ShellContext);
  * sidebar and a main pane). On phones the rail and sidebar slide in as a drawer.
  */
 export function AppShell({ rail, children }: { rail: ReactNode; children: ReactNode }) {
+  const t = useT();
   const [navOpen, setNavOpen] = useState(false);
   const [sidebarHidden, setHidden] = useState(() => {
     try {
@@ -53,7 +55,7 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
       <div className="flex h-full overflow-hidden">
         <div
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:z-50 md:translate-x-0",
             navOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -62,7 +64,7 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
         {navOpen && (
           <button
             type="button"
-            aria-label="Close menu"
+            aria-label={t("shell.closeMenu")}
             onClick={() => setNavOpen(false)}
             className="fixed inset-0 z-30 bg-black/60 md:hidden"
           />
@@ -96,16 +98,17 @@ export function Sidebar({ label, collapsible, children }: { label: string; colla
 /** Opens the drawer on phones; on wider screens, unfolds a collapsed sidebar. */
 export function NavToggle() {
   const { setNavOpen, sidebarHidden, setSidebarHidden } = useShell();
+  const t = useT();
   return (
     <>
-      <IconButton type="button" aria-label="Open menu" onClick={() => setNavOpen(true)} className="-ml-1.5 md:hidden">
+      <IconButton type="button" aria-label={t("shell.openMenu")} onClick={() => setNavOpen(true)} className="-ml-1.5 md:hidden">
         <MenuIcon size={18} />
       </IconButton>
       {sidebarHidden && (
         <IconButton
           type="button"
-          aria-label="Show sidebar"
-          title="Show sidebar"
+          aria-label={t("shell.showSidebar")}
+          title={t("shell.showSidebar")}
           onClick={() => setSidebarHidden(false)}
           className="-ml-1.5 max-md:hidden"
         >
@@ -119,11 +122,12 @@ export function NavToggle() {
 /** Folds a collapsible sidebar away on wide screens; NavToggle brings it back. */
 export function SidebarCollapse() {
   const { setSidebarHidden } = useShell();
+  const t = useT();
   return (
     <IconButton
       type="button"
-      aria-label="Hide sidebar"
-      title="Hide sidebar"
+      aria-label={t("shell.hideSidebar")}
+      title={t("shell.hideSidebar")}
       onClick={() => setSidebarHidden(true)}
       className="size-9 flex-none max-md:hidden"
     >
@@ -143,12 +147,13 @@ export function PaneHeader({ children, className = "" }: { children: ReactNode; 
 
 /** Back to the project chat, from a page that replaces it (files, artifacts). */
 export function BackToChat({ projectId }: { projectId: string }) {
+  const t = useT();
   return (
     <Link
       to="/projects/$projectId"
       params={{ projectId }}
-      aria-label="Back to the project chat"
-      title="Back to the project chat"
+      aria-label={t("shell.backToChat")}
+      title={t("shell.backToChat")}
       className="-ml-1 flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
     >
       <ChevronLeft size={18} />

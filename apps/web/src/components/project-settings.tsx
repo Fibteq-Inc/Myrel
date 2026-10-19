@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { InviteRole, ProjectRole, ProviderId } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
@@ -17,7 +18,7 @@ import {
 } from "../lib/api";
 import { Button, errorMessage, GhostButton, IconButton, initials, Input } from "../lib/ui";
 
-export const ROLE_LABELS: Record<ProjectRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
+export const roleKey = (role: ProjectRole) => `role.${role}` as const;
 
 /**
  * Everything about one project: general and model, GitHub, members and
@@ -33,6 +34,7 @@ export function ProjectSettings({
   /** The project's name and your role; the dialog shows these in its own header. */
   header?: boolean;
 }) {
+  const t = useT();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const canManage = project.role === "owner" || project.role === "admin";
 
@@ -42,9 +44,9 @@ export function ProjectSettings({
         <div>
           <h1 className="text-xl font-semibold">{project.name}</h1>
           <p className="mt-1 text-[13px] text-subtle">
-            You are {ROLE_LABELS[project.role].toLowerCase()} of this project.{" "}
+            {t("projectSettings.youAre", { role: t(roleKey(project.role)) })}{" "}
             <Link to="/projects/$projectId" params={{ projectId }} className="text-accent hover:underline">
-              Open project
+              {t("projectSettings.open")}
             </Link>
           </p>
         </div>
@@ -58,6 +60,7 @@ export function ProjectSettings({
 }
 
 function GeneralAndModel({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
   const { data: providers } = useQuery(providersQuery);
@@ -105,18 +108,18 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
 
   return (
     <form onSubmit={onSubmit} className="space-y-10">
-      <Section title="General">
-        <Field label="Project name">
+      <Section title={t("projectSettings.general")}>
+        <Field label={t("projectSettings.name")}>
           <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} required disabled={!canManage} />
         </Field>
       </Section>
 
       <Section
-        title="Model"
-        description="Which model the coordinator and thread agents use in this project. Leave empty to use the server default."
+        title={t("projectSettings.model")}
+        description={t("projectSettings.modelDescription")}
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Provider">
+          <Field label={t("projectSettings.provider")}>
             <Select
               value={provider}
               disabled={!canManage}
@@ -127,8 +130,11 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
               }}
             >
               <option value="">
-                Server default
-                {providers ? ` (${providers.providers.find((p) => p.id === providers.serverDefault)?.name})` : ""}
+                {providers
+                  ? t("projectSettings.serverDefaultNamed", {
+                      name: providers.providers.find((p) => p.id === providers.serverDefault)?.name ?? "",
+                    })
+                  : t("projectSettings.serverDefault")}
               </option>
               {providers?.providers.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -137,41 +143,44 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
               ))}
             </Select>
           </Field>
-          <Field label="Model" hint={providerInfo ? `Default: ${providerInfo.defaultModel}` : undefined}>
+          <Field
+            label={t("projectSettings.model")}
+            hint={providerInfo ? t("projectSettings.modelHint", { model: providerInfo.defaultModel }) : undefined}
+          >
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder={providerInfo?.defaultModel ?? "Default"}
+              placeholder={providerInfo?.defaultModel ?? t("projectSettings.modelPlaceholder")}
               spellCheck={false}
               disabled={!canManage}
             />
           </Field>
         </div>
         <Field
-          label="Key"
+          label={t("projectSettings.key")}
           hint={
             <>
-              Add your own keys under{" "}
+              {t("projectSettings.keyHintBefore")}{" "}
               <Link to="/settings/keys" className="text-accent hover:underline">
-                Model keys
+                {t("settings.keys")}
               </Link>
-              . Everyone in the project uses the key you pick here.
+              {t("projectSettings.keyHintAfter")}
             </>
           }
         >
           <Select value={keyId} onChange={(e) => setKeyId(e.target.value)} disabled={!canManage}>
-            <option value="">{providerInfo?.serverKey ? "Server key" : "No key"}</option>
-            {foreignKey && <option value={keyId}>Another member's key</option>}
+            <option value="">{providerInfo?.serverKey ? t("projectSettings.serverKey") : t("projectSettings.noKey")}</option>
+            {foreignKey && <option value={keyId}>{t("projectSettings.foreignKey")}</option>}
             {usableKeys.map((k) => (
               <option key={k.id} value={k.id}>
-                {k.label} {k.hint} {k.scope === "instance" ? "(shared)" : ""}
+                {k.label} {k.hint} {k.scope === "instance" ? t("projectSettings.shared") : ""}
               </option>
             ))}
           </Select>
         </Field>
         {noKey && (
           <Notice>
-            The server has no {providerInfo.name} key, so agents cannot answer in this project until you pick one.
+            {t("projectSettings.missingKey", { provider: providerInfo.name })}
           </Notice>
         )}
       </Section>
@@ -179,10 +188,10 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
       {canManage && (
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={save.isPending || !name.trim()}>
-            Save changes
+            {t("settings.saveChanges")}
           </Button>
-          {save.isSuccess && !save.isPending && <Notice tone="ok">Saved.</Notice>}
-          {save.error && <Notice>{errorMessage(save.error)}</Notice>}
+          {save.isSuccess && !save.isPending && <Notice tone="ok">{t("settings.saved")}</Notice>}
+          {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
         </div>
       )}
     </form>
@@ -190,6 +199,7 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
 }
 
 function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole }) {
+  const t = useT();
   const { user } = useRouteContext({ from: "/_app" });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -213,8 +223,8 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
   const roleOptions: ProjectRole[] = myRole === "owner" ? ["owner", "admin", "member"] : ["admin", "member"];
 
   return (
-    <Section title="Members" description="Owners and admins manage members, invitations and settings.">
-      <List empty="No members.">
+    <Section title={t("members.title")} description={t("members.description")}>
+      <List empty={t("members.empty")}>
         {members.map((m) => {
           const isMe = m.id === user.id;
           const editable = canManage && !isMe && (m.role !== "owner" || myRole === "owner");
@@ -229,35 +239,35 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium">{m.name}</span>
-                  {isMe && <Badge>You</Badge>}
+                  {isMe && <Badge>{t("members.you")}</Badge>}
                 </div>
                 {m.email && <div className="truncate text-xs text-subtle">{m.email}</div>}
               </div>
               {editable ? (
                 <Select
                   className="w-28"
-                  aria-label={`Role of ${m.name}`}
+                  aria-label={t("members.roleOf", { name: m.name })}
                   value={m.role}
                   disabled={setRole.isPending}
                   onChange={(e) => setRole.mutate({ userId: m.id, role: e.target.value as ProjectRole })}
                 >
                   {roleOptions.map((r) => (
                     <option key={r} value={r}>
-                      {ROLE_LABELS[r]}
+                      {t(roleKey(r))}
                     </option>
                   ))}
                 </Select>
               ) : (
-                <span className="text-[13px] text-subtle">{ROLE_LABELS[m.role]}</span>
+                <span className="text-[13px] text-subtle">{t(roleKey(m.role))}</span>
               )}
               {(editable || isMe) && (
                 <IconButton
                   type="button"
-                  aria-label={isMe ? "Leave project" : `Remove ${m.name}`}
-                  title={isMe ? "Leave project" : "Remove"}
+                  aria-label={isMe ? t("members.leave") : t("members.removeLabel", { name: m.name })}
+                  title={isMe ? t("members.leave") : t("members.remove")}
                   disabled={remove.isPending}
                   onClick={() => {
-                    const question = isMe ? "Leave this project?" : `Remove ${m.name} from the project?`;
+                    const question = isMe ? t("members.leaveConfirm") : t("members.removeConfirm", { name: m.name });
                     if (confirm(question)) remove.mutate(m.id);
                   }}
                 >
@@ -268,12 +278,13 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
           );
         })}
       </List>
-      {(setRole.error || remove.error) && <Notice>{errorMessage(setRole.error ?? remove.error)}</Notice>}
+      {(setRole.error || remove.error) && <Notice>{errorMessage(setRole.error ?? remove.error, t)}</Notice>}
     </Section>
   );
 }
 
 function Invites({ projectId }: { projectId: string }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data: invites = [] } = useQuery(projectInvitesQuery(projectId));
   const refresh = () => queryClient.invalidateQueries({ queryKey: projectInvitesQuery(projectId).queryKey });
@@ -295,8 +306,8 @@ function Invites({ projectId }: { projectId: string }) {
 
   return (
     <Section
-      title="Invite people"
-      description="They see the invitation under Settings → Invitations after signing in with this email, and can create an account with it even when sign-ups are closed."
+      title={t("projectInvites.title")}
+      description={t("projectInvites.description")}
     >
       <form onSubmit={onSubmit} className="flex flex-col gap-2 sm:flex-row">
         <Input
@@ -307,15 +318,15 @@ function Invites({ projectId }: { projectId: string }) {
           required
           className="flex-1"
         />
-        <Select className="sm:w-32" value={role} onChange={(e) => setRole(e.target.value as InviteRole)} aria-label="Role">
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
+        <Select className="sm:w-32" value={role} onChange={(e) => setRole(e.target.value as InviteRole)} aria-label={t("projectInvites.role")}>
+          <option value="member">{t("role.member")}</option>
+          <option value="admin">{t("role.admin")}</option>
         </Select>
         <Button type="submit" disabled={invite.isPending || !email.trim()}>
-          Invite
+          {t("projectInvites.invite")}
         </Button>
       </form>
-      {invite.error && <Notice>{errorMessage(invite.error)}</Notice>}
+      {invite.error && <Notice>{errorMessage(invite.error, t)}</Notice>}
       {invites.length > 0 && (
         <List empty="">
           {invites.map((i) => (
@@ -323,11 +334,11 @@ function Invites({ projectId }: { projectId: string }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate">{i.email}</div>
                 <div className="text-xs text-subtle">
-                  Pending · {ROLE_LABELS[i.role].toLowerCase()} · invited by {i.invitedBy}
+                  {t("projectInvites.pending", { role: t(roleKey(i.role)), name: i.invitedBy })}
                 </div>
               </div>
               <GhostButton type="button" disabled={revoke.isPending} onClick={() => revoke.mutate(i.id)}>
-                Revoke
+                {t("projectInvites.revoke")}
               </GhostButton>
             </Row>
           ))}

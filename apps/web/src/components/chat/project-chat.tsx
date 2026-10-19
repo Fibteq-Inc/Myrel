@@ -1,4 +1,5 @@
 import { projectChat, threadByRoot, threadMessages } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { Link } from "@tanstack/react-router";
 import { Blocks, FolderOpen, Hash, MessagesSquare, Settings } from "lucide-react";
 import { api } from "../../lib/api";
@@ -18,6 +19,7 @@ const headerIcon =
 
 /** The project chat: everything said to the coordinator, with a card for each thread it opened. */
 export function ProjectChat({ me, className = "" }: { me: string; className?: string }) {
+  const t = useT();
   const { project, names, state, send } = useProjectContext();
   const openSettings = useOpenProjectSettings();
   const artifacts = Object.keys(state.artifacts).length;
@@ -31,7 +33,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
       <PaneHeader>
         <NavToggle />
         <Hash size={17} className="flex-none text-muted" aria-hidden="true" />
-        <h1 className="flex-none text-[15px] font-semibold">Project chat</h1>
+        <h1 className="flex-none text-[15px] font-semibold">{t("chat.title")}</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline @max-[640px]:!hidden">{project.name}</span>
         <div className="ml-auto flex-none whitespace-nowrap">
           <WorkspaceButton project={project} />
@@ -40,8 +42,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           <Link
             to="/projects/$projectId/files"
             params={{ projectId: project.id }}
-            aria-label="Files and memory"
-            title="Files and memory"
+            aria-label={t("sidebar.files")}
+            title={t("sidebar.files")}
             className={headerIcon}
           >
             <FolderOpen size={16} />
@@ -49,8 +51,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           <Link
             to="/projects/$projectId/artifacts"
             params={{ projectId: project.id }}
-            aria-label={artifacts ? `Artifacts (${artifacts})` : "Artifacts"}
-            title="Artifacts"
+            aria-label={artifacts ? t("chat.artifactsCount", { count: artifacts }) : t("sidebar.artifacts")}
+            title={t("sidebar.artifacts")}
             className={cn(headerIcon, "relative")}
           >
             <Blocks size={16} />
@@ -63,8 +65,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           <button
             type="button"
             onClick={openSettings}
-            aria-label="Project settings"
-            title="Project settings"
+            aria-label={t("chat.projectSettings")}
+            title={t("chat.projectSettings")}
             className={headerIcon}
           >
             <Settings size={16} />
@@ -101,7 +103,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
 
       <div className="mx-auto w-full max-w-[808px]">
         <Composer
-          placeholder="Give Altair a task"
+          placeholder={t("chat.placeholder")}
           onSend={(body, attachments) => send(body, null, attachments)}
           onUpload={(file) => api.upload(project.id, file.name, file)}
           autoFocus
@@ -112,16 +114,14 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
 }
 
 function EmptyChat() {
+  const t = useT();
   return (
     <div className="flex flex-col items-center gap-2 py-20 text-center">
       <span className="mb-2 flex size-12 items-center justify-center rounded-2xl border border-line bg-raised">
         <MessagesSquare size={22} className="text-muted" aria-hidden="true" />
       </span>
-      <p className="text-base font-medium">What should Altair work on?</p>
-      <p className="max-w-sm text-[13px] text-subtle">
-        Ask for anything. Altair opens a thread for each piece of work and reports back there, so this chat stays
-        readable.
-      </p>
+      <p className="text-base font-medium">{t("chat.emptyTitle")}</p>
+      <p className="max-w-sm text-[13px] text-subtle">{t("chat.emptyBody")}</p>
     </div>
   );
 }

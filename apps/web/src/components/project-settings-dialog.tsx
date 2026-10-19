@@ -1,9 +1,10 @@
+import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, X } from "lucide-react";
 import { createContext, type ReactNode, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { projectQuery } from "../lib/api";
 import { IconButton } from "../lib/ui";
-import { ProjectSettings, ROLE_LABELS } from "./project-settings";
+import { ProjectSettings, roleKey } from "./project-settings";
 
 const SettingsDialogContext = createContext<(() => void) | null>(null);
 
@@ -29,7 +30,7 @@ export function useOpenProjectSettings() {
 function ProjectSettingsDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const { data: project } = useQuery(projectQuery(projectId));
-  const role = project ? ROLE_LABELS[project.role].toLowerCase() : null;
+  const t = useT();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -50,11 +51,15 @@ function ProjectSettingsDialog({ projectId, onClose }: { projectId: string; onCl
       <header className="flex h-14 flex-none items-center gap-3 border-b border-line pl-5 pr-3">
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <h2 id="project-settings-title" className="truncate text-[15px] font-semibold">
-            {project?.name ?? "Project"} settings
+            {project ? t("projectSettings.dialogTitle", { name: project.name }) : t("chat.projectSettings")}
           </h2>
-          {role && <span className="text-xs text-subtle">You are {role} of this project</span>}
+          {project && (
+            <span className="text-xs text-subtle">
+              {t("projectSettings.youAre", { role: t(roleKey(project.role)) })}
+            </span>
+          )}
         </div>
-        <IconButton type="button" onClick={onClose} aria-label="Close settings" title="Close" className="size-9">
+        <IconButton type="button" onClick={onClose} aria-label={t("projectSettings.close")} title={t("projectSettings.close")} className="size-9">
           <X size={17} />
         </IconButton>
       </header>
@@ -63,7 +68,7 @@ function ProjectSettingsDialog({ projectId, onClose }: { projectId: string; onCl
           <Suspense
             fallback={
               <div className="flex justify-center py-16 text-subtle">
-                <LoaderCircle size={20} className="animate-spin" aria-label="Loading settings" />
+                <LoaderCircle size={20} className="animate-spin" aria-label={t("common.loading")} />
               </div>
             }
           >

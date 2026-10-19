@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { Attachment, ProjectFile } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -66,6 +67,7 @@ export function PendingAttachments({
   items: { id: string; name: string; file?: ProjectFile; error?: string }[];
   onRemove: (id: string) => void;
 }) {
+  const t = useT();
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5 px-1 pb-2">
@@ -86,7 +88,7 @@ export function PendingAttachments({
           <button
             type="button"
             onClick={() => onRemove(item.id)}
-            aria-label={`Remove ${item.name}`}
+            aria-label={t("files.remove", { name: item.name })}
             className="rounded p-0.5 text-subtle hover:bg-hover hover:text-fg"
           >
             <X size={13} />
@@ -109,6 +111,7 @@ export function FilePreview({
   contentType?: string;
   onClose?: () => void;
 }) {
+  const t = useT();
   const blob = useQuery({
     queryKey: ["projects", projectId, "file", path],
     queryFn: () => api.getFile(projectId, path),
@@ -134,22 +137,22 @@ export function FilePreview({
           <a
             href={url}
             download={displayName(path)}
-            aria-label="Download"
-            title="Download"
+            aria-label={t("files.download")}
+            title={t("files.download")}
             className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
           >
             <Download size={16} />
           </a>
         )}
         {onClose && (
-          <IconButton type="button" onClick={onClose} aria-label="Close preview">
+          <IconButton type="button" onClick={onClose} aria-label={t("files.closePreview")}>
             <X size={16} />
           </IconButton>
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {blob.isPending && <p className="p-5 text-[13px] text-subtle">Loading…</p>}
-        {blob.isError && <p className="p-5 text-[13px] text-bad">This file could not be loaded.</p>}
+        {blob.isPending && <p className="p-5 text-[13px] text-subtle">{t("files.loading")}</p>}
+        {blob.isError && <p className="p-5 text-[13px] text-bad">{t("files.loadFailed")}</p>}
         {url && kind === "image" && <img src={url} alt={displayName(path)} className="mx-auto max-w-full p-5" />}
         {url && kind === "pdf" && <iframe src={url} title={path} className="size-full min-h-[70vh] bg-white" />}
         {text !== null && kind === "markdown" && (
@@ -161,7 +164,7 @@ export function FilePreview({
           <pre className="whitespace-pre-wrap break-words p-5 font-mono text-[12.5px] text-body">{text}</pre>
         )}
         {blob.data && kind === "other" && (
-          <p className="p-5 text-[13px] text-subtle">No preview for this kind of file. Use the download button.</p>
+          <p className="p-5 text-[13px] text-subtle">{t("files.noPreview")}</p>
         )}
       </div>
     </div>

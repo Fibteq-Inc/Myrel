@@ -1,7 +1,8 @@
+import { useT } from "@altair/i18n/react";
 import type { Message, Reaction } from "@altair/protocol";
 import { CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import { AltairMark, relativeTime } from "../../lib/ui";
+import { AltairMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 
@@ -27,6 +28,8 @@ export function MessageView({
   decision?: DecisionHandlers;
   children?: ReactNode;
 }) {
+  const t = useT();
+  const relativeTime = useRelativeTime();
   if (message.authorKind === "system") {
     return (
       <div className="flex items-start gap-2.5 rounded-xl border border-[#3b3218] bg-[#17150f] px-3.5 py-2.5 text-[13px] text-body">
@@ -47,7 +50,7 @@ export function MessageView({
           <div className="-ml-1.5 -mt-1 flex items-center gap-1">
             <Reactions reactions={reactions} />
             <span className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-              <CopyButton text={message.body} label="Copy message" />
+              <CopyButton text={message.body} label={t("message.copy")} />
               <time dateTime={message.createdAt} className="px-1 text-xs text-subtle">
                 {relativeTime(message.createdAt)}
               </time>
@@ -61,7 +64,7 @@ export function MessageView({
   const mine = message.authorId === me;
   return (
     <div className="group flex flex-col items-end gap-1.5">
-      {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? "Member"}</span>}
+      {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? t("common.member")}</span>}
       {message.body && (
         <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
           {message.body}
@@ -92,13 +95,14 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label = "Thinking" }: { label?: string }) {
+export function Thinking({ label }: { label?: string }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-3.5" role="status">
       <AltairMark size={28} />
       <span className="flex items-center gap-2 text-[13px] text-subtle">
         <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
-        {label}…
+        {label ?? t("message.thinking")}…
       </span>
     </div>
   );
