@@ -12,6 +12,8 @@
     "build:api": "turbo run build --filter=@altair/api",
     "deploy": "pnpm --filter @altair/api run deploy",
     "deploy:preview": "pnpm --filter @altair/api run deploy:preview",
+    "deploy:api": "pnpm run deploy",
+    "deploy:api:preview": "pnpm run deploy:preview",
     "deploy:artifacts": "pnpm --filter @altair/artifacts run deploy",
     "deploy:artifacts:preview": "pnpm --filter @altair/artifacts run deploy:preview",
     "typecheck": "turbo run typecheck",
