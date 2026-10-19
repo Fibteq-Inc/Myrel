@@ -1,0 +1,3 @@
+# Same value as ARTIFACT_SIGNING_SECRET in apps/api/.dev.vars.
+ARTIFACT_SIGNING_SECRET=change-me-to-another-long-random-string
+APP_ORIGINS=http://localhost:5173

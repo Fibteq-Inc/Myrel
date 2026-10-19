@@ -54,15 +54,18 @@ export function defaultWorkspaceTabs(_thread: Thread): WorkspaceTab[] {
 /** The right half of a thread: tabs over what the agent changed, ran and produced. */
 export function WorkspacePanel({
   tabs,
+  initialTab,
   status,
   className = "",
 }: {
   tabs: WorkspaceTab[];
+  /** The tab shown first; remount (change `key`) to switch to it again. */
+  initialTab?: string;
   /** Shown at the right of the tab bar, e.g. which runner does the work. */
   status?: ReactNode;
   className?: string;
 }) {
-  const [active, setActive] = useState(tabs[0]?.id);
+  const [active, setActive] = useState(initialTab ?? tabs[0]?.id);
   const base = useId();
   const current = tabs.find((t) => t.id === active) ?? tabs[0];
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
+import { Artifact } from "./artifacts";
 import { MAX_MESSAGE_LENGTH, Message, Reaction, Thread, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
@@ -44,10 +45,14 @@ export const ServerEvent = z.discriminatedUnion("type", [
     threads: z.array(Thread).default([]),
     /** Reactions on the returned messages. */
     reactions: z.array(Reaction).default([]),
+    /** Every artifact in the project, current state. */
+    artifacts: z.array(Artifact).default([]),
   }),
   /** A thread was created or changed (title, status, checklist, resolved). */
   z.object({ type: z.literal("thread.updated"), thread: Thread }),
   z.object({ type: z.literal("reaction.added"), reaction: Reaction }),
+  /** An artifact was published or got a new version. */
+  z.object({ type: z.literal("artifact.updated"), artifact: Artifact }),
   /**
    * An agent started or stopped working. threadId null = the coordinator in the project chat.
    * Ephemeral: not replayed by sync.

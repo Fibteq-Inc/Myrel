@@ -5,6 +5,7 @@ import { FilePath } from "./paths";
 export const MessageId = z.string().regex(idPattern("message"));
 export const ThreadId = z.string().regex(idPattern("thread"));
 export const ProjectId = z.string().regex(idPattern("project"));
+export const ArtifactId = z.string().regex(idPattern("artifact"));
 
 /** ISO-8601 timestamp string. */
 export const Timestamp = z.iso.datetime();
@@ -21,6 +22,15 @@ export const Attachment = z.object({
 });
 export type Attachment = z.infer<typeof Attachment>;
 
+/** An artifact an agent delivered with a message, shown as a card under it. */
+export const ArtifactRef = z.object({
+  artifactId: ArtifactId,
+  /** The version this message delivered; the card can still open the latest. */
+  version: z.number().int().positive(),
+  title: z.string(),
+});
+export type ArtifactRef = z.infer<typeof ArtifactRef>;
+
 export const Message = z.object({
   id: MessageId,
   projectId: ProjectId,
@@ -31,6 +41,8 @@ export const Message = z.object({
   body: z.string(),
   /** Files attached to the message, stored in the project files. Absent = none. */
   attachments: z.array(Attachment).optional(),
+  /** Artifacts delivered with the message. Absent = none (and from servers older than artifacts). */
+  artifacts: z.array(ArtifactRef).optional(),
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,

@@ -1,4 +1,14 @@
-import { CLI_NAMES, Decision, formatDecision, type Message, type ProjectRepo, type ProjectWorkspace, type Thread } from "@altair/protocol";
+import {
+  type Artifact,
+  CLI_NAMES,
+  Decision,
+  formatDecision,
+  MAX_ARTIFACT_BYTES,
+  type Message,
+  type ProjectRepo,
+  type ProjectWorkspace,
+  type Thread,
+} from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
@@ -7,6 +17,7 @@ import { renderMessage } from "./render";
 /** The thread operations the thread agent's tools act through. */
 export type ThreadHost = {
   reply(text: string): Promise<Message>;
+  publishArtifact(input: { artifactId?: string; title: string; description?: string; html: string }): Promise<Artifact>;
   setStatusText(text: string): Promise<void>;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
   resolve(): Promise<void>;
@@ -29,6 +40,7 @@ Tools:
 - reply: the only way people see anything you say. Each reply is a message in this thread.
 - update_status: your progress checklist, shown on the thread while you work. Line 1 is a short header, then a blank line, then one step per line prefixed with ✓ (done), ✱ (in progress) or ○ (not started). Post it first on multi-step work and refresh it as steps complete. It is not a reply and notifies no one.
 - ask_decision: put a question to the person as a card with 2 to 4 options, one recommended. Use it instead of a reply whenever you need the person to choose; their pick arrives as their next message. Keep working on the recommended option meanwhile when you can.
+- publish_artifact: publish a self-contained HTML page (a report, a chart, a small app, a prototype) as an artifact people open in a viewer next to the chat. Pass artifact_id to publish a new version of an existing artifact instead of a new one; the address stays the same. The page runs sandboxed on its own origin: inline your CSS and JS, load libraries only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com or esm.sh with an exact version, and do not call any other server. Give it a <title>, a background and a layout that works at phone width. Artifacts you publish are attached to your next reply as cards, so publish first, then reply with one line about it. Use an artifact when the result is something to look at or use, or longer than about fifteen lines; answer short things in the reply itself.
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 
@@ -38,7 +50,7 @@ Tools:
 
 ${KNOWLEDGE_GUIDE}
 
-Apart from those repositories and the local folder you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
+Apart from those repositories, the local folder and the artifacts you publish, you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
 
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
@@ -60,6 +72,7 @@ export function threadPrompt(input: {
   repos: ProjectRepo[];
   tasks?: LocalTask[];
   workspace?: ProjectWorkspace | null;
+  artifacts?: Artifact[];
 }): string {
   const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
@@ -86,6 +99,11 @@ export function threadPrompt(input: {
     notes.length ? `## Notes from the coordinator (not visible to people)\n${notes.join("\n")}` : "",
     workspace,
     tasks.length ? `## Tasks you ran on the person's computer, oldest first (NEW = finished since your last turn)\n${tasks.join("\n\n")}` : "",
+    input.artifacts?.length
+      ? `## Artifacts in this project (newest first; pass artifact_id to update one)\n${input.artifacts
+          .map((a) => `- [${a.id}] "${a.title}" · v${a.version}${a.threadId === input.thread.id ? " · from this thread" : ""}`)
+          .join("\n")}`
+      : "",
     input.thread.statusText ? `## Your current checklist\n${input.thread.statusText}` : "",
     "Continue the work now.",
   ]
@@ -121,6 +139,21 @@ export function threadTools(host: ThreadHost): Tool[] {
       run: async ({ context, ...decision }) => {
         await host.reply([context, formatDecision(decision)].filter(Boolean).join("\n\n"));
         return "Asked. The person's choice will arrive as their next message.";
+      },
+    }),
+    tool({
+      name: "publish_artifact",
+      description:
+        "Publish a self-contained HTML page as an artifact, or a new version of one (artifact_id). It is attached to your next reply.",
+      input: z.object({
+        title: z.string().trim().min(1).max(120),
+        html: z.string().min(1).max(MAX_ARTIFACT_BYTES),
+        description: z.string().max(500).optional().describe("One sentence shown on the artifact's card."),
+        artifact_id: z.string().optional().describe("An existing artifact's id, to publish a new version of it."),
+      }),
+      run: async ({ title, html, description, artifact_id }) => {
+        const a = await host.publishArtifact({ artifactId: artifact_id, title, description, html });
+        return `Published "${a.title}" v${a.version} (${a.id}). It will be attached to your next reply.`;
       },
     }),
     tool({
