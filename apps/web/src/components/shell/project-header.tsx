@@ -3,7 +3,7 @@ import type { MessageKey, Translate } from "@altair/i18n";
 import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Blocks, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
+import { BarChart3, Blocks, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -23,6 +23,7 @@ const TABS: { id: ProjectView; label: MessageKey; icon: typeof List }[] = [
   { id: "threads", label: "sidebar.threads", icon: List },
   { id: "artifacts", label: "sidebar.artifacts", icon: Blocks },
   { id: "files", label: "tabs.files", icon: FolderOpen },
+  { id: "usage", label: "tabs.usage", icon: BarChart3 },
 ];
 
 /** A project's top bar: project switcher, the tabs (conversation first), local folder and settings. */

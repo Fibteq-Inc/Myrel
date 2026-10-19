@@ -1,4 +1,4 @@
-import { type ArtifactRef, CLI_NAMES, createId, type ProjectWorkspace, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type ArtifactRef, CLI_NAMES, createId, type ProjectWorkspace, type Task, type TaskStats, type TaskStatus, type TerminalLine } from "@altair/protocol";
 import {
   emptyProgress,
   HarnessId,
@@ -17,7 +17,7 @@ import { runLoop } from "../llm";
 import { getWorkspace } from "../runners";
 import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBackend, taskPlace } from "../sandbox/backend";
 import { threadWorkspace } from "../sandbox/workspace";
-import { meteredForTurn, recordTaskUsage } from "../usage";
+import { meteredForTurn, recordTaskUsage, taskCostMicros, taskRuntime, TurnMeter } from "../usage";
 import { type Author, knowledgeTools } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
@@ -183,6 +183,9 @@ export class ThreadAgent extends Agent<Env> {
       createdAt: r.created_at,
       isNew: r.seen === 0,
     }));
+    // The newest task this turn reports on for the first time.
+    const finishedTask = this.sql<TaskRow>`
+      SELECT * FROM tasks WHERE status != 'running' AND reported = 0 ORDER BY created_at DESC LIMIT 1`[0];
     this.sql`UPDATE notes SET seen = 1`;
     this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
     this.sql`UPDATE routine_runs SET seen = 1`;
@@ -199,13 +202,21 @@ export class ThreadAgent extends Agent<Env> {
     try {
       // Bill the turn to the newest person in the thread, else whoever asked in the root message.
       const requester = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
+      const meter = new TurnMeter(llm.provider.model);
+      // The first reply after a task finished reports on it, so its stats carry the task too.
+      let taskStats = finishedTask ? this.taskStats(finishedTask) : undefined;
+      const stats = () => {
+        const s = meter.take(taskStats);
+        taskStats = undefined;
+        return s ?? undefined;
+      };
       await runLoop({
-        provider: meteredForTurn(llm.provider, this.env, {
-          projectId,
-          threadId,
-          userId: requester.authorKind === "user" ? requester.authorId : null,
-          agent: "thread",
-        }),
+        provider: meteredForTurn(
+          llm.provider,
+          this.env,
+          { projectId, threadId, userId: requester.authorKind === "user" ? requester.authorId : null, agent: "thread" },
+          meter,
+        ),
         system: THREAD_SYSTEM,
         prompt: threadPrompt({
           ...ctx,
@@ -233,6 +244,7 @@ export class ThreadAgent extends Agent<Env> {
                 authorId: THREAD_AGENT_ID,
                 body: text,
                 artifacts,
+                stats: stats(),
               });
               // Our own replies are not news on the next turn.
               this.setMeta("last_seen_seq", String(m.seq));
@@ -293,7 +305,14 @@ export class ThreadAgent extends Agent<Env> {
       });
       // Published but never mentioned in a reply: still deliver the cards.
       if (pending.length) {
-        await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending });
+        await project.sendMessage({
+          threadId,
+          authorKind: "agent",
+          authorId: THREAD_AGENT_ID,
+          body: "",
+          artifacts: pending,
+          stats: stats(),
+        });
       }
       const running = this.runningTask() !== null;
       await project.updateThread(threadId, {
@@ -576,6 +595,23 @@ export class ThreadAgent extends Agent<Env> {
     return this.sql<LogRow>`SELECT stream, text FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT ${limit}`
       .reverse()
       .map((r) => ({ stream: r.stream, text: r.text }));
+  }
+
+  /** What a finished task took, for the stats under the reply that reports it. */
+  private taskStats(row: TaskRow): TaskStats {
+    const spec = JSON.parse(row.spec) as StoredSpec;
+    const { usage } = JSON.parse(row.progress) as TaskProgress;
+    const model = spec.model?.id ?? null;
+    return {
+      title: spec.title,
+      harness: spec.harness,
+      runtime: taskRuntime(row.backend),
+      model,
+      durationMs: Math.max(0, Date.parse(row.finished_at ?? row.created_at) - Date.parse(row.created_at)),
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costMicros: taskCostMicros(this.env, model, usage),
+    };
   }
 
   private toTask(row: TaskRow): Task {

@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import type { PanelTab } from "./project-knowledge";
 
 /** The tabs across the top of a project. The conversation is the default and has no `view`. */
-export type ProjectView = "chat" | "threads" | "artifacts" | "files";
+export type ProjectView = "chat" | "threads" | "artifacts" | "files" | "usage";
 
 /**
  * The open tab and what it shows, kept in the URL of every project page so an
@@ -21,7 +21,7 @@ export type ProjectSearch = {
 
 export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section"] as const;
 
-const VIEWS = ["threads", "artifacts", "files"];
+const VIEWS = ["threads", "artifacts", "files", "usage"];
 const SECTIONS = ["files", "memory", "instructions"];
 
 export function validateProjectSearch(s: Record<string, unknown>): ProjectSearch {
