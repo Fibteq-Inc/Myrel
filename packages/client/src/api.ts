@@ -1,14 +1,18 @@
 import type {
+  AddProjectRepoInput,
   AdminSettings,
   ApiKey,
   CreateApiKeyInput,
   CreateInviteInput,
   CreateProjectInput,
+  GithubRepo,
+  GithubStatus,
   Invite,
   Me,
   Member,
   Message,
   Project,
+  ProjectRepo,
   ProjectRole,
   ProjectSettings,
   ProviderId,
@@ -208,6 +212,42 @@ export class ApiClient {
   async updateAdminSettings(input: UpdateAdminSettingsInput) {
     return (await this.request<{ settings: AdminSettings }>("/api/admin/settings", { method: "PATCH", body: input }))
       .settings;
+  }
+
+  // --- GitHub ---
+
+  getGithubStatus() {
+    return this.request<GithubStatus>("/api/github");
+  }
+
+  async listGithubRepos() {
+    return (await this.request<{ repos: GithubRepo[] }>("/api/github/repos")).repos;
+  }
+
+  /**
+   * Where the browser goes to connect GitHub: `install` adds the app to an
+   * account, `authorize` only signs in to pick up existing installations.
+   * It needs the cookie session, so it works from the web app, not a native shell.
+   */
+  githubConnectUrl(mode: "install" | "authorize", returnTo: string) {
+    return `${this.baseUrl}/api/github/connect?mode=${mode}&returnTo=${encodeURIComponent(returnTo)}`;
+  }
+
+  async listProjectRepos(projectId: string) {
+    return (await this.request<{ repos: ProjectRepo[] }>(`/api/projects/${encodeURIComponent(projectId)}/repos`)).repos;
+  }
+
+  async addProjectRepo(projectId: string, input: AddProjectRepoInput) {
+    return (
+      await this.request<{ repo: ProjectRepo }>(`/api/projects/${encodeURIComponent(projectId)}/repos`, {
+        method: "POST",
+        body: input,
+      })
+    ).repo;
+  }
+
+  async removeProjectRepo(projectId: string, repoId: number) {
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/repos/${repoId}`, { method: "DELETE" });
   }
 
   getMessages(projectId: string, afterSeq = 0) {

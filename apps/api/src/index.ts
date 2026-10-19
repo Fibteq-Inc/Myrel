@@ -7,6 +7,7 @@ import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
 import { accountRoutes } from "./routes/account";
 import { adminRoutes } from "./routes/admin";
+import { githubRoutes } from "./routes/github";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
 
@@ -39,6 +40,7 @@ const app = new Hono<AppEnv>()
   .route("/admin", adminRoutes)
   .route("/projects", projectRoutes)
   .route("/usage", usageRoutes)
+  .route("/github", githubRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;
