@@ -2,6 +2,7 @@ import { anthropic } from "./anthropic";
 import { openAiCompatible } from "./openai";
 import type { ProviderId as ProtocolProviderId } from "@altair/protocol";
 import type { ModelProvider } from "./types";
+import type { ModelConfig } from "@altair/runner-core";
 
 export * from "./loop";
 export * from "./metering";
@@ -79,8 +80,10 @@ export function serverProviderId(env: LlmEnv): string {
   return env.LLM_PROVIDER || DEFAULT_PROVIDER;
 }
 
-/** Builds the configured provider, or explains which setting is missing. */
-export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch, override: ProviderOverride = {}): ProviderResult {
+type Resolved = { id: ProviderId; def: ProviderDef; apiKey: string; baseUrl: string; headers: Record<string, string>; model: string };
+
+/** Reads the provider settings, or explains which one is missing. */
+function resolveProvider(env: LlmEnv, override: ProviderOverride): { ok: true; value: Resolved } | { ok: false; reason: string } {
   const id = (override.provider || serverProviderId(env)) as ProviderId;
   const def: ProviderDef | undefined = PROVIDERS[id];
   if (!def) {
@@ -105,10 +108,32 @@ export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch, override: 
     ? { "cf-aig-authorization": `Bearer ${env.AI_GATEWAY_TOKEN}` }
     : {};
   const model = override.model || (isServerProvider && env.LLM_MODEL) || def.defaultModel;
+  return { ok: true, value: { id, def, apiKey, baseUrl, headers, model } };
+}
 
+/** Builds the configured provider, or explains which setting is missing. */
+export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch, override: ProviderOverride = {}): ProviderResult {
+  const r = resolveProvider(env, override);
+  if (!r.ok) return r;
+  const { id, def, apiKey, baseUrl, headers, model } = r.value;
   const provider =
     def.kind === "anthropic"
       ? anthropic({ model, baseUrl, apiKey, headers, fetch: fetchImpl })
       : openAiCompatible({ id, model, baseUrl, apiKey, headers, fetch: fetchImpl });
   return { ok: true, provider };
+}
+
+/**
+ * The model a coding harness should use for run_task: the same provider and
+ * key as the agents, with RUNNER_MODEL overriding the model. The key goes to
+ * the sandbox as a secret, never into the stored task.
+ */
+export function taskModel(
+  env: LlmEnv & { RUNNER_MODEL?: string },
+  override: ProviderOverride = {},
+): { ok: true; model: ModelConfig; apiKey: string } | { ok: false; reason: string } {
+  const r = resolveProvider(env, override);
+  if (!r.ok) return r;
+  const { id, def, apiKey, baseUrl, model } = r.value;
+  return { ok: true, model: { kind: def.kind, provider: id, id: env.RUNNER_MODEL || model, baseUrl }, apiKey };
 }

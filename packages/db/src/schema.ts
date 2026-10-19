@@ -105,6 +105,8 @@ export const projects = sqliteTable("projects", {
   llmModel: text("llm_model"),
   /** Key the project's agents call the model with; null = an instance key for the provider. */
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+  /** Where tasks run: auto, local or cloud (see TaskTarget in @altair/protocol). */
+  taskTarget: text("task_target").notNull().default("auto"),
   ...timestamps,
 });
 
@@ -186,5 +188,153 @@ export const projectInvites = sqliteTable(
 export const instanceSettings = sqliteTable("instance_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
+  updatedAt: timestamps.updatedAt,
+});
+
+// --- GitHub (a GitHub App; see apps/api/src/github) ---
+
+/** A GitHub App installation on a user or organization account. `id` is GitHub's installation id. */
+export const githubInstallations = sqliteTable("github_installations", {
+  id: integer("id").primaryKey(),
+  accountLogin: text("account_login").notNull(),
+  accountType: text("account_type", { enum: ["User", "Organization"] }).notNull(),
+  accountAvatarUrl: text("account_avatar_url"),
+  ...timestamps,
+});
+
+/** Altair users GitHub confirmed can reach an installation (checked with their GitHub sign-in). */
+export const githubInstallationUsers = sqliteTable(
+  "github_installation_users",
+  {
+    installationId: integer("installation_id")
+      .notNull()
+      .references(() => githubInstallations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.installationId, t.userId] }), index("github_installation_users_user_id_idx").on(t.userId)],
+);
+
+/** A repository connected to a project. `repoId` is GitHub's repository id, stable across renames. */
+export const projectRepos = sqliteTable(
+  "project_repos",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    repoId: integer("repo_id").notNull(),
+    installationId: integer("installation_id")
+      .notNull()
+      .references(() => githubInstallations.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    defaultBranch: text("default_branch").notNull(),
+    private: integer("private", { mode: "boolean" }).notNull(),
+    addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.repoId] }), index("project_repos_installation_id_idx").on(t.installationId)],
+);
+
+// --- Local runners (altair-runner on the user's computer) ---
+
+export const runners = sqliteTable(
+  "runners",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** SHA-256 of the runner's secret token, hex. The token itself is only on the computer. */
+    tokenHash: text("token_hash").notNull().unique(),
+    /** JSON RunnerInfo from the runner's last hello (folders, CLIs, version), or null. */
+    info: text("info"),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+    ...timestamps,
+  },
+  (t) => [index("runners_user_id_idx").on(t.userId)],
+);
+
+/** Short-lived codes shown in the web app and typed into `altair-runner pair`. */
+export const runnerPairings = sqliteTable("runner_pairings", {
+  /** SHA-256 of the normalized code, hex. */
+  codeHash: text("code_hash").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestamps.createdAt,
+});
+
+/** The local folder (on one of the owner's runners) a project works in. One per project. */
+export const projectWorkspaces = sqliteTable(
+  "project_workspaces",
+  {
+    projectId: text("project_id")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    cli: text("cli", { enum: ["claude", "codex", "gemini"] }).notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (t) => [index("project_workspaces_runner_id_idx").on(t.runnerId)],
+);
+
+// --- Notifications ---
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    threadId: text("thread_id"),
+    kind: text("kind", { enum: ["done", "ready", "decision", "blocked", "failed"] }).notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    url: text("url").notNull(),
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [index("notifications_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+/** Devices that receive push: browsers (Web Push) and native apps (Expo push tokens). */
+export const pushSubscriptions = sqliteTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["webpush", "expo"] }).notNull(),
+    /** Web Push endpoint URL, or the Expo push token. */
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh"),
+    auth: text("auth"),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [index("push_subscriptions_user_id_idx").on(t.userId)],
+);
+
+/** Per-user delivery channels. No row = defaults (both on). */
+export const notificationSettings = sqliteTable("notification_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  email: integer("email", { mode: "boolean" }).notNull().default(true),
+  push: integer("push", { mode: "boolean" }).notNull().default(true),
   updatedAt: timestamps.updatedAt,
 });

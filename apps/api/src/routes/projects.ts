@@ -1,5 +1,6 @@
 import { createDb, schema } from "@altair/db";
 import {
+  AddProjectRepoInput,
   CreateInviteInput,
   CreateProjectInput,
   createId,
@@ -9,15 +10,21 @@ import {
   type ProjectRole,
   type ProjectSettings,
   UpdateMemberInput,
+  SetWorkspaceInput,
+  TaskTarget,
   UpdateProjectSettingsInput,
 } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { USER_ID_HEADER } from "../agents/project-agent";
+import { GithubError, githubConfigured, installationToken } from "../github/app";
+import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
+import { deleteProject } from "../projects/delete";
+import { getWorkspace, notifyProject, parseInfo } from "../runners";
 
-const { apiKeys, projects, projectInvites, projectMembers, user } = schema;
+const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
 
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
@@ -48,6 +55,14 @@ export const projectRoutes = new Hono<AppEnv>()
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
     return project ? c.json({ project }) : c.json({ error: "not_found" }, 404);
   })
+  .delete("/:id", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (project.role !== "owner") return c.json({ error: "forbidden", message: "Only owners can delete a project." }, 403);
+    await deleteProject(c.env, id);
+    return c.body(null, 204);
+  })
   .get("/:id/settings", async (c) => {
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
@@ -64,7 +79,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, model } = input.data;
+    const { name, model, taskTarget } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -82,6 +97,7 @@ export const projectRoutes = new Hono<AppEnv>()
       .set({
         ...(name !== undefined && { name }),
         ...(model !== undefined && { llmModel: model || null }),
+        ...(taskTarget !== undefined && { taskTarget }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -222,12 +238,136 @@ export const projectRoutes = new Hono<AppEnv>()
       .where(and(eq(projectInvites.id, inviteId), eq(projectInvites.projectId, id)));
     return c.body(null, 204);
   })
+  .get("/:id/repos", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    return c.json({ repos: await listProjectRepos(c.env.DB, id) });
+  })
+  .post("/:id/repos", async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    const project = await findMembership(c.env, id, userId);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden" }, 403);
+    if (!githubConfigured(c.env)) return c.json({ error: "github_not_configured" }, 503);
+    const input = AddProjectRepoInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const { installationId, repoId } = input.data;
+    if (!(await canUseInstallation(c.env.DB, userId, installationId))) return c.json({ error: "forbidden" }, 403);
+
+    // Narrowing a token to the repo fails unless the installation really covers it.
+    let repo;
+    try {
+      const res = await installationToken(c.env, installationId, {
+        repositoryIds: [repoId],
+        permissions: { metadata: "read" },
+      });
+      repo = res.repositories?.find((r) => r.id === repoId);
+    } catch (err) {
+      if (!(err instanceof GithubError) || err.status >= 500) throw err;
+    }
+    if (!repo) return c.json({ error: "repo_not_accessible" }, 404);
+
+    await createDb(c.env.DB)
+      .insert(projectRepos)
+      .values({
+        projectId: id,
+        repoId,
+        installationId,
+        fullName: repo.full_name,
+        defaultBranch: repo.default_branch,
+        private: repo.private,
+        addedBy: userId,
+        createdAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [projectRepos.projectId, projectRepos.repoId],
+        set: { installationId, fullName: repo.full_name, defaultBranch: repo.default_branch, private: repo.private },
+      });
+    const repos = await listProjectRepos(c.env.DB, id);
+    return c.json({ repo: repos.find((r) => r.repoId === repoId) }, 201);
+  })
+  .delete("/:id/repos/:repoId", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden" }, 403);
+    await createDb(c.env.DB)
+      .delete(projectRepos)
+      .where(and(eq(projectRepos.projectId, id), eq(projectRepos.repoId, Number(c.req.param("repoId")))));
+    return c.body(null, 204);
+  })
   .get("/:id/messages", async (c) => {
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
     const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
     const agent = await getAgentByName(c.env.PROJECT_AGENT, id);
     return c.json(await agent.getMessagesAfter(after));
+  })
+  .get("/:id/threads/:threadId/tasks", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    return c.json({ tasks: await agent.getTasks() });
+  })
+  // What the thread's cloud tasks saved (its Artifacts workspace): history and one folder or file.
+  .get("/:id/threads/:threadId/files", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    return c.json({ workspace: await agent.readWorkspace(c.req.query("path") ?? "", c.req.query("ref") || undefined) });
+  })
+  .post("/:id/threads/:threadId/tasks/:taskId/cancel", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    const cancelled = await agent.cancelTask(c.req.param("taskId"));
+    return cancelled.ok ? c.json({ ok: true }) : c.json({ error: "cannot_cancel", message: cancelled.error }, 409);
+  })
+  // The local folder this project works in, on one of the user's computers.
+  .get("/:id/workspace", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  .put("/:id/workspace", async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    const project = await findMembership(c.env, id, userId);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const input = SetWorkspaceInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+
+    // Only your own computers, and only a folder you shared on it with `altair-runner share`.
+    const db = createDb(c.env.DB);
+    const [runner] = await db
+      .select()
+      .from(runners)
+      .where(and(eq(runners.id, input.data.runnerId), eq(runners.userId, userId)));
+    if (!runner) return c.json({ error: "invalid_input", message: "Unknown computer." }, 400);
+    const info = parseInfo(runner.info);
+    if (!info?.folders.some((f) => f.path === input.data.path)) {
+      return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
+    }
+
+    const now = new Date();
+    const values = { ...input.data, updatedAt: now };
+    await db
+      .insert(projectWorkspaces)
+      .values({ projectId: id, createdBy: userId, createdAt: now, ...values })
+      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, createdBy: userId } });
+    await notifyProject(c.env, id);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  .delete("/:id/workspace", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    await createDb(c.env.DB).delete(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
+    await notifyProject(c.env, id);
+    return c.json({ workspace: null });
   })
   .get("/:id/ws", async (c) => {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
@@ -244,7 +384,7 @@ export const projectRoutes = new Hono<AppEnv>()
     return agent.fetch(new Request(c.req.raw, { headers }));
   });
 
-async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
+export async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
   const [row] = await createDb(env.DB)
     .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
     .from(projectMembers)
@@ -252,6 +392,13 @@ async function findMembership(env: Env, projectId: string, userId: string): Prom
     .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
     .limit(1);
   return row ? toProject(row) : null;
+}
+
+/** The thread's id when it exists in a project the user belongs to. */
+async function findThread(env: Env, projectId: string, threadId: string, userId: string): Promise<string | null> {
+  if (!(await findMembership(env, projectId, userId))) return null;
+  const project = await getAgentByName(env.PROJECT_AGENT, projectId);
+  return (await project.getThread(threadId)) ? threadId : null;
 }
 
 function toProject(row: { id: string; name: string; role: Project["role"]; createdAt: Date }): Project {
@@ -280,8 +427,18 @@ async function ownerCount(env: Env, projectId: string): Promise<number> {
 
 async function readSettings(env: Env, projectId: string): Promise<ProjectSettings> {
   const [row] = await createDb(env.DB)
-    .select({ name: projects.name, provider: projects.llmProvider, model: projects.llmModel, keyId: projects.llmKeyId })
+    .select({
+      name: projects.name,
+      provider: projects.llmProvider,
+      model: projects.llmModel,
+      keyId: projects.llmKeyId,
+      taskTarget: projects.taskTarget,
+    })
     .from(projects)
     .where(eq(projects.id, projectId));
-  return { ...row!, provider: row!.provider as ProjectSettings["provider"] };
+  return {
+    ...row!,
+    provider: row!.provider as ProjectSettings["provider"],
+    taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
+  };
 }

@@ -1,5 +1,7 @@
+import type { Translate } from "@altair/i18n";
+import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
-import { FileText, GitCompareArrows, type LucideIcon, SquareTerminal } from "lucide-react";
+import { FileText, GitCompareArrows, type LucideIcon, SquareTerminal, X } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { cn } from "../../lib/ui";
 
@@ -16,60 +18,78 @@ export type WorkspaceTab = {
  * The thread's tabs as they stand today. The sandbox, runner and artifact
  * work replace each placeholder with the real view.
  */
-export function defaultWorkspaceTabs(_thread: Thread): WorkspaceTab[] {
+export function defaultWorkspaceTabs(_thread: Thread, t: Translate): WorkspaceTab[] {
   return [
     {
       id: "changes",
-      label: "Changes",
+      label: t("workspace.changes"),
       icon: GitCompareArrows,
       content: (
-        <EmptyTab icon={GitCompareArrows} title="No changes yet">
-          When this thread edits code, the diff and its pull request show up here.
+        <EmptyTab icon={GitCompareArrows} title={t("workspace.changesEmpty")}>
+          {t("workspace.changesEmptyBody")}
         </EmptyTab>
       ),
     },
     {
       id: "terminal",
-      label: "Terminal",
+      label: t("workspace.terminal"),
       icon: SquareTerminal,
       content: (
-        <EmptyTab icon={SquareTerminal} title="Nothing has run yet">
-          Commands this thread runs in its sandbox or on your runner stream here, live.
+        <EmptyTab icon={SquareTerminal} title={t("workspace.terminalEmpty")}>
+          {t("workspace.terminalEmptyBody")}
         </EmptyTab>
       ),
     },
     {
       id: "outputs",
-      label: "Outputs",
+      label: t("workspace.outputs"),
       icon: FileText,
       content: (
-        <EmptyTab icon={FileText} title="No outputs yet">
-          Files, artifacts and links this thread delivers collect here.
+        <EmptyTab icon={FileText} title={t("workspace.outputsEmpty")}>
+          {t("workspace.outputsEmptyBody")}
         </EmptyTab>
       ),
     },
   ];
 }
 
-/** The right half of a thread: tabs over what the agent changed, ran and produced. */
+/**
+ * Tabs over what a thread changed, ran and produced. Pass `active` and
+ * `onActiveChange` to control the tab from outside, `onClose` for a close button.
+ */
 export function WorkspacePanel({
   tabs,
+  initialTab,
   status,
+  active: controlled,
+  onActiveChange,
+  onClose,
   className = "",
 }: {
   tabs: WorkspaceTab[];
+  /** The tab shown first; remount (change `key`) to switch to it again. */
+  initialTab?: string;
   /** Shown at the right of the tab bar, e.g. which runner does the work. */
   status?: ReactNode;
+  active?: string;
+  onActiveChange?: (id: string) => void;
+  onClose?: () => void;
   className?: string;
 }) {
-  const [active, setActive] = useState(tabs[0]?.id);
+  const t = useT();
+  const [uncontrolled, setUncontrolled] = useState(initialTab ?? tabs[0]?.id);
+  const active = controlled ?? uncontrolled;
+  const setActive = (id: string) => {
+    setUncontrolled(id);
+    onActiveChange?.(id);
+  };
   const base = useId();
   const current = tabs.find((t) => t.id === active) ?? tabs[0];
 
   return (
-    <section aria-label="Workspace" className={cn("min-w-0 flex-col bg-[#0b0b0d]", className)}>
+    <section aria-label={t("workspace.label")} className={cn("min-w-0 flex-col bg-[#0b0b0d]", className)}>
       <div className="flex h-[52px] flex-none items-center gap-1 overflow-x-auto border-b border-line px-3.5">
-        <div role="tablist" aria-label="Workspace tabs" className="flex items-center gap-1">
+        <div role="tablist" aria-label={t("workspace.tabs")} className="flex items-center gap-1">
           {tabs.map((tab) => {
             const selected = tab.id === current?.id;
             return (
@@ -102,6 +122,20 @@ export function WorkspacePanel({
           })}
         </div>
         {status && <div className="ml-auto flex flex-none items-center gap-1.5 pl-3 text-xs text-subtle">{status}</div>}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("workspace.close")}
+            title={t("workspace.close")}
+            className={cn(
+              "flex size-8 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg",
+              !status && "ml-auto",
+            )}
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
       {current && (
         <div

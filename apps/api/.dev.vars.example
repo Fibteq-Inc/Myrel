@@ -6,3 +6,11 @@ TRUSTED_ORIGINS=http://localhost:5173
 SIGNUP_ENABLED=true
 # Model key for the default provider (LLM_PROVIDER in wrangler.jsonc).
 FIREWORKS_API_KEY=
+# Artifacts: `pnpm dev` also runs the artifact Worker (apps/artifacts) on :8788.
+# Use the same secret in apps/artifacts/.dev.vars.
+ARTIFACTS_URL=http://localhost:8788
+ARTIFACT_SIGNING_SECRET=change-me-to-another-long-random-string
+# Optional notification channels (see wrangler.jsonc). Email uses the EMAIL binding; locally sends are only simulated. Generate VAPID keys with `pnpm --filter @altair/api vapid`.
+# EMAIL_FROM=Altair <altair@example.com>
+# VAPID_PUBLIC_KEY=
+# VAPID_PRIVATE_KEY=

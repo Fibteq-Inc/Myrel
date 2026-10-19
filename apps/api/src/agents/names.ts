@@ -2,3 +2,5 @@
 export const COORDINATOR_ID = "coordinator";
 export const THREAD_AGENT_ID = "thread-agent";
 export const SYSTEM_ID = "system";
+/** authorId of the project-chat post a routine makes when it runs. */
+export const ROUTINE_ID = "routine";

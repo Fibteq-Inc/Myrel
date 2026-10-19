@@ -1,8 +1,11 @@
+import { useT } from "@altair/i18n/react";
 import type { Message, Reaction } from "@altair/protocol";
-import { CircleAlert, LoaderCircle } from "lucide-react";
+import { AlarmClock, CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import { AltairMark, relativeTime } from "../../lib/ui";
+import { AltairMark, useRelativeTime } from "../../lib/ui";
+import { AttachmentList } from "../files";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
+import { MessageStatsLine } from "./message-stats";
 
 export type Names = Record<string, string>;
 
@@ -26,6 +29,24 @@ export function MessageView({
   decision?: DecisionHandlers;
   children?: ReactNode;
 }) {
+  const t = useT();
+  const relativeTime = useRelativeTime();
+  if (message.authorKind === "system" && message.authorId === "routine") {
+    const [title, ...rest] = message.body.replace(/^⏰\s*/, "").split("\n");
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-start gap-2.5 rounded-xl border border-[#2b3060] bg-accent-soft/60 px-3.5 py-2.5 text-[13px] text-body">
+          <AlarmClock size={16} className="mt-0.5 flex-none text-accent" aria-hidden="true" />
+          <span className="min-w-0">
+            <span className="block text-xs text-subtle">{t("routines.notice", { name: title ?? "" })}</span>
+            <span className="whitespace-pre-wrap">{rest.join("\n").trim()}</span>
+          </span>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
   if (message.authorKind === "system") {
     return (
       <div className="flex items-start gap-2.5 rounded-xl border border-[#3b3218] bg-[#17150f] px-3.5 py-2.5 text-[13px] text-body">
@@ -41,11 +62,13 @@ export function MessageView({
         <AltairMark size={28} />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
           <MessageMarkdown body={message.body} decision={decision} />
+          <AttachmentList attachments={message.attachments} />
           {children}
+          {message.stats && <MessageStatsLine stats={message.stats} />}
           <div className="-ml-1.5 -mt-1 flex items-center gap-1">
             <Reactions reactions={reactions} />
             <span className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-              <CopyButton text={message.body} label="Copy message" />
+              <CopyButton text={message.body} label={t("message.copy")} />
               <time dateTime={message.createdAt} className="px-1 text-xs text-subtle">
                 {relativeTime(message.createdAt)}
               </time>
@@ -59,9 +82,14 @@ export function MessageView({
   const mine = message.authorId === me;
   return (
     <div className="group flex flex-col items-end gap-1.5">
-      {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? "Member"}</span>}
-      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
-        {message.body}
+      {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? t("common.member")}</span>}
+      {message.body && (
+        <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
+          {message.body}
+        </div>
+      )}
+      <div className="flex max-w-[85%] justify-end">
+        <AttachmentList attachments={message.attachments} />
       </div>
       <Reactions reactions={reactions} />
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
@@ -85,13 +113,14 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label = "Thinking" }: { label?: string }) {
+export function Thinking({ label }: { label?: string }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-3.5" role="status">
       <AltairMark size={28} />
       <span className="flex items-center gap-2 text-[13px] text-subtle">
         <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
-        {label}…
+        {label ?? t("message.thinking")}…
       </span>
     </div>
   );

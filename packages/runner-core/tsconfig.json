@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The runner code runs in Workers, browsers and Node; tests use Node to run real scripts.
+    "lib": ["es2023", "dom"],
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}

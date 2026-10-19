@@ -36,7 +36,9 @@ flowchart LR
     api["Hono API /api/*<br/>Better Auth"]
     pa["ProjectAgent DO<br/>coordinator, project chat"]
     ta["ThreadAgent DO<br/>one per thread"]
+    ra["RunnerAgent DO<br/>one per paired computer"]
   end
+  runner["altair-runner<br/>your computer, your CLI"]
   d1[("D1<br/>users, projects")]
   llm["LLM provider<br/>Fireworks, Anthropic, OpenAI<br/>optionally via AI Gateway"]
   clients --> assets
@@ -45,6 +47,8 @@ flowchart LR
   api --> d1
   pa -- start_thread, message_thread --> ta
   ta -- request_coordinator --> pa
+  ta -- run_local_task --> ra
+  runner -- outbound WebSocket --> ra
   pa --> llm
   ta --> llm
 ```
@@ -54,21 +58,30 @@ flowchart LR
 - **Agents**: one `ProjectAgent` Durable Object per project runs the coordinator
   (`post_message`, `start_thread`, `message_thread`, `react`). Each thread has a
   `ThreadAgent` that does the work (`reply`, `update_status`, `request_coordinator`,
-  `resolve_thread`). Both use a small provider-neutral loop in `apps/api/src/llm`.
+  `resolve_thread`, and `run_local_task` when the project has a local folder). Both
+  use a small provider-neutral loop in `apps/api/src/llm`.
+- **Local runner**: `altair-runner` (`packages/altair-runner`) runs on your computer, keeps an
+  outbound WebSocket to a `RunnerAgent` Durable Object and runs tasks with your own
+  Claude Code, Codex or Gemini CLI in folders you shared. Your CLI logins never leave
+  your computer. See [packages/altair-runner/README.md](packages/altair-runner/README.md).
 - **Realtime**: messages live in the project's Durable Object SQLite with a
   monotonically increasing `seq`, so clients resync after reconnecting.
 - **Web**: Vite, React 19, TanStack Router and Query, Tailwind CSS 4.
-- **Shared**: `packages/protocol` (zod schemas) and `packages/client` (fetch and
-  WebSocket client for web, desktop and React Native).
+- **Shared**: `packages/protocol` (zod schemas), `packages/client` (fetch and
+  WebSocket client for web, desktop and React Native) and `packages/i18n` (UI
+  strings in English and Turkish; read [its README](packages/i18n/README.md)
+  before adding UI text).
 
 More detail is in [docs/architecture.md](docs/architecture.md).
 
 ```
-apps/api           Hono Worker, Durable Objects (ProjectAgent, ThreadAgent)
+apps/api           Hono Worker, Durable Objects (ProjectAgent, ThreadAgent, RunnerAgent)
 apps/web           Vite + React SPA
 packages/protocol  message/thread/project types, WebSocket events
 packages/client    typed API client + reconnecting project socket
+packages/i18n      UI strings (en, tr) for web and mobile
 packages/db        Drizzle schema and D1 migrations
+packages/altair-runner    @fibteq/altair-runner, the local daemon for your own coding CLI (altair-runner-alias: its short npm name)
 docs/              self-hosting, architecture, maintainer notes
 ee/                enterprise features under a commercial license (empty for now)
 ```
@@ -80,8 +93,9 @@ Requires Node 22+ and pnpm 10.
 ```sh
 pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars    # set BETTER_AUTH_SECRET and a model key
+cp apps/artifacts/.dev.vars.example apps/artifacts/.dev.vars
 pnpm db:migrate:local                               # applies D1 migrations to the local database
-pnpm dev                                            # API on :8787, web on http://localhost:5173
+pnpm dev                                            # API on :8787, artifacts on :8788, web on http://localhost:5173
 ```
 
 Open http://localhost:5173, create an account (sign-ups are on locally), create a
@@ -105,9 +119,10 @@ connecting the apps.
 |---|---|---|
 | 0 | Monorepo, auth, D1, deploy pipeline | Done |
 | 1 | Talking coordinator and thread agents | Done |
+| 1.5 | Local `altair-runner`: work in a folder on your computer with your own Claude Code, Codex or Gemini CLI | Done |
 | 2 | Threads that do work: sandboxed runners (OpenCode first), project files on R2, GitHub (clone, branch, PR) | Next |
 | 3 | Artifacts, project memory, decision cards, mobile app (Expo) | Planned |
-| 4 | Events and routines (webhooks, schedules), local `altair-runner` for your own CLI subscriptions, MCP connectors, desktop app (Tauri) | Planned |
+| 4 | Events and routines (webhooks, schedules), MCP connectors, desktop app (Tauri) | Planned |
 | 5 | Members and roles, billing for the hosted service, enterprise features, one-click deploy | Planned |
 
 ## Contributing

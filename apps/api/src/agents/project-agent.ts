@@ -1,22 +1,38 @@
 import { createDb, schema } from "@altair/db";
 import {
+  type Attachment,
+  type Artifact,
+  type ArtifactVersion,
   type AuthorKind,
   ClientEvent,
+  type CreateRoutineInput,
   createId,
   type Message,
+  type MessageStats,
+  type ArtifactRef,
+  nextCronRun,
+  type NotificationKind,
   type Reaction,
+  type Routine,
+  type RoutineSchedule,
+  type RoutineTarget,
   type ServerEvent,
   SYNC_PAGE_SIZE,
   type Thread,
   type ThreadStatus,
+  type UpdateRoutineInput,
 } from "@altair/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
+import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
+import { deliverNotification, excerpt } from "../notifications/deliver";
 import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
-import { meteredForTurn } from "../usage";
-import { COORDINATOR_ID, SYSTEM_ID } from "./names";
+import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
+import { meteredForTurn, TurnMeter } from "../usage";
+import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID } from "./names";
+import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
 export const USER_ID_HEADER = "x-altair-user-id";
@@ -30,6 +46,11 @@ type MessageRow = {
   author_kind: AuthorKind;
   author_id: string;
   body: string;
+  attachments: string | null;
+  /** JSON array of ArtifactRef, or null. */
+  artifacts: string | null;
+  /** JSON MessageStats, or null. */
+  stats: string | null;
   created_at: string;
 };
 
@@ -47,7 +68,26 @@ type ThreadRow = {
 
 type InboxRow = { id: number; kind: InboxItem["kind"]; payload: string };
 
-export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | "body">;
+type RoutineRow = {
+  id: string;
+  name: string;
+  prompt: string;
+  target: string;
+  schedule: string;
+  paused: number;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  run_count: number;
+  schedule_id: string | null;
+  created_by: string;
+  created_at: string;
+};
+
+export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | "body"> & {
+  attachments?: Attachment[];
+  artifacts?: ArtifactRef[];
+  stats?: MessageStats;
+};
 
 export type ThreadPatch = Partial<Pick<Thread, "title" | "status" | "statusText" | "resolved" | "label">>;
 
@@ -58,6 +98,9 @@ export type ThreadContext = {
   root: Message;
   messages: Message[];
   names: Record<string, string>;
+  knowledge: KnowledgeSnapshot;
+  routines: Routine[];
+  defaultTimezone: string;
 };
 
 export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
@@ -74,8 +117,13 @@ const COORDINATOR_HISTORY = 40;
 export class ProjectAgent extends Agent<Env> {
   static override options = { sendIdentityOnConnect: false };
 
-  /** Agents currently working: null = coordinator, otherwise a thread id. In memory only. */
-  private active = new Set<string | null>();
+  /** Agents currently working (null = coordinator, otherwise a thread id) and what they are doing. In memory only. */
+  private active = new Map<string | null, string | undefined>();
+
+  /** Project instructions, memory and the file index. */
+  readonly knowledge: KnowledgeStore;
+
+  private readonly artifacts: ArtifactStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -88,6 +136,13 @@ export class ProjectAgent extends Agent<Env> {
       body TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`;
+    // Added with project files; older projects get the column here.
+    const columns = this.sql<{ name: string }>`PRAGMA table_info(messages)`;
+    if (!columns.some((c) => c.name === "attachments")) this.sql`ALTER TABLE messages ADD COLUMN attachments TEXT`;
+    // Added with artifacts.
+    if (!columns.some((c) => c.name === "artifacts")) this.sql`ALTER TABLE messages ADD COLUMN artifacts TEXT`;
+    // Added with per-message stats.
+    if (!columns.some((c) => c.name === "stats")) this.sql`ALTER TABLE messages ADD COLUMN stats TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -112,6 +167,28 @@ export class ProjectAgent extends Agent<Env> {
       kind TEXT NOT NULL,
       payload TEXT NOT NULL
     )`;
+    this.knowledge = new KnowledgeStore(
+      (strings, ...values) => this.sql(strings, ...values),
+      env.FILES,
+      () => this.name,
+      (kind) => this.emit({ type: "knowledge.changed", kind }),
+    );
+    this.artifacts = new ArtifactStore(this.sql.bind(this), env.ARTIFACTS, this.name);
+    // Scheduled wake-ups. Each armed routine has one pending Agents SDK schedule (a DO alarm).
+    this.sql`CREATE TABLE IF NOT EXISTS routines (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      target TEXT NOT NULL,
+      schedule TEXT NOT NULL,
+      paused INTEGER NOT NULL DEFAULT 0,
+      next_run_at TEXT,
+      last_run_at TEXT,
+      run_count INTEGER NOT NULL DEFAULT 0,
+      schedule_id TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`;
   }
 
   // Our clients speak the Altair protocol only; skip the SDK's state/identity frames.
@@ -126,6 +203,8 @@ export class ProjectAgent extends Agent<Env> {
       return;
     }
     connection.setState({ userId });
+    // Remembered for links in notification emails when BETTER_AUTH_URL is not set.
+    this.ctx.storage.kv.put("origin", new URL(request.url).origin);
   }
 
   override async onMessage(connection: Connection, raw: string | ArrayBuffer | ArrayBufferView) {
@@ -149,11 +228,18 @@ export class ProjectAgent extends Agent<Env> {
         if (event.threadId && !this.getThread(event.threadId)) {
           return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
         }
+        let attachments: Attachment[];
+        try {
+          attachments = this.knowledge.attachmentsFor(event.attachments);
+        } catch (err) {
+          return send(connection, { type: "error", code: "no_file", message: (err as Error).message });
+        }
         const message = this.sendMessage({
           threadId: event.threadId,
           authorKind: "user",
           authorId: userId,
           body: event.body,
+          attachments,
         });
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
@@ -179,8 +265,12 @@ export class ProjectAgent extends Agent<Env> {
           ...page,
           threads: this.listThreads(),
           reactions: this.reactionsFor(page.messages.map((m) => m.id)),
+          artifacts: this.artifacts.list(),
+          routines: this.listRoutines(),
         });
-        for (const threadId of this.active) send(connection, { type: "agent.activity", threadId, active: true });
+        for (const [threadId, label] of this.active) {
+          send(connection, { type: "agent.activity", threadId, active: true, label });
+        }
         return;
       }
     }
@@ -192,11 +282,24 @@ export class ProjectAgent extends Agent<Env> {
   sendMessage(input: NewMessage): Message {
     const id = createId("message");
     const createdAt = new Date().toISOString();
+    const attachments = input.attachments ?? [];
+    const stored = attachments.length ? JSON.stringify(attachments) : null;
+    const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, created_at)
-      VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${createdAt})
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, created_at)
+      VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
+        ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null}, ${createdAt})
       RETURNING seq`;
-    const message: Message = { ...input, id, projectId: this.name, seq: row!.seq, createdAt };
+    const { artifacts: _, ...rest } = input;
+    const message: Message = {
+      ...rest,
+      attachments,
+      ...(artifacts && { artifacts }),
+      id,
+      projectId: this.name,
+      seq: row!.seq,
+      createdAt,
+    };
     this.emit({ type: "message.created", message });
     return message;
   }
@@ -270,7 +373,38 @@ export class ProjectAgent extends Agent<Env> {
       this.toMessage(r),
     );
     const { projectName, names } = await this.directory();
-    return { projectName, thread, root, messages, names };
+    return {
+      projectName,
+      thread,
+      root,
+      messages,
+      names,
+      knowledge: this.knowledge.snapshot(),
+      routines: this.listRoutines(),
+      defaultTimezone: this.defaultTimezone(),
+    };
+  }
+
+  /** A thread's turn ended in a way people should hear about. Callable over RPC. */
+  async notifyThread(threadId: string, kind: NotificationKind, text: string): Promise<void> {
+    const thread = this.getThread(threadId);
+    if (!thread) return;
+    try {
+      const { projectName } = await this.directory();
+      const origin = this.env.BETTER_AUTH_URL?.replace(/\/$/, "") || (this.ctx.storage.kv.get<string>("origin") ?? null);
+      await deliverNotification(this.env, {
+        projectId: this.name,
+        projectName,
+        threadId,
+        kind,
+        title: thread.title,
+        body: excerpt(text),
+        path: `/projects/${this.name}/threads/${threadId}`,
+        origin,
+      });
+    } catch (err) {
+      console.error("notification failed", err);
+    }
   }
 
   /** A thread agent asks the coordinator for permission or direction. Callable over RPC. */
@@ -278,17 +412,209 @@ export class ProjectAgent extends Agent<Env> {
     await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason });
   }
 
-  /** Thread agents report when they start and stop working. Callable over RPC. */
-  setActivity(threadId: string | null, active: boolean): void {
-    if (active === this.active.has(threadId)) return;
-    if (active) this.active.add(threadId);
+  /** Agents report when they start and stop working, and optionally what they are doing. Callable over RPC. */
+  setActivity(threadId: string | null, active: boolean, label?: string): void {
+    if (active === this.active.has(threadId) && label === this.active.get(threadId)) return;
+    if (active) this.active.set(threadId, label);
     else this.active.delete(threadId);
-    this.emit({ type: "agent.activity", threadId, active });
+    this.emit({ type: "agent.activity", threadId, active, label });
+  }
+
+  /** The project's local folder changed or its computer connected/disconnected. Callable over RPC. */
+  workspaceChanged(): void {
+    this.emit({ type: "workspace.changed" });
+  }
+
+  /** A thread's task changed or printed output; relay it to clients. Callable over RPC. */
+  broadcastTask(event: Extract<ServerEvent, { type: "task.updated" | "task.output" }>): void {
+    this.emit(event);
+  }
+
+  // ---- Routines ----------------------------------------------------------
+
+  listRoutines(): Routine[] {
+    return this.sql<RoutineRow>`SELECT * FROM routines ORDER BY created_at`.map((r) => this.toRoutine(r));
+  }
+
+  getRoutine(id: string): Routine | null {
+    const [row] = this.sql<RoutineRow>`SELECT * FROM routines WHERE id = ${id}`;
+    return row ? this.toRoutine(row) : null;
+  }
+
+  /** Creates and arms a routine. Callable over RPC. Throws on a bad target or a time in the past. */
+  async createRoutine(input: CreateRoutineInput, createdBy: string): Promise<Routine> {
+    this.checkTarget(input.target);
+    this.checkSchedule(input.schedule);
+    const id = createId("routine");
+    const now = new Date().toISOString();
+    this.sql`INSERT INTO routines (id, name, prompt, target, schedule, paused, run_count, created_by, created_at)
+      VALUES (${id}, ${input.name}, ${input.prompt}, ${JSON.stringify(input.target)}, ${JSON.stringify(input.schedule)},
+        0, 0, ${createdBy}, ${now})`;
+    return this.arm(id);
+  }
+
+  /** Renames, reschedules, pauses or resumes a routine. Callable over RPC. */
+  async updateRoutine(id: string, patch: UpdateRoutineInput): Promise<Routine | null> {
+    const current = this.getRoutine(id);
+    if (!current) return null;
+    if (patch.schedule) this.checkSchedule(patch.schedule);
+    const next = { ...current, ...patch };
+    this.sql`UPDATE routines SET name = ${next.name}, prompt = ${next.prompt}, schedule = ${JSON.stringify(next.schedule)},
+      paused = ${next.paused ? 1 : 0} WHERE id = ${id}`;
+    return this.arm(id);
+  }
+
+  async deleteRoutine(id: string): Promise<boolean> {
+    const [row] = this.sql<RoutineRow>`SELECT * FROM routines WHERE id = ${id}`;
+    if (!row) return false;
+    if (row.schedule_id) await this.cancelSchedule(row.schedule_id);
+    this.sql`DELETE FROM routines WHERE id = ${id}`;
+    this.emit({ type: "routine.deleted", routineId: id });
+    return true;
+  }
+
+  /** Runs a routine right away without touching its schedule. Callable over RPC. */
+  async runRoutineNow(id: string): Promise<Routine | null> {
+    const routine = this.getRoutine(id);
+    if (!routine) return null;
+    await this.fireRoutine(routine);
+    return this.getRoutine(id);
+  }
+
+  /** Schedule callback (a DO alarm via the Agents SDK): run the routine, then arm its next run. */
+  async runRoutine(payload: { routineId: string }): Promise<void> {
+    const routine = this.getRoutine(payload.routineId);
+    if (!routine || routine.paused) return;
+    this.sql`UPDATE routines SET schedule_id = NULL WHERE id = ${routine.id}`;
+    await this.fireRoutine(routine);
+    if (routine.schedule.kind === "cron") {
+      await this.arm(routine.id);
+      return;
+    }
+    // A one-off routine is finished once its alarm has fired.
+    this.sql`UPDATE routines SET next_run_at = NULL WHERE id = ${routine.id}`;
+    this.emit({ type: "routine.updated", routine: this.getRoutine(routine.id)! });
+  }
+
+  private async fireRoutine(routine: Routine) {
+    const now = new Date().toISOString();
+    this.sql`UPDATE routines SET last_run_at = ${now}, run_count = run_count + 1 WHERE id = ${routine.id}`;
+    if (routine.target.kind === "thread") {
+      const thread = this.getThread(routine.target.threadId);
+      if (thread) {
+        if (thread.resolved) this.updateThread(thread.id, { resolved: false });
+        await this.wakeThread(thread.id, { kind: "routine", name: routine.name, prompt: routine.prompt });
+        return;
+      }
+      // The thread is gone: hand the run to the coordinator instead of dropping it.
+    }
+    const post = this.sendMessage({
+      threadId: null,
+      authorKind: "system",
+      authorId: ROUTINE_ID,
+      body: `⏰ ${routine.name}\n\n${routine.prompt}`,
+    });
+    await this.notifyCoordinator({ kind: "routine", messageId: post.id, routineId: routine.id, name: routine.name });
+  }
+
+  /** Cancels the pending alarm, computes the next run and schedules it. Emits the new state. */
+  private async arm(id: string): Promise<Routine> {
+    const [row] = this.sql<RoutineRow>`SELECT * FROM routines WHERE id = ${id}`;
+    if (row!.schedule_id) await this.cancelSchedule(row!.schedule_id);
+    const routine = this.toRoutine(row!);
+    const next = routine.paused ? null : nextRun(routine.schedule, routine.lastRunAt);
+    let scheduleId: string | null = null;
+    if (next) {
+      const s = await this.schedule(next, "runRoutine", { routineId: id }, { idempotent: false });
+      scheduleId = s.id;
+    }
+    const nextRunAt = next?.toISOString() ?? null;
+    this.sql`UPDATE routines SET next_run_at = ${nextRunAt}, schedule_id = ${scheduleId} WHERE id = ${id}`;
+    const armed = { ...routine, nextRunAt };
+    this.emit({ type: "routine.updated", routine: armed });
+    return armed;
+  }
+
+  private checkTarget(target: RoutineTarget) {
+    if (target.kind === "thread" && !this.getThread(target.threadId)) throw new Error("That thread does not exist.");
+  }
+
+  private checkSchedule(schedule: RoutineSchedule) {
+    if (schedule.kind === "once" && Date.parse(schedule.at) <= Date.now()) {
+      throw new Error("That time is already in the past.");
+    }
+    if (schedule.kind === "cron" && !nextCronRun(schedule.cron, schedule.timezone, new Date())) {
+      throw new Error("That cron expression never matches.");
+    }
+  }
+
+  private defaultTimezone() {
+    return this.env.DEFAULT_TIMEZONE || "UTC";
+  }
+
+  /** The coordinator's routine tools. Routines agents create are credited to "agent". */
+  private routineHost(threadId: string | null): RoutineHost {
+    return {
+      listRoutines: () => this.listRoutines(),
+      createRoutine: (input) => this.createRoutine(input, "agent"),
+      setPaused: (id, paused) => this.updateRoutine(id, { paused }),
+      deleteRoutine: (id) => this.deleteRoutine(id),
+      defaultTimezone: this.defaultTimezone(),
+      threadId,
+    };
   }
 
   private async wakeThread(threadId: string, reason: ThreadWake) {
     const agent = await getAgentByName(this.env.THREAD_AGENT, threadId);
     await agent.wake(reason);
+  }
+
+  // ---- Artifacts ---------------------------------------------------------
+
+  /**
+   * Publish a new artifact, or a new version of one. Callable over RPC. Bad input comes
+   * back as `error` (a message for the model) rather than an exception across RPC.
+   */
+  async publishArtifact(input: PublishInput): Promise<{ artifact: Artifact } | { error: string }> {
+    try {
+      const artifact = await this.artifacts.publish(input);
+      this.emit({ type: "artifact.updated", artifact });
+      return { artifact };
+    } catch (err) {
+      if (err instanceof ArtifactError) return { error: err.message };
+      throw err;
+    }
+  }
+
+  /** Newest first. Callable over RPC. */
+  listArtifacts(): Artifact[] {
+    return this.artifacts.list();
+  }
+
+  getArtifact(id: string): { artifact: Artifact; versions: ArtifactVersion[] } | null {
+    const artifact = this.artifacts.get(id);
+    return artifact ? { artifact, versions: this.artifacts.versions(id) } : null;
+  }
+
+  hasArtifactVersion(id: string, version: number): boolean {
+    return this.artifacts.hasVersion(id, version);
+  }
+
+  // ---- Deletion ---------------------------------------------------------
+
+  /**
+   * Called when the project is deleted (see src/projects/delete.ts): disconnects every client
+   * and returns what lives outside this object, so the caller can clean it up.
+   */
+  prepareDelete(): { threadIds: string[]; artifactIds: string[] } {
+    for (const connection of this.getConnections()) connection.close(4404, "project deleted");
+    return { threadIds: this.listThreads().map((t) => t.id), artifactIds: this.artifacts.list().map((a) => a.id) };
+  }
+
+  /** Erases this project's storage and pending alarms. */
+  async wipe(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
   }
 
   // ---- Coordinator -------------------------------------------------------
@@ -317,16 +643,30 @@ export class ProjectAgent extends Agent<Env> {
       const chat = this.sql<MessageRow>`
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
+      const meter = new TurnMeter(llm.provider.model);
       await runLoop({
-        provider: meteredForTurn(llm.provider, this.env, {
-          projectId: this.name,
-          threadId: null,
-          userId: this.turnRequester(inbox),
-          agent: "coordinator",
-        }),
+        provider: meteredForTurn(
+          llm.provider,
+          this.env,
+          { projectId: this.name, threadId: null, userId: this.turnRequester(inbox), agent: "coordinator" },
+          meter,
+        ),
         system: COORDINATOR_SYSTEM,
-        prompt: coordinatorPrompt({ projectName, names, chat, threads: this.listThreads(), inbox }),
-        tools: coordinatorTools(this.coordinatorHost()),
+        prompt: coordinatorPrompt({
+          projectName,
+          names,
+          chat,
+          threads: this.listThreads(),
+          routines: this.listRoutines(),
+          inbox,
+          knowledge: this.knowledge.snapshot(),
+          now: new Date(),
+          defaultTimezone: this.defaultTimezone(),
+        }),
+        tools: [
+          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID })),
+          ...routineTools(this.routineHost(null)),
+        ],
         maxSteps: 8,
       });
     } catch (err) {
@@ -351,12 +691,19 @@ export class ProjectAgent extends Agent<Env> {
     return null;
   }
 
-  private coordinatorHost(): CoordinatorHost {
+  private coordinatorHost(meter?: TurnMeter): CoordinatorHost {
     return {
       getMessage: (id) => this.getMessage(id),
       getThread: (id) => this.getThread(id),
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
-      post: (body) => this.sendMessage({ threadId: null, authorKind: "agent", authorId: COORDINATOR_ID, body }),
+      post: (body) =>
+        this.sendMessage({
+          threadId: null,
+          authorKind: "agent",
+          authorId: COORDINATOR_ID,
+          body,
+          ...(meter && { stats: meter.take() ?? undefined }),
+        }),
       react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
       startThread: async ({ rootMessageId, title, brief, ack }) => {
         const thread = this.createThread(rootMessageId, title);
@@ -370,6 +717,70 @@ export class ProjectAgent extends Agent<Env> {
         if (thread?.resolved) this.updateThread(threadId, { resolved: false });
         await this.wakeThread(threadId, { kind: "coordinator", note });
       },
+    };
+  }
+
+  // ---- Knowledge (instructions, memory, files) ---------------------------
+  // Thin RPC surface over KnowledgeStore for the API routes and thread agents.
+
+  getInstructions() {
+    return this.knowledge.getInstructions();
+  }
+
+  setInstructions(text: string, by: Author) {
+    return this.knowledge.setInstructions(text, by);
+  }
+
+  listMemory() {
+    return this.knowledge.listMemory();
+  }
+
+  getMemory(name: string) {
+    return this.knowledge.getMemory(name);
+  }
+
+  putMemory(name: string, input: { description: string; content: string }, by: Author) {
+    return this.knowledge.putMemory(name, input, by);
+  }
+
+  deleteMemory(name: string) {
+    return this.knowledge.deleteMemory(name);
+  }
+
+  listFiles(prefix = "") {
+    return this.knowledge.listFiles(prefix);
+  }
+
+  getFile(path: string) {
+    return this.knowledge.getFile(path);
+  }
+
+  recordFile(file: { path: string; size: number; contentType: string }, by: Author) {
+    return this.knowledge.recordFile(file, by);
+  }
+
+  forgetFile(path: string) {
+    return this.knowledge.forgetFile(path);
+  }
+
+  async readFileText(path: string): Promise<{ found: boolean; text: string | null; size: number }> {
+    const file = this.knowledge.getFile(path);
+    if (!file) return { found: false, text: null, size: 0 };
+    return { found: true, text: await this.knowledge.readText(path), size: file.size };
+  }
+
+  writeFileText(path: string, content: string, by: Author) {
+    return this.knowledge.writeText(path, content, by);
+  }
+
+  private knowledgeHost(by: Author): KnowledgeHost {
+    return {
+      memoryRead: (name) => this.getMemory(name),
+      memoryWrite: (name, description, content) => this.putMemory(name, { description, content }, by),
+      memoryDelete: (name) => this.deleteMemory(name),
+      listFiles: (prefix) => this.listFiles(prefix),
+      readText: (path) => this.readFileText(path),
+      writeText: (path, content) => this.writeFileText(path, content, by),
     };
   }
 
@@ -402,6 +813,9 @@ export class ProjectAgent extends Agent<Env> {
       authorKind: r.author_kind,
       authorId: r.author_id,
       body: r.body,
+      attachments: r.attachments ? (JSON.parse(r.attachments) as Attachment[]) : [],
+      ...(r.artifacts && { artifacts: JSON.parse(r.artifacts) as ArtifactRef[] }),
+      ...(r.stats && { stats: JSON.parse(r.stats) as MessageStats }),
       seq: r.seq,
       createdAt: r.created_at,
     };
@@ -421,10 +835,37 @@ export class ProjectAgent extends Agent<Env> {
       updatedAt: r.updated_at,
     };
   }
+
+  private toRoutine(r: RoutineRow): Routine {
+    return {
+      id: r.id,
+      projectId: this.name,
+      name: r.name,
+      prompt: r.prompt,
+      target: JSON.parse(r.target) as Routine["target"],
+      schedule: JSON.parse(r.schedule) as Routine["schedule"],
+      paused: r.paused === 1,
+      nextRunAt: r.next_run_at,
+      lastRunAt: r.last_run_at,
+      runCount: r.run_count,
+      createdBy: r.created_by,
+      createdAt: r.created_at,
+    };
+  }
+}
+
+/** When a routine runs next: the next cron match, or a one-off time that has not run yet. */
+function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | null {
+  if (schedule.kind === "cron") return nextCronRun(schedule.cron, schedule.timezone, new Date());
+  const at = new Date(schedule.at);
+  return lastRunAt && Date.parse(lastRunAt) >= at.getTime() - 1000 ? null : at;
 }
 
 /** Why a thread agent is woken. */
-export type ThreadWake = { kind: "message"; messageId: string } | { kind: "coordinator"; note: string };
+export type ThreadWake =
+  | { kind: "message"; messageId: string }
+  | { kind: "coordinator"; note: string }
+  | { kind: "routine"; name: string; prompt: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

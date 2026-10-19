@@ -7,11 +7,19 @@ import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
 import { accountRoutes } from "./routes/account";
 import { adminRoutes } from "./routes/admin";
+import { knowledgeRoutes } from "./routes/knowledge";
+import { githubRoutes } from "./routes/github";
+import { artifactRoutes } from "./routes/artifacts";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
+import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
+import { notificationRoutes } from "./routes/notifications";
+import { routineRoutes } from "./routes/routines";
 
 export { ProjectAgent } from "./agents/project-agent";
+export { RunnerAgent } from "./agents/runner-agent";
 export { ThreadAgent } from "./agents/thread-agent";
+export { Sandbox } from "./sandbox/sandbox";
 
 const app = new Hono<AppEnv>()
   .basePath("/api")
@@ -37,8 +45,16 @@ const app = new Hono<AppEnv>()
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
+  .route("/projects/:id/artifacts", artifactRoutes)
+  .route("/projects/:projectId/routines", routineRoutes)
   .route("/projects", projectRoutes)
+  // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
+  .route("/projects", knowledgeRoutes)
   .route("/usage", usageRoutes)
+  .route("/github", githubRoutes)
+  .route("/runner", runnerDeviceRoutes)
+  .route("/runners", runnerRoutes)
+  .route("/notifications", notificationRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;

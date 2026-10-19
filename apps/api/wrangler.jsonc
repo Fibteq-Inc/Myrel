@@ -25,13 +25,51 @@
     }
   ],
 
+  // R2 buckets. Create each once (`wrangler r2 bucket create <name>` or in the dashboard) before deploying.
+  // FILES: project files and message uploads, under projects/<projectId>/files/.
+  // ARTIFACTS: artifact versions (HTML); the artifact Worker (apps/artifacts) serves them from its own domain.
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "altair-files" },
+    { "binding": "ARTIFACTS", "bucket_name": "altair-artifacts" }
+  ],
+
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
-      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" }
+      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" },
+      // One per paired computer running altair-runner.
+      { "name": "RUNNER_AGENT", "class_name": "RunnerAgent" },
+      // One Linux container per thread for run_task (src/sandbox). Needs Cloudflare Containers
+      // (Workers Paid plan). Remove this binding and the "containers" block to run without it:
+      // run_task then tells the agent there is no sandbox.
+      { "name": "SANDBOX", "class_name": "Sandbox" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["RunnerAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
+  ],
+
+  // Sandbox containers. No image is built on deploy: they run Cloudflare's managed Debian image, set up
+  // once and snapshotted (src/sandbox/setup.ts).
+  "containers": [
+    {
+      "name": "altair-sandbox",
+      "class_name": "Sandbox",
+      "scheduling_policy": "durable_object"
+    }
+  ],
+
+  // Cloudflare Artifacts (beta): one git repository per thread, where the sandbox saves each task's
+  // work so the next task continues from it. Optional: without this binding nothing is saved between
+  // tasks except what a task pushes to GitHub.
+  "artifacts": [{ "binding": "WORKSPACES", "namespace": "altair" }],
+
+  // Cloudflare Email Service (Email Sending) for notification emails. Needs a domain onboarded under
+  // Compute > Email Service > Email Sending and the EMAIL_FROM var below. Locally, `wrangler dev`
+  // only simulates sends. Remove the binding to run without email.
+  "send_email": [{ "name": "EMAIL" }],
 
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
   // BETTER_AUTH_SECRET (required), KEY_ENCRYPTION_SECRET (recommended: encrypts the model keys people
@@ -56,6 +94,31 @@
   // LLM_PRICES: optional JSON of model prices in US dollars per million tokens, used for the
   // usage dashboard's cost estimates, e.g. {"firerouter/opus": {"input": 4, "output": 20, "cachedInput": 0.4}}.
   // Built-in prices cover Claude models; a model with no price is metered with no cost.
+  //
+  // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a
+  // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID,
+  // GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET.
+  //
+  // Artifacts. ARTIFACTS_URL: origin of the artifact Worker, e.g. its workers.dev address or a
+  // domain of its own. It must be a different site from the app (not a subdomain of the app's
+  // domain); a workers.dev address always is. Self-hosting: set your artifact Worker's origin. Empty = artifacts are
+  // published and listed but cannot be opened. ARTIFACT_SIGNING_SECRET (secret): shared with
+  // the artifact Worker, which only serves links signed with it.
+  //
+  // Sandbox (run_task). Repository access comes from the project's GitHub connection.
+  // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
+  // RUNNER_HARNESS: default coding harness, opencode (default) or claude-code.
+  // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
+  //
+  // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
+  //
+  // Notifications (see src/notifications). The in-app list always works; the rest is optional.
+  // Email via Cloudflare Email Service: the EMAIL binding above + EMAIL_FROM, an address on a
+  // domain onboarded under Email Service > Email Sending. The value here is Fibteq's own deployment
+  // (fibteq.app); self-hosting: use an address on your domain, or empty to turn email off.
+  // Web Push: VAPID_PUBLIC_KEY here + VAPID_PRIVATE_KEY secret (generate both with
+  // `pnpm --filter @altair/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
+  // Mobile push goes through Expo; EXPO_ACCESS_TOKEN secret only if enhanced push security is on.
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
@@ -65,6 +128,17 @@
     "LLM_MODEL": "",
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
-    "AI_GATEWAY_URL": ""
+    "AI_GATEWAY_URL": "",
+    "ARTIFACTS_URL": "https://altair-artifacts.fibteq.workers.dev",
+
+    "GITHUB_APP_ID": "5386818",
+    "GITHUB_APP_SLUG": "fibteq",
+    "SANDBOX_INSTANCE_TYPE": "standard-1",
+    "RUNNER_HARNESS": "opencode",
+    "RUNNER_MODEL": "",
+    "DEFAULT_TIMEZONE": "UTC",
+    "EMAIL_FROM": "Altair <altair@fibteq.app>",
+    "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
+    "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
   }
 }

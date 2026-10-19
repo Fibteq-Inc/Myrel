@@ -1,7 +1,7 @@
 # Self-hosting Fibteq Altair on Cloudflare
 
 Altair runs as a single Cloudflare Worker named `altair`. The same Worker serves
-the web app, the HTTP API and two Durable Object classes, and keeps accounts and
+the web app, the HTTP API and three Durable Object classes, and keeps accounts and
 projects in a D1 database. This guide sets up your own copy and keeps it
 deploying from Git with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
 
@@ -62,6 +62,16 @@ in your account):
 Commit and push the change. Keep the database name `altair`: the deploy script
 applies migrations to the database with that name. You do not need to run the
 migrations by hand; every production deploy applies pending ones first.
+
+### Create the R2 bucket
+
+Project files and message uploads are stored in R2 (binding `FILES` in
+`apps/api/wrangler.jsonc`). Create the bucket once; a deploy fails while it is
+missing:
+
+```sh
+pnpm --filter @altair/api exec wrangler r2 bucket create altair-files
+```
 
 ## 3. Set the required secret
 
@@ -155,6 +165,9 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `ANTHROPIC_API_KEY` | Agents, when `LLM_PROVIDER` is `anthropic` | For that provider |
 | `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
 | `AI_GATEWAY_TOKEN` | Calling an authenticated AI Gateway | Only with `AI_GATEWAY_URL` on an authenticated gateway |
+| `ARTIFACT_SIGNING_SECRET` | Signing artifact links; set the same value on the artifact Worker | To view artifacts |
+| `VAPID_PRIVATE_KEY` | Browser push notifications (with `VAPID_PUBLIC_KEY`) | No |
+| `EXPO_ACCESS_TOKEN` | Mobile push, only if Expo enhanced push security is on | No |
 
 ### Variables
 
@@ -168,6 +181,14 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
+| `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://altair-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
+| `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for `run_task`: `lite`, `basic`, `standard-1` … `standard-4`. |
+| `RUNNER_HARNESS` | `opencode` | Default coding agent in the sandbox: `opencode` or `claude-code` (Claude models only). |
+| `RUNNER_MODEL` | empty | Model for the coding agent; empty uses the agents' model. |
+| `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
+| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Altair <altair@example.com>`. Empty turns email off. |
+| `VAPID_PUBLIC_KEY` | empty | Web Push public key. |
+| `VAPID_SUBJECT` | empty | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
 
 ### Bindings
 
@@ -179,7 +200,12 @@ supply the D1 id.
 | `DB` | D1 database | Accounts, sessions, projects, membership |
 | `PROJECT_AGENT` | Durable Object (`ProjectAgent`) | One per project: coordinator, project chat, live WebSocket |
 | `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
+| `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the altair-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
+| `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
+| `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for `run_task` (see [Code sandbox](#code-sandbox)) |
+| `WORKSPACES` | Artifacts namespace `altair` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
+| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) |
 
 ## Optional features
 
@@ -199,6 +225,122 @@ rate limits and cost tracking to model calls.
 
 Fireworks has no built-in AI Gateway route. Add it to the gateway as a custom
 provider and put that URL in `LLM_BASE_URL`.
+
+### Artifacts
+
+Thread agents publish HTML pages with `publish_artifact`. Each publish is an
+immutable version in the `altair-artifacts` R2 bucket
+(`artifacts/{id}/v{n}/index.html`); the app's address for an artifact stays the
+same and opens the latest version. Artifacts are untrusted HTML, so a second
+Worker, `altair-artifacts` (`apps/artifacts`), serves them from **a different
+site** than the app: its own `workers.dev` address
+(`https://altair-artifacts.<your-subdomain>.workers.dev`) works, as does a
+separate domain such as `altair-usercontent.dev`, but never a subdomain of the
+app's domain. It sends a strict CSP that
+sandboxes each page into an opaque origin, and it only serves links the API
+signed within the last hour.
+
+1. Create the bucket **before** deploying the API, since it binds it:
+   `pnpm --filter @altair/api exec wrangler r2 bucket create altair-artifacts`.
+2. Pick one random value (`openssl rand -base64 32`) and set it as
+   `ARTIFACT_SIGNING_SECRET` on both Workers:
+   `pnpm --filter @altair/api exec wrangler secret put ARTIFACT_SIGNING_SECRET` and
+   `pnpm --filter @altair/artifacts exec wrangler secret put ARTIFACT_SIGNING_SECRET`.
+3. Add a second Workers Builds project on the same repository:
+
+   | Setting | Value |
+   |---|---|
+   | Root directory | `/` |
+   | Build command | `pnpm --filter @altair/artifacts build` |
+   | Deploy command | `pnpm run deploy:artifacts` |
+   | Non-production branch deploy command | `pnpm run deploy:artifacts:preview` |
+
+4. Optionally attach a separate domain to `altair-artifacts` under
+   **Settings → Domains & Routes**; otherwise use its `workers.dev` address.
+5. Set `ARTIFACTS_URL` in `apps/api/wrangler.jsonc` to that origin, and
+   `APP_ORIGINS` in `apps/artifacts/wrangler.jsonc` to the app's origin (only
+   those pages may frame artifacts; empty allows any). The values in the repo
+   are Fibteq's own deployment; replace them with yours.
+
+Without `ARTIFACTS_URL`, artifacts are still published, listed and readable as
+code, but the preview stays off. Locally, `pnpm dev` runs the artifact Worker
+on `:8788`; copy `apps/artifacts/.dev.vars.example` too.
+
+### Code sandbox
+
+Thread agents get hands through the `run_task` tool: it starts a coding agent
+(OpenCode by default) in the thread's own Linux container, which clones the
+repository, edits code, runs commands and tests, and can open a pull request.
+Its checklist and terminal output stream into the thread.
+
+- It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
+  which is on the Workers Paid plan.
+- No image is built or pushed, so deploys need no Docker. Containers start from
+  Cloudflare's managed `cloudflare/debian-trixie` image (Node.js on Debian). The
+  first task on a server installs the tools once (git, gh, jq, ripgrep, Python,
+  OpenCode, Claude Code; `apps/api/src/sandbox/setup.ts`), which takes a few
+  minutes, and snapshots the result. Every thread's container then starts from that
+  snapshot. Changing `setup.ts` makes the next task build a fresh one.
+- The coding agent uses the project's model and key (the same ones the agents
+  use). `RUNNER_MODEL` picks a different model for it.
+- Cloning private repositories and opening pull requests uses the project's
+  GitHub connection. Public repositories clone without it.
+- Containers sleep after 10 idle minutes; a thread's next task wakes its own.
+- Each project chooses where tasks run under **Settings → Tasks**: automatic
+  (on the computer with the project's local folder while `altair-runner` is
+  online there, otherwise in this sandbox), always on that computer, or always
+  in the cloud.
+
+To run without a sandbox, remove the `SANDBOX` binding and the `containers`
+block from `apps/api/wrangler.jsonc` (keep the migrations). `run_task`
+then tells the agent there is no sandbox.
+
+### Thread workspaces
+
+A container's disk does not survive its sleep. With
+[Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (beta,
+Workers Paid), each thread gets its own git repository, `thread-<thread id>`
+in the `altair` namespace. The sandbox commits and pushes every task's work
+there, unfinished work included, and the thread's next task starts from it:
+without a repository it continues in the same files, and with one it
+continues the same branch.
+
+Artifacts has no local emulator, so `wrangler dev` needs a Cloudflare login
+while the `WORKSPACES` binding is in `apps/api/wrangler.jsonc` (the API tests
+leave it out on their own). To run without it, remove the `artifacts` block;
+tasks then keep only what they push to GitHub.
+
+### Routines
+
+Routines are scheduled wake-ups: a prompt that runs on a cron schedule (in a
+time zone) or once at a set time. People create them from the alarm clock button in
+the project chat's header, or by asking Altair ("every weekday at 9, summarize open
+threads"). Each run either posts in the project chat, where the coordinator
+opens a thread for it, or wakes an existing thread. They run on Durable Object
+alarms, so they need no setup. Set `DEFAULT_TIMEZONE` to your team's zone.
+
+### Notifications
+
+Members are notified when a thread finishes, replies, needs a decision, is
+blocked or fails. The in-app list (the bell in the rail) always works. Each
+person turns email and browser push on or off under the bell.
+
+- **Email** goes through
+  [Cloudflare Email Service](https://developers.cloudflare.com/email-service/)
+  via the `EMAIL` (`send_email`) binding. In the dashboard, open
+  **Compute → Email Service → Email Sending → Onboard Domain** and add your
+  domain (it must use Cloudflare DNS; onboarding adds the SPF, DKIM and DMARC
+  records). Sending to arbitrary addresses needs the Workers Paid plan. Then
+  set `EMAIL_FROM` to an address on that domain. Only finished, decision,
+  blocked and failed events are emailed. Set `BETTER_AUTH_URL` so the links in
+  emails point at your server. `wrangler dev` only simulates sends; remove the
+  `send_email` block to run without email.
+- **Browser push** uses Web Push with VAPID keys. Generate a pair once with
+  `pnpm --filter @altair/api vapid`, put `VAPID_PUBLIC_KEY` (and
+  `VAPID_SUBJECT`) in the variables and `VAPID_PRIVATE_KEY` in the secrets.
+  Changing the pair later invalidates every browser subscription.
+- **Mobile push** for the Expo app needs nothing on the server: the app
+  registers its Expo push token through `POST /api/notifications/subscriptions`.
 
 ### Web UI on another origin
 

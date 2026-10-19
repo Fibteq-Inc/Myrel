@@ -2,7 +2,7 @@ import { createDb, schema } from "@altair/db";
 import type { ApiKey, ProviderId } from "@altair/protocol";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { decryptSecret } from "./crypto";
-import { createProvider, type ProviderOverride, type ProviderResult, serverProviderId } from "./llm";
+import { createProvider, type ProviderOverride, type ProviderResult, serverProviderId, taskModel } from "./llm";
 
 const { apiKeys, projects } = schema;
 
@@ -35,6 +35,20 @@ export async function instanceKey(env: Env, provider: string): Promise<string | 
  * else an instance key for that provider, else the Worker secret (see createProvider).
  */
 export async function projectProvider(env: Env, projectId: string, fetchImpl?: typeof fetch): Promise<ProviderResult> {
+  const override = await projectOverride(env, projectId);
+  return override.ok ? createProvider(env, fetchImpl, override.value) : override;
+}
+
+/** The model and key run_task hands to a coding harness, chosen the same way as the agents'. */
+export async function projectTaskModel(env: Env, projectId: string): Promise<ReturnType<typeof taskModel>> {
+  const override = await projectOverride(env, projectId);
+  return override.ok ? taskModel(env, override.value) : override;
+}
+
+async function projectOverride(
+  env: Env,
+  projectId: string,
+): Promise<{ ok: true; value: ProviderOverride } | { ok: false; reason: string }> {
   const db = createDb(env.DB);
   const [project] = await db
     .select({ provider: projects.llmProvider, model: projects.llmModel, keyId: projects.llmKeyId })
@@ -55,5 +69,5 @@ export async function projectProvider(env: Env, projectId: string, fetchImpl?: t
     console.error("could not decrypt model key", err);
     return { ok: false, reason: "The project's model key could not be decrypted. Add it again in Settings." };
   }
-  return createProvider(env, fetchImpl, override);
+  return { ok: true, value: override };
 }

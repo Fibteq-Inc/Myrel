@@ -71,7 +71,14 @@ describe("coordinator and thread agent", () => {
       return {
         text: "",
         toolCalls: [
-          call("update_status", { text: "Durable Objects\n\n✓ Researched" }),
+          call("reply", { text: "Durable Objects'i kısaca açıklayacağım." }),
+          call("update_plan", {
+            title: "Durable Objects",
+            steps: [
+              { text: "Researched", state: "done" },
+              { text: "Benchmarks", state: "skipped" },
+            ],
+          }),
           call("reply", { text: "Durable Objects are single-instance actors with storage." }),
         ],
       };
@@ -84,12 +91,15 @@ describe("coordinator and thread agent", () => {
       const t = (await agent.listThreads())[0];
       return t?.status === "review_ready" ? t : null;
     }, "thread reply");
-    expect(thread).toMatchObject({ title: "Durable Objects", statusText: "Durable Objects\n\n✓ Researched", resolved: false });
+    expect(thread).toMatchObject({ title: "Durable Objects", statusText: "Durable Objects\n\n✓ Researched\n– Benchmarks",
+      resolved: false,
+    });
 
     const ctx = (await agent.getThreadContext(thread.id))!;
     expect(ctx.root.body).toBe("Durable Objects'i araştır");
     expect(ctx.messages.map((m) => [m.authorKind, m.authorId, m.body])).toEqual([
       ["agent", "coordinator", "Durable Objects'i araştırıyorum."],
+      ["agent", "thread-agent", "Durable Objects'i kısaca açıklayacağım."],
       ["agent", "thread-agent", "Durable Objects are single-instance actors with storage."],
     ]);
 
@@ -177,7 +187,7 @@ describe("coordinator and thread agent", () => {
       return { text: "", toolCalls: [call("reply", { text: "Here it is." })] };
     });
 
-    const { project, ws, token } = await setup();
+    const { project, ws, token, agent } = await setup();
     ws.send(JSON.stringify({ type: "message.send", body: "what does it cost?" }));
 
     const usage = async (query = "") =>
@@ -197,6 +207,19 @@ describe("coordinator and thread agent", () => {
       costMicros: 0,
       unpricedCalls: 4,
     });
+
+    // The thread's reply says what it took: one model call so far in its turn, in the cloud.
+    const { messages } = await agent.getMessagesAfter(0);
+    const reply = messages.find((m: Message) => m.body === "Here it is.")!;
+    expect(reply.stats).toMatchObject({
+      model: "firerouter/opus",
+      calls: 1,
+      inputTokens: 1000,
+      outputTokens: 100,
+      costMicros: null,
+      runtime: "cloud",
+    });
+    expect(reply.stats!.task).toBeUndefined();
     expect(summary.daily).toHaveLength(7);
     expect(summary.daily.at(-1)!.calls).toBe(4);
     expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Altair", calls: 4 })]);

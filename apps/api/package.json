@@ -11,11 +11,13 @@
     "deploy:preview": "wrangler versions upload",
     "typecheck": "tsc",
     "test": "vitest run",
-    "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false"
+    "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false",
+    "vapid": "node scripts/vapid.mjs"
   },
   "dependencies": {
     "@altair/db": "workspace:*",
     "@altair/protocol": "workspace:*",
+    "@altair/runner-core": "workspace:*",
     "agents": "0.28.1",
     "better-auth": "1.7.11",
     "drizzle-orm": "0.45.4",

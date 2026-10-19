@@ -1,4 +1,4 @@
-import type { Message, Reaction, ServerEvent, Thread } from "@altair/protocol";
+import type { Artifact, Message, Reaction, Routine, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -9,11 +9,48 @@ export type ProjectState = {
   messages: Message[];
   threads: Record<string, Thread>;
   reactions: Record<string, Reaction[]>;
+  artifacts: Record<string, Artifact>;
+  routines: Record<string, Routine>;
   /** Agents working right now: "" is the coordinator, otherwise a thread id. */
   active: Record<string, true>;
+  /** What an active agent is doing, when it said (e.g. a task on the person's computer). */
+  progress: Record<string, string>;
+  /** Tasks (run_task) seen live or loaded with `applyTasks`, by id. */
+  tasks: Record<string, Task>;
+  /** Terminal output per task id, oldest first, capped at MAX_TERMINAL_LINES. */
+  output: Record<string, TerminalLine[]>;
 };
 
-export const emptyProjectState: ProjectState = { messages: [], threads: {}, reactions: {}, active: {} };
+export const emptyProjectState: ProjectState = {
+  messages: [],
+  threads: {},
+  reactions: {},
+  artifacts: {},
+  routines: {},
+  active: {},
+  progress: {},
+  tasks: {},
+  output: {},
+};
+
+/** Terminal lines kept per task on the client. */
+export const MAX_TERMINAL_LINES = 1000;
+
+/** Adds tasks fetched from the tasks endpoint, with their earlier output. */
+export function applyTasks(state: ProjectState, tasks: (Task & { log?: TerminalLine[] })[]): ProjectState {
+  const next = { ...state, tasks: { ...state.tasks }, output: { ...state.output } };
+  for (const { log, ...task } of tasks) {
+    next.tasks[task.id] = task;
+    // Live lines that arrived while fetching are newer than the fetched log.
+    if (log) next.output[task.id] = [...log, ...(state.output[task.id] ?? [])].slice(-MAX_TERMINAL_LINES);
+  }
+  return next;
+}
+
+export const threadTasks = (s: ProjectState, threadId: string) =>
+  Object.values(s.tasks)
+    .filter((t) => t.threadId === threadId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
 export function applyMessage(state: ProjectState, message: Message): ProjectState {
   return { ...state, messages: [...state.messages, message] };
@@ -24,19 +61,40 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
   switch (event.type) {
     case "thread.updated":
       return { ...state, threads: { ...state.threads, [event.thread.id]: event.thread } };
+    case "artifact.updated":
+      return { ...state, artifacts: { ...state.artifacts, [event.artifact.id]: event.artifact } };
+    case "routine.updated":
+      return { ...state, routines: { ...state.routines, [event.routine.id]: event.routine } };
+    case "routine.deleted": {
+      const { [event.routineId]: _, ...routines } = state.routines;
+      return { ...state, routines };
+    }
     case "reaction.added":
       return { ...state, reactions: addReactions(state.reactions, [event.reaction]) };
     case "agent.activity": {
       const key = event.threadId ?? "";
       const active = { ...state.active };
+      const progress = { ...state.progress };
       if (event.active) active[key] = true;
       else delete active[key];
-      return { ...state, active };
+      if (event.active && event.label) progress[key] = event.label;
+      else delete progress[key];
+      return { ...state, active, progress };
+    }
+    case "task.updated":
+      return { ...state, tasks: { ...state.tasks, [event.task.id]: event.task } };
+    case "task.output": {
+      const lines = [...(state.output[event.taskId] ?? []), ...event.lines].slice(-MAX_TERMINAL_LINES);
+      return { ...state, output: { ...state.output, [event.taskId]: lines } };
     }
     case "sync.result": {
       const threads = { ...state.threads };
       for (const t of event.threads) threads[t.id] = t;
-      return { ...state, threads, reactions: addReactions(state.reactions, event.reactions) };
+      const artifacts = { ...state.artifacts };
+      for (const a of event.artifacts) artifacts[a.id] = a;
+      // The sync carries every routine, so it replaces the list (deletions while offline drop out).
+      const routines = Object.fromEntries(event.routines.map((r) => [r.id, r]));
+      return { ...state, threads, artifacts, routines, reactions: addReactions(state.reactions, event.reactions) };
     }
     default:
       return state;
@@ -54,6 +112,10 @@ function addReactions(current: Record<string, Reaction[]>, added: Reaction[]) {
   return next;
 }
 
+/** The project's artifacts, most recently updated first (the Library). */
+export const artifactList = (s: ProjectState) =>
+  Object.values(s.artifacts).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
 export const projectChat = (s: ProjectState) => s.messages.filter((m) => m.threadId === null);
 
 export const threadMessages = (s: ProjectState, threadId: string) => s.messages.filter((m) => m.threadId === threadId);
@@ -62,20 +124,36 @@ export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
 }
 
-export type ChecklistItem = { state: "done" | "active" | "todo"; text: string };
+export type ChecklistItem = {
+  state: "done" | "active" | "todo" | "skipped" | "failed";
+  text: string;
+  /** 0 for a step of the agent's plan; 1 and 2 for the steps of a task nested under it. */
+  depth: number;
+};
 
-/** Parses an `update_status` checklist: a header line, then ✓ / ✱ / ○ steps. */
+/**
+ * Parses a thread's checklist: a header line, then ✓ / ✱ / ○ steps (✗ marks a
+ * failed step, – one the agent decided to skip). Indented steps belong to the
+ * step above them.
+ */
 export function parseChecklist(text: string): { title: string; items: ChecklistItem[] } {
-  // The just-finished step may be bolded: **✓ step**.
-  const lines = text.split("\n").map((l) => l.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim());
-  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo" };
+  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo", "–": "skipped", "✗": "failed" };
   const items: ChecklistItem[] = [];
   let title = "";
-  for (const line of lines) {
+  for (const raw of text.split("\n")) {
+    const indent = raw.length - raw.trimStart().length;
+    // The just-finished step may be bolded: **✓ step**.
+    const line = raw.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim();
     if (!line) continue;
     const state = marks[line[0]!];
-    if (state) items.push({ state, text: line.slice(1).trim() });
+    if (state) items.push({ state, text: line.slice(1).trim(), depth: Math.min(2, Math.floor(indent / 2)) });
     else if (!title && items.length === 0) title = line;
   }
   return { title, items };
+}
+
+/** How far a checklist is: its top-level steps done, out of those not skipped. */
+export function checklistProgress(items: ChecklistItem[]): { done: number; total: number } {
+  const steps = items.filter((i) => i.depth === 0 && i.state !== "skipped");
+  return { done: steps.filter((i) => i.state === "done").length, total: steps.length };
 }

@@ -35,11 +35,20 @@ export const CreateApiKeyInput = z.object({
 export type CreateApiKeyInput = z.input<typeof CreateApiKeyInput>;
 
 /** null fields fall back to the server default. */
+/**
+ * Where a project's tasks run. auto: on the person's computer when the
+ * project has a local folder and that computer is online, otherwise in the
+ * cloud sandbox. local / cloud: always there.
+ */
+export const TaskTarget = z.enum(["auto", "local", "cloud"]);
+export type TaskTarget = z.infer<typeof TaskTarget>;
+
 export const ProjectSettings = z.object({
   name: z.string(),
   provider: ProviderId.nullable(),
   model: z.string().nullable(),
   keyId: z.string().nullable(),
+  taskTarget: TaskTarget,
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -48,6 +57,7 @@ export const UpdateProjectSettingsInput = z.object({
   provider: ProviderId.nullable().optional(),
   model: z.string().trim().max(200).nullable().optional(),
   keyId: z.string().nullable().optional(),
+  taskTarget: TaskTarget.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 

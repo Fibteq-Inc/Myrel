@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@altair/client": "workspace:*",
+    "@altair/i18n": "workspace:*",
     "@altair/protocol": "workspace:*",
     "@tanstack/react-query": "5.104.4",
     "@tanstack/react-router": "1.170.45",

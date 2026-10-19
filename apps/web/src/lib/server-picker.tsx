@@ -1,10 +1,12 @@
 import { normalizeServerUrl, probeServer } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { type FormEvent, useState } from "react";
 import { server, switchServer } from "./api";
 import { Button, errorMessage, Input } from "./ui";
 
 /** Shows which Altair server the app talks to and lets the user switch to another (e.g. self-hosted). */
 export function ServerPicker() {
+  const t = useT();
   const [editing, setEditing] = useState(server === "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -18,7 +20,7 @@ export function ServerPicker() {
       await probeServer(origin);
       await switchServer(origin);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, t));
       setPending(false);
     }
   }
@@ -26,9 +28,9 @@ export function ServerPicker() {
   if (!editing) {
     return (
       <p className="flex items-center justify-between text-sm text-subtle">
-        <span className="truncate">Server: {new URL(server).host}</span>
+        <span className="truncate">{t("server.current", { host: new URL(server).host })}</span>
         <button type="button" className="hover:underline" onClick={() => setEditing(true)}>
-          Change
+          {t("server.change")}
         </button>
       </p>
     );
@@ -37,7 +39,7 @@ export function ServerPicker() {
   return (
     <form onSubmit={onSubmit} className="space-y-2">
       <label htmlFor="server" className="text-sm text-subtle">
-        Altair server
+        {t("server.label")}
       </label>
       <div className="flex gap-2">
         <Input
@@ -50,7 +52,7 @@ export function ServerPicker() {
           inputMode="url"
         />
         <Button type="submit" disabled={pending}>
-          Connect
+          {t("server.connect")}
         </Button>
       </div>
       {error && <p className="text-sm text-bad">{error}</p>}

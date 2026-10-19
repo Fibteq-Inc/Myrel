@@ -1,13 +1,17 @@
-import { createId, type Message, type Thread } from "@altair/protocol";
+import { createId, type Message, type Task, type Thread } from "@altair/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,
   applyMessage,
+  applyTasks,
+  artifactList,
+  checklistProgress,
   emptyProjectState,
   parseChecklist,
   projectChat,
   threadByRoot,
   threadMessages,
+  threadTasks,
 } from "../src/project-state";
 
 const projectId = createId("project");
@@ -37,11 +41,41 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
 });
 
 describe("project state", () => {
+  it("keeps artifacts from sync and live updates, newest first", () => {
+    const art = (title: string, updatedAt: string, version = 1) => ({
+      id: createId("artifact"),
+      projectId,
+      threadId: null,
+      title,
+      description: null,
+      version,
+      createdAt: updatedAt,
+      updatedAt,
+    });
+    const old = art("Old", "2026-01-01T00:00:00.000Z");
+    const recent = art("Recent", "2026-02-01T00:00:00.000Z");
+    let s = applyEvent(emptyProjectState, {
+      type: "sync.result",
+      messages: [],
+      hasMore: false,
+      threads: [],
+      reactions: [],
+      artifacts: [old, recent],
+      routines: [],
+    });
+    expect(artifactList(s).map((a) => a.title)).toEqual(["Recent", "Old"]);
+    s = applyEvent(s, { type: "artifact.updated", artifact: { ...old, version: 2, updatedAt: "2026-03-01T00:00:00.000Z" } });
+    expect(artifactList(s).map((a) => [a.title, a.version])).toEqual([
+      ["Old", 2],
+      ["Recent", 1],
+    ]);
+  });
+
   it("splits project chat from threads and tracks thread updates, reactions and activity", () => {
     const root = msg(1);
     const t = thread(root.id);
     let s = applyMessage(emptyProjectState, root);
-    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [t], reactions: [] });
+    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [t], reactions: [], artifacts: [], routines: [] });
     s = applyMessage(s, msg(2, t.id));
     s = applyEvent(s, { type: "thread.updated", thread: { ...t, status: "review_ready" } });
     const reaction = { messageId: root.id, emoji: "👍", authorKind: "agent" as const, authorId: "coordinator" };
@@ -62,11 +96,51 @@ describe("project state", () => {
     expect(parseChecklist("Research\n\n✓ Read docs\n**✓ Compared options**\n✱ Writing summary\n○ Reply")).toEqual({
       title: "Research",
       items: [
-        { state: "done", text: "Read docs" },
-        { state: "done", text: "Compared options" },
-        { state: "active", text: "Writing summary" },
-        { state: "todo", text: "Reply" },
+        { state: "done", text: "Read docs", depth: 0 },
+        { state: "done", text: "Compared options", depth: 0 },
+        { state: "active", text: "Writing summary", depth: 0 },
+        { state: "todo", text: "Reply", depth: 0 },
       ],
     });
+  });
+
+  it("parses skipped steps and a task's steps nested under the plan", () => {
+    const { items } = parseChecklist("Fix\n\n✓ Read code\n✱ Fix bug\n  ✓ Sandbox ready\n  ✱ Agent working\n    ✓ edit a.ts\n– Deploy\n○ Reply");
+    expect(items.map((i) => [i.state, i.depth])).toEqual([
+      ["done", 0],
+      ["active", 0],
+      ["done", 1],
+      ["active", 1],
+      ["done", 2],
+      ["skipped", 0],
+      ["todo", 0],
+    ]);
+    // Only the plan's own steps count, and a skipped step is not work left.
+    expect(checklistProgress(items)).toEqual({ done: 1, total: 3 });
+  });
+});
+
+describe("tasks", () => {
+  it("merges fetched task logs with live output and tracks status", () => {
+    const threadId = createId("thread");
+    const task: Task = {
+      id: createId("task"),
+      threadId,
+      title: "Run tests",
+      harness: "shell",
+      backend: "sandbox",
+      status: "running",
+      prUrl: null,
+      summary: null,
+      createdAt: now,
+      finishedAt: null,
+    };
+    let s = applyEvent(emptyProjectState, { type: "task.updated", task });
+    s = applyEvent(s, { type: "task.output", taskId: task.id, threadId, lines: [{ stream: "stdout", text: "live" }] });
+    s = applyTasks(s, [{ ...task, log: [{ stream: "system", text: "earlier" }] }]);
+    expect(s.output[task.id]!.map((l) => l.text)).toEqual(["earlier", "live"]);
+    s = applyEvent(s, { type: "task.updated", task: { ...task, status: "done", prUrl: "https://github.com/a/b/pull/1" } });
+    expect(threadTasks(s, threadId).map((t) => [t.status, t.prUrl])).toEqual([["done", "https://github.com/a/b/pull/1"]]);
+    expect(parseChecklist("T\n\n✓ a\n✗ b failed").items.map((i) => i.state)).toEqual(["done", "failed"]);
   });
 });
