@@ -1,0 +1,132 @@
+import * as Clipboard from "expo-clipboard";
+import { Copy } from "lucide-react-native";
+import { type ReactNode, useMemo } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
+import { type MarkedStyles, Renderer, useMarkdown } from "react-native-marked";
+import { DECISION_LANG, parseDecision } from "../lib/decision";
+import { colors, mono, radius } from "../theme";
+import { DecisionCard } from "./decision-card";
+
+export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
+
+/** Draws ```decision blocks as cards, code with a copy button, and routes links to `onLink`. */
+class AltairRenderer extends Renderer {
+  constructor(
+    private readonly decision: DecisionHandlers | undefined,
+    private readonly onLink: (href: string) => void,
+  ) {
+    super({ selectable: true });
+  }
+
+  override code(text: string, language?: string, containerStyle?: ViewStyle, textStyle?: TextStyle): ReactNode {
+    if (language === DECISION_LANG) {
+      const decision = parseDecision(text);
+      if (decision) return <DecisionCard key={this.getKey()} decision={decision} {...this.decision} />;
+    }
+    return <CodeBlock key={this.getKey()} text={text} language={language} containerStyle={containerStyle} textStyle={textStyle} />;
+  }
+
+  override link(children: string | ReactNode[], href: string, styles?: TextStyle): ReactNode {
+    return (
+      <Text key={this.getKey()} accessibilityRole="link" style={styles} onPress={() => this.onLink(href)}>
+        {children}
+      </Text>
+    );
+  }
+}
+
+function CodeBlock({
+  text,
+  language,
+  containerStyle,
+  textStyle,
+}: {
+  text: string;
+  language?: string;
+  containerStyle?: ViewStyle;
+  textStyle?: TextStyle;
+}) {
+  return (
+    <View style={[containerStyle, styles.code]}>
+      <View style={styles.codeHead}>
+        <Text style={styles.codeLang}>{language || "text"}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Copy code"
+          hitSlop={10}
+          onPress={() => void Clipboard.setStringAsync(text)}
+        >
+          <Copy size={16} color={colors.subtle} />
+        </Pressable>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12 }}>
+        <Text selectable style={[textStyle, styles.codeText]}>
+          {text}
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+const markedStyles: MarkedStyles = {
+  text: { color: colors.body, fontSize: 16, lineHeight: 24 },
+  paragraph: { paddingVertical: 0, marginBottom: 10 },
+  strong: { color: colors.fg, fontWeight: "600" },
+  link: { color: colors.link, fontStyle: "normal" },
+  h1: { color: colors.fg, fontSize: 19, fontWeight: "600", borderBottomWidth: 0, paddingBottom: 0, marginBottom: 8 },
+  h2: { color: colors.fg, fontSize: 17, fontWeight: "600", borderBottomWidth: 0, paddingBottom: 0, marginBottom: 8 },
+  h3: { color: colors.fg, fontSize: 16, fontWeight: "600", marginBottom: 6 },
+  codespan: { color: colors.fg, backgroundColor: colors.hover, fontFamily: mono, fontSize: 14, fontStyle: "normal" },
+  code: { padding: 0, marginBottom: 10 },
+  codeText: { color: colors.body },
+  blockquote: { borderLeftColor: colors.edge, borderLeftWidth: 2, paddingLeft: 10, backgroundColor: "transparent" },
+  li: { color: colors.body, fontSize: 16, lineHeight: 24 },
+  list: { marginBottom: 10 },
+  hr: { backgroundColor: colors.line, marginVertical: 12 },
+  table: { borderColor: colors.line },
+  tableCell: { borderColor: colors.line, padding: 6 },
+};
+
+/** Agent message markdown. */
+export function MessageMarkdown({
+  body,
+  decision,
+  onLink,
+}: {
+  body: string;
+  decision?: DecisionHandlers;
+  onLink: (href: string) => void;
+}) {
+  const hasDecision = decision !== undefined;
+  const answer = decision?.answer;
+  const onChoose = decision?.onChoose;
+  // Rebuilding the renderer re-parses the message, so only do it when what it draws changes.
+  const renderer = useMemo(
+    () => new AltairRenderer(hasDecision ? { answer, onChoose } : undefined, onLink),
+    [hasDecision, answer, onChoose, onLink],
+  );
+  const elements = useMarkdown(body, { colorScheme: "dark", renderer, styles: markedStyles });
+  return <View>{elements}</View>;
+}
+
+const styles = StyleSheet.create({
+  code: {
+    padding: 0,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.edge,
+    backgroundColor: "#0b0b0d",
+    overflow: "hidden",
+  },
+  codeHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  codeLang: { color: colors.subtle, fontFamily: mono, fontSize: 13 },
+  codeText: { fontFamily: mono, fontSize: 13, lineHeight: 19, color: colors.body },
+});
