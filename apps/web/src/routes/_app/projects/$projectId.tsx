@@ -2,7 +2,7 @@ import { projectChat, threadByRoot, threadMessages } from "@altair/client";
 import type { Message, Thread } from "@altair/protocol";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, MessagesSquare, RotateCcw, CircleCheck, X } from "lucide-react";
+import { ChevronLeft, MessagesSquare, RotateCcw, CircleCheck, Settings, X } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { Checklist, Composer, MessageView, type Names, Thinking, ThreadCard, threadStatus } from "../../../components/chat";
 import { membersQuery, projectQuery } from "../../../lib/api";
@@ -42,6 +42,15 @@ function ProjectPage() {
           <MessagesSquare size={17} className="text-muted" aria-hidden="true" />
           <h1 className="truncate text-[15px] font-semibold">{project.name}</h1>
           <ConnectionDot status={status} />
+          <Link
+            to="/settings/projects/$projectId"
+            params={{ projectId }}
+            aria-label="Project settings"
+            title="Project settings"
+            className="-mr-2 rounded-lg p-2 text-muted hover:bg-hover hover:text-fg"
+          >
+            <Settings size={16} />
+          </Link>
         </header>
 
         <ScrollToEnd dep={chat.length + (state.active[""] ? 1 : 0)} className="flex-1 overflow-y-auto">

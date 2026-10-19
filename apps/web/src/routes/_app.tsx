@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
-import { BarChart3, Folder, LogOut, Plus } from "lucide-react";
+import { BarChart3, Folder, LogOut, Plus, Settings } from "lucide-react";
 import { api, canChooseServer, projectsQuery, server, sessionQuery } from "../lib/api";
 import { AltairMark, IconButton, initials } from "../lib/ui";
 
@@ -78,6 +78,14 @@ function AppLayout() {
             <span className="block truncate text-[13px] font-medium">{user.name}</span>
             <span className="block truncate text-xs text-subtle">{user.email}</span>
           </span>
+          <Link
+            to="/settings"
+            aria-label="Settings"
+            title="Settings"
+            className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
+          >
+            <Settings size={16} />
+          </Link>
           <IconButton type="button" onClick={signOut} aria-label="Sign out" title="Sign out">
             <LogOut size={16} />
           </IconButton>
