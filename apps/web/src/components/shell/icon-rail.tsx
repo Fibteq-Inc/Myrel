@@ -2,7 +2,7 @@ import type { SessionUser } from "@altair/client";
 import { LOCALE_NAMES, LOCALES, type MessageKey } from "@altair/i18n";
 import { useI18n } from "@altair/i18n/react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
+import { BarChart3, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
 import { canChooseServer, server } from "../../lib/api";
 import { AltairMark, cn, UserAvatar } from "../../lib/ui";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
@@ -11,7 +11,7 @@ type RailItem = {
   label: MessageKey;
   icon: LucideIcon;
   /** Where it goes. No `to` = not built yet; shown dimmed. */
-  to?: "/";
+  to?: "/" | "/usage";
   /** Path prefixes that light it up. */
   match?: string[];
 };
@@ -25,6 +25,7 @@ export const RAIL_ITEMS: RailItem[] = [
   { label: "rail.artifacts", icon: Blocks },
   { label: "rail.files", icon: FolderOpen },
   { label: "rail.devices", icon: MonitorSmartphone },
+  { label: "rail.usage", icon: BarChart3, to: "/usage", match: ["/usage"] },
 ];
 
 const itemClass =
@@ -72,15 +73,15 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       )}
 
       <div className="mt-auto flex flex-col items-center gap-2.5">
-        <button
-          type="button"
-          disabled
-          aria-label={t("common.comingSoon", { label: t("rail.settings") })}
-          title={t("common.comingSoonTitle", { label: t("rail.settings") })}
-          className={cn(itemClass, "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-subtle")}
+        <Link
+          to="/settings"
+          aria-label={t("rail.settings")}
+          title={t("rail.settings")}
+          aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+          className={cn(itemClass, pathname.startsWith("/settings") && "bg-hover text-fg")}
         >
           <Settings size={20} strokeWidth={1.8} />
-        </button>
+        </Link>
         <Menu
           label={t("rail.account")}
           side="right"

@@ -4,7 +4,7 @@ import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, ChevronRight, ChevronsUpDown, Hash, Plus, Search, SquarePen, Wifi, WifiOff } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronsUpDown, Hash, Plus, Search, Settings, SquarePen, Wifi, WifiOff } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -203,6 +203,15 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
             ))}
           </div>
           <MenuSeparator />
+          <MenuItem
+            icon={<Settings size={15} />}
+            onSelect={() => {
+              close();
+              void navigate({ to: "/settings/projects/$projectId", params: { projectId: current } });
+            }}
+          >
+            Project settings
+          </MenuItem>
           <MenuItem
             icon={<Plus size={15} />}
             onSelect={() => {

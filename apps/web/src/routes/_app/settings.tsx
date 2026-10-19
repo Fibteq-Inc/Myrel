@@ -1,0 +1,102 @@
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { ChevronLeft, Folder, KeyRound, Mail, Server, UserRound } from "lucide-react";
+import type { ReactNode } from "react";
+import { meQuery, myInvitesQuery, projectsQuery } from "../../lib/api";
+
+export const Route = createFileRoute("/_app/settings")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(meQuery),
+  component: SettingsLayout,
+});
+
+function SettingsLayout() {
+  const { data: me } = useQuery(meQuery);
+  const { data: projects = [] } = useQuery(projectsQuery);
+  const { data: invites = [] } = useQuery(myInvitesQuery);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <nav
+        aria-label="Settings"
+        className="flex-none border-b border-line px-3 py-3 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:py-5"
+      >
+        <Link to="/" className="mb-3 flex items-center gap-1.5 px-2 text-[13px] text-subtle hover:text-fg">
+          <ChevronLeft size={14} /> Back
+        </Link>
+        <h1 className="mb-2 px-2 text-base font-semibold">Settings</h1>
+        <ul className="flex gap-1 overflow-x-auto md:block md:space-y-0.5">
+          <NavItem to="/settings" icon={<UserRound size={15} />} exact>
+            Account
+          </NavItem>
+          <NavItem to="/settings/keys" icon={<KeyRound size={15} />}>
+            Model keys
+          </NavItem>
+          <NavItem to="/settings/invites" icon={<Mail size={15} />}>
+            Invitations
+            {invites.length > 0 && (
+              <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold text-ground">
+                {invites.length}
+              </span>
+            )}
+          </NavItem>
+          {me?.role === "admin" && (
+            <NavItem to="/settings/server" icon={<Server size={15} />}>
+              Server
+            </NavItem>
+          )}
+        </ul>
+        {projects.length > 0 && (
+          <>
+            <div className="mb-1 mt-5 hidden px-2 text-xs text-subtle md:block">Projects</div>
+            <ul className="hidden space-y-0.5 md:block">
+              {projects.map((p) => (
+                <li key={p.id}>
+                  <Link
+                    to="/settings/projects/$projectId"
+                    params={{ projectId: p.id }}
+                    className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-hover hover:text-fg"
+                    activeProps={{ className: "bg-hover text-fg" }}
+                  >
+                    <Folder size={14} className="flex-none" />
+                    <span className="truncate">{p.name}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </nav>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-2xl space-y-10 px-4 py-6 sm:px-8 sm:py-8">
+          <Outlet />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NavItem({
+  to,
+  icon,
+  exact,
+  children,
+}: {
+  to: "/settings" | "/settings/keys" | "/settings/invites" | "/settings/server";
+  icon: ReactNode;
+  exact?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <li className="flex-none">
+      <Link
+        to={to}
+        activeOptions={{ exact }}
+        className="flex items-center gap-2.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-hover hover:text-fg"
+        activeProps={{ className: "bg-hover text-fg" }}
+      >
+        {icon}
+        {children}
+      </Link>
+    </li>
+  );
+}

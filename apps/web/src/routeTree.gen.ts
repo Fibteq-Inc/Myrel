@@ -12,8 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppUsageRouteImport } from './routes/_app/usage'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app/projects/$projectId'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsInvitesRouteImport } from './routes/_app/settings/invites'
+import { Route as AppSettingsKeysRouteImport } from './routes/_app/settings/keys'
+import { Route as AppSettingsServerRouteImport } from './routes/_app/settings/server'
 import { Route as AppProjectsProjectIdIndexRouteImport } from './routes/_app/projects/$projectId/index'
+import { Route as AppSettingsProjectsProjectIdRouteImport } from './routes/_app/settings/projects/$projectId'
 import { Route as AppProjectsProjectIdThreadsThreadIdRouteImport } from './routes/_app/projects/$projectId/threads/$threadId'
 
 const AppRoute = AppRouteImport.update({
@@ -30,16 +37,52 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppUsageRoute = AppUsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProjectsProjectIdRoute = AppProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
   getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsInvitesRoute = AppSettingsInvitesRouteImport.update({
+  id: '/invites',
+  path: '/invites',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
+  id: '/keys',
+  path: '/keys',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsServerRoute = AppSettingsServerRouteImport.update({
+  id: '/server',
+  path: '/server',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppProjectsProjectIdIndexRoute =
   AppProjectsProjectIdIndexRouteImport.update({
     id: '/',
     path: '/',
     getParentRoute: () => AppProjectsProjectIdRoute,
+  } as any)
+const AppSettingsProjectsProjectIdRoute =
+  AppSettingsProjectsProjectIdRouteImport.update({
+    id: '/projects/$projectId',
+    path: '/projects/$projectId',
+    getParentRoute: () => AppSettingsRoute,
   } as any)
 const AppProjectsProjectIdThreadsThreadIdRoute =
   AppProjectsProjectIdThreadsThreadIdRouteImport.update({
@@ -51,13 +94,26 @@ const AppProjectsProjectIdThreadsThreadIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
+  '/settings': typeof AppSettingsRouteWithChildren
+  '/usage': typeof AppUsageRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
+  '/settings/invites': typeof AppSettingsInvitesRoute
+  '/settings/keys': typeof AppSettingsKeysRoute
+  '/settings/server': typeof AppSettingsServerRoute
+  '/settings/': typeof AppSettingsIndexRoute
+  '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
   '/projects/$projectId/': typeof AppProjectsProjectIdIndexRoute
   '/projects/$projectId/threads/$threadId': typeof AppProjectsProjectIdThreadsThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/usage': typeof AppUsageRoute
   '/': typeof AppIndexRoute
+  '/settings/invites': typeof AppSettingsInvitesRoute
+  '/settings/keys': typeof AppSettingsKeysRoute
+  '/settings/server': typeof AppSettingsServerRoute
+  '/settings': typeof AppSettingsIndexRoute
+  '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
   '/projects/$projectId': typeof AppProjectsProjectIdIndexRoute
   '/projects/$projectId/threads/$threadId': typeof AppProjectsProjectIdThreadsThreadIdRoute
 }
@@ -65,8 +121,15 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/_app/settings': typeof AppSettingsRouteWithChildren
+  '/_app/usage': typeof AppUsageRoute
   '/_app/': typeof AppIndexRoute
   '/_app/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
+  '/_app/settings/invites': typeof AppSettingsInvitesRoute
+  '/_app/settings/keys': typeof AppSettingsKeysRoute
+  '/_app/settings/server': typeof AppSettingsServerRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
   '/_app/projects/$projectId/': typeof AppProjectsProjectIdIndexRoute
   '/_app/projects/$projectId/threads/$threadId': typeof AppProjectsProjectIdThreadsThreadIdRoute
 }
@@ -75,21 +138,41 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/settings'
+    | '/usage'
     | '/projects/$projectId'
+    | '/settings/invites'
+    | '/settings/keys'
+    | '/settings/server'
+    | '/settings/'
+    | '/settings/projects/$projectId'
     | '/projects/$projectId/'
     | '/projects/$projectId/threads/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/usage'
     | '/'
+    | '/settings/invites'
+    | '/settings/keys'
+    | '/settings/server'
+    | '/settings'
+    | '/settings/projects/$projectId'
     | '/projects/$projectId'
     | '/projects/$projectId/threads/$threadId'
   id:
     | '__root__'
     | '/_app'
     | '/login'
+    | '/_app/settings'
+    | '/_app/usage'
     | '/_app/'
     | '/_app/projects/$projectId'
+    | '/_app/settings/invites'
+    | '/_app/settings/keys'
+    | '/_app/settings/server'
+    | '/_app/settings/'
+    | '/_app/settings/projects/$projectId'
     | '/_app/projects/$projectId/'
     | '/_app/projects/$projectId/threads/$threadId'
   fileRoutesById: FileRoutesById
@@ -122,6 +205,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/usage': {
+      id: '/_app/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof AppUsageRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/projects/$projectId': {
       id: '/_app/projects/$projectId'
       path: '/projects/$projectId'
@@ -129,12 +226,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsProjectIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/invites': {
+      id: '/_app/settings/invites'
+      path: '/invites'
+      fullPath: '/settings/invites'
+      preLoaderRoute: typeof AppSettingsInvitesRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/keys': {
+      id: '/_app/settings/keys'
+      path: '/keys'
+      fullPath: '/settings/keys'
+      preLoaderRoute: typeof AppSettingsKeysRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/server': {
+      id: '/_app/settings/server'
+      path: '/server'
+      fullPath: '/settings/server'
+      preLoaderRoute: typeof AppSettingsServerRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/projects/$projectId/': {
       id: '/_app/projects/$projectId/'
       path: '/'
       fullPath: '/projects/$projectId/'
       preLoaderRoute: typeof AppProjectsProjectIdIndexRouteImport
       parentRoute: typeof AppProjectsProjectIdRoute
+    }
+    '/_app/settings/projects/$projectId': {
+      id: '/_app/settings/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/settings/projects/$projectId'
+      preLoaderRoute: typeof AppSettingsProjectsProjectIdRouteImport
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/projects/$projectId/threads/$threadId': {
       id: '/_app/projects/$projectId/threads/$threadId'
@@ -145,6 +277,26 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppSettingsRouteChildren {
+  AppSettingsInvitesRoute: typeof AppSettingsInvitesRoute
+  AppSettingsKeysRoute: typeof AppSettingsKeysRoute
+  AppSettingsServerRoute: typeof AppSettingsServerRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+  AppSettingsProjectsProjectIdRoute: typeof AppSettingsProjectsProjectIdRoute
+}
+
+const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsInvitesRoute: AppSettingsInvitesRoute,
+  AppSettingsKeysRoute: AppSettingsKeysRoute,
+  AppSettingsServerRoute: AppSettingsServerRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
+  AppSettingsProjectsProjectIdRoute: AppSettingsProjectsProjectIdRoute,
+}
+
+const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
+  AppSettingsRouteChildren,
+)
 
 interface AppProjectsProjectIdRouteChildren {
   AppProjectsProjectIdIndexRoute: typeof AppProjectsProjectIdIndexRoute
@@ -161,11 +313,15 @@ const AppProjectsProjectIdRouteWithChildren =
   AppProjectsProjectIdRoute._addFileChildren(AppProjectsProjectIdRouteChildren)
 
 interface AppRouteChildren {
+  AppSettingsRoute: typeof AppSettingsRouteWithChildren
+  AppUsageRoute: typeof AppUsageRoute
   AppIndexRoute: typeof AppIndexRoute
   AppProjectsProjectIdRoute: typeof AppProjectsProjectIdRouteWithChildren
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppSettingsRoute: AppSettingsRouteWithChildren,
+  AppUsageRoute: AppUsageRoute,
   AppIndexRoute: AppIndexRoute,
   AppProjectsProjectIdRoute: AppProjectsProjectIdRouteWithChildren,
 }
