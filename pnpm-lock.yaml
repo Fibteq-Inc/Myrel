@@ -26,6 +26,9 @@ importers:
       '@altair/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@altair/runner-core':
+        specifier: workspace:*
+        version: link:../../packages/runner-core
       agents:
         specifier: 0.28.1
         version: 0.28.1(@babel/core@7.29.7)(@babel/runtime@7.29.10)(@modelcontextprotocol/client@2.3.1)(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.7))(@modelcontextprotocol/server@2.3.1)(react@19.3.1)(rolldown@1.2.14)(vite@8.3.4(@types/node@22.19.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.7)
@@ -191,6 +194,19 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@22.19.1)(vite@8.3.4(@types/node@22.19.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/runner-core:
+    dependencies:
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.1
+        version: 22.19.1
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@types/node@22.19.1)(vite@8.3.4(@types/node@22.19.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))

@@ -232,7 +232,7 @@ describe("local workspace", () => {
           : { text: "", toolCalls: [] };
       }
       threadPrompts.push(req.prompt);
-      if (req.prompt.includes("### DONE · NEW")) {
+      if (req.prompt.includes("(done, NEW result)")) {
         return { text: "", toolCalls: [call("reply", { text: "Testler geçti: 12 passed." })] };
       }
       return {

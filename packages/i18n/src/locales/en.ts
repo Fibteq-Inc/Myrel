@@ -306,7 +306,7 @@ export const en = {
   "github.noneVisible": "The app cannot see any repositories yet.",
   "common.loading": "Loading",
 
-  // frag-me.json
+  // Shell and chat additions
   "composer.attach": "Attach files",
   "rail.projectFiles": "Project files",
   "rail.filesNoProject": "Files (open a project first)",
@@ -315,7 +315,7 @@ export const en = {
   "sidebar.artifacts": "Artifacts",
   "workspace.close": "Close workspace",
 
-  // frag-devices.json
+  // Devices, runners and the thread panel
   "runners.online": "Online",
   "runners.neverConnected": "Never connected",
   "runners.seenJustNow": "Offline, seen just now",
@@ -361,7 +361,7 @@ export const en = {
   "threadPanel.close": "Close thread",
   "threadPanel.backToConversation": "Back to the conversation",
 
-  // frag-knowledge.json
+  // Files, memory and local folders
   "knowledge.label": "Project knowledge",
   "knowledge.tabFiles": "Files",
   "knowledge.tabMemory": "Memory",
@@ -429,7 +429,7 @@ export const en = {
   "folderPicker.shareNamed": "Share {name}",
   "folderPicker.share": "Share folder",
 
-  // frag-artifacts.json
+  // Artifacts and files
   "artifacts.artifact": "Artifact",
   "artifacts.labelNamed": "Artifact: {title}",
   "artifacts.olderVersion": "Version {version} · latest is {latest}",
@@ -462,4 +462,17 @@ export const en = {
   "files.loading": "Loading…",
   "files.loadFailed": "This file could not be loaded.",
   "files.noPreview": "No preview for this kind of file. Use the download button.",
+
+  // Tasks (terminal and changes tabs)
+  "checklist.failed": "Failed",
+  "tasks.inProgressTitle": "Work in progress",
+  "tasks.inProgressBody": "The task's pull request and summary show up here when it finishes.",
+  "tasks.pullRequest": "Pull request",
+  "tasks.stop": "Stop",
+  "tasks.terminalOutput": "Terminal output",
+  "tasks.waiting": "Waiting for output…",
+  "tasks.running": "Running",
+  "tasks.done": "Done",
+  "tasks.cancelled": "Cancelled",
+  "tasks.failed": "Failed",
 } satisfies Record<string, string | PluralMessage>;

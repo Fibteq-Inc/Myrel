@@ -1,14 +1,16 @@
-import { createId, type Message, type Thread } from "@altair/protocol";
+import { createId, type Message, type Task, type Thread } from "@altair/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,
   applyMessage,
+  applyTasks,
   artifactList,
   emptyProjectState,
   parseChecklist,
   projectChat,
   threadByRoot,
   threadMessages,
+  threadTasks,
 } from "../src/project-state";
 
 const projectId = createId("project");
@@ -98,5 +100,30 @@ describe("project state", () => {
         { state: "todo", text: "Reply" },
       ],
     });
+  });
+});
+
+describe("tasks", () => {
+  it("merges fetched task logs with live output and tracks status", () => {
+    const threadId = createId("thread");
+    const task: Task = {
+      id: createId("task"),
+      threadId,
+      title: "Run tests",
+      harness: "shell",
+      backend: "sandbox",
+      status: "running",
+      prUrl: null,
+      summary: null,
+      createdAt: now,
+      finishedAt: null,
+    };
+    let s = applyEvent(emptyProjectState, { type: "task.updated", task });
+    s = applyEvent(s, { type: "task.output", taskId: task.id, threadId, lines: [{ stream: "stdout", text: "live" }] });
+    s = applyTasks(s, [{ ...task, log: [{ stream: "system", text: "earlier" }] }]);
+    expect(s.output[task.id]!.map((l) => l.text)).toEqual(["earlier", "live"]);
+    s = applyEvent(s, { type: "task.updated", task: { ...task, status: "done", prUrl: "https://github.com/a/b/pull/1" } });
+    expect(threadTasks(s, threadId).map((t) => [t.status, t.prUrl])).toEqual([["done", "https://github.com/a/b/pull/1"]]);
+    expect(parseChecklist("T\n\n✓ a\n✗ b failed").items.map((i) => i.state)).toEqual(["done", "failed"]);
   });
 });

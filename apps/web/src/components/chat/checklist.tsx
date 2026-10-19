@@ -1,6 +1,6 @@
 import { parseChecklist } from "@altair/client";
 import { useT } from "@altair/i18n/react";
-import { CircleCheck, CircleDashed, LoaderCircle } from "lucide-react";
+import { CircleCheck, CircleDashed, CircleX, LoaderCircle } from "lucide-react";
 import { cn } from "../../lib/ui";
 
 /** A thread agent's `update_status` checklist with a progress bar. */
@@ -45,6 +45,7 @@ export function Checklist({ text, live = true }: { text: string; live?: boolean 
                   <CircleDashed size={15} className="text-accent" aria-label={t("checklist.stopped")} />
                 ))}
               {item.state === "todo" && <CircleDashed size={15} aria-label={t("checklist.todo")} />}
+              {item.state === "failed" && <CircleX size={15} className="text-bad" aria-label={t("checklist.failed")} />}
             </span>
             {item.text}
           </li>

@@ -109,6 +109,8 @@ export class RunnerAgent extends Agent<Env> {
         if (task?.status !== "running") return;
         const project = await getAgentByName(this.env.PROJECT_AGENT, task.project_id);
         await project.setActivity(task.thread_id, true, frame.text.slice(0, 200));
+        const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
+        await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.slice(0, 200) }]);
         return;
       }
       case "task.done": {
@@ -229,7 +231,11 @@ export class RunnerAgent extends Agent<Env> {
   private async finish(task: TaskRow, ok: boolean, result: string) {
     this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
     const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
-    await thread.wake({ kind: "task", taskId: task.id, ok, result });
+    await thread.taskEvents(task.id, [
+      { type: "text", text: result },
+      ok ? { type: "phase", phase: "agent", state: "done" } : { type: "phase", phase: "agent", state: "failed" },
+      { type: "done", ok },
+    ]);
   }
 }
 

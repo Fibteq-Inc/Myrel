@@ -304,7 +304,7 @@ export const tr: Catalog = {
   "github.noneVisible": "Uygulama henüz hiçbir depoyu göremiyor.",
   "common.loading": "Yükleniyor",
 
-  // frag-me.json
+  // Shell and chat additions
   "composer.attach": "Dosya ekle",
   "rail.projectFiles": "Proje dosyaları",
   "rail.filesNoProject": "Dosyalar (önce bir proje aç)",
@@ -313,7 +313,7 @@ export const tr: Catalog = {
   "sidebar.artifacts": "Artifact'ler",
   "workspace.close": "Çalışma alanını kapat",
 
-  // frag-devices.json
+  // Devices, runners and the thread panel
   "runners.online": "Çevrimiçi",
   "runners.neverConnected": "Hiç bağlanmadı",
   "runners.seenJustNow": "Çevrimdışı, az önce görüldü",
@@ -359,7 +359,7 @@ export const tr: Catalog = {
   "threadPanel.close": "Thread'i kapat",
   "threadPanel.backToConversation": "Sohbete dön",
 
-  // frag-knowledge.json
+  // Files, memory and local folders
   "knowledge.label": "Proje bilgisi",
   "knowledge.tabFiles": "Dosyalar",
   "knowledge.tabMemory": "Hafıza",
@@ -427,7 +427,7 @@ export const tr: Catalog = {
   "folderPicker.shareNamed": "{name} klasörünü paylaş",
   "folderPicker.share": "Klasörü paylaş",
 
-  // frag-artifacts.json
+  // Artifacts and files
   "artifacts.artifact": "Artifact",
   "artifacts.labelNamed": "Artifact: {title}",
   "artifacts.olderVersion": "Sürüm {version} · en yenisi {latest}",
@@ -460,4 +460,17 @@ export const tr: Catalog = {
   "files.loading": "Yükleniyor…",
   "files.loadFailed": "Bu dosya yüklenemedi.",
   "files.noPreview": "Bu dosya türü için önizleme yok. İndirme düğmesini kullan.",
+
+  // Tasks (terminal and changes tabs)
+  "checklist.failed": "Başarısız",
+  "tasks.inProgressTitle": "Çalışma sürüyor",
+  "tasks.inProgressBody": "Görev bitince pull request'i ve özeti burada görünür.",
+  "tasks.pullRequest": "Pull request",
+  "tasks.stop": "Durdur",
+  "tasks.terminalOutput": "Terminal çıktısı",
+  "tasks.waiting": "Çıktı bekleniyor…",
+  "tasks.running": "Çalışıyor",
+  "tasks.done": "Bitti",
+  "tasks.cancelled": "İptal edildi",
+  "tasks.failed": "Başarısız",
 };

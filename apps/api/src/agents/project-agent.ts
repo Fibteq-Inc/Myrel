@@ -344,6 +344,11 @@ export class ProjectAgent extends Agent<Env> {
     this.emit({ type: "workspace.changed" });
   }
 
+  /** A thread's task changed or printed output; relay it to clients. Callable over RPC. */
+  broadcastTask(event: Extract<ServerEvent, { type: "task.updated" | "task.output" }>): void {
+    this.emit(event);
+  }
+
   private async wakeThread(threadId: string, reason: ThreadWake) {
     const agent = await getAgentByName(this.env.THREAD_AGENT, threadId);
     await agent.wake(reason);
@@ -588,8 +593,7 @@ export class ProjectAgent extends Agent<Env> {
 /** Why a thread agent is woken. */
 export type ThreadWake =
   | { kind: "message"; messageId: string }
-  | { kind: "coordinator"; note: string }
-  | { kind: "task"; taskId: string; ok: boolean; result: string };
+  | { kind: "coordinator"; note: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

@@ -1,5 +1,16 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import { readFileSync, writeFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+
+/**
+ * wrangler.jsonc without the Artifacts binding, which has no local emulator and
+ * would need a Cloudflare login. Written next to it so its relative paths hold.
+ */
+function testConfig(): string {
+  const path = "./.wrangler.test.jsonc";
+  writeFileSync(path, readFileSync("./wrangler.jsonc", "utf8").replace(/^\s*"artifacts":.*$/m, ""));
+  return path;
+}
 
 export default defineConfig(async () => {
   const migrations = await readD1Migrations("../../packages/db/migrations");
@@ -8,7 +19,7 @@ export default defineConfig(async () => {
   return {
     plugins: [
       cloudflareTest({
-        wrangler: { configPath: "./wrangler.jsonc" },
+        wrangler: { configPath: testConfig() },
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,

@@ -84,6 +84,7 @@ export async function projectRepoToken(
   projectId: string,
   fullName: string,
   permissions: RepoPermissions = { contents: "read", metadata: "read" },
+  minValidMs?: number,
 ): Promise<{ token: string; repo: ProjectRepo }> {
   const repos = await listProjectRepos(env.DB, projectId);
   const repo = repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
@@ -91,6 +92,6 @@ export async function projectRepoToken(
     const names = repos.map((r) => r.fullName).join(", ") || "none";
     throw new Error(`${fullName} is not connected to this project (connected: ${names})`);
   }
-  const { token } = await installationToken(env, repo.installationId, { repositoryIds: [repo.repoId], permissions });
+  const { token } = await installationToken(env, repo.installationId, { repositoryIds: [repo.repoId], permissions }, minValidMs);
   return { token, repo };
 }

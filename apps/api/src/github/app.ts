@@ -103,11 +103,12 @@ export async function installationToken(
   env: GithubEnv,
   installationId: number,
   scope: { repositoryIds?: number[]; permissions?: RepoPermissions } = {},
+  /** How long the token must stay valid; tokens last an hour. */
+  minValidMs = 5 * 60_000,
 ): Promise<AccessToken> {
   const cacheKey = JSON.stringify([installationId, scope]);
   const cached = tokenCache.get(cacheKey);
-  // Tokens last an hour; refresh with five minutes to spare.
-  if (cached && Date.parse(cached.expires_at) - Date.now() > 5 * 60_000) return cached;
+  if (cached && Date.parse(cached.expires_at) - Date.now() > minValidMs) return cached;
   const body: Record<string, unknown> = {};
   if (scope.repositoryIds) body.repository_ids = scope.repositoryIds;
   if (scope.permissions) body.permissions = scope.permissions;
