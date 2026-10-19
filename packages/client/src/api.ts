@@ -1,4 +1,4 @@
-import type { CreateProjectInput, Member, Message, Project } from "@altair/protocol";
+import type { CreateProjectInput, Member, Message, Project, UsageSummary } from "@altair/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
@@ -100,6 +100,15 @@ export class ApiClient {
     return this.request<{ messages: Message[]; hasMore: boolean }>(
       `/api/projects/${encodeURIComponent(projectId)}/messages?after=${afterSeq}`,
     );
+  }
+
+  // --- usage ---
+
+  /** Model usage across the caller's projects, bucketed by day in the caller's time zone. */
+  getUsage(input: { days: number; projectId?: string | null; tzOffset?: number }) {
+    const query = new URLSearchParams({ days: String(input.days), tzOffset: String(input.tzOffset ?? 0) });
+    if (input.projectId) query.set("projectId", input.projectId);
+    return this.request<UsageSummary>(`/api/usage?${query}`);
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

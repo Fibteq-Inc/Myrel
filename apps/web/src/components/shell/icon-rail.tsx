@@ -1,6 +1,6 @@
 import type { SessionUser } from "@altair/client";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Blocks, FolderOpen, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
+import { BarChart3, Blocks, FolderOpen, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
 import { canChooseServer, server } from "../../lib/api";
 import { AltairMark, cn, UserAvatar } from "../../lib/ui";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
@@ -9,7 +9,7 @@ type RailItem = {
   label: string;
   icon: LucideIcon;
   /** Where it goes. No `to` = not built yet; shown dimmed. */
-  to?: "/";
+  to?: "/" | "/usage";
   /** Path prefixes that light it up. */
   match?: string[];
 };
@@ -23,6 +23,7 @@ export const RAIL_ITEMS: RailItem[] = [
   { label: "Artifacts", icon: Blocks },
   { label: "Files", icon: FolderOpen },
   { label: "Devices and runners", icon: MonitorSmartphone },
+  { label: "Usage", icon: BarChart3, to: "/usage", match: ["/usage"] },
 ];
 
 const itemClass =
