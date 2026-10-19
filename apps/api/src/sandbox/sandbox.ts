@@ -43,6 +43,13 @@ export class Sandbox extends DurableObject<Env> {
     if (this.current?.taskId === taskId) this.current.abort.abort(new Error("Cancelled"));
   }
 
+  /** For project deletion: stops the task and the container and erases this sandbox's storage. */
+  async wipe(): Promise<void> {
+    this.current?.abort.abort(new Error("The project was deleted"));
+    if (this.ctx.container?.running) await this.ctx.container.destroy();
+    await this.ctx.storage.deleteAll();
+  }
+
   private async execute(threadId: string, spec: TaskSpec, secrets: Record<string, string>, signal: AbortSignal) {
     const thread = await getAgentByName(this.env.THREAD_AGENT, threadId);
     const harness = HARNESSES[spec.harness];

@@ -594,6 +594,23 @@ export class ProjectAgent extends Agent<Env> {
     return this.artifacts.hasVersion(id, version);
   }
 
+  // ---- Deletion ---------------------------------------------------------
+
+  /**
+   * Called when the project is deleted (see src/projects/delete.ts): disconnects every client
+   * and returns what lives outside this object, so the caller can clean it up.
+   */
+  prepareDelete(): { threadIds: string[]; artifactIds: string[] } {
+    for (const connection of this.getConnections()) connection.close(4404, "project deleted");
+    return { threadIds: this.listThreads().map((t) => t.id), artifactIds: this.artifacts.list().map((a) => a.id) };
+  }
+
+  /** Erases this project's storage and pending alarms. */
+  async wipe(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+  }
+
   // ---- Coordinator -------------------------------------------------------
 
   private async notifyCoordinator(item: InboxItem) {

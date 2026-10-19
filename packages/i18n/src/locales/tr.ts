@@ -244,6 +244,18 @@ export const tr: Catalog = {
   "projectInvites.invite": "Davet et",
   "projectInvites.pending": "Bekliyor · {role} · davet eden: {name}",
   "projectInvites.revoke": "Geri al",
+  "deleteProject.title": "Projeyi sil",
+  "deleteProject.description": "Projeyi herkes için siler: sohbet, thread'ler, dosyalar, artifact'ler, hafıza ve ayarlar. Geri alınamaz.",
+  "deleteProject.button": "Projeyi sil",
+  "deleteProject.confirmTitle": "{name} silinsin mi?",
+  "deleteProject.confirmBody": {
+    one: "Bu projedeki her şey silinir, çalışan görevler de durdurulur. Geri alınamaz.",
+    other: "Bu projedeki her şey {count} üyenin tamamı için silinir, çalışan görevler de durdurulur. Geri alınamaz.",
+  },
+  "deleteProject.typeName": "Onaylamak için {name} yaz",
+  "deleteProject.confirm": "Kalıcı olarak sil",
+  "deleteProject.cancel": "Vazgeç",
+  "deleteProject.deleting": "Siliniyor…",
 
   // Usage
   "usage.title": "Kullanım",

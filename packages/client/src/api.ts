@@ -177,6 +177,11 @@ export class ApiClient {
     });
   }
 
+  /** Deletes the project and all its data for everyone. Owners only. */
+  async deleteProject(projectId: string) {
+    await this.request(projectPath(projectId), { method: "DELETE" });
+  }
+
   /** Removes a member; pass your own id to leave the project. */
   async removeMember(projectId: string, userId: string) {
     await this.request(`${projectPath(projectId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });

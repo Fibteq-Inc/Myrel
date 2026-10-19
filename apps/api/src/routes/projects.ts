@@ -21,6 +21,7 @@ import { USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
 import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
+import { deleteProject } from "../projects/delete";
 import { getWorkspace, notifyProject, parseInfo } from "../runners";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
@@ -53,6 +54,14 @@ export const projectRoutes = new Hono<AppEnv>()
   .get("/:id", async (c) => {
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
     return project ? c.json({ project }) : c.json({ error: "not_found" }, 404);
+  })
+  .delete("/:id", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (project.role !== "owner") return c.json({ error: "forbidden", message: "Only owners can delete a project." }, 403);
+    await deleteProject(c.env, id);
+    return c.body(null, 204);
   })
   .get("/:id/settings", async (c) => {
     const id = c.req.param("id");

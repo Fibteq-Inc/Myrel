@@ -5,6 +5,7 @@ import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { GithubRepos } from "./github-repos";
+import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
   api,
@@ -56,6 +57,7 @@ export function ProjectSettings({
       <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />
       <Members projectId={projectId} myRole={project.role} />
       {canManage && <Invites projectId={projectId} />}
+      {project.role === "owner" && <DangerZone projectId={projectId} name={project.name} />}
     </>
   );
 }
@@ -362,6 +364,55 @@ function Invites({ projectId }: { projectId: string }) {
             </Row>
           ))}
         </List>
+      )}
+    </Section>
+  );
+}
+
+/** Owners only: deletes the project for everyone after typing its name. */
+function DangerZone({ projectId, name }: { projectId: string; name: string }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { data: members = [] } = useQuery(membersQuery(projectId));
+  const [confirming, setConfirming] = useState(false);
+  const remove = useMutation({
+    mutationFn: () => api.deleteProject(projectId),
+    onSuccess: async () => {
+      setConfirming(false);
+      queryClient.removeQueries({ queryKey: projectQuery(projectId).queryKey });
+      await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
+      await navigate({ to: "/" });
+    },
+  });
+
+  return (
+    <Section title={t("deleteProject.title")}>
+      <div className="flex flex-col gap-3 rounded-xl border border-bad/40 bg-bad/5 px-4 py-3 sm:flex-row sm:items-center">
+        <p className="flex-1 text-[13px] text-muted">{t("deleteProject.description")}</p>
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="inline-flex h-8 flex-none items-center justify-center rounded-lg border border-bad/50 px-3 text-[13px] font-medium text-bad hover:bg-bad/10"
+        >
+          {t("deleteProject.button")}
+        </button>
+      </div>
+      {confirming && (
+        <ConfirmDialog
+          title={t("deleteProject.confirmTitle", { name })}
+          body={t("deleteProject.confirmBody", { count: Math.max(1, members.length) })}
+          confirmLabel={t("deleteProject.confirm")}
+          busyLabel={t("deleteProject.deleting")}
+          typeToConfirm={name}
+          busy={remove.isPending}
+          error={remove.error ? errorMessage(remove.error, t) : undefined}
+          onConfirm={() => remove.mutate()}
+          onClose={() => {
+            setConfirming(false);
+            remove.reset();
+          }}
+        />
       )}
     </Section>
   );
