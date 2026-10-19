@@ -1,8 +1,9 @@
 import type { Runner, RunnerPairingCode } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Folder, MonitorSmartphone, Plus, Trash2, X } from "lucide-react";
+import { Folder, FolderPlus, MonitorSmartphone, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { FolderPicker, folderPickerBlocker } from "../../components/folder-picker";
 import { NavToggle } from "../../components/shell/shell";
 import { CliChips, lastSeen, OnlineDot, PairingSteps, RunnerIcon } from "../../components/runners";
 import { api, runnersQuery, server } from "../../lib/api";
@@ -72,8 +73,8 @@ function DevicesPage() {
                   <span className="min-w-0 flex-1">
                     <span className="font-medium">{newRunner.name}</span> is paired.{" "}
                     {newRunner.online
-                      ? "It's connected. Pick one of its folders from a project's header."
-                      : "Share a folder and run `npx altair-runner start` on it to connect."}
+                      ? "It's connected. Add a folder to it below, then pick it from a project's header."
+                      : "Run step 2 on it to connect."}
                   </span>
                   <GhostButton type="button" onClick={() => setPairing(null)}>
                     Done
@@ -110,8 +111,15 @@ function DevicesPage() {
 }
 
 function RunnerRow({ runner, onRemoved }: { runner: Runner; onRemoved: () => void }) {
+  const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
+  const [adding, setAdding] = useState(false);
   const remove = useMutation({ mutationFn: () => api.removeRunner(runner.id), onSuccess: onRemoved });
+  const unshare = useMutation({
+    mutationFn: (path: string) => api.unshareRunnerFolder(runner.id, path),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: runnersQuery.queryKey }),
+  });
+  const blocker = folderPickerBlocker(runner);
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-line bg-raised px-4 py-3.5">
       <div className="flex items-center gap-3">
@@ -148,19 +156,61 @@ function RunnerRow({ runner, onRemoved }: { runner: Runner; onRemoved: () => voi
         )}
       </div>
       <CliChips runner={runner} />
-      {runner.folders.length > 0 && (
-        <ul className="flex flex-col gap-1 border-t border-line pt-3">
-          {runner.folders.map((f) => (
-            <li key={f.path} className="flex items-center gap-2 text-[13px] text-muted">
-              <Folder size={14} className="flex-none text-subtle" aria-hidden="true" />
-              <span className="truncate font-mono text-[12.5px]" title={f.path}>
-                {f.path}
-              </span>
-            </li>
-          ))}
-        </ul>
+      <div className="flex flex-col gap-1 border-t border-line pt-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs text-subtle">Shared folders</h3>
+          {!adding && (
+            <GhostButton
+              type="button"
+              className="ml-auto h-7 px-2 text-xs"
+              disabled={Boolean(blocker)}
+              title={blocker ?? undefined}
+              onClick={() => setAdding(true)}
+            >
+              <FolderPlus size={14} aria-hidden="true" />
+              Add folder
+            </GhostButton>
+          )}
+        </div>
+        {runner.folders.length === 0 && !adding && (
+          <p className="text-[13px] text-subtle">{blocker ?? "None yet. Add the folders projects may work in."}</p>
+        )}
+        {runner.folders.length > 0 && (
+          <ul className="flex flex-col">
+            {runner.folders.map((f) => (
+              <li key={f.path} className="group flex items-center gap-2 rounded-md py-1 text-[13px] text-muted">
+                <Folder size={14} className="flex-none text-subtle" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]" title={f.path}>
+                  {f.path}
+                </span>
+                {!blocker && (
+                  <IconButton
+                    type="button"
+                    aria-label={`Stop sharing ${f.path}`}
+                    title="Stop sharing"
+                    className="size-7 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                    disabled={unshare.isPending}
+                    onClick={() => unshare.mutate(f.path)}
+                  >
+                    <X size={14} />
+                  </IconButton>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {adding && (
+          <FolderPicker
+            runner={runner}
+            className="mt-2"
+            onShared={() => setAdding(false)}
+            onCancel={() => setAdding(false)}
+          />
+        )}
+      </div>
+      {(remove.error || unshare.error) && (
+        <p className="text-sm text-bad">{errorMessage(remove.error ?? unshare.error)}</p>
       )}
-      {remove.error && <p className="text-sm text-bad">{errorMessage(remove.error)}</p>}
     </li>
   );
 }

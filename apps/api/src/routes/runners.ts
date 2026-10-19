@@ -1,5 +1,11 @@
 import { createDb, schema } from "@altair/db";
-import { createId, PairRunnerInput, type PairRunnerResult, type RunnerPairingCode } from "@altair/protocol";
+import {
+  createId,
+  PairRunnerInput,
+  type PairRunnerResult,
+  RunnerFolderInput,
+  type RunnerPairingCode,
+} from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Hono } from "hono";
@@ -46,6 +52,18 @@ export const runnerDeviceRoutes = new Hono<AppEnv>()
     });
     return c.json({ runner: { id, name: input.data.name }, token } satisfies PairRunnerResult, 201);
   })
+  // Whether the runner's token is still valid, so it can tell "unpaired" from "server unreachable".
+  .get("/me", async (c) => {
+    const token = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    const [runner] = token
+      ? await createDb(c.env.DB)
+          .select({ id: runners.id, name: runners.name })
+          .from(runners)
+          .where(eq(runners.tokenHash, await sha256Hex(token)))
+      : [];
+    if (!runner) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ runner });
+  })
   // The runner's live connection. Token in `Authorization: Bearer`.
   .get("/connect", async (c) => {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
@@ -91,6 +109,41 @@ export const runnerRoutes = new Hono<AppEnv>()
     });
     return c.json({ code, expiresAt: expiresAt.toISOString() } satisfies RunnerPairingCode, 201);
   })
+  // Browses the computer's folders, for the folder picker. Only the computer's owner can.
+  .get("/:id/dirs", async (c) => {
+    const id = c.req.param("id");
+    if (!(await ownsRunner(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.RUNNER_AGENT, id);
+    const result = await agent.listDirs(c.req.query("path") || undefined);
+    if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
+    return c.json(result.listing);
+  })
+  // Shares a folder on the computer, as `altair-runner share` would.
+  .post("/:id/folders", async (c) => {
+    const id = c.req.param("id");
+    const input = RunnerFolderInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    if (!(await ownsRunner(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.RUNNER_AGENT, id);
+    const result = await agent.setShared(input.data.path, true);
+    if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
+    return c.json({ folders: result.folders });
+  })
+  // Stops sharing a folder. Projects working in it lose their local folder.
+  .delete("/:id/folders", async (c) => {
+    const id = c.req.param("id");
+    const input = RunnerFolderInput.safeParse({ path: c.req.query("path") });
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    if (!(await ownsRunner(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.RUNNER_AGENT, id);
+    const result = await agent.setShared(input.data.path, false);
+    if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
+    const { projectWorkspaces } = schema;
+    const stale = and(eq(projectWorkspaces.runnerId, id), eq(projectWorkspaces.path, input.data.path));
+    const affected = await createDb(c.env.DB).delete(projectWorkspaces).where(stale).returning();
+    await Promise.all(affected.map((r) => notifyProject(c.env, r.projectId)));
+    return c.json({ folders: result.folders });
+  })
   // Unpairs a computer: its token stops working and projects lose that folder.
   .delete("/:id", async (c) => {
     const id = c.req.param("id");
@@ -108,3 +161,11 @@ export const runnerRoutes = new Hono<AppEnv>()
     await Promise.all(affected.map((r) => notifyProject(c.env, r.projectId)));
     return c.json({ ok: true });
   });
+
+async function ownsRunner(env: Env, runnerId: string, userId: string): Promise<boolean> {
+  const [row] = await createDb(env.DB)
+    .select({ id: runners.id })
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.userId, userId)));
+  return Boolean(row);
+}

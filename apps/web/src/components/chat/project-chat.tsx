@@ -4,6 +4,7 @@ import { Hash, MessagesSquare, Settings } from "lucide-react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, UserAvatar } from "../../lib/ui";
+import { ArtifactCards } from "../artifacts";
 import { WorkspaceButton } from "../local-folder";
 import { NavToggle, PaneHeader } from "../shell/shell";
 import { Composer } from "./composer";
@@ -62,6 +63,9 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 reactions={state.reactions[m.id]}
                 decision={{ answer: answers.get(m.id), onChoose: (label) => send(label) }}
               >
+                {m.artifacts?.length ? (
+                  <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
+                ) : null}
                 {thread && (
                   <ThreadCard projectId={project.id} thread={thread} replies={threadMessages(state, thread.id).length} />
                 )}

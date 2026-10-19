@@ -57,6 +57,7 @@ export function defaultWorkspaceTabs(_thread: Thread): WorkspaceTab[] {
  */
 export function WorkspacePanel({
   tabs,
+  initialTab,
   status,
   active: controlled,
   onActiveChange,
@@ -64,6 +65,8 @@ export function WorkspacePanel({
   className = "",
 }: {
   tabs: WorkspaceTab[];
+  /** The tab shown first; remount (change `key`) to switch to it again. */
+  initialTab?: string;
   /** Shown at the right of the tab bar, e.g. which runner does the work. */
   status?: ReactNode;
   active?: string;
@@ -71,7 +74,7 @@ export function WorkspacePanel({
   onClose?: () => void;
   className?: string;
 }) {
-  const [uncontrolled, setUncontrolled] = useState(tabs[0]?.id);
+  const [uncontrolled, setUncontrolled] = useState(initialTab ?? tabs[0]?.id);
   const active = controlled ?? uncontrolled;
   const setActive = (id: string) => {
     setUncontrolled(id);

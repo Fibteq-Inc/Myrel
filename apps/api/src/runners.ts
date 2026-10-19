@@ -59,6 +59,7 @@ export async function toRunner(env: Env, row: RunnerRow): Promise<Runner> {
     platform: info?.platform ?? "",
     folders: info?.folders ?? [],
     clis: info?.clis ?? [],
+    features: info?.features ?? [],
     online: await isRunnerOnline(env, row.id),
     lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),

@@ -90,8 +90,9 @@ Requires Node 22+ and pnpm 10.
 ```sh
 pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars    # set BETTER_AUTH_SECRET and a model key
+cp apps/artifacts/.dev.vars.example apps/artifacts/.dev.vars
 pnpm db:migrate:local                               # applies D1 migrations to the local database
-pnpm dev                                            # API on :8787, web on http://localhost:5173
+pnpm dev                                            # API on :8787, artifacts on :8788, web on http://localhost:5173
 ```
 
 Open http://localhost:5173, create an account (sign-ups are on locally), create a

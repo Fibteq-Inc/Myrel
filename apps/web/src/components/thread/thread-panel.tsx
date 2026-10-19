@@ -5,6 +5,7 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } f
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
+import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import { Checklist, Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking } from "../chat";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
@@ -19,7 +20,20 @@ const SIDE_BY_SIDE = 700;
  * chat. Its header opens the workspace tools (changes, terminal, outputs)
  * beside the conversation. On phones it covers the screen.
  */
-export function ThreadPanel({ threadId, me }: { threadId: string; me: string }) {
+export function ThreadPanel({
+  threadId,
+  me,
+  artifact,
+  version,
+  onOpenArtifact,
+}: {
+  threadId: string;
+  me: string;
+  /** The output open in the Outputs tab, from the URL. */
+  artifact?: string;
+  version?: number;
+  onOpenArtifact: (artifact: string | undefined, version?: number) => void;
+}) {
   const { project, state, status, emit } = useProjectContext();
   const panel = useThreadPanel();
   const navigate = useNavigate();
@@ -37,12 +51,43 @@ export function ThreadPanel({ threadId, me }: { threadId: string; me: string }) 
   const close = () => void navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
 
   const thread = state.threads[threadId];
-  const tabs = thread ? defaultWorkspaceTabs(thread) : [];
+  const messages = thread ? threadMessages(state, thread.id) : [];
+  // What this thread published, plus anything its messages delivered from elsewhere.
+  const attached = new Set(messages.flatMap((m) => m.artifacts?.map((a) => a.artifactId) ?? []));
+  const outputs = Object.values(state.artifacts)
+    .filter((a) => a.threadId === threadId || attached.has(a.id))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const tabs = thread
+    ? defaultWorkspaceTabs(thread).map((tab) =>
+        tab.id === "outputs"
+          ? {
+              ...tab,
+              count: outputs.length,
+              content: (
+                <ThreadOutputs
+                  projectId={project.id}
+                  thread={thread}
+                  artifacts={outputs}
+                  openId={artifact}
+                  version={version}
+                  onOpen={onOpenArtifact}
+                />
+              ),
+            }
+          : tab,
+      )
+    : [];
   const tool = tabs.some((t) => t.id === panel.tool) ? panel.tool : null;
   const sideBySide = measured >= SIDE_BY_SIDE;
 
-  function openTool(id: string) {
-    if (tool === id) return panel.update({ tool: null });
+  // Opening an artifact brings the Outputs tab into view.
+  useEffect(() => {
+    if (artifact) openTool("outputs", true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artifact]);
+
+  function openTool(id: string, keepOpen = false) {
+    if (tool === id && !keepOpen) return panel.update({ tool: null });
     // Make room for the conversation and the tool side by side.
     panel.update({ tool: id, ...(!panel.maximized && panel.width < PANEL_SPLIT ? { width: PANEL_SPLIT } : {}) });
   }
@@ -158,7 +203,7 @@ export function ThreadPanel({ threadId, me }: { threadId: string; me: string }) 
 
           <div className="flex min-h-0 flex-1">
             {(!tool || sideBySide) && (
-              <Conversation threadId={thread.id} me={me} wide={!tool && measured > 900} />
+              <Conversation threadId={thread.id} me={me} wide={!tool && measured > 900} openArtifact={artifact} />
             )}
             {tool && (
               <div className={cn("flex min-w-0 flex-col", sideBySide ? "w-[52%] flex-none border-l border-line" : "flex-1")}>
@@ -189,7 +234,17 @@ export function ThreadPanel({ threadId, me }: { threadId: string; me: string }) 
   );
 }
 
-function Conversation({ threadId, me, wide }: { threadId: string; me: string; wide: boolean }) {
+function Conversation({
+  threadId,
+  me,
+  wide,
+  openArtifact,
+}: {
+  threadId: string;
+  me: string;
+  wide: boolean;
+  openArtifact?: string;
+}) {
   const { project, names, state, send } = useProjectContext();
   const thread = state.threads[threadId]!;
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
@@ -215,7 +270,17 @@ function Conversation({ threadId, me, wide }: { threadId: string; me: string; wi
               names={names}
               reactions={state.reactions[m.id]}
               decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
-            />
+            >
+              {m.artifacts?.length ? (
+                <ArtifactCards
+                  projectId={project.id}
+                  threadId={thread.id}
+                  refs={m.artifacts}
+                  artifacts={state.artifacts}
+                  openId={openArtifact}
+                />
+              ) : null}
+            </MessageView>
           ))}
           {active && <Thinking label={state.progress[thread.id] ?? (working ? "Working" : "Thinking")} />}
         </div>

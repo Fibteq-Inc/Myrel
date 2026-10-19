@@ -9,6 +9,7 @@ export const ID_PREFIXES = {
   invite: "inv",
   runner: "rnr",
   task: "task",
+  artifact: "art",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

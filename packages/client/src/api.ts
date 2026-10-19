@@ -1,5 +1,8 @@
 import type {
   AddProjectRepoInput,
+  Artifact,
+  ArtifactVersion,
+  ArtifactView,
   AdminSettings,
   ApiKey,
   CreateApiKeyInput,
@@ -23,6 +26,8 @@ import type {
   ProviderInfo,
   PutMemoryInput,
   Runner,
+  RunnerDirListing,
+  RunnerFolder,
   RunnerPairingCode,
   SetWorkspaceInput,
   UpdateAdminSettingsInput,
@@ -358,6 +363,27 @@ export class ApiClient {
     return this.request<{ ok: true }>(`/api/runners/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
+  /** Folders inside `path` on one of your computers (its home folder when absent). */
+  listRunnerDirs(id: string, path?: string) {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.request<RunnerDirListing>(`/api/runners/${encodeURIComponent(id)}/dirs${query}`);
+  }
+
+  /** Shares a folder on one of your computers, so projects can work in it. */
+  async shareRunnerFolder(id: string, path: string) {
+    return (
+      await this.request<{ folders: RunnerFolder[] }>(`/api/runners/${encodeURIComponent(id)}/folders`, {
+        method: "POST",
+        body: { path },
+      })
+    ).folders;
+  }
+
+  async unshareRunnerFolder(id: string, path: string) {
+    const url = `/api/runners/${encodeURIComponent(id)}/folders?path=${encodeURIComponent(path)}`;
+    return (await this.request<{ folders: RunnerFolder[] }>(url, { method: "DELETE" })).folders;
+  }
+
   async getWorkspace(projectId: string) {
     return (
       await this.request<{ workspace: ProjectWorkspace | null }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`)
@@ -375,6 +401,40 @@ export class ApiClient {
 
   async clearWorkspace(projectId: string) {
     await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace`, { method: "DELETE" });
+  }
+
+  // --- artifacts ---
+
+  private artifactsPath(projectId: string, artifactId?: string) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/artifacts`;
+    return artifactId ? `${base}/${encodeURIComponent(artifactId)}` : base;
+  }
+
+  async listArtifacts(projectId: string) {
+    return (await this.request<{ artifacts: Artifact[] }>(this.artifactsPath(projectId))).artifacts;
+  }
+
+  getArtifact(projectId: string, artifactId: string) {
+    return this.request<{ artifact: Artifact; versions: ArtifactVersion[] }>(this.artifactsPath(projectId, artifactId));
+  }
+
+  /** A signed, short-lived link to frame one version (default: latest) from the artifact origin. */
+  artifactView(projectId: string, artifactId: string, version?: number) {
+    const query = version ? `?version=${version}` : "";
+    return this.request<ArtifactView>(`${this.artifactsPath(projectId, artifactId)}/view${query}`);
+  }
+
+  /** One version's HTML source, as text. */
+  async artifactSource(projectId: string, artifactId: string, version: number): Promise<string> {
+    const headers: Record<string, string> = {};
+    const token = await this.tokens?.get();
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await this.fetchImpl(`${this.baseUrl}${this.artifactsPath(projectId, artifactId)}/versions/${version}/source`, {
+      headers,
+      credentials: "include",
+    });
+    if (!res.ok) throw new ApiError(res.status, null);
+    return res.text();
   }
 
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */

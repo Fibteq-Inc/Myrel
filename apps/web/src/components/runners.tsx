@@ -68,7 +68,7 @@ export function Command({ children }: { children: string }) {
   );
 }
 
-/** The three steps to connect a computer, with the pairing code filled in. */
+/** The steps to connect a computer, with the pairing code filled in. */
 export function PairingSteps({ pairing, server }: { pairing: RunnerPairingCode; server: string }) {
   const left = useCountdown(pairing.expiresAt);
   return (
@@ -79,14 +79,16 @@ export function PairingSteps({ pairing, server }: { pairing: RunnerPairingCode; 
           {left > 0 ? `The code works once and expires in ${formatSeconds(left)}.` : "This code expired. Create a new one."}
         </p>
       </Step>
-      <Step n={2} title="Share a project folder">
-        <Command>{"cd ~/code/my-project && npx altair-runner share"}</Command>
-        <p className="text-xs text-subtle">Altair can only work in folders you share. Share as many as you like.</p>
-      </Step>
-      <Step n={3} title="Start the runner and leave it running">
-        <Command>npx altair-runner start</Command>
+      <Step n={2} title="Keep it running in the background">
+        <Command>npx altair-runner service install</Command>
         <p className="text-xs text-subtle">
-          It uses the Claude Code, Codex or Gemini CLI you already signed in to. Your logins never leave your computer.
+          It starts now and every time you log in, and uses the Claude Code, Codex or Gemini CLI you already signed in
+          to. Your logins never leave your computer.
+        </p>
+      </Step>
+      <Step n={3} title="Add a project folder">
+        <p className="text-[13px] text-muted">
+          Once it shows up below, use Add folder to pick the folders projects may work in.
         </p>
       </Step>
     </ol>

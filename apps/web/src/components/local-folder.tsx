@@ -5,6 +5,7 @@ import { ChevronDown, Folder, FolderPlus, Laptop } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, runnersQuery, workspaceQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton } from "../lib/ui";
+import { FolderPicker, folderPickerBlocker } from "./folder-picker";
 import { OnlineDot, RunnerIcon } from "./runners";
 
 /** Header control: the project's local folder and whether its computer is connected; owners can change it. */
@@ -98,6 +99,7 @@ function WorkspaceForm({
   const [runnerId, setRunnerId] = useState(workspace?.runnerId ?? "");
   const [pickedPath, setPath] = useState(workspace?.path ?? "");
   const [pickedCli, setCli] = useState<CliId | "">(workspace?.cli ?? "");
+  const [browsing, setBrowsing] = useState(false);
 
   // Fall back to the first computer, its first folder and its first CLI.
   const runner = runners.find((r) => r.id === runnerId) ?? runners[0];
@@ -158,22 +160,46 @@ function WorkspaceForm({
       )}
 
       <Field label={runners.length > 1 ? "Folder" : `Folder on ${runner.name}`}>
-        {runner.folders.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-edge px-3 py-2.5 text-subtle">
-            No shared folders yet. In a terminal, run{" "}
-            <code className="font-mono text-fg">npx altair-runner share</code> inside your project folder.
-          </p>
+        {browsing ? (
+          <FolderPicker
+            runner={runner}
+            onShared={(shared) => {
+              setPath(shared);
+              setBrowsing(false);
+            }}
+            onCancel={() => setBrowsing(false)}
+          />
         ) : (
-          <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-            {runner.folders.map((f) => (
-              <Choice key={f.path} checked={f.path === path} onChange={() => setPath(f.path)} name="folder">
-                <Folder size={14} className="flex-none text-subtle" aria-hidden="true" />
-                <span className="truncate font-mono text-[12.5px]" title={f.path}>
-                  {f.path}
-                </span>
-              </Choice>
-            ))}
-          </div>
+          <>
+            {runner.folders.length > 0 && (
+              <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                {runner.folders.map((f) => (
+                  <Choice key={f.path} checked={f.path === path} onChange={() => setPath(f.path)} name="folder">
+                    <Folder size={14} className="flex-none text-subtle" aria-hidden="true" />
+                    <span className="truncate font-mono text-[12.5px]" title={f.path}>
+                      {f.path}
+                    </span>
+                  </Choice>
+                ))}
+              </div>
+            )}
+            {folderPickerBlocker(runner) ? (
+              runner.folders.length === 0 && (
+                <p className="rounded-lg border border-dashed border-edge px-3 py-2.5 text-subtle">
+                  No shared folders yet. {folderPickerBlocker(runner)}
+                </p>
+              )
+            ) : (
+              <button
+                type="button"
+                onClick={() => setBrowsing(true)}
+                className="flex items-center gap-2 rounded-lg border border-dashed border-edge px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
+              >
+                <FolderPlus size={14} className="flex-none" aria-hidden="true" />
+                {runner.folders.length === 0 ? "Choose a folder on this computer" : "Add another folder"}
+              </button>
+            )}
+          </>
         )}
       </Field>
 
@@ -206,7 +232,8 @@ function WorkspaceForm({
       {!runner.online && (
         <p className="flex items-center gap-2 text-subtle">
           <OnlineDot online={false} />
-          {runner.name} is offline. Run <code className="font-mono text-fg">npx altair-runner start</code> on it.
+          {runner.name} is offline. Turn it on, or run{" "}
+          <code className="font-mono text-fg">npx altair-runner service install</code> on it.
         </p>
       )}
       {(save.error || clear.error) && <p className="text-bad">{errorMessage(save.error ?? clear.error)}</p>}

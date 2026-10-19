@@ -1,4 +1,4 @@
-import { createId, type ProjectWorkspace } from "@altair/protocol";
+import { type ArtifactRef, createId, type ProjectWorkspace } from "@altair/protocol";
 import { Agent, getAgentByName } from "agents";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listProjectRepos } from "../github/store";
@@ -95,6 +95,7 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
+    const artifacts = await project.listArtifacts();
 
     const llm = await projectProvider(this.env, projectId);
     if (!llm.ok) {
@@ -120,6 +121,8 @@ export class ThreadAgent extends Agent<Env> {
     // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
     let resolved: boolean = false as boolean;
     let asked: boolean = false as boolean;
+    // Artifacts published this turn, attached to the next reply.
+    let pending: ArtifactRef[] = [];
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
@@ -138,6 +141,7 @@ export class ThreadAgent extends Agent<Env> {
           brief: this.getMeta("brief") ?? "",
           lastSeenSeq,
           notes,
+          artifacts,
           repos: await listProjectRepos(this.env.DB, projectId),
           tasks,
           workspace,
@@ -145,10 +149,29 @@ export class ThreadAgent extends Agent<Env> {
         tools: [
           ...threadTools({
           reply: async (text) => {
-            const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: text });
+            const artifacts = pending;
+            pending = [];
+            const m = await project.sendMessage({
+              threadId,
+              authorKind: "agent",
+              authorId: THREAD_AGENT_ID,
+              body: text,
+              artifacts,
+            });
             // Our own replies are not news on the next turn.
             this.setMeta("last_seen_seq", String(m.seq));
             return m;
+          },
+          publishArtifact: async (input) => {
+            const result = await project.publishArtifact({ ...input, threadId });
+            if ("error" in result) throw new Error(result.error);
+            const { artifact } = result;
+            // A second publish of the same artifact in one turn replaces its card.
+            pending = [
+              ...pending.filter((p) => p.artifactId !== artifact.id),
+              { artifactId: artifact.id, version: artifact.version, title: artifact.title },
+            ];
+            return artifact;
           },
           setStatusText: async (text) => {
             await project.updateThread(threadId, { statusText: text });
@@ -175,6 +198,10 @@ export class ThreadAgent extends Agent<Env> {
         ],
         maxSteps: 16,
       });
+      // Published but never mentioned in a reply: still deliver the cards.
+      if (pending.length) {
+        await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending });
+      }
       await project.updateThread(threadId, {
         status: resolved ? "done" : this.hasRunningTask() ? "working" : asked ? "blocked" : "review_ready",
         resolved,

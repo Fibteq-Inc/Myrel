@@ -1,6 +1,6 @@
 {
   "name": "@fibteq/altair-runner",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Connects your computer to Altair so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",

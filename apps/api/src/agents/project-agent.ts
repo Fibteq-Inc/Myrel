@@ -1,10 +1,13 @@
 import { createDb, schema } from "@altair/db";
 import {
   type Attachment,
+  type Artifact,
+  type ArtifactVersion,
   type AuthorKind,
   ClientEvent,
   createId,
   type Message,
+  type ArtifactRef,
   type Reaction,
   type ServerEvent,
   SYNC_PAGE_SIZE,
@@ -15,6 +18,7 @@ import { Agent, type Connection, type ConnectionContext, getAgentByName } from "
 import { eq } from "drizzle-orm";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
+import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
 import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn } from "../usage";
@@ -33,6 +37,8 @@ type MessageRow = {
   author_id: string;
   body: string;
   attachments: string | null;
+  /** JSON array of ArtifactRef, or null. */
+  artifacts: string | null;
   created_at: string;
 };
 
@@ -52,6 +58,7 @@ type InboxRow = { id: number; kind: InboxItem["kind"]; payload: string };
 
 export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | "body"> & {
   attachments?: Attachment[];
+  artifacts?: ArtifactRef[];
 };
 
 export type ThreadPatch = Partial<Pick<Thread, "title" | "status" | "statusText" | "resolved" | "label">>;
@@ -86,6 +93,8 @@ export class ProjectAgent extends Agent<Env> {
   /** Project instructions, memory and the file index. */
   readonly knowledge: KnowledgeStore;
 
+  private readonly artifacts: ArtifactStore;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql`CREATE TABLE IF NOT EXISTS messages (
@@ -100,6 +109,8 @@ export class ProjectAgent extends Agent<Env> {
     // Added with project files; older projects get the column here.
     const columns = this.sql<{ name: string }>`PRAGMA table_info(messages)`;
     if (!columns.some((c) => c.name === "attachments")) this.sql`ALTER TABLE messages ADD COLUMN attachments TEXT`;
+    // Added with artifacts.
+    if (!columns.some((c) => c.name === "artifacts")) this.sql`ALTER TABLE messages ADD COLUMN artifacts TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -130,6 +141,7 @@ export class ProjectAgent extends Agent<Env> {
       () => this.name,
       (kind) => this.emit({ type: "knowledge.changed", kind }),
     );
+    this.artifacts = new ArtifactStore(this.sql.bind(this), env.ARTIFACTS, this.name);
   }
 
   // Our clients speak the Altair protocol only; skip the SDK's state/identity frames.
@@ -204,6 +216,7 @@ export class ProjectAgent extends Agent<Env> {
           ...page,
           threads: this.listThreads(),
           reactions: this.reactionsFor(page.messages.map((m) => m.id)),
+          artifacts: this.artifacts.list(),
         });
         for (const [threadId, label] of this.active) {
           send(connection, { type: "agent.activity", threadId, active: true, label });
@@ -221,11 +234,22 @@ export class ProjectAgent extends Agent<Env> {
     const createdAt = new Date().toISOString();
     const attachments = input.attachments ?? [];
     const stored = attachments.length ? JSON.stringify(attachments) : null;
+    const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, created_at)
-      VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored}, ${createdAt})
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, created_at)
+      VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
+        ${artifacts ? JSON.stringify(artifacts) : null}, ${createdAt})
       RETURNING seq`;
-    const message: Message = { ...input, attachments, id, projectId: this.name, seq: row!.seq, createdAt };
+    const { artifacts: _, ...rest } = input;
+    const message: Message = {
+      ...rest,
+      attachments,
+      ...(artifacts && { artifacts }),
+      id,
+      projectId: this.name,
+      seq: row!.seq,
+      createdAt,
+    };
     this.emit({ type: "message.created", message });
     return message;
   }
@@ -323,6 +347,37 @@ export class ProjectAgent extends Agent<Env> {
   private async wakeThread(threadId: string, reason: ThreadWake) {
     const agent = await getAgentByName(this.env.THREAD_AGENT, threadId);
     await agent.wake(reason);
+  }
+
+  // ---- Artifacts ---------------------------------------------------------
+
+  /**
+   * Publish a new artifact, or a new version of one. Callable over RPC. Bad input comes
+   * back as `error` (a message for the model) rather than an exception across RPC.
+   */
+  async publishArtifact(input: PublishInput): Promise<{ artifact: Artifact } | { error: string }> {
+    try {
+      const artifact = await this.artifacts.publish(input);
+      this.emit({ type: "artifact.updated", artifact });
+      return { artifact };
+    } catch (err) {
+      if (err instanceof ArtifactError) return { error: err.message };
+      throw err;
+    }
+  }
+
+  /** Newest first. Callable over RPC. */
+  listArtifacts(): Artifact[] {
+    return this.artifacts.list();
+  }
+
+  getArtifact(id: string): { artifact: Artifact; versions: ArtifactVersion[] } | null {
+    const artifact = this.artifacts.get(id);
+    return artifact ? { artifact, versions: this.artifacts.versions(id) } : null;
+  }
+
+  hasArtifactVersion(id: string, version: number): boolean {
+    return this.artifacts.hasVersion(id, version);
   }
 
   // ---- Coordinator -------------------------------------------------------
@@ -508,6 +563,7 @@ export class ProjectAgent extends Agent<Env> {
       authorId: r.author_id,
       body: r.body,
       attachments: r.attachments ? (JSON.parse(r.attachments) as Attachment[]) : [],
+      ...(r.artifacts && { artifacts: JSON.parse(r.artifacts) as ArtifactRef[] }),
       seq: r.seq,
       createdAt: r.created_at,
     };
