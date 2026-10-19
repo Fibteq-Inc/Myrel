@@ -2,7 +2,7 @@ import { z } from "zod";
 import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
-import { MAX_MESSAGE_LENGTH, Message, Reaction, Thread, ThreadId } from "./models";
+import { MAX_MESSAGE_LENGTH, Message, Reaction, Task, TaskId, TerminalLine, Thread, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
@@ -68,6 +68,10 @@ export const ServerEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("knowledge.changed"), kind: KnowledgeKind }),
   /** The project's local folder changed, or its computer came online or went offline. */
   z.object({ type: z.literal("workspace.changed") }),
+  /** A task started, finished or changed. */
+  z.object({ type: z.literal("task.updated"), task: Task }),
+  /** New terminal output from a running task. Ephemeral: earlier output comes from the tasks endpoint. */
+  z.object({ type: z.literal("task.output"), taskId: TaskId, threadId: ThreadId, lines: z.array(TerminalLine) }),
   z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;

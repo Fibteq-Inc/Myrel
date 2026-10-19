@@ -180,6 +180,9 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
 | `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://altair-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
+| `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for `run_task`: `lite`, `basic`, `standard-1` … `standard-4`. |
+| `RUNNER_HARNESS` | `opencode` | Default coding agent in the sandbox: `opencode` or `claude-code` (Claude models only). |
+| `RUNNER_MODEL` | empty | Model for the coding agent; empty uses the agents' model. |
 
 ### Bindings
 
@@ -194,6 +197,8 @@ supply the D1 id.
 | `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the altair-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
 | `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
+| `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for `run_task` (see [Code sandbox](#code-sandbox)) |
+| `WORKSPACES` | Artifacts namespace `altair` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
 
 ## Optional features
 
@@ -253,6 +258,44 @@ signed within the last hour.
 Without `ARTIFACTS_URL`, artifacts are still published, listed and readable as
 code, but the preview stays off. Locally, `pnpm dev` runs the artifact Worker
 on `:8788`; copy `apps/artifacts/.dev.vars.example` too.
+
+### Code sandbox
+
+Thread agents get hands through the `run_task` tool: it starts a coding agent
+(OpenCode by default) in the thread's own Linux container, which clones the
+repository, edits code, runs commands and tests, and can open a pull request.
+Its checklist and terminal output stream into the thread.
+
+- It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
+  which is on the Workers Paid plan.
+- The image is `packages/sandbox-image/Dockerfile` (git, gh, jq, Node 22,
+  Python, OpenCode, Claude Code). Wrangler builds it with Docker on every
+  build and deploy, including `wrangler deploy --dry-run`, so the build
+  machine needs Docker. Workers Builds and GitHub's `ubuntu-latest` runners have it.
+- The coding agent uses the project's model and key (the same ones the agents
+  use). `RUNNER_MODEL` picks a different model for it.
+- Cloning private repositories and opening pull requests uses the project's
+  GitHub connection. Public repositories clone without it.
+- Containers sleep after 10 idle minutes; a thread's next task wakes its own.
+
+To run without a sandbox, remove the `SANDBOX` binding and the `containers`
+block from `apps/api/wrangler.jsonc` (keep the migrations). `run_task`
+then tells the agent there is no sandbox.
+
+### Thread workspaces
+
+A container's disk does not survive its sleep. With
+[Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (beta,
+Workers Paid), each thread gets its own git repository, `thread-<thread id>`
+in the `altair` namespace. The sandbox commits and pushes every task's work
+there, unfinished work included, and the thread's next task starts from it:
+without a repository it continues in the same files, and with one it
+continues the same branch.
+
+Artifacts has no local emulator, so `wrangler dev` needs a Cloudflare login
+while the `WORKSPACES` binding is in `apps/api/wrangler.jsonc` (the API tests
+leave it out on their own). To run without it, remove the `artifacts` block;
+tasks then keep only what they push to GitHub.
 
 ### Web UI on another origin
 

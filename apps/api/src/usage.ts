@@ -41,3 +41,39 @@ async function recordUsage(
       latencyMs: call.latencyMs,
     });
 }
+
+/**
+ * One row for a finished run_task: the coding harness's own model calls, summed.
+ * The task id is the turn id. Billed as the thread's work.
+ */
+export async function recordTaskUsage(
+  env: LlmEnv & { DB: D1Database },
+  ctx: { projectId: string; threadId: string; taskId: string; provider: string; model: string },
+  usage: { inputTokens: number; outputTokens: number; costUsd: number },
+  latencyMs: number,
+) {
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) return;
+  const prices = { ...DEFAULT_PRICES, ...parsePrices(env.LLM_PRICES) };
+  const price = priceFor(ctx.model, prices);
+  // The harness's own cost figure wins; otherwise estimate from the price table.
+  const cost = usage.costUsd > 0 ? Math.round(usage.costUsd * 1_000_000) : price ? costMicros(usage, price) : null;
+  await createDb(env.DB)
+    .insert(schema.usageEvents)
+    .values({
+      id: createId("usage"),
+      createdAt: new Date(),
+      projectId: ctx.projectId,
+      threadId: ctx.threadId,
+      userId: null,
+      agent: "thread",
+      turnId: ctx.taskId,
+      provider: ctx.provider,
+      model: ctx.model,
+      servedModel: null,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: 0,
+      outputTokens: usage.outputTokens,
+      costMicros: cost,
+      latencyMs,
+    });
+}

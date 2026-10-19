@@ -17,6 +17,7 @@ import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
 export { ThreadAgent } from "./agents/thread-agent";
+export { Sandbox } from "./sandbox/sandbox";
 
 const app = new Hono<AppEnv>()
   .basePath("/api")

@@ -1,4 +1,4 @@
-import { threadMessages } from "@altair/client";
+import { threadMessages, threadTasks } from "@altair/client";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CircleCheck, LoaderCircle, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import { Checklist, Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking } from "../chat";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
+import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
 import { CHAT_MIN, PANEL_MIN, PANEL_SPLIT, useThreadPanel } from "./panel-state";
 
@@ -34,7 +35,7 @@ export function ThreadPanel({
   version?: number;
   onOpenArtifact: (artifact: string | undefined, version?: number) => void;
 }) {
-  const { project, state, status, emit } = useProjectContext();
+  const { project, state, status, emit, loadTasks } = useProjectContext();
   const panel = useThreadPanel();
   const navigate = useNavigate();
   const ref = useRef<HTMLElement>(null);
@@ -48,6 +49,12 @@ export function ThreadPanel({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    // Earlier tasks and their output are not in the live sync; fetch them when the thread opens.
+    if (status === "open") loadTasks(threadId).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, status]);
+
   const close = () => void navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
 
   const thread = state.threads[threadId];
@@ -58,7 +65,11 @@ export function ThreadPanel({
     .filter((a) => a.threadId === threadId || attached.has(a.id))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const tabs = thread
-    ? defaultWorkspaceTabs(thread).map((tab) =>
+    ? withTasks(defaultWorkspaceTabs(thread), {
+        projectId: project.id,
+        tasks: threadTasks(state, thread.id),
+        output: state.output,
+      }).map((tab) =>
         tab.id === "outputs"
           ? {
               ...tab,

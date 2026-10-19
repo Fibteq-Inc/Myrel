@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { idPattern } from "./ids";
-import { ProjectId, ThreadId, Timestamp } from "./models";
+import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
 
 /**
  * altair-runner: a small daemon on the user's own computer. It opens an
@@ -14,7 +14,6 @@ import { ProjectId, ThreadId, Timestamp } from "./models";
 export const RUNNER_PROTOCOL_VERSION = 1;
 
 export const RunnerId = z.string().regex(idPattern("runner"));
-export const TaskId = z.string().regex(idPattern("task"));
 
 export const CliId = z.enum(["claude", "codex", "gemini"]);
 export type CliId = z.infer<typeof CliId>;
