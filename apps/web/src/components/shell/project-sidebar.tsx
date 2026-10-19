@@ -4,14 +4,15 @@ import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Blocks, Check, ChevronDown, ChevronRight, ChevronsUpDown, FolderOpen, Hash, Plus, Search, Settings, SquarePen, Wifi, WifiOff } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronsUpDown, Plus, Search, Settings, SquarePen, Wifi, WifiOff } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, Kbd, useRelativeTime } from "../../lib/ui";
 import { threadActivity, ThreadStatusIcon } from "../chat/thread-status";
+import { useOpenProjectSettings } from "../project-settings-dialog";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
-import { Sidebar } from "./shell";
+import { Sidebar, SidebarCollapse } from "./shell";
 
 /** The project's sidebar: project switcher, search, project chat, threads, connection. */
 export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
@@ -42,9 +43,14 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
   }, [state.threads, query]);
 
   return (
-    <Sidebar label={t("sidebar.label")}>
+    <Sidebar label={t("sidebar.label")} collapsible>
       <div className="flex flex-col gap-3 px-3.5 pb-2.5 pt-3.5">
-        <ProjectSwitcher current={project.id} name={project.name} memberCount={members.length} />
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <ProjectSwitcher current={project.id} name={project.name} memberCount={members.length} />
+          </div>
+          <SidebarCollapse />
+        </div>
         <div className="flex gap-2">
           <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[#26262b] bg-[#19191d] px-2.5 text-subtle focus-within:border-edge">
             <Search size={15} aria-hidden="true" />
@@ -74,41 +80,7 @@ export function ProjectSidebar({ footer }: { footer?: ReactNode }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
-        <div className="px-2 py-1">
-          <Link
-            to="/projects/$projectId"
-            params={{ projectId: project.id }}
-            activeOptions={{ exact: true }}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
-            activeProps={{ className: "bg-hover !text-fg font-medium" }}
-          >
-            <Hash size={16} aria-hidden="true" />
-            {t("sidebar.projectChat")}
-          </Link>
-          <Link
-            to="/projects/$projectId/files"
-            params={{ projectId: project.id }}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
-            activeProps={{ className: "bg-hover !text-fg font-medium" }}
-          >
-            <FolderOpen size={16} aria-hidden="true" />
-            {t("sidebar.files")}
-          </Link>
-          <Link
-            to="/projects/$projectId/artifacts"
-            params={{ projectId: project.id }}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
-            activeProps={{ className: "bg-hover !text-fg font-medium" }}
-          >
-            <Blocks size={16} aria-hidden="true" />
-            {t("sidebar.artifacts")}
-            {Object.keys(state.artifacts).length > 0 && (
-              <span className="ml-auto font-mono text-xs text-subtle">{Object.keys(state.artifacts).length}</span>
-            )}
-          </Link>
-        </div>
-
-        <div className="px-2 pt-3.5">
+        <div className="px-2 pt-1">
           <div className="flex items-center px-2.5 pb-1.5 text-xs text-subtle">
             {t("sidebar.threads")}
             <span className="ml-auto font-mono">{open.length}</span>
@@ -188,6 +160,7 @@ function ThreadRow({ projectId, thread }: { projectId: string; thread: Thread })
 function ProjectSwitcher({ current, name, memberCount }: { current: string; name: string; memberCount: number }) {
   const { data: projects = [] } = useQuery(projectsQuery);
   const navigate = useNavigate();
+  const openSettings = useOpenProjectSettings();
   const t = useT();
   return (
     <Menu
@@ -228,7 +201,7 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
             icon={<Settings size={15} />}
             onSelect={() => {
               close();
-              void navigate({ to: "/settings/projects/$projectId", params: { projectId: current } });
+              openSettings();
             }}
           >
             {t("chat.projectSettings")}

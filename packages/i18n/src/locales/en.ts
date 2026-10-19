@@ -41,6 +41,9 @@ export const en = {
   // Shell
   "shell.openMenu": "Open menu",
   "shell.closeMenu": "Close menu",
+  "shell.showSidebar": "Show sidebar",
+  "shell.hideSidebar": "Hide sidebar",
+  "shell.backToChat": "Back to the project chat",
   "rail.main": "Main",
   "rail.home": "Altair home",
   "rail.projects": "Projects",
@@ -139,6 +142,9 @@ export const en = {
   "workspace.outputsEmptyBody": "Files, artifacts and links this thread delivers collect here.",
   // Project chat header
   "chat.projectSettings": "Project settings",
+  "chat.artifactsCount": "Artifacts ({count})",
+  "projectSettings.dialogTitle": "{name} settings",
+  "projectSettings.close": "Close settings",
   "rail.usage": "Usage",
 
   // Settings

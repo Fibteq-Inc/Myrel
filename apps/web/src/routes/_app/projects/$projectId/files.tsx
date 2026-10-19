@@ -2,7 +2,7 @@ import { useT } from "@altair/i18n/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { FolderOpen } from "lucide-react";
 import { type PanelTab, ProjectKnowledge } from "../../../../components/project-knowledge";
-import { NavToggle, PaneHeader } from "../../../../components/shell/shell";
+import { BackToChat, NavToggle, PaneHeader } from "../../../../components/shell/shell";
 import { useProjectContext } from "../../../../lib/project-context";
 
 type Search = { tab?: PanelTab; file?: string };
@@ -27,6 +27,7 @@ function FilesPage() {
     <main className="flex min-h-0 flex-1 flex-col">
       <PaneHeader>
         <NavToggle />
+        <BackToChat projectId={project.id} />
         <FolderOpen size={17} className="flex-none text-muted" aria-hidden="true" />
         <h1 className="truncate text-[15px] font-semibold">{t("sidebar.files")}</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline">{project.name}</span>

@@ -37,6 +37,9 @@ export const tr: Catalog = {
   // Shell
   "shell.openMenu": "Menüyü aç",
   "shell.closeMenu": "Menüyü kapat",
+  "shell.showSidebar": "Kenar çubuğunu göster",
+  "shell.hideSidebar": "Kenar çubuğunu gizle",
+  "shell.backToChat": "Proje sohbetine dön",
   "rail.main": "Ana menü",
   "rail.home": "Altair ana sayfa",
   "rail.projects": "Projeler",
@@ -137,6 +140,9 @@ export const tr: Catalog = {
   "workspace.outputsEmptyBody": "Bu thread'in teslim ettiği dosyalar, artifact'ler ve bağlantılar burada toplanır.",
   // Project chat header
   "chat.projectSettings": "Proje ayarları",
+  "chat.artifactsCount": "Artifact'ler ({count})",
+  "projectSettings.dialogTitle": "{name} ayarları",
+  "projectSettings.close": "Ayarları kapat",
   "rail.usage": "Kullanım",
 
   // Settings
