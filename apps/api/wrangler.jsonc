@@ -33,11 +33,28 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] }],
 
-  // Set with `wrangler secret put` (or .dev.vars locally).
-  "secrets": { "required": ["BETTER_AUTH_SECRET"] },
+  // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
+  // BETTER_AUTH_SECRET (required) and the model keys below. There is no `secrets.required` list on
+  // purpose: with one, `wrangler dev` drops every .dev.vars secret not on it, so the optional
+  // model keys could not be used locally.
   // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
   // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Altair".
-  "vars": { "BETTER_AUTH_URL": "", "TRUSTED_ORIGINS": "", "INSTANCE_NAME": "Altair" }
+  //
+  // Models (see src/llm/index.ts). LLM_PROVIDER: fireworks (default), anthropic or openai.
+  // The provider's key is a secret: FIREWORKS_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY.
+  // LLM_MODEL: empty = the provider's default model.
+  // AI_GATEWAY_URL: optional, e.g. https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway>;
+  // anthropic and openai calls then go through it (AI_GATEWAY_TOKEN secret for an authenticated gateway).
+  // LLM_BASE_URL: optional full override of the provider's API base URL.
+  "vars": {
+    "BETTER_AUTH_URL": "",
+    "TRUSTED_ORIGINS": "",
+    "INSTANCE_NAME": "Altair",
+    "LLM_PROVIDER": "fireworks",
+    "LLM_MODEL": "",
+    "LLM_BASE_URL": "",
+    "AI_GATEWAY_URL": ""
+  }
 }

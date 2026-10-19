@@ -1,4 +1,4 @@
-import type { CreateProjectInput, Message, Project } from "@altair/protocol";
+import type { CreateProjectInput, Member, Message, Project } from "@altair/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
@@ -90,6 +90,10 @@ export class ApiClient {
 
   async getProject(id: string) {
     return (await this.request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`)).project;
+  }
+
+  async listMembers(projectId: string) {
+    return (await this.request<{ members: Member[] }>(`/api/projects/${encodeURIComponent(projectId)}/members`)).members;
   }
 
   getMessages(projectId: string, afterSeq = 0) {

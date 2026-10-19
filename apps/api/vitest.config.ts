@@ -8,7 +8,12 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations, BETTER_AUTH_SECRET: "test-secret-at-least-32-characters-long" },
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            BETTER_AUTH_SECRET: "test-secret-at-least-32-characters-long",
+            // Model calls are answered by test/fake-llm.ts.
+            FIREWORKS_API_KEY: "test-fireworks-key",
+          },
         },
       }),
     ],

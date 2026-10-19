@@ -1,0 +1,52 @@
+/**
+ * Provider-neutral chat types. Each provider adapter maps these onto its own wire
+ * format, so the agent loop never sees OpenAI- or Anthropic-specific shapes.
+ */
+
+export type ToolSpec = {
+  name: string;
+  description: string;
+  /** JSON Schema for the tool's input object. */
+  parameters: Record<string, unknown>;
+};
+
+export type ToolCall = { id: string; name: string; input: unknown };
+
+export type ToolResult = { id: string; name: string; output: string; isError?: boolean };
+
+export type Turn =
+  | { role: "user"; content: string }
+  | { role: "assistant"; text: string; toolCalls: ToolCall[] }
+  | { role: "tool"; results: ToolResult[] };
+
+export type ChatRequest = {
+  system: string;
+  turns: Turn[];
+  tools: ToolSpec[];
+  maxTokens?: number;
+};
+
+export type Usage = { inputTokens: number; outputTokens: number };
+
+export type ChatResponse = {
+  text: string;
+  toolCalls: ToolCall[];
+  usage?: Usage;
+};
+
+export interface ModelProvider {
+  /** Provider id, e.g. "fireworks". */
+  readonly id: string;
+  readonly model: string;
+  chat(request: ChatRequest): Promise<ChatResponse>;
+}
+
+export class LlmError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "LlmError";
+  }
+}

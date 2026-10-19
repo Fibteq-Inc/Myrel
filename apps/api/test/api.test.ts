@@ -54,6 +54,10 @@ describe("projects", () => {
     expect((await list(alice)).map((p) => p.id)).toEqual([project.id]);
     expect(await list(bob)).toEqual([]);
     expect((await api(`/api/projects/${project.id}`, { token: bob })).status).toBe(404);
+
+    const members = await (await api(`/api/projects/${project.id}/members`, { token: alice })).json();
+    expect(members).toEqual({ members: [expect.objectContaining({ name: "Test", role: "owner" })] });
+    expect((await api(`/api/projects/${project.id}/members`, { token: bob })).status).toBe(404);
   });
 
   it("rejects invalid input", async () => {
@@ -93,28 +97,30 @@ describe("ProjectAgent", () => {
     const waiters: Array<() => void> = [];
     ws.addEventListener("message", (e) => {
       events.push(ServerEvent.parse(JSON.parse(e.data as string)));
-      waiters.shift()?.();
+      for (const w of waiters.splice(0)) w();
     });
     ws.accept();
-    const next = () => new Promise<void>((r) => waiters.push(r));
+    // Agent activity events may interleave, so wait for the event type we expect.
+    const waitFor = async <T extends ServerEvent["type"]>(type: T) => {
+      for (;;) {
+        const hit = events.find((e) => e.type === type);
+        if (hit) return hit as Extract<ServerEvent, { type: T }>;
+        await new Promise<void>((r) => waiters.push(r));
+      }
+    };
 
-    let pending: Promise<unknown> = Promise.all([next(), next()]);
     ws.send(JSON.stringify({ type: "message.send", clientId: "c1", body: "hello" }));
-    await pending;
-    expect(events.map((e) => e.type).sort()).toEqual(["message.ack", "message.created"]);
-    const created = events.find((e) => e.type === "message.created");
-    expect(created?.type === "message.created" && created.message).toMatchObject({
+    expect(await waitFor("message.ack")).toMatchObject({ clientId: "c1" });
+    expect((await waitFor("message.created")).message).toMatchObject({
       body: "hello",
       seq: 1,
       projectId: project.id,
       authorKind: "user",
     });
 
-    pending = next();
     ws.send(JSON.stringify({ type: "sync", afterSeq: 0 }));
-    await pending;
-    const sync = events.at(-1);
-    expect(sync?.type === "sync.result" && sync.messages.map((m) => m.body)).toEqual(["hello"]);
+    const sync = await waitFor("sync.result");
+    expect(sync.messages.map((m) => m.body)).toEqual(["hello"]);
     ws.close();
   });
 

@@ -25,7 +25,7 @@ export function ServerPicker() {
 
   if (!editing) {
     return (
-      <p className="flex items-center justify-between text-sm text-neutral-500">
+      <p className="flex items-center justify-between text-sm text-subtle">
         <span className="truncate">Server: {new URL(server).host}</span>
         <button type="button" className="hover:underline" onClick={() => setEditing(true)}>
           Change
@@ -36,7 +36,7 @@ export function ServerPicker() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-2">
-      <label htmlFor="server" className="text-sm text-neutral-500">
+      <label htmlFor="server" className="text-sm text-subtle">
         Altair server
       </label>
       <div className="flex gap-2">
@@ -53,7 +53,7 @@ export function ServerPicker() {
           Connect
         </Button>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-bad">{error}</p>}
     </form>
   );
 }

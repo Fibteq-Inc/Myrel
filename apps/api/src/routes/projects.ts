@@ -1,12 +1,12 @@
 import { createDb, schema } from "@altair/db";
-import { CreateProjectInput, createId, type Project } from "@altair/protocol";
+import { CreateProjectInput, createId, type Member, type Project } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { USER_ID_HEADER } from "../agents/project-agent";
 import { type AppEnv, requireUser } from "../middleware";
 
-const { projects, projectMembers } = schema;
+const { projects, projectMembers, user } = schema;
 
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
@@ -36,6 +36,16 @@ export const projectRoutes = new Hono<AppEnv>()
   .get("/:id", async (c) => {
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
     return project ? c.json({ project }) : c.json({ error: "not_found" }, 404);
+  })
+  .get("/:id/members", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const members: Member[] = await createDb(c.env.DB)
+      .select({ id: user.id, name: user.name, role: projectMembers.role })
+      .from(projectMembers)
+      .innerJoin(user, eq(user.id, projectMembers.userId))
+      .where(eq(projectMembers.projectId, id));
+    return c.json({ members });
   })
   .get("/:id/messages", async (c) => {
     const id = c.req.param("id");

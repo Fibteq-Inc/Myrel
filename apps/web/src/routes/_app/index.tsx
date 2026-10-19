@@ -27,7 +27,7 @@ function ProjectsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl space-y-6 p-6">
+    <main className="mx-auto w-full max-w-2xl space-y-6 overflow-y-auto p-6">
       <h1 className="text-xl font-semibold">Projects</h1>
       <form onSubmit={onSubmit} className="flex gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New project name" maxLength={120} />
@@ -35,20 +35,20 @@ function ProjectsPage() {
           Create
         </Button>
       </form>
-      {create.error && <p className="text-sm text-red-600">{errorMessage(create.error)}</p>}
+      {create.error && <p className="text-sm text-bad">{errorMessage(create.error)}</p>}
       {projects.length === 0 ? (
-        <p className="text-sm text-neutral-500">No projects yet.</p>
+        <p className="text-sm text-subtle">No projects yet.</p>
       ) : (
-        <ul className="divide-y divide-neutral-200 rounded-md border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-raised">
           {projects.map((p) => (
             <li key={p.id}>
               <Link
                 to="/projects/$projectId"
                 params={{ projectId: p.id }}
-                className="flex items-center justify-between px-4 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                className="flex items-center justify-between px-4 py-3 hover:bg-hover"
               >
                 <span>{p.name}</span>
-                <span className="text-xs text-neutral-500">{new Date(p.createdAt).toLocaleDateString()}</span>
+                <span className="text-xs text-subtle">{new Date(p.createdAt).toLocaleDateString()}</span>
               </Link>
             </li>
           ))}

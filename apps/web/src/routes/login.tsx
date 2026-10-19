@@ -31,7 +31,8 @@ function LoginPage() {
     try {
       if (mode === "signup") await api.signUp({ email, password, name: String(form.get("name")) });
       else await api.signIn({ email, password });
-      await queryClient.invalidateQueries({ queryKey: ["session"] });
+      // Refetch now: the app layout reads the cached session, and invalidating alone keeps the old null.
+      await queryClient.fetchQuery({ ...sessionQuery, staleTime: 0 });
       await navigate({ to: "/" });
     } catch (err) {
       setError(errorMessage(err));
@@ -60,13 +61,13 @@ function LoginPage() {
             minLength={8}
             autoComplete={mode === "signin" ? "current-password" : "new-password"}
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-bad">{error}</p>}
           <Button type="submit" disabled={pending} className="w-full">
             {mode === "signin" ? "Sign in" : "Sign up"}
           </Button>
           <button
             type="button"
-            className="w-full text-sm text-neutral-500 hover:underline"
+            className="w-full text-sm text-subtle hover:underline"
             onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
           >
             {mode === "signin" ? "No account? Sign up" : "Have an account? Sign in"}
