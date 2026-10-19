@@ -11,7 +11,7 @@ import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, sh
 import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 
-export const RUNNER_VERSION = "0.2.0";
+export const RUNNER_VERSION = "0.2.1";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -29,6 +29,27 @@ export async function pair(input: { server: string; code: string; name?: string 
   await saveConfig(config);
   return config;
 }
+
+/**
+ * Asks the server whether this computer's pairing is still valid. "unknown"
+ * when the server cannot be reached or is too old to say.
+ */
+export async function checkPairing(config: Pick<RunnerConfig, "server" | "token">): Promise<"ok" | "invalid" | "unknown"> {
+  if (!config.server || !config.token) return "invalid";
+  try {
+    const res = await fetch(`${config.server}/api/runner/me`, {
+      headers: { authorization: `Bearer ${config.token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) return "ok";
+    return res.status === 401 ? "invalid" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+const UNPAIRED =
+  "This computer is not paired with Altair any more (it was removed, or paired again elsewhere). Get a new code in Altair > Devices and run `altair-runner pair <code> --server <url>`.";
 
 export type RunnerHandle = { stop(): void; done: Promise<void> };
 
@@ -127,7 +148,9 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     status({ state: "connecting" });
     const ws = new WebSocket(url, { headers: { authorization: `Bearer ${config.token}` } } as never);
     socket = ws;
+    let opened = false;
     ws.onopen = () => {
+      opened = true;
       attempt = 0;
       // Before hello: the server fails any task that hello does not list as running.
       for (const frame of pending.splice(0)) send(frame);
@@ -151,8 +174,17 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         );
       }
     };
-    ws.onclose = (e) => {
-      if (socket !== ws || stopped) return;
+    let down = false;
+    const onDown = async (e: { code: number; reason: string }) => {
+      if (down || socket !== ws || stopped) return;
+      down = true;
+      // A refused upgrade looks like any network error; ask whether the token is the reason.
+      if (!opened && (await checkPairing(config)) === "invalid") {
+        log(UNPAIRED);
+        opts.onRevoked?.();
+        stopReason = "revoked";
+        return stop();
+      }
       if (e.code === 4401) {
         log("This computer was removed from Altair. Pair it again with `altair-runner pair`.");
         opts.onRevoked?.();
@@ -175,7 +207,11 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       status({ state: "offline", reason: e.reason || `code ${e.code}`, retryInMs: delay });
       setTimeout(connect, delay);
     };
-    ws.onerror = () => {}; // onclose follows and handles reconnecting
+    ws.onclose = (e) => void onDown(e);
+    // Some Node versions fire only "error", never "close", when the upgrade is refused (e.g. a 401).
+    ws.onerror = () => {
+      if (!opened) void onDown({ code: 1006, reason: "" });
+    };
   };
   connect();
 

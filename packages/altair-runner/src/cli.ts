@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@altair/protocol";
 import { detectClis } from "./clis";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
-import { pair, RUNNER_VERSION, startRunner } from "./runner";
+import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
 
 const HELP = `altair-runner ${RUNNER_VERSION}
@@ -78,12 +78,13 @@ async function main(argv: string[]) {
     }
     case "status": {
       const config = await loadConfig();
-      const clis = await detectClis();
+      const [clis, pairing] = await Promise.all([detectClis(), checkPairing(config)]);
       if (values.json) {
         const { token, ...rest } = config;
-        return console.log(JSON.stringify({ ...rest, paired: Boolean(token && config.server), clis }));
+        return console.log(JSON.stringify({ ...rest, paired: Boolean(token && config.server), pairing, clis }));
       }
-      console.log(`Server:  ${config.server ?? "(not paired)"}`);
+      const pairingText = { ok: "", invalid: " (not paired any more: run altair-runner pair)", unknown: " (could not reach it)" };
+      console.log(`Server:  ${config.server ? `${config.server}${pairingText[pairing]}` : "(not paired)"}`);
       console.log(`Config:  ${configPath()}`);
       console.log(`Access:  ${config.access}`);
       console.log(`Folders: ${config.folders.map((f) => `\n  ${f.path}`).join("") || "none"}`);
@@ -106,6 +107,11 @@ async function main(argv: string[]) {
       if (arg === "install") {
         const config = await loadConfig();
         if (!config.server || !config.token) throw new Error("Pair this computer first: altair-runner pair <code> --server <url>");
+        if ((await checkPairing(config)) === "invalid") {
+          throw new Error(
+            `${config.server} does not know this computer any more. Get a new code in Altair > Devices and run \`altair-runner pair <code> --server ${config.server}\` first.`,
+          );
+        }
         if (values.access) await saveAccess(values.access);
         printService(await installService(fileURLToPath(import.meta.url)), values.json);
         return;
