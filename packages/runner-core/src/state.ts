@@ -61,7 +61,13 @@ export function reduceTask(p: TaskProgress, e: RunnerEvent): TaskProgress {
   }
 }
 
-type Labels = Record<Phase, { todo: string; doing: string; done: string; failed: string }>;
+type Labels = Record<Phase, { todo: string; doing: string; done: string; failed: string }> & {
+  /** Known `detail` codes of a started phase, in words. */
+  notes: Record<string, string>;
+};
+
+/** `detail` of a started prepare phase while the sandbox installs its tools the first time. */
+export const SETUP_NOTE = "setup";
 
 /** Checklist labels per language, phases in the order they run. Unknown languages use English. */
 export const CHECKLIST_LABELS: Record<string, Labels> = {
@@ -71,6 +77,7 @@ export const CHECKLIST_LABELS: Record<string, Labels> = {
     agent: { todo: "Do the work", doing: "Working", done: "Did the work", failed: "The work failed" },
     save: { todo: "Save the work", doing: "Saving the work", done: "Saved the work", failed: "Could not save the work" },
     publish: { todo: "Open the pull request", doing: "Opening the pull request", done: "Opened the pull request", failed: "Could not open the pull request" },
+    notes: { [SETUP_NOTE]: "installing the tools, only the first time (a few minutes)" },
   },
   tr: {
     prepare: { todo: "Sandbox'ı aç", doing: "Sandbox açılıyor", done: "Sandbox açıldı", failed: "Sandbox açılamadı" },
@@ -78,6 +85,7 @@ export const CHECKLIST_LABELS: Record<string, Labels> = {
     agent: { todo: "İşi yap", doing: "Çalışıyor", done: "İş yapıldı", failed: "İş tamamlanamadı" },
     save: { todo: "Çalışmayı kaydet", doing: "Çalışma kaydediliyor", done: "Çalışma kaydedildi", failed: "Çalışma kaydedilemedi" },
     publish: { todo: "Pull request aç", doing: "Pull request açılıyor", done: "Pull request açıldı", failed: "Pull request açılamadı" },
+    notes: { [SETUP_NOTE]: "araçlar kuruluyor, yalnızca ilk sefer (birkaç dakika)" },
   },
 };
 
@@ -104,7 +112,8 @@ export function renderChecklist(title: string, p: TaskProgress, language = "en")
     if (state === "done") lines.push(`✓ ${label.done}`);
     else if (state === "failed") lines.push(`✗ ${label.failed}${detail ? `: ${clip(detail, 120)}` : ""}`);
     else if (state === "started") {
-      const doing = phase === "agent" && p.lastTool ? `${label.doing}: ${clip(p.lastTool, 50)}` : label.doing;
+      const note = phase === "agent" ? p.lastTool : detail && (labels.notes[detail] ?? detail);
+      const doing = note ? `${label.doing}: ${clip(note, phase === "agent" ? 50 : 80)}` : label.doing;
       lines.push(`✱ ${doing}`);
     } else lines.push(`○ ${label.todo}`);
     if (phase === "agent") {

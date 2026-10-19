@@ -303,6 +303,18 @@ export class ThreadAgent extends Agent<Env> {
         // The opening note and each plan update take a step of their own.
         maxSteps: 24,
       });
+      // A finished task always gets reported, even when the model ended its turn without a word.
+      if (finishedTask && !lastReply && !this.runningTask()) {
+        await project.sendMessage({
+          threadId,
+          authorKind: "agent",
+          authorId: THREAD_AGENT_ID,
+          body: taskReport(this.toTask(finishedTask).title, finishedTask, this.taskLog(finishedTask.id, 15)),
+          artifacts: pending,
+          stats: stats(),
+        });
+        pending = [];
+      }
       // Published but never mentioned in a reply: still deliver the cards.
       if (pending.length) {
         await project.sendMessage({
@@ -692,4 +704,21 @@ export class ThreadAgent extends Agent<Env> {
     this.sql`INSERT INTO meta (key, value) VALUES (${key}, ${value})
       ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
   }
+}
+
+/** A short result message for a task the agent did not report on itself, in the task's language. */
+function taskReport(title: string, row: TaskRow, log: LogRow[]): string {
+  const tr = row.language.toLowerCase().startsWith("tr");
+  const outcome =
+    row.status === "done"
+      ? tr ? "tamamlandı" : "finished"
+      : row.status === "cancelled"
+        ? tr ? "durduruldu" : "was cancelled"
+        : tr ? "başarısız oldu" : "failed";
+  const parts = [tr ? `"${title}" görevi ${outcome}.` : `The task "${title}" ${outcome}.`];
+  if (row.summary) parts.push(row.summary);
+  if (row.pr_url) parts.push(row.pr_url);
+  const tail = log.map((l) => l.text).join("\n").trim();
+  if (tail) parts.push(`${tr ? "Son çıktı" : "Last output"}:\n\n\`\`\`\n${tail.slice(-3000)}\n\`\`\``);
+  return parts.join("\n\n");
 }

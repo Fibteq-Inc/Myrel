@@ -1,4 +1,4 @@
-import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, TaskSpec, taskEnv, taskScript } from "@altair/runner-core";
+import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, SETUP_NOTE, TaskSpec, taskEnv, taskScript } from "@altair/runner-core";
 import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
 import { BASE_IMAGE, SANDBOX_HOME, SANDBOX_USER, SETUP_SCRIPT, SETUP_VERSION } from "./setup";
@@ -69,8 +69,13 @@ export class Sandbox extends DurableObject<Env> {
 
     let done: RunnerEvent;
     try {
-      push({ type: "log", stream: "system", text: `Starting ${harness.label} in the sandbox…` });
-      const container = await this.container((text) => push({ type: "log", stream: "system", text }));
+      push(
+        { type: "phase", phase: "prepare", state: "started" },
+        { type: "log", stream: "system", text: `Starting ${harness.label} in the sandbox…` },
+      );
+      const container = await this.container((text) =>
+        push({ type: "phase", phase: "prepare", state: "started", detail: SETUP_NOTE }, { type: "log", stream: "system", text }),
+      );
       const timeout = AbortSignal.timeout(spec.timeoutSec * 1000);
       const proc = await execWhenReady(container, ["bash", "-c", taskScript()], {
         env: { HOME: SANDBOX_HOME, CI: "1", GIT_TERMINAL_PROMPT: "0", ...taskEnv(spec, harness), ...secrets },
