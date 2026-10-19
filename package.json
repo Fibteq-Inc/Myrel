@@ -19,10 +19,6 @@
   "devDependencies": {
     "turbo": "2.11.9",
     "typescript": "7.0.2",
-    "wrangler": "latest"
-  },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ]
+    "wrangler": "^4.151.2"
+  }
 }
