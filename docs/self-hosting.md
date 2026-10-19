@@ -269,9 +269,10 @@ Its checklist and terminal output stream into the thread.
 - It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
   which is on the Workers Paid plan.
 - The image is `packages/sandbox-image/Dockerfile` (git, gh, jq, Node 22,
-  Python, OpenCode, Claude Code). Wrangler builds it with Docker on every
-  build and deploy, including `wrangler deploy --dry-run`, so the build
-  machine needs Docker. Workers Builds and GitHub's `ubuntu-latest` runners have it.
+  Python, OpenCode, Claude Code). Wrangler builds it with Docker on
+  `wrangler deploy` and `wrangler versions upload`, so the deploying machine
+  needs Docker. Workers Builds and GitHub's `ubuntu-latest` runners have it.
+  `pnpm build` skips the image (`--containers-rollout=none`) and runs without Docker.
 - The coding agent uses the project's model and key (the same ones the agents
   use). `RUNNER_MODEL` picks a different model for it.
 - Cloning private repositories and opening pull requests uses the project's

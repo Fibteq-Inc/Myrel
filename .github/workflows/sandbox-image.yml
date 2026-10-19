@@ -1,0 +1,19 @@
+name: sandbox image
+
+# `pnpm build` no longer builds the sandbox image, so check the Dockerfile here when it changes.
+on:
+  pull_request:
+    paths: ["packages/sandbox-image/**"]
+  push:
+    branches: [main]
+    paths: ["packages/sandbox-image/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build --platform linux/amd64 packages/sandbox-image
