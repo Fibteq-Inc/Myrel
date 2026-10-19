@@ -10,6 +10,8 @@ export const ID_PREFIXES = {
   runner: "rnr",
   task: "task",
   artifact: "art",
+  routine: "rtn",
+  notification: "ntf",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

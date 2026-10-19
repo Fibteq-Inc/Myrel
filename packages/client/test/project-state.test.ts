@@ -61,6 +61,7 @@ describe("project state", () => {
       threads: [],
       reactions: [],
       artifacts: [old, recent],
+      routines: [],
     });
     expect(artifactList(s).map((a) => a.title)).toEqual(["Recent", "Old"]);
     s = applyEvent(s, { type: "artifact.updated", artifact: { ...old, version: 2, updatedAt: "2026-03-01T00:00:00.000Z" } });
@@ -74,7 +75,7 @@ describe("project state", () => {
     const root = msg(1);
     const t = thread(root.id);
     let s = applyMessage(emptyProjectState, root);
-    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [t], reactions: [], artifacts: [] });
+    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [t], reactions: [], artifacts: [], routines: [] });
     s = applyMessage(s, msg(2, t.id));
     s = applyEvent(s, { type: "thread.updated", thread: { ...t, status: "review_ready" } });
     const reaction = { messageId: root.id, emoji: "👍", authorKind: "agent" as const, authorId: "coordinator" };

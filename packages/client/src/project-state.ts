@@ -1,4 +1,4 @@
-import type { Artifact, Message, Reaction, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
+import type { Artifact, Message, Reaction, Routine, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -10,6 +10,7 @@ export type ProjectState = {
   threads: Record<string, Thread>;
   reactions: Record<string, Reaction[]>;
   artifacts: Record<string, Artifact>;
+  routines: Record<string, Routine>;
   /** Agents working right now: "" is the coordinator, otherwise a thread id. */
   active: Record<string, true>;
   /** What an active agent is doing, when it said (e.g. a task on the person's computer). */
@@ -25,6 +26,7 @@ export const emptyProjectState: ProjectState = {
   threads: {},
   reactions: {},
   artifacts: {},
+  routines: {},
   active: {},
   progress: {},
   tasks: {},
@@ -61,6 +63,12 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
       return { ...state, threads: { ...state.threads, [event.thread.id]: event.thread } };
     case "artifact.updated":
       return { ...state, artifacts: { ...state.artifacts, [event.artifact.id]: event.artifact } };
+    case "routine.updated":
+      return { ...state, routines: { ...state.routines, [event.routine.id]: event.routine } };
+    case "routine.deleted": {
+      const { [event.routineId]: _, ...routines } = state.routines;
+      return { ...state, routines };
+    }
     case "reaction.added":
       return { ...state, reactions: addReactions(state.reactions, [event.reaction]) };
     case "agent.activity": {
@@ -84,7 +92,9 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
       for (const t of event.threads) threads[t.id] = t;
       const artifacts = { ...state.artifacts };
       for (const a of event.artifacts) artifacts[a.id] = a;
-      return { ...state, threads, artifacts, reactions: addReactions(state.reactions, event.reactions) };
+      // The sync carries every routine, so it replaces the list (deletions while offline drop out).
+      const routines = Object.fromEntries(event.routines.map((r) => [r.id, r]));
+      return { ...state, threads, artifacts, routines, reactions: addReactions(state.reactions, event.reactions) };
     }
     default:
       return state;

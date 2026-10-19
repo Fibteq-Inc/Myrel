@@ -43,6 +43,13 @@
       "when": 1792439444283,
       "tag": "0005_task_target",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792441648032,
+      "tag": "0006_notifications",
+      "breakpoints": true
     }
   ]
 }

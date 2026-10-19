@@ -12,6 +12,16 @@ function testConfig(): string {
   return path;
 }
 
+async function vapidKeys() {
+  const { publicKey, privateKey } = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const raw = new Uint8Array((await crypto.subtle.exportKey("raw", publicKey)) as ArrayBuffer);
+  const { d } = (await crypto.subtle.exportKey("jwk", privateKey)) as JsonWebKey;
+  return { VAPID_PUBLIC_KEY: Buffer.from(raw).toString("base64url"), VAPID_PRIVATE_KEY: d! };
+}
+
 export default defineConfig(async () => {
   const migrations = await readD1Migrations("../../packages/db/migrations");
   // GitHub hands out PKCS#1 keys, so the tests use one too (see src/github/app.ts).
@@ -36,6 +46,11 @@ export default defineConfig(async () => {
             GITHUB_APP_PRIVATE_KEY: privateKey,
             ARTIFACTS_URL: "https://usercontent.test",
             ARTIFACT_SIGNING_SECRET: "test-signing-secret",
+            // Notification channels; outbound calls are captured by test/fake-llm.ts.
+            EMAIL_FROM: "Altair <altair@example.com>",
+            // A fresh Web Push key pair per run, so no key lives in the repo.
+            ...(await vapidKeys()),
+            VAPID_SUBJECT: "mailto:test@example.com",
           },
         },
       }),

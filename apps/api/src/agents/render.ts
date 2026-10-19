@@ -3,7 +3,7 @@ import type { Message, Thread } from "@altair/protocol";
 /** How a message's author reads in a prompt. */
 export function authorLabel(m: Message, names: Record<string, string>): string {
   if (m.authorKind === "user") return `${names[m.authorId] ?? "Member"} (member)`;
-  if (m.authorKind === "system") return "System notice";
+  if (m.authorKind === "system") return m.authorId === "routine" ? "Routine run" : "System notice";
   return "You (Altair)";
 }
 

@@ -1,13 +1,16 @@
-import type { Message, Thread } from "@altair/protocol";
+import type { Message, Routine, Thread } from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
 import { renderMessage, renderThread } from "./render";
+import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
 
 /** Something the coordinator has not seen yet. */
 export type InboxItem =
   | { kind: "message"; messageId: string }
-  | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string };
+  | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string }
+  /** A routine ran and posted its prompt in the project chat as messageId. */
+  | { kind: "routine"; messageId: string; routineId: string; name: string };
 
 /** The project operations the coordinator's tools act through. */
 export type CoordinatorHost = {
@@ -34,6 +37,8 @@ For each new message in the project chat:
 
 Several unrelated asks in one message: start a thread on that message for the first ask. For each other ask, post one line naming it with post_message, then start a thread on that post.
 
+${ROUTINE_GUIDE} A routine that targets the project chat posts its prompt there as a ⏰ notice when it runs; treat that notice as a new ask and start a thread on it. Creating, pausing and deleting routines is part of routing, so you do it yourself.
+
 Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. You never approve irreversible steps on a person's behalf.
 
 ${KNOWLEDGE_GUIDE}
@@ -48,10 +53,13 @@ export function coordinatorPrompt(input: {
   names: Record<string, string>;
   chat: Message[];
   threads: Thread[];
+  routines: Routine[];
   inbox: InboxItem[];
   knowledge: KnowledgeSnapshot;
+  now: Date;
+  defaultTimezone: string;
 }): string {
-  const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "message" ? [i.messageId] : [])));
+  const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "request" ? [] : [i.messageId])));
   const threadByRoot = new Map(input.threads.map((t) => [t.rootMessageId, t]));
   const chat = input.chat.map((m) => {
     const line = renderMessage(m, input.names, { isNew: newIds.has(m.id) });
@@ -61,13 +69,18 @@ export function coordinatorPrompt(input: {
   const requests = input.inbox.flatMap((i) =>
     i.kind === "request" ? [`- Thread [${i.threadId}] asks (${i.request}): ${i.reason}`] : [],
   );
+  const ran = input.inbox.flatMap((i) =>
+    i.kind === "routine" ? [`- Routine [${i.routineId}] "${i.name}" ran and posted [${i.messageId}]`] : [],
+  );
 
   return [
-    `Project: ${input.projectName}`,
+    `Project: ${input.projectName}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
     renderKnowledge(input.knowledge),
     `## Threads\n${input.threads.map(renderThread).join("\n") || "(none yet)"}`,
+    `## Routines\n${input.routines.map(renderRoutine).join("\n") || "(none)"}`,
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
     requests.length ? `## Requests from thread agents\n${requests.join("\n")}` : "",
+    ran.length ? `## Routines that just ran (start a thread on each post)\n${ran.join("\n")}` : "",
     "Handle everything new now with your tools.",
   ]
     .filter(Boolean)
