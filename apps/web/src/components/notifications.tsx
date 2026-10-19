@@ -9,6 +9,7 @@ import { useFormat } from "../lib/format";
 import { currentPushSubscription, disableWebPush, enableWebPush, webPushSupported } from "../lib/push";
 import { errorMessage } from "../lib/ui";
 import { Popover } from "./popover";
+import { Switch } from "./ui/controls";
 
 const ICONS: Record<NotificationKind, ReactNode> = {
   done: <CircleCheck size={16} className="text-ok" />,
@@ -177,17 +178,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return (
     <label className="flex cursor-pointer items-center gap-3 text-xs text-muted">
       <span className="flex-1">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative h-5 w-9 flex-none rounded-full transition-colors ${checked ? "bg-accent" : "bg-edge"}`}
-      >
-        <span
-          className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${checked ? "translate-x-[18px]" : "translate-x-0.5"}`}
-        />
-      </button>
+      <Switch checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </label>
   );
 }
