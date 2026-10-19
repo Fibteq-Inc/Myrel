@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      // The Worker serves apps/web/dist as static assets, so bundle after the SPA is built.
+      "dependsOn": ["^build", "@altair/web#build"],
+      "outputs": ["dist/**"]
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "altair",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // The web app (apps/web) is built into ../web/dist and served from the same Worker.
+  // /api/* always hits the Worker; every other unknown path falls back to index.html.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "altair",
+      // Replace with the id printed by `wrangler d1 create altair` before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
+      { "name": "THREAD_AGENT", "class_name": "ThreadAgent" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] }],
+
+  // Set with `wrangler secret put` (or .dev.vars locally).
+  "secrets": { "required": ["BETTER_AUTH_SECRET"] },
+  // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
+  // TRUSTED_ORIGINS: extra comma-separated origins allowed to call /api/auth.
+  "vars": { "BETTER_AUTH_URL": "", "TRUSTED_ORIGINS": "" }
+}

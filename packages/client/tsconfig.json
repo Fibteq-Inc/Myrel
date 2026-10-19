@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Only fetch/WebSocket/timers: the same surface exists in browsers and React Native.
+    "lib": ["es2023", "dom"]
+  },
+  "include": ["src", "test"]
+}

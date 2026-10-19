@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+  - sharp
+
+ignoredBuiltDependencies:
+  - core-js-pure
+
+peerDependencyRules:
+  allowedVersions:
+    # Only needed by the agents SDK's optional Vite decorator plugin, which Altair doesn't use.
+    "@babel/core": "7"
