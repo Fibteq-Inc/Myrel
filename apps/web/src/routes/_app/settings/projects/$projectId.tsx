@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
+import { GithubRepos } from "../../../../components/github-repos";
 import { Badge, Field, List, Notice, Row, Section, Select } from "../../../../components/settings";
 import {
   api,
@@ -18,6 +19,9 @@ import {
 import { Button, errorMessage, GhostButton, IconButton, initials, Input } from "../../../../lib/ui";
 
 export const Route = createFileRoute("/_app/settings/projects/$projectId")({
+  // `github` is the result of a GitHub connect round trip (see components/github-repos.tsx).
+  validateSearch: (search: Record<string, unknown>): { github?: string } =>
+    typeof search.github === "string" ? { github: search.github } : {},
   loader: ({ context, params }) =>
     Promise.all([
       context.queryClient.ensureQueryData(projectQuery(params.projectId)),
@@ -31,6 +35,7 @@ const roleKey = (role: ProjectRole) => `role.${role}` as const;
 function ProjectSettingsPage() {
   const t = useT();
   const { projectId } = Route.useParams();
+  const { github } = Route.useSearch();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const canManage = project.role === "owner" || project.role === "admin";
 
@@ -46,6 +51,7 @@ function ProjectSettingsPage() {
         </p>
       </div>
       <GeneralAndModel projectId={projectId} canManage={canManage} />
+      <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />
       <Members projectId={projectId} myRole={project.role} />
       {canManage && <Invites projectId={projectId} />}
     </>

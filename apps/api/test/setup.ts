@@ -6,3 +6,4 @@ const { TEST_MIGRATIONS } = env as typeof env & { TEST_MIGRATIONS: D1Migration[]
 await applyD1Migrations(env.DB, TEST_MIGRATIONS);
 
 import "./fake-llm";
+import "./fake-github";

@@ -1,0 +1,62 @@
+/**
+ * A tiny in-memory GitHub for tests: one installation (42, org "acme") that
+ * covers repos 7 (acme/app) and 8 (acme/docs). Requests are recorded so tests
+ * can check what Altair asked for.
+ */
+export const fakeGithub = {
+  installations: [{ id: 42, account: { login: "acme", type: "Organization", avatar_url: "https://avatars.test/acme" } }],
+  repos: [
+    { id: 7, full_name: "acme/app", default_branch: "main", private: true, description: "The app" },
+    { id: 8, full_name: "acme/docs", default_branch: "trunk", private: false, description: null },
+  ],
+  files: { "acme/app": { "README.md": "# Acme app\n", "src/index.ts": "export const x = 1;\n" } } as Record<
+    string,
+    Record<string, string>
+  >,
+  requests: [] as { method: string; url: string; body?: unknown }[],
+};
+
+const realFetch = globalThis.fetch;
+
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  if (url.hostname !== "github.com" && url.hostname !== "api.github.com") return realFetch(input, init);
+  const method = init?.method ?? "GET";
+  const body = init?.body ? JSON.parse(init.body as string) : undefined;
+  fakeGithub.requests.push({ method, url: url.href, body });
+
+  if (url.href === "https://github.com/login/oauth/access_token") {
+    return body.code === "good-code" ? Response.json({ access_token: "user-token" }) : Response.json({ error: "bad_verification_code" });
+  }
+  if (url.pathname === "/user/installations") {
+    return Response.json({ total_count: fakeGithub.installations.length, installations: fakeGithub.installations });
+  }
+  const tokenMatch = url.pathname.match(/^\/app\/installations\/(\d+)\/access_tokens$/);
+  if (tokenMatch) {
+    if (Number(tokenMatch[1]) !== 42) return new Response("{}", { status: 404 });
+    const ids: number[] | undefined = body?.repository_ids;
+    if (ids?.some((id) => !fakeGithub.repos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
+    const repositories = ids ? fakeGithub.repos.filter((r) => ids.includes(r.id)) : undefined;
+    return Response.json({ token: "inst-token", expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
+  }
+  if (url.pathname === "/installation/repositories") {
+    return Response.json({ total_count: fakeGithub.repos.length, repositories: fakeGithub.repos });
+  }
+  const contents = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/contents\/?(.*)$/);
+  if (contents) {
+    const files = fakeGithub.files[contents[1]!] ?? {};
+    const path = decodeURIComponent(contents[2] ?? "");
+    if (files[path] !== undefined) {
+      return Response.json({ type: "file", name: path, path, size: files[path].length, encoding: "base64", content: btoa(files[path]) });
+    }
+    const prefix = path ? `${path}/` : "";
+    const entries = new Map<string, { type: string; name: string; path: string; size: number }>();
+    for (const [p, text] of Object.entries(files)) {
+      if (!p.startsWith(prefix)) continue;
+      const [name, ...rest] = p.slice(prefix.length).split("/");
+      entries.set(name!, { type: rest.length ? "dir" : "file", name: name!, path: prefix + name, size: rest.length ? 0 : text.length });
+    }
+    return entries.size ? Response.json([...entries.values()]) : new Response("{}", { status: 404 });
+  }
+  return new Response(JSON.stringify({ message: "not faked" }), { status: 404 });
+}) as typeof fetch;

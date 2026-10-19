@@ -1,4 +1,4 @@
-import { Decision, formatDecision, type Message, type Thread } from "@altair/protocol";
+import { Decision, formatDecision, type Message, type ProjectRepo, type Thread } from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { renderMessage } from "./render";
@@ -9,6 +9,10 @@ export type ThreadHost = {
   setStatusText(text: string): Promise<void>;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
   resolve(): Promise<void>;
+  /** Directory listing of a connected repository. */
+  listRepoFiles(repo: string, path: string, ref?: string): Promise<string>;
+  /** Text of one file in a connected repository. */
+  readRepoFile(repo: string, path: string, ref?: string): Promise<string>;
 };
 
 export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean };
@@ -22,7 +26,9 @@ Tools:
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 
-In this phase you have no internet access and no files. Work from your own knowledge, say so when facts may be out of date, and be clear about what you inferred.
+- repo_list_files and repo_read_file: read the GitHub repositories connected to this project (listed in the prompt). Look at the code before answering questions about it. You cannot change repositories, run code or open pull requests yet; say so when asked.
+
+Apart from those repositories you have no internet access and no files. Work from your own knowledge, say so when facts may be out of date, and be clear about what you inferred.
 
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
@@ -40,12 +46,18 @@ export function threadPrompt(input: {
   names: Record<string, string>;
   lastSeenSeq: number;
   notes: CoordinatorNote[];
+  repos: ProjectRepo[];
 }): string {
   const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
   return [
     `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}`,
     `## Brief from the coordinator\n${input.brief}`,
+    input.repos.length
+      ? `## GitHub repositories connected to this project\n${input.repos
+          .map((r) => `- ${r.fullName} (default branch ${r.defaultBranch}${r.private ? ", private" : ""})`)
+          .join("\n")}`
+      : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
     `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
     `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
     notes.length ? `## Notes from the coordinator (not visible to people)\n${notes.join("\n")}` : "",
@@ -94,6 +106,26 @@ export function threadTools(host: ThreadHost): Tool[] {
         await host.requestCoordinator(kind, reason);
         return "Sent to the coordinator. Its answer will arrive in a later turn.";
       },
+    }),
+    tool({
+      name: "repo_list_files",
+      description: "List a directory in a connected GitHub repository. Use path \"\" for the root.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        path: z.string().default(""),
+        ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
+      }),
+      run: ({ repo, path, ref }) => host.listRepoFiles(repo, path, ref),
+    }),
+    tool({
+      name: "repo_read_file",
+      description: "Read a text file from a connected GitHub repository.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        path: z.string().min(1),
+        ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
+      }),
+      run: ({ repo, path, ref }) => host.readRepoFile(repo, path, ref),
     }),
     tool({
       name: "resolve_thread",
