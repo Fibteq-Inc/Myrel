@@ -1,0 +1,95 @@
+# GitHub integration
+
+Altair talks to GitHub through a **GitHub App**. Each Altair server needs its own app.
+People connect their GitHub account in a project's settings, pick repositories, and thread
+agents can then read the code in those repositories. Cloning, running code and opening pull
+requests build on the same app in a later phase, which is why the permissions below already
+include write access.
+
+## 1. Create the GitHub App
+
+On GitHub: **Settings → Developer settings → GitHub Apps → New GitHub App** (for an
+organization: **Organization settings → Developer settings → GitHub Apps**).
+Replace `https://altair.example.com` with your server's public address.
+
+| Field | Value |
+| --- | --- |
+| GitHub App name | Anything, e.g. `Fibteq Altair`. Its URL name becomes the slug. |
+| Homepage URL | `https://altair.example.com` |
+| Callback URL | `https://altair.example.com/api/github/callback` |
+| Expire user authorization tokens | Either. Altair does not keep user tokens. |
+| Request user authorization (OAuth) during installation | **On** (Altair uses it to check who installed the app) |
+| Setup URL | Leave empty (GitHub disables it when the option above is on) |
+| Redirect on update | On |
+| Webhook → Active | On |
+| Webhook URL | `https://altair.example.com/api/github/webhook` |
+| Webhook secret | A long random string (`openssl rand -hex 32`) |
+
+**Repository permissions**
+
+| Permission | Access |
+| --- | --- |
+| Contents | Read and write |
+| Pull requests | Read and write |
+| Issues | Read and write |
+| Checks | Read-only |
+| Commit statuses | Read-only |
+| Metadata | Read-only (mandatory) |
+
+**Subscribe to events:** Pull request, Pull request review, Pull request review comment,
+Issue comment, Push, Check run, Repository. Installation events are always sent.
+
+**Where can this GitHub App be installed?** "Only on this account" for a private server,
+"Any account" if other people's accounts will connect.
+
+After creating it, on the app's page:
+
+1. Note the **App ID** and the **Client ID**.
+2. **Generate a new client secret** and copy it.
+3. **Generate a private key**. A `.pem` file downloads.
+4. The slug is the last part of the app's public URL, `https://github.com/apps/<slug>`.
+
+## 2. Give the Worker the settings
+
+All six are secrets, so a deploy from `wrangler.jsonc` never wipes them. In the Cloudflare
+dashboard: **Workers & Pages → altair → Settings → Variables and Secrets → Add**, type
+**Secret**. Or with wrangler from `apps/api`:
+
+```sh
+wrangler secret put GITHUB_APP_ID           # e.g. 1234567
+wrangler secret put GITHUB_APP_SLUG         # e.g. fibteq-altair
+wrangler secret put GITHUB_CLIENT_ID        # e.g. Iv23li...
+wrangler secret put GITHUB_CLIENT_SECRET
+wrangler secret put GITHUB_WEBHOOK_SECRET   # the webhook secret from step 1
+wrangler secret put GITHUB_APP_PRIVATE_KEY < your-app.private-key.pem
+```
+
+The private key can be pasted as is, including the `-----BEGIN RSA PRIVATE KEY-----` lines.
+The integration stays off (the settings page says so) until all six are set.
+
+For local development put the same values in `apps/api/.dev.vars`, with a callback URL of
+`http://localhost:5173/api/github/callback` on a separate development app.
+
+## 3. Connect
+
+Open a project, click the settings icon, then **Connect GitHub** in "GitHub repositories". Project owners and admins can connect repositories. GitHub asks which account
+and repositories to install on and sends you back. If someone else (an organization admin)
+already installed the app, use **Already installed? Sign in with GitHub** instead.
+
+Connecting works from the web app, because the GitHub round trip relies on the browser's
+signed-in session. The desktop and mobile apps will get their own flow.
+
+## How it fits together
+
+- `app.ts`: the app JWT, installation tokens and REST calls (WebCrypto, no Octokit).
+- `state.ts`: the signed `state` for the round trip, and webhook signature checks.
+- `store.ts`: installations per user, repositories per project, and `projectRepoToken`, which
+  hands out a token limited to one project repository. Later phases clone and open pull
+  requests with it.
+- `files.ts`: the thread agent's `repo_list_files` and `repo_read_file` tools.
+- `../routes/github.ts`: `/api/github` (status, connect, callback, repos, webhook).
+- `../routes/projects.ts`: `/api/projects/:id/repos`.
+
+Who can use an installation is checked when they connect: GitHub's `/user/installations`
+lists only the installations that person can reach. A user who can reach an installation can
+connect any repository the app was given on it.

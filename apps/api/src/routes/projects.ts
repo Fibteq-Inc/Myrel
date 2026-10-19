@@ -1,5 +1,6 @@
 import { createDb, schema } from "@altair/db";
 import {
+  AddProjectRepoInput,
   CreateInviteInput,
   CreateProjectInput,
   createId,
@@ -15,9 +16,11 @@ import { getAgentByName } from "agents";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { USER_ID_HEADER } from "../agents/project-agent";
+import { GithubError, githubConfigured, installationToken } from "../github/app";
+import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 
-const { apiKeys, projects, projectInvites, projectMembers, user } = schema;
+const { apiKeys, projects, projectInvites, projectMembers, projectRepos, user } = schema;
 
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
@@ -220,6 +223,65 @@ export const projectRoutes = new Hono<AppEnv>()
     await createDb(c.env.DB)
       .delete(projectInvites)
       .where(and(eq(projectInvites.id, inviteId), eq(projectInvites.projectId, id)));
+    return c.body(null, 204);
+  })
+  .get("/:id/repos", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    return c.json({ repos: await listProjectRepos(c.env.DB, id) });
+  })
+  .post("/:id/repos", async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    const project = await findMembership(c.env, id, userId);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden" }, 403);
+    if (!githubConfigured(c.env)) return c.json({ error: "github_not_configured" }, 503);
+    const input = AddProjectRepoInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const { installationId, repoId } = input.data;
+    if (!(await canUseInstallation(c.env.DB, userId, installationId))) return c.json({ error: "forbidden" }, 403);
+
+    // Narrowing a token to the repo fails unless the installation really covers it.
+    let repo;
+    try {
+      const res = await installationToken(c.env, installationId, {
+        repositoryIds: [repoId],
+        permissions: { metadata: "read" },
+      });
+      repo = res.repositories?.find((r) => r.id === repoId);
+    } catch (err) {
+      if (!(err instanceof GithubError) || err.status >= 500) throw err;
+    }
+    if (!repo) return c.json({ error: "repo_not_accessible" }, 404);
+
+    await createDb(c.env.DB)
+      .insert(projectRepos)
+      .values({
+        projectId: id,
+        repoId,
+        installationId,
+        fullName: repo.full_name,
+        defaultBranch: repo.default_branch,
+        private: repo.private,
+        addedBy: userId,
+        createdAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [projectRepos.projectId, projectRepos.repoId],
+        set: { installationId, fullName: repo.full_name, defaultBranch: repo.default_branch, private: repo.private },
+      });
+    const repos = await listProjectRepos(c.env.DB, id);
+    return c.json({ repo: repos.find((r) => r.repoId === repoId) }, 201);
+  })
+  .delete("/:id/repos/:repoId", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden" }, 403);
+    await createDb(c.env.DB)
+      .delete(projectRepos)
+      .where(and(eq(projectRepos.projectId, id), eq(projectRepos.repoId, Number(c.req.param("repoId")))));
     return c.body(null, 204);
   })
   .get("/:id/messages", async (c) => {
