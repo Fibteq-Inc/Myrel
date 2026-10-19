@@ -4,13 +4,14 @@ import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Blocks, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { WorkspaceButton } from "../local-folder";
 import { useOpenProjectSettings } from "../project-settings-dialog";
 import { type ProjectView, useProjectView, viewSearch } from "../project-view";
+import { RoutinesButton, RoutinesPanel } from "../routines";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
 import { NavToggle } from "./shell";
 
@@ -31,6 +32,8 @@ export function ProjectHeader() {
   const { view, go } = useProjectView();
   const openSettings = useOpenProjectSettings();
   const tabs = useRef<HTMLDivElement>(null);
+  const routines = Object.values(state.routines);
+  const [routinesOpen, setRoutinesOpen] = useState(false);
   const counts: Partial<Record<ProjectView, number>> = {
     threads: Object.values(state.threads).filter((th) => !th.resolved).length,
     artifacts: Object.keys(state.artifacts).length,
@@ -113,6 +116,11 @@ export function ProjectHeader() {
         <div className="whitespace-nowrap max-md:hidden">
           <WorkspaceButton project={project} />
         </div>
+        <RoutinesButton
+          onClick={() => setRoutinesOpen(true)}
+          count={routines.length}
+          className="flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
+        />
         <IconButton
           type="button"
           onClick={openSettings}
@@ -123,6 +131,14 @@ export function ProjectHeader() {
           <Settings size={16} />
         </IconButton>
       </div>
+      {routinesOpen && (
+        <RoutinesPanel
+          projectId={project.id}
+          routines={routines}
+          threads={Object.values(state.threads)}
+          onClose={() => setRoutinesOpen(false)}
+        />
+      )}
     </header>
   );
 }

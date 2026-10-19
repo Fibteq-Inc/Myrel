@@ -166,6 +166,8 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
 | `AI_GATEWAY_TOKEN` | Calling an authenticated AI Gateway | Only with `AI_GATEWAY_URL` on an authenticated gateway |
 | `ARTIFACT_SIGNING_SECRET` | Signing artifact links; set the same value on the artifact Worker | To view artifacts |
+| `VAPID_PRIVATE_KEY` | Browser push notifications (with `VAPID_PUBLIC_KEY`) | No |
+| `EXPO_ACCESS_TOKEN` | Mobile push, only if Expo enhanced push security is on | No |
 
 ### Variables
 
@@ -183,6 +185,10 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for `run_task`: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_HARNESS` | `opencode` | Default coding agent in the sandbox: `opencode` or `claude-code` (Claude models only). |
 | `RUNNER_MODEL` | empty | Model for the coding agent; empty uses the agents' model. |
+| `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
+| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Altair <altair@example.com>`. Empty turns email off. |
+| `VAPID_PUBLIC_KEY` | empty | Web Push public key. |
+| `VAPID_SUBJECT` | empty | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
 
 ### Bindings
 
@@ -199,6 +205,7 @@ supply the D1 id.
 | `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for `run_task` (see [Code sandbox](#code-sandbox)) |
 | `WORKSPACES` | Artifacts namespace `altair` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
+| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) |
 
 ## Optional features
 
@@ -302,6 +309,38 @@ Artifacts has no local emulator, so `wrangler dev` needs a Cloudflare login
 while the `WORKSPACES` binding is in `apps/api/wrangler.jsonc` (the API tests
 leave it out on their own). To run without it, remove the `artifacts` block;
 tasks then keep only what they push to GitHub.
+
+### Routines
+
+Routines are scheduled wake-ups: a prompt that runs on a cron schedule (in a
+time zone) or once at a set time. People create them from the alarm clock button in
+the project chat's header, or by asking Altair ("every weekday at 9, summarize open
+threads"). Each run either posts in the project chat, where the coordinator
+opens a thread for it, or wakes an existing thread. They run on Durable Object
+alarms, so they need no setup. Set `DEFAULT_TIMEZONE` to your team's zone.
+
+### Notifications
+
+Members are notified when a thread finishes, replies, needs a decision, is
+blocked or fails. The in-app list (the bell in the rail) always works. Each
+person turns email and browser push on or off under the bell.
+
+- **Email** goes through
+  [Cloudflare Email Service](https://developers.cloudflare.com/email-service/)
+  via the `EMAIL` (`send_email`) binding. In the dashboard, open
+  **Compute → Email Service → Email Sending → Onboard Domain** and add your
+  domain (it must use Cloudflare DNS; onboarding adds the SPF, DKIM and DMARC
+  records). Sending to arbitrary addresses needs the Workers Paid plan. Then
+  set `EMAIL_FROM` to an address on that domain. Only finished, decision,
+  blocked and failed events are emailed. Set `BETTER_AUTH_URL` so the links in
+  emails point at your server. `wrangler dev` only simulates sends; remove the
+  `send_email` block to run without email.
+- **Browser push** uses Web Push with VAPID keys. Generate a pair once with
+  `pnpm --filter @altair/api vapid`, put `VAPID_PUBLIC_KEY` (and
+  `VAPID_SUBJECT`) in the variables and `VAPID_PRIVATE_KEY` in the secrets.
+  Changing the pair later invalidates every browser subscription.
+- **Mobile push** for the Expo app needs nothing on the server: the app
+  registers its Expo push token through `POST /api/notifications/subscriptions`.
 
 ### Web UI on another origin
 

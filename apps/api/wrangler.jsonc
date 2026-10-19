@@ -66,6 +66,11 @@
   // tasks except what a task pushes to GitHub.
   "artifacts": [{ "binding": "WORKSPACES", "namespace": "altair" }],
 
+  // Cloudflare Email Service (Email Sending) for notification emails. Needs a domain onboarded under
+  // Compute > Email Service > Email Sending and the EMAIL_FROM var below. Locally, `wrangler dev`
+  // only simulates sends. Remove the binding to run without email.
+  "send_email": [{ "name": "EMAIL" }],
+
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
   // BETTER_AUTH_SECRET (required), KEY_ENCRYPTION_SECRET (recommended: encrypts the model keys people
   // add in Settings; falls back to BETTER_AUTH_SECRET, and changing it later makes stored keys unreadable)
@@ -104,6 +109,16 @@
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
   // RUNNER_HARNESS: default coding harness, opencode (default) or claude-code.
   // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
+  //
+  // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
+  //
+  // Notifications (see src/notifications). The in-app list always works; the rest is optional.
+  // Email via Cloudflare Email Service: the EMAIL binding above + EMAIL_FROM, an address on a
+  // domain onboarded under Email Service > Email Sending. The value here is Fibteq's own deployment
+  // (fibteq.app); self-hosting: use an address on your domain, or empty to turn email off.
+  // Web Push: VAPID_PUBLIC_KEY here + VAPID_PRIVATE_KEY secret (generate both with
+  // `pnpm --filter @altair/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
+  // Mobile push goes through Expo; EXPO_ACCESS_TOKEN secret only if enhanced push security is on.
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
@@ -120,6 +135,10 @@
     "GITHUB_APP_SLUG": "fibteq",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_HARNESS": "opencode",
-    "RUNNER_MODEL": ""
+    "RUNNER_MODEL": "",
+    "DEFAULT_TIMEZONE": "UTC",
+    "EMAIL_FROM": "Altair <altair@fibteq.app>",
+    "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
+    "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
   }
 }

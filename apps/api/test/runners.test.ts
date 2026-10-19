@@ -329,6 +329,25 @@ describe("local workspace", () => {
     expect(await threadAgent.startTask({ title: "x", prompt: "y" })).toMatchObject({ ok: false, error: expect.stringContaining("offline") });
   });
 
+  it("keeps a project without a local folder in the cloud, even with the computer online", async () => {
+    const user = await signUp();
+    const { token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel"]);
+    await until(async () => (await listRunners(user))[0]?.online, "online");
+    const project = await createProject(user);
+    expect(((await (await api(`/api/projects/${project.id}/workspace`, { token: user })).json()) as { workspace: unknown }).workspace).toBeNull();
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Bulut");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+
+    await threadAgent.startTask({ title: "Bulut", prompt: "echo hi", harness: "shell" });
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "failed", "cloud task");
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+  });
+
   it("asks older runners to update before stopping their tasks", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

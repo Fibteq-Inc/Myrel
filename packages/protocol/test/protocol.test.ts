@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { ClientEvent, createId, formatDecision, Message, parseDecision, Project, ServerEvent } from "../src";
+import {
+  ClientEvent,
+  CreateRoutineInput,
+  CronExpression,
+  createId,
+  formatDecision,
+  Message,
+  nextCronRun,
+  parseCron,
+  parseDecision,
+  Project,
+  ServerEvent,
+} from "../src";
 
 const message = {
   id: createId("message"),
@@ -123,5 +135,55 @@ describe("decision blocks", () => {
   it("rejects malformed blocks", () => {
     expect(parseDecision("not json")).toBeNull();
     expect(parseDecision(JSON.stringify({ question: "Q", options: [{ label: "only one" }] }))).toBeNull();
+  });
+});
+
+describe("cron", () => {
+  const at = (iso: string) => new Date(iso);
+
+  it("finds the next weekday morning in a time zone", () => {
+    // Friday 2026-10-16 10:00 in Istanbul (UTC+3) → Monday 09:00 local = 06:00 UTC.
+    expect(nextCronRun("0 9 * * 1-5", "Europe/Istanbul", at("2026-10-16T07:00:00Z"))?.toISOString()).toBe(
+      "2026-10-19T06:00:00.000Z",
+    );
+  });
+
+  it("handles steps, lists and either-day matching", () => {
+    expect(nextCronRun("*/15 * * * *", "UTC", at("2026-10-19T12:07:30Z"))?.toISOString()).toBe(
+      "2026-10-19T12:15:00.000Z",
+    );
+    expect(nextCronRun("30 8 1,15 * *", "UTC", at("2026-10-19T00:00:00Z"))?.toISOString()).toBe(
+      "2026-11-01T08:30:00.000Z",
+    );
+    // Day 1 of the month OR a Sunday: Sunday 2026-10-25 comes first.
+    expect(nextCronRun("0 0 1 * 0", "UTC", at("2026-10-19T00:00:00Z"))?.toISOString()).toBe(
+      "2026-10-25T00:00:00.000Z",
+    );
+    expect(nextCronRun("0 0 29 2 *", "UTC", at("2026-10-19T00:00:00Z"))?.toISOString()).toBe(
+      "2028-02-29T00:00:00.000Z",
+    );
+  });
+
+  it("follows daylight saving time", () => {
+    // New York leaves DST on 2026-11-01: 09:00 local is 13:00 UTC before, 14:00 UTC after.
+    expect(nextCronRun("0 9 * * *", "America/New_York", at("2026-10-31T14:00:00Z"))?.toISOString()).toBe(
+      "2026-11-01T14:00:00.000Z",
+    );
+  });
+
+  it("rejects invalid expressions", () => {
+    expect(() => parseCron("61 * * * *")).toThrow();
+    expect(() => parseCron("* * *")).toThrow();
+    expect(CronExpression.safeParse("0 9 * * 1-5").success).toBe(true);
+    expect(CronExpression.safeParse("every day").success).toBe(false);
+  });
+});
+
+describe("Routine inputs", () => {
+  it("defaults the target to the coordinator and the time zone to UTC", () => {
+    const input = CreateRoutineInput.parse({ name: "Digest", prompt: "Summarize", schedule: { kind: "cron", cron: "0 9 * * *" } });
+    expect(input.target).toEqual({ kind: "coordinator" });
+    expect(input.schedule).toEqual({ kind: "cron", cron: "0 9 * * *", timezone: "UTC" });
+    expect(CreateRoutineInput.safeParse({ ...input, schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Mars/Base" } }).success).toBe(false);
   });
 });
