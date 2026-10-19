@@ -1,4 +1,13 @@
-import type { CreateProjectInput, Member, Message, Project } from "@altair/protocol";
+import type {
+  CreateProjectInput,
+  Instructions,
+  Member,
+  MemoryEntry,
+  Message,
+  Project,
+  ProjectFile,
+  PutMemoryInput,
+} from "@altair/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
@@ -35,21 +44,38 @@ export class ApiClient {
   }
 
   async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const res = await this.send(path, {
+      method: init.method,
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      contentType: init.body === undefined ? undefined : "application/json",
+    });
+    const text = await res.text();
+    const data: unknown = text ? JSON.parse(text) : null;
+    if (!res.ok) throw new ApiError(res.status, data);
+    return data as T;
+  }
+
+  /** Raw fetch with auth applied. Use `request` for JSON endpoints. */
+  async send(path: string, init: { method?: string; body?: BodyInit; contentType?: string } = {}): Promise<Response> {
     const headers: Record<string, string> = { accept: "application/json" };
-    if (init.body !== undefined) headers["content-type"] = "application/json";
+    if (init.contentType) headers["content-type"] = init.contentType;
     const token = await this.tokens?.get();
     if (token) headers.authorization = `Bearer ${token}`;
 
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: init.method ?? "GET",
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.body,
       credentials: "include",
     });
     // Better Auth's bearer plugin returns the session token in this header.
     const issued = res.headers.get("set-auth-token");
     if (issued) await this.tokens?.set(issued);
+    return res;
+  }
 
+  private async sendJson<T>(path: string, init: { method: string; body: BodyInit; contentType: string }): Promise<T> {
+    const res = await this.send(path, init);
     const text = await res.text();
     const data: unknown = text ? JSON.parse(text) : null;
     if (!res.ok) throw new ApiError(res.status, data);
@@ -102,6 +128,59 @@ export class ApiClient {
     );
   }
 
+  // --- project knowledge: instructions, memory, files ---
+
+  async getInstructions(projectId: string) {
+    return (await this.request<{ instructions: Instructions }>(`${projectPath(projectId)}/instructions`)).instructions;
+  }
+
+  async setInstructions(projectId: string, text: string) {
+    const path = `${projectPath(projectId)}/instructions`;
+    return (await this.request<{ instructions: Instructions }>(path, { method: "PUT", body: { text } })).instructions;
+  }
+
+  async listMemory(projectId: string) {
+    return (await this.request<{ memory: MemoryEntry[] }>(`${projectPath(projectId)}/memory`)).memory;
+  }
+
+  async putMemory(projectId: string, name: string, input: PutMemoryInput) {
+    const path = `${projectPath(projectId)}/memory/${encodeURIComponent(name)}`;
+    return (await this.request<{ memory: MemoryEntry }>(path, { method: "PUT", body: input })).memory;
+  }
+
+  async deleteMemory(projectId: string, name: string) {
+    await this.request(`${projectPath(projectId)}/memory/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  async listFiles(projectId: string, prefix = "") {
+    const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
+    return (await this.request<{ files: ProjectFile[] }>(`${projectPath(projectId)}/files${query}`)).files;
+  }
+
+  /** A file's bytes. Fetched (not linked) so bearer-token apps can preview too. */
+  async getFile(projectId: string, path: string): Promise<Blob> {
+    const res = await this.send(`${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    return res.blob();
+  }
+
+  async putFile(projectId: string, path: string, body: Blob) {
+    const url = `${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`;
+    const init = { method: "PUT", body, contentType: body.type || "application/octet-stream" };
+    return (await this.sendJson<{ file: ProjectFile }>(url, init)).file;
+  }
+
+  async deleteFile(projectId: string, path: string) {
+    await this.request(`${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+  }
+
+  /** Uploads a file to attach to a message; send its `path` in `message.send`'s attachments. */
+  async upload(projectId: string, name: string, body: Blob) {
+    const url = `${projectPath(projectId)}/uploads?name=${encodeURIComponent(name)}`;
+    const init = { method: "POST", body, contentType: body.type || "application/octet-stream" };
+    return (await this.sendJson<{ file: ProjectFile }>(url, init)).file;
+  }
+
   /** WebSocket URL for a project's live channel, with the bearer token in the query if present. */
   async projectSocketUrl(projectId: string): Promise<string> {
     // String ops instead of URL setters: React Native's URL polyfill doesn't implement them.
@@ -111,3 +190,5 @@ export class ApiClient {
     return `${origin}/api/projects/${encodeURIComponent(projectId)}/ws${query}`;
   }
 }
+
+const projectPath = (id: string) => `/api/projects/${encodeURIComponent(id)}`;

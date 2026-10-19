@@ -1,26 +1,38 @@
 import { projectChat, threadByRoot, threadMessages } from "@altair/client";
-import type { Message, Thread } from "@altair/protocol";
+import type { Message, ProjectFile, Thread } from "@altair/protocol";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, MessagesSquare, RotateCcw, CircleCheck, X } from "lucide-react";
+import { Brain, ChevronLeft, FolderOpen, MessagesSquare, RotateCcw, CircleCheck, X } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { Checklist, Composer, MessageView, type Names, Thinking, ThreadCard, threadStatus } from "../../../components/chat";
-import { membersQuery, projectQuery } from "../../../lib/api";
-import { GhostButton } from "../../../lib/ui";
+import { type PanelTab, ProjectPanel } from "../../../components/project-panel";
+import { api, membersQuery, projectQuery } from "../../../lib/api";
+import { GhostButton, IconButton } from "../../../lib/ui";
 import { useProject } from "../../../lib/use-project";
 
-type Search = { thread?: string };
+/** `panel` opens the project's files / memory / instructions beside the chat, in place of a thread. */
+type Search = { thread?: string; panel?: PanelTab; file?: string };
+
+const PANELS: PanelTab[] = ["files", "memory", "instructions"];
 
 export const Route = createFileRoute("/_app/projects/$projectId")({
-  validateSearch: (search: Record<string, unknown>): Search =>
-    typeof search.thread === "string" ? { thread: search.thread } : {},
+  validateSearch: (search: Record<string, unknown>): Search => ({
+    ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
+    ...(PANELS.includes(search.panel as PanelTab) ? { panel: search.panel as PanelTab } : {}),
+    ...(typeof search.file === "string" ? { file: search.file } : {}),
+  }),
   loader: ({ context, params }) => context.queryClient.ensureQueryData(projectQuery(params.projectId)),
   component: ProjectPage,
 });
 
 function ProjectPage() {
   const { projectId } = Route.useParams();
-  const { thread: openThreadId } = Route.useSearch();
+  const { thread: openThreadId, panel, file } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const openPanel = (next: { tab: PanelTab; file?: string }) =>
+    void navigate({ search: { panel: next.tab, ...(next.file ? { file: next.file } : {}) } });
+  const openFile = (path: string) => openPanel({ tab: "files", file: path });
+  const upload = (f: File) => api.upload(projectId, f.name, f);
   const { user } = Route.useRouteContext();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const { data: members = [] } = useQuery(membersQuery(projectId));
@@ -29,12 +41,13 @@ function ProjectPage() {
 
   const chat = projectChat(state);
   const roots = threadByRoot(state);
-  const openThread = openThreadId ? state.threads[openThreadId] : undefined;
+  const openThread = openThreadId && !panel ? state.threads[openThreadId] : undefined;
+  const sideOpen = !!openThread || !!panel;
   const replyCount = (threadId: string) => threadMessages(state, threadId).length;
 
   return (
     <div className="flex min-h-0 flex-1">
-      <main className={`min-w-0 flex-1 flex-col ${openThread ? "hidden lg:flex" : "flex"}`}>
+      <main className={`min-w-0 flex-1 flex-col ${sideOpen ? "hidden lg:flex" : "flex"}`}>
         <header className="flex h-14 flex-none items-center gap-3 border-b border-line px-4 sm:px-5">
           <Link to="/" aria-label="All projects" className="-ml-1 rounded-lg p-1 text-muted hover:bg-hover md:hidden">
             <ChevronLeft size={18} />
@@ -42,6 +55,18 @@ function ProjectPage() {
           <MessagesSquare size={17} className="text-muted" aria-hidden="true" />
           <h1 className="truncate text-[15px] font-semibold">{project.name}</h1>
           <ConnectionDot status={status} />
+          <IconButton type="button" aria-label="Project files" title="Files" onClick={() => openPanel({ tab: "files" })}>
+            <FolderOpen size={17} />
+          </IconButton>
+          <IconButton
+            type="button"
+            aria-label="Project memory and instructions"
+            title="Memory and instructions"
+            onClick={() => openPanel({ tab: "memory" })}
+            className="-ml-2"
+          >
+            <Brain size={17} />
+          </IconButton>
         </header>
 
         <ScrollToEnd dep={chat.length + (state.active[""] ? 1 : 0)} className="flex-1 overflow-y-auto">
@@ -50,7 +75,14 @@ function ProjectPage() {
             {chat.map((m) => {
               const thread = roots.get(m.id);
               return (
-                <MessageView key={m.id} message={m} me={user.id} names={names} reactions={state.reactions[m.id]}>
+                <MessageView
+                  key={m.id}
+                  message={m}
+                  me={user.id}
+                  names={names}
+                  reactions={state.reactions[m.id]}
+                  onOpenFile={openFile}
+                >
                   {thread && (
                     <ThreadCard
                       projectId={projectId}
@@ -67,7 +99,11 @@ function ProjectPage() {
         </ScrollToEnd>
 
         <div className="mx-auto w-full max-w-[800px]">
-          <Composer placeholder="Message the project" onSend={(body) => send(body)} />
+          <Composer
+            placeholder="Message the project"
+            onSend={(body, attachments) => send(body, null, attachments)}
+            onUpload={upload}
+          />
         </div>
       </main>
 
@@ -80,8 +116,20 @@ function ProjectPage() {
           active={!!state.active[openThread.id]}
           me={user.id}
           names={names}
-          onSend={(body) => send(body, openThread.id)}
+          onSend={(body, attachments) => send(body, openThread.id, attachments)}
+          onUpload={upload}
+          onOpenFile={openFile}
           onResolve={(resolved) => emit({ type: "thread.resolve", threadId: openThread.id, resolved })}
+        />
+      )}
+
+      {panel && (
+        <ProjectPanel
+          projectId={projectId}
+          tab={panel}
+          file={file}
+          onNavigate={openPanel}
+          onClose={() => void navigate({ search: {} })}
         />
       )}
     </div>
@@ -97,6 +145,8 @@ function ThreadPanel({
   me,
   names,
   onSend,
+  onUpload,
+  onOpenFile,
   onResolve,
 }: {
   projectId: string;
@@ -106,7 +156,9 @@ function ThreadPanel({
   active: boolean;
   me: string;
   names: Names;
-  onSend: (body: string) => void;
+  onSend: (body: string, attachments: string[]) => void;
+  onUpload: (file: File) => Promise<ProjectFile>;
+  onOpenFile: (path: string) => void;
   onResolve: (resolved: boolean) => void;
 }) {
   const status = threadStatus(thread);
@@ -151,15 +203,15 @@ function ThreadPanel({
 
       <ScrollToEnd dep={messages.length + (active ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className="flex flex-col gap-6 px-5 py-6">
-          {root && <MessageView message={root} me={me} names={names} />}
+          {root && <MessageView message={root} me={me} names={names} onOpenFile={onOpenFile} />}
           {messages.map((m) => (
-            <MessageView key={m.id} message={m} me={me} names={names} />
+            <MessageView key={m.id} message={m} me={me} names={names} onOpenFile={onOpenFile} />
           ))}
           {active && <Thinking label={thread.status === "working" ? "Working" : "Thinking"} />}
         </div>
       </ScrollToEnd>
 
-      <Composer placeholder="Reply in this thread" onSend={onSend} />
+      <Composer placeholder="Reply in this thread" onSend={onSend} onUpload={onUpload} />
     </section>
   );
 }

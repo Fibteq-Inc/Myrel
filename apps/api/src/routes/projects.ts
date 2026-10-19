@@ -69,7 +69,7 @@ export const projectRoutes = new Hono<AppEnv>()
     return agent.fetch(new Request(c.req.raw, { headers }));
   });
 
-async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
+export async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
   const [row] = await createDb(env.DB)
     .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
     .from(projectMembers)

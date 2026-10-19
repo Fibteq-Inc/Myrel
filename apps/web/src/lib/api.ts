@@ -40,6 +40,12 @@ export const projectQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id], queryFn: () => api.getProject(id) });
 export const membersQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "members"], queryFn: () => api.listMembers(id) });
+export const filesQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "files"], queryFn: () => api.listFiles(id) });
+export const memoryQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "memory"], queryFn: () => api.listMemory(id) });
+export const instructionsQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "instructions"], queryFn: () => api.getInstructions(id) });
 /** What the current server allows (e.g. whether new accounts can be created). */
 export const serverInfoQuery = queryOptions({
   queryKey: ["server-info", server],

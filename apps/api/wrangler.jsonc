@@ -25,6 +25,10 @@
     }
   ],
 
+  // Project files and message uploads, under projects/<projectId>/files/. Create the bucket once
+  // with `wrangler r2 bucket create altair-files` (or in the dashboard) before deploying.
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "altair-files" }],
+
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },

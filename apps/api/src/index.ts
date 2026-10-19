@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { createAuth, signUpEnabled } from "./auth";
 import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
+import { knowledgeRoutes } from "./routes/knowledge";
 import { projectRoutes } from "./routes/projects";
 
 export { ProjectAgent } from "./agents/project-agent";
@@ -32,6 +33,8 @@ const app = new Hono<AppEnv>()
   )
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
   .route("/projects", projectRoutes)
+  // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
+  .route("/projects", knowledgeRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));
 
 export type AppType = typeof app;

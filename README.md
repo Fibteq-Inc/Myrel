@@ -53,6 +53,7 @@ Altair deploys with [Cloudflare Workers Builds](https://developers.cloudflare.co
 One-time setup:
 
 1. Create the D1 database (`pnpm --filter @altair/api exec wrangler d1 create altair`) and put its id in `apps/api/wrangler.jsonc`.
+1. Create the R2 bucket for project files and message uploads: `pnpm --filter @altair/api exec wrangler r2 bucket create altair-files` (binding `FILES`).
 2. Set the auth secret, which also creates the Worker if it does not exist yet:
    `pnpm --filter @altair/api exec wrangler secret put BETTER_AUTH_SECRET` (value: `openssl rand -base64 32`).
 3. In the Cloudflare dashboard, open Workers & Pages → `altair` → Settings → Build → Connect, pick this repository, and set:

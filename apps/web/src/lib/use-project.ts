@@ -8,7 +8,7 @@ import {
 } from "@altair/client";
 import type { ClientEventInput } from "@altair/protocol";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { api } from "./api";
+import { api, queryClient } from "./api";
 
 type Action =
   | Parameters<typeof applyEvent>[1]
@@ -34,7 +34,13 @@ export function useProject(projectId: string) {
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
       onMessage: (message) => dispatch({ type: "message", message }),
-      onEvent: (event) => dispatch(event),
+      onEvent: (event) => {
+        // Files, memory and instructions are fetched over HTTP; refetch the list that changed.
+        if (event.type === "knowledge.changed") {
+          void queryClient.invalidateQueries({ queryKey: ["projects", projectId, event.kind] });
+        }
+        dispatch(event);
+      },
       onStatus: (s) => {
         setStatus(s);
         // Activity is not replayed; after reconnecting, the sync re-sends what is still running.
@@ -48,7 +54,8 @@ export function useProject(projectId: string) {
   return {
     state,
     status,
-    send: (body: string, threadId: string | null = null) => socketRef.current?.sendMessage(body, { threadId }),
+    send: (body: string, threadId: string | null = null, attachments: string[] = []) =>
+      socketRef.current?.sendMessage(body, { threadId, attachments }),
     emit: (event: ClientEventInput) => socketRef.current?.send(event),
   };
 }

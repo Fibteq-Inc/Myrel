@@ -1,5 +1,5 @@
 import { parseChecklist } from "@altair/client";
-import type { Message, Reaction, Thread } from "@altair/protocol";
+import type { Message, ProjectFile, Reaction, Thread } from "@altair/protocol";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowUp,
@@ -10,11 +10,13 @@ import {
   CirclePause,
   LoaderCircle,
   MessageSquareText,
+  Paperclip,
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AltairMark } from "../lib/ui";
+import { AltairMark, errorMessage } from "../lib/ui";
+import { AttachmentList, PendingAttachments } from "./files";
 
 export type Names = Record<string, string>;
 
@@ -23,12 +25,15 @@ export function MessageView({
   me,
   names,
   reactions,
+  onOpenFile,
   children,
 }: {
   message: Message;
   me: string;
   names: Names;
   reactions?: Reaction[];
+  /** Opens an attached file's preview. */
+  onOpenFile: (path: string) => void;
   children?: ReactNode;
 }) {
   if (message.authorKind === "system") {
@@ -48,6 +53,7 @@ export function MessageView({
           <div className="prose-altair">
             <Markdown remarkPlugins={[remarkGfm]}>{message.body}</Markdown>
           </div>
+          <AttachmentList attachments={message.attachments} onOpen={onOpenFile} />
           <Reactions reactions={reactions} />
           {children}
         </div>
@@ -59,8 +65,13 @@ export function MessageView({
   return (
     <div className="flex flex-col items-end gap-1.5">
       {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? "Member"}</span>}
-      <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
-        {message.body}
+      {message.body && (
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
+          {message.body}
+        </div>
+      )}
+      <div className="flex max-w-[85%] justify-end">
+        <AttachmentList attachments={message.attachments} onOpen={onOpenFile} />
       </div>
       <Reactions reactions={reactions} />
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
@@ -186,17 +197,38 @@ export function Thinking({ label = "Thinking" }: { label?: string }) {
   );
 }
 
+type Pending = { id: string; name: string; file?: ProjectFile; error?: string };
+
 export function Composer({
   placeholder,
   onSend,
+  onUpload,
   disabled,
 }: {
   placeholder: string;
-  onSend: (body: string) => void;
+  /** `attachments` are paths of files already uploaded with `onUpload`. */
+  onSend: (body: string, attachments: string[]) => void;
+  onUpload?: (file: File) => Promise<ProjectFile>;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState<Pending[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const uploading = pending.some((p) => !p.file && !p.error);
+  const ready = pending.flatMap((p) => (p.file ? [p.file.path] : []));
+
+  function attach(files: File[]) {
+    if (!onUpload) return;
+    for (const file of files) {
+      const id = crypto.randomUUID();
+      setPending((list) => [...list, { id, name: file.name }]);
+      onUpload(file).then(
+        (uploaded) => setPending((list) => list.map((p) => (p.id === id ? { ...p, file: uploaded } : p))),
+        (err) => setPending((list) => list.map((p) => (p.id === id ? { ...p, error: errorMessage(err) } : p))),
+      );
+    }
+  }
 
   // Grow with the text, up to a cap.
   useLayoutEffect(() => {
@@ -209,9 +241,10 @@ export function Composer({
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const body = draft.trim();
-    if (!body || disabled) return;
-    onSend(body);
+    if ((!body && ready.length === 0) || disabled || uploading) return;
+    onSend(body, ready);
     setDraft("");
+    setPending([]);
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -219,13 +252,52 @@ export function Composer({
   }
 
   return (
-    <form onSubmit={submit} className="px-4 pb-4 pt-2 sm:px-5">
-      <div className="flex items-end gap-2 rounded-2xl border border-edge bg-raised py-2.5 pl-3.5 pr-2.5 focus-within:border-[#3a3a44]">
+    <form
+      onSubmit={submit}
+      className="px-4 pb-4 pt-2 sm:px-5"
+      onDragOver={(e) => onUpload && e.preventDefault()}
+      onDrop={(e) => {
+        if (!onUpload || e.dataTransfer.files.length === 0) return;
+        e.preventDefault();
+        attach([...e.dataTransfer.files]);
+      }}
+    >
+      <PendingAttachments items={pending} onRemove={(id) => setPending((list) => list.filter((p) => p.id !== id))} />
+      <div className={`flex items-end gap-2 rounded-2xl border border-edge bg-raised py-2.5 pr-2.5 ${onUpload ? "pl-2" : "pl-3.5"} focus-within:border-[#3a3a44]`}>
+        {onUpload && (
+          <>
+            <button
+              type="button"
+              onClick={() => picker.current?.click()}
+              aria-label="Attach files"
+              title="Attach files"
+              className="flex size-9 flex-none items-center justify-center rounded-[10px] text-muted hover:bg-hover hover:text-fg"
+            >
+              <Paperclip size={17} />
+            </button>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                attach([...(e.target.files ?? [])]);
+                e.target.value = "";
+              }}
+            />
+          </>
+        )}
         <textarea
           ref={ref}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={(e) => {
+            if (onUpload && e.clipboardData.files.length > 0) {
+              e.preventDefault();
+              attach([...e.clipboardData.files]);
+            }
+          }}
           rows={1}
           aria-label={placeholder}
           placeholder={placeholder}
@@ -234,7 +306,7 @@ export function Composer({
         <button
           type="submit"
           aria-label="Send"
-          disabled={!draft.trim() || disabled}
+          disabled={(!draft.trim() && ready.length === 0) || uploading || disabled}
           className="flex size-9 flex-none items-center justify-center rounded-[10px] bg-accent text-ground disabled:opacity-40"
         >
           <ArrowUp size={17} strokeWidth={2.3} />

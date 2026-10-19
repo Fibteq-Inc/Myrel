@@ -1,6 +1,7 @@
 import type { Message, Thread } from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
+import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
 import { renderMessage, renderThread } from "./render";
 
 /** Something the coordinator has not seen yet. */
@@ -35,6 +36,9 @@ Several unrelated asks in one message: start a thread on that message for the fi
 
 Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. You never approve irreversible steps on a person's behalf.
 
+${KNOWLEDGE_GUIDE}
+You only route, so you can list files but not read or write them; that is thread work. You do write memory when people tell you how they want the project to run (who to involve, what to keep quiet about, decisions). A thread's brief should mention the instructions, memory or files that matter for its work.
+
 Style: write in the language the people write in. Plain, warm, short sentences. No em dashes. Never show ids to people; ids are only for tool calls. When there is nothing to do, call no tools.`;
 
 export function coordinatorPrompt(input: {
@@ -43,6 +47,7 @@ export function coordinatorPrompt(input: {
   chat: Message[];
   threads: Thread[];
   inbox: InboxItem[];
+  knowledge: KnowledgeSnapshot;
 }): string {
   const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "message" ? [i.messageId] : [])));
   const threadByRoot = new Map(input.threads.map((t) => [t.rootMessageId, t]));
@@ -57,6 +62,7 @@ export function coordinatorPrompt(input: {
 
   return [
     `Project: ${input.projectName}`,
+    renderKnowledge(input.knowledge),
     `## Threads\n${input.threads.map(renderThread).join("\n") || "(none yet)"}`,
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
     requests.length ? `## Requests from thread agents\n${requests.join("\n")}` : "",
@@ -66,8 +72,10 @@ export function coordinatorPrompt(input: {
     .join("\n\n");
 }
 
-export function coordinatorTools(host: CoordinatorHost): Tool[] {
+export function coordinatorTools(host: CoordinatorHost, knowledge: KnowledgeHost): Tool[] {
   return [
+    // Routing needs memory and a view of the files, not file contents.
+    ...knowledgeTools(knowledge).filter((t) => t.name.startsWith("memory_") || t.name === "list_files"),
     tool({
       name: "post_message",
       description: "Post a short message in the project chat, visible to every member.",
