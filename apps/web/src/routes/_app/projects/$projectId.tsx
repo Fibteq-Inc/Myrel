@@ -1,6 +1,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, useMatches } from "@tanstack/react-router";
 import { ProjectChat } from "../../../components/chat/project-chat";
+import { ProjectSettingsDialogProvider } from "../../../components/project-settings-dialog";
 import { ProjectSidebar } from "../../../components/shell/project-sidebar";
 import { ThreadPanelProvider, useThreadPanel } from "../../../components/thread/panel-state";
 import { membersQuery, projectQuery } from "../../../lib/api";
@@ -20,21 +21,24 @@ function ProjectLayout() {
   const { user } = Route.useRouteContext();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const { data: members = [] } = useQuery(membersQuery(projectId));
-  const childRoute = useMatches({ select: (matches) => matches.at(-1)?.routeId });
+  const childRoute = useMatches({ select: (matches) => matches.at(-1)?.routeId,
+  });
   return (
     <ProjectProvider key={projectId} project={project} members={members}>
-      <ThreadPanelProvider>
-        <ProjectSidebar />
-        <div className="flex min-w-0 flex-1">
-          {childRoute && BESIDE_CHAT.has(childRoute) ? (
-            <ChatWithPanel me={user.id} threadOpen={childRoute.endsWith("$threadId")} />
-          ) : (
-            <div className="flex min-w-0 flex-1 flex-col">
-              <Outlet />
-            </div>
-          )}
-        </div>
-      </ThreadPanelProvider>
+      <ProjectSettingsDialogProvider projectId={projectId}>
+        <ThreadPanelProvider>
+          <ProjectSidebar />
+          <div className="flex min-w-0 flex-1">
+            {childRoute && BESIDE_CHAT.has(childRoute) ? (
+              <ChatWithPanel me={user.id} threadOpen={childRoute.endsWith("$threadId")} />
+            ) : (
+              <div className="flex min-w-0 flex-1 flex-col">
+                <Outlet />
+              </div>
+            )}
+          </div>
+        </ThreadPanelProvider>
+      </ProjectSettingsDialogProvider>
     </ProjectProvider>
   );
 }

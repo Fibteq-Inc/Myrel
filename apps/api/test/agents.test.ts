@@ -71,7 +71,14 @@ describe("coordinator and thread agent", () => {
       return {
         text: "",
         toolCalls: [
-          call("update_status", { text: "Durable Objects\n\n✓ Researched" }),
+          call("reply", { text: "Durable Objects'i kısaca açıklayacağım." }),
+          call("update_plan", {
+            title: "Durable Objects",
+            steps: [
+              { text: "Researched", state: "done" },
+              { text: "Benchmarks", state: "skipped" },
+            ],
+          }),
           call("reply", { text: "Durable Objects are single-instance actors with storage." }),
         ],
       };
@@ -84,12 +91,15 @@ describe("coordinator and thread agent", () => {
       const t = (await agent.listThreads())[0];
       return t?.status === "review_ready" ? t : null;
     }, "thread reply");
-    expect(thread).toMatchObject({ title: "Durable Objects", statusText: "Durable Objects\n\n✓ Researched", resolved: false });
+    expect(thread).toMatchObject({ title: "Durable Objects", statusText: "Durable Objects\n\n✓ Researched\n– Benchmarks",
+      resolved: false,
+    });
 
     const ctx = (await agent.getThreadContext(thread.id))!;
     expect(ctx.root.body).toBe("Durable Objects'i araştır");
     expect(ctx.messages.map((m) => [m.authorKind, m.authorId, m.body])).toEqual([
       ["agent", "coordinator", "Durable Objects'i araştırıyorum."],
+      ["agent", "thread-agent", "Durable Objects'i kısaca açıklayacağım."],
       ["agent", "thread-agent", "Durable Objects are single-instance actors with storage."],
     ]);
 

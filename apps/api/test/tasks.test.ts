@@ -62,7 +62,16 @@ describe("run_task", () => {
       if (!req.prompt.includes("## Tasks")) {
         return {
           text: "",
-          toolCalls: [call("run_task", { title: "Testleri çalıştır", prompt: "pnpm test", harness: "shell", language: "tr" })],
+          toolCalls: [
+            call("update_plan", {
+              title: "Testler",
+              steps: [
+                { text: "Testleri çalıştır", state: "active" },
+                { text: "Sonucu bildir", state: "todo" },
+              ],
+            }),
+            call("run_task", { title: "Testleri çalıştır", prompt: "pnpm test", harness: "shell", language: "tr" }),
+          ],
         };
       }
       return { text: "", toolCalls: [call("reply", { text: "Sandbox açılamadı." })] };
@@ -83,7 +92,9 @@ describe("run_task", () => {
     // The second turn saw the result, and the checklist shows where it stopped, in the thread's language.
     expect(prompts[1]).toContain("Testleri çalıştır (failed, NEW result)");
     const t = (await projectAgent.getThread(thread.id))!;
-    expect(t.statusText).toContain("✗ Sandbox açılamadı: The sandbox container is not configured");
+    // The task's steps sit under the agent's own plan step.
+    expect(t.statusText).toMatch(/^Testler\n\n✱ Testleri çalıştır\n {2}✗ Sandbox açılamadı: The sandbox container is not configured/);
+    expect(t.statusText).toContain("\n○ Sonucu bildir");
 
     // Clients heard about the task and its output live.
     expect(events.some((e) => e.type === "task.updated" && e.task.status === "running")).toBe(true);

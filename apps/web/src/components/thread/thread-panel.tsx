@@ -1,4 +1,5 @@
 import { threadMessages, threadTasks } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CircleCheck, LoaderCircle, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import { Checklist, Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking } from "../chat";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
+import { NavToggle } from "../shell/shell";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
 import { CHAT_MIN, PANEL_MIN, PANEL_SPLIT, useThreadPanel } from "./panel-state";
@@ -35,6 +37,7 @@ export function ThreadPanel({
   version?: number;
   onOpenArtifact: (artifact: string | undefined, version?: number) => void;
 }) {
+  const t = useT();
   const { project, state, status, emit, loadTasks } = useProjectContext();
   const panel = useThreadPanel();
   const navigate = useNavigate();
@@ -65,7 +68,7 @@ export function ThreadPanel({
     .filter((a) => a.threadId === threadId || attached.has(a.id))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const tabs = thread
-    ? withTasks(defaultWorkspaceTabs(thread), {
+    ? withTasks(defaultWorkspaceTabs(thread, t), {
         projectId: project.id,
         tasks: threadTasks(state, thread.id),
         output: state.output,
@@ -88,7 +91,7 @@ export function ThreadPanel({
           : tab,
       )
     : [];
-  const tool = tabs.some((t) => t.id === panel.tool) ? panel.tool : null;
+  const tool = tabs.some((tab) => tab.id === panel.tool) ? panel.tool : null;
   const sideBySide = measured >= SIDE_BY_SIDE;
 
   // Opening an artifact brings the Outputs tab into view.
@@ -130,7 +133,7 @@ export function ThreadPanel({
   return (
     <aside
       ref={ref}
-      aria-label={thread ? `Thread: ${thread.title}` : "Thread"}
+      aria-label={thread ? t("threadPanel.label", { title: thread.title }) : t("threadPanel.labelEmpty")}
       style={panel.maximized ? undefined : { width: panel.width, maxWidth: `calc(100% - ${CHAT_MIN}px)` }}
       className={cn(
         "relative flex min-w-0 flex-col border-line bg-[#0c0c0e]",
@@ -142,7 +145,7 @@ export function ThreadPanel({
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize thread panel"
+          aria-label={t("threadPanel.resize")}
           aria-valuenow={Math.round(measured)}
           tabIndex={0}
           onPointerDown={startResize}
@@ -164,27 +167,39 @@ export function ThreadPanel({
       ) : (
         <>
           <header className="flex h-14 flex-none items-center gap-1 border-b border-line pl-4 pr-2">
+            {panel.maximized && (
+              // The chat and its header are hidden, so bring a folded sidebar back from here.
+              <span className="mr-1 flex max-lg:hidden">
+                <NavToggle />
+              </span>
+            )}
             <ThreadStatusIcon thread={thread} />
             <div className="ml-1.5 flex min-w-0 flex-1 flex-col leading-tight">
               <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
-              <span className={cn("truncate text-[11px]", threadStatus(thread).tone)}>{threadStatus(thread).label}</span>
+              <span className={cn("truncate text-[11px]", threadStatus(thread, t).tone)}>
+                {threadStatus(thread, t).label}
+              </span>
             </div>
 
-            <div role="group" aria-label="Workspace tools" className="flex items-center gap-0.5 rounded-lg border border-line p-0.5">
-              {tabs.map((t) => (
+            <div
+              role="group"
+              aria-label={t("threadPanel.tools")}
+              className="flex items-center gap-0.5 rounded-lg border border-line p-0.5"
+            >
+              {tabs.map((tab) => (
                 <button
-                  key={t.id}
+                  key={tab.id}
                   type="button"
-                  onClick={() => openTool(t.id)}
-                  aria-pressed={tool === t.id}
-                  aria-label={t.label}
-                  title={t.label}
+                  onClick={() => openTool(tab.id)}
+                  aria-pressed={tool === tab.id}
+                  aria-label={tab.label}
+                  title={tab.label}
                   className={cn(
                     "flex size-7 items-center justify-center rounded-md transition-colors",
-                    tool === t.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg",
+                    tool === tab.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg",
                   )}
                 >
-                  <t.icon size={15} />
+                  <tab.icon size={15} />
                 </button>
               ))}
             </div>
@@ -192,8 +207,8 @@ export function ThreadPanel({
             <IconButton
               type="button"
               onClick={() => emit({ type: "thread.resolve", threadId: thread.id, resolved: !thread.resolved })}
-              aria-label={thread.resolved ? "Reopen thread" : "Mark resolved"}
-              title={thread.resolved ? "Reopen thread" : "Mark resolved"}
+              aria-label={thread.resolved ? t("threadPanel.reopen") : t("threadPanel.resolve")}
+              title={thread.resolved ? t("threadPanel.reopen") : t("threadPanel.resolve")}
               className="size-8"
             >
               {thread.resolved ? <RotateCcw size={16} /> : <CircleCheck size={16} />}
@@ -201,13 +216,19 @@ export function ThreadPanel({
             <IconButton
               type="button"
               onClick={() => panel.update({ maximized: !panel.maximized })}
-              aria-label={panel.maximized ? "Restore panel size" : "Maximize panel"}
-              title={panel.maximized ? "Restore panel size" : "Maximize panel"}
+              aria-label={panel.maximized ? t("threadPanel.restore") : t("threadPanel.maximize")}
+              title={panel.maximized ? t("threadPanel.restore") : t("threadPanel.maximize")}
               className="size-8 max-lg:!hidden"
             >
               {panel.maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </IconButton>
-            <IconButton type="button" onClick={close} aria-label="Close thread" title="Close thread" className="size-8">
+            <IconButton
+              type="button"
+              onClick={close}
+              aria-label={t("threadPanel.close")}
+              title={t("threadPanel.close")}
+              className="size-8"
+            >
               <X size={17} />
             </IconButton>
           </header>
@@ -225,7 +246,7 @@ export function ThreadPanel({
                     className="flex h-9 flex-none items-center gap-1.5 border-b border-line px-4 text-[13px] text-muted hover:text-fg"
                   >
                     <ArrowLeft size={14} aria-hidden="true" />
-                    Back to the conversation
+                    {t("threadPanel.backToConversation")}
                   </button>
                 )}
                 <WorkspacePanel
@@ -256,6 +277,7 @@ function Conversation({
   wide: boolean;
   openArtifact?: string;
 }) {
+  const t = useT();
   const { project, names, state, send } = useProjectContext();
   const thread = state.threads[threadId]!;
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
@@ -264,7 +286,7 @@ function Conversation({
   const active = !!state.active[thread.id];
   const working = thread.status === "working" && !thread.resolved;
   return (
-    <section aria-label="Thread messages" className="flex min-w-0 flex-1 flex-col">
+    <section aria-label={t("thread.messages")} className="flex min-w-0 flex-1 flex-col">
       {thread.statusText && !thread.resolved && (
         <div className="max-h-[40%] flex-none overflow-y-auto border-b border-line bg-[#111114] px-5 py-3.5">
           <Checklist text={thread.statusText} live={working} />
@@ -293,13 +315,13 @@ function Conversation({
               ) : null}
             </MessageView>
           ))}
-          {active && <Thinking label={state.progress[thread.id] ?? (working ? "Working" : "Thinking")} />}
+          {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
         </div>
       </ScrollToEnd>
       <div className={cn("mx-auto w-full", wide ? "max-w-[808px]" : "")}>
         <Composer
           key={thread.id}
-          placeholder="Reply in this thread"
+          placeholder={t("thread.placeholder")}
           onSend={(body, attachments) => send(body, thread.id, attachments)}
           onUpload={(file) => api.upload(project.id, file.name, file)}
         />
@@ -309,15 +331,16 @@ function Conversation({
 }
 
 function PanelMissing({ loading, onClose }: { loading: boolean; onClose: () => void }) {
+  const t = useT();
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-subtle">
       {loading ? (
-        <LoaderCircle size={20} className="animate-spin" aria-label="Loading thread" />
+        <LoaderCircle size={20} className="animate-spin" aria-label={t("thread.loading")} />
       ) : (
         <>
-          <p>This thread doesn't exist or was removed.</p>
+          <p>{t("thread.missing")}</p>
           <button type="button" onClick={onClose} className="text-[#b4beff] hover:underline">
-            Back to the project chat
+            {t("thread.backToChat")}
           </button>
         </>
       )}

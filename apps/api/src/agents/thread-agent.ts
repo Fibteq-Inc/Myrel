@@ -19,6 +19,7 @@ import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBacke
 import { threadWorkspace } from "../sandbox/workspace";
 import { meteredForTurn, recordTaskUsage } from "../usage";
 import { type Author, knowledgeTools } from "./knowledge";
+import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
@@ -66,8 +67,8 @@ const WATCHDOG_GRACE_SEC = 300;
  * wake queues a turn that reads the thread from the ProjectAgent, calls the
  * model and acts through reply / update_status / request_coordinator.
  * Messages themselves live in the ProjectAgent; this DO keeps the brief,
- * coordinator notes, a read cursor, and the tasks the agent ran (run_task in
- * the sandbox, run_local_task on the person's computer) with their progress
+ * coordinator notes, a read cursor, and the tasks the agent ran (run_task, in
+ * the sandbox or on the person's computer) with their progress
  * and terminal output.
  */
 export class ThreadAgent extends Agent<Env> {
@@ -214,8 +215,11 @@ export class ThreadAgent extends Agent<Env> {
               ];
               return artifact;
             },
-            setStatusText: async (text) => {
-              await project.updateThread(threadId, { statusText: text });
+            setPlan: async (plan) => {
+              this.setMeta("plan", JSON.stringify(plan));
+              // A finished task's steps go once the agent moves its plan on.
+              if (!this.runningTask()) this.deleteMeta("task_checklist");
+              await this.showStatus();
             },
             requestCoordinator: async (kind, reason) => {
               asked = true;
@@ -242,7 +246,8 @@ export class ThreadAgent extends Agent<Env> {
             writeText: (path, content) => project.writeFileText(path, content, BY),
           }),
         ],
-        maxSteps: 16,
+        // The opening note and each plan update take a step of their own.
+        maxSteps: 24,
       });
       // Published but never mentioned in a reply: still deliver the cards.
       if (pending.length) {
@@ -268,9 +273,9 @@ export class ThreadAgent extends Agent<Env> {
     }
   }
 
-  // ---- Tasks (run_task, run_local_task) -------------------------------------
+  // ---- Tasks (run_task) ---------------------------------------------------
 
-  /** Starts a task for run_task or run_local_task, or says why it cannot. Callable over RPC. */
+  /** Starts a task for run_task, or says why it cannot. Callable over RPC. */
   async startTask(input: RunTaskInput): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
     try {
       const { projectId } = this.ids();
@@ -422,7 +427,8 @@ export class ThreadAgent extends Agent<Env> {
     if (!projectId || !threadId) return;
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     if (lines.length) await project.broadcastTask({ type: "task.output", taskId, threadId, lines });
-    await project.updateThread(threadId, { statusText: renderChecklist(spec.title, progress, row.language) });
+    this.setMeta("task_checklist", renderChecklist(spec.title, progress, row.language));
+    await this.showStatus();
     if (finished) {
       if (spec.model) {
         const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
@@ -475,6 +481,18 @@ export class ThreadAgent extends Agent<Env> {
   private backendOf(row: TaskRow): Pick<RunnerBackend, "cancel"> {
     if (row.backend === "local") return localCanceller(this.env, (JSON.parse(row.spec) as StoredSpec).runnerId);
     return sandboxBackend(this.env, this.getMeta("thread_id")!);
+  }
+
+  /** Shows the agent's plan, with the current task's steps nested in it, as the thread's checklist. */
+  private async showStatus() {
+    const projectId = this.getMeta("project_id");
+    const threadId = this.getMeta("thread_id");
+    if (!projectId || !threadId) return;
+    const plan = this.getMeta("plan");
+    const statusText = composeStatus(plan ? (JSON.parse(plan) as Plan) : null, this.getMeta("task_checklist"));
+    if (statusText === null) return;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    await project.updateThread(threadId, { statusText });
   }
 
   private ids() {
@@ -570,6 +588,10 @@ export class ThreadAgent extends Agent<Env> {
   private getMeta(key: string): string | null {
     const [row] = this.sql<{ value: string }>`SELECT value FROM meta WHERE key = ${key}`;
     return row?.value ?? null;
+  }
+
+  private deleteMeta(key: string) {
+    this.sql`DELETE FROM meta WHERE key = ${key}`;
   }
 
   private setMeta(key: string, value: string) {

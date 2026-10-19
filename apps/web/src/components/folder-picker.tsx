@@ -1,3 +1,5 @@
+import type { Translate } from "@altair/i18n";
+import { useT } from "@altair/i18n/react";
 import type { Runner } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Check, ChevronRight, Folder, Home } from "lucide-react";
@@ -6,10 +8,10 @@ import { api, runnersQuery } from "../lib/api";
 import { Button, cn, errorMessage, GhostButton, IconButton } from "../lib/ui";
 
 /** Whether this computer can browse and share folders from the web app right now, and why not. */
-export function folderPickerBlocker(runner: Runner): string | null {
-  if (!runner.online) return `${runner.name} is offline. Turn it on and start altair-runner to add folders.`;
+export function folderPickerBlocker(runner: Runner, t: Translate): string | null {
+  if (!runner.online) return t("folderPicker.offline", { computer: runner.name });
   if (!runner.features.includes("folders")) {
-    return "Update altair-runner on this computer to add folders from here: npx altair-runner@latest service install";
+    return t("folderPicker.updateRunner", { command: "npx altair-runner@latest update" });
   }
   return null;
 }
@@ -29,6 +31,7 @@ export function FolderPicker({
   onCancel: () => void;
   className?: string;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   // undefined: the computer's home folder.
   const [path, setPath] = useState<string | undefined>();
@@ -62,19 +65,25 @@ export function FolderPicker({
       <div className="flex items-center gap-1.5">
         <IconButton
           type="button"
-          aria-label="Up one folder"
-          title="Up"
+          aria-label={t("folderPicker.upLabel")}
+          title={t("folderPicker.up")}
           className="size-8 flex-none"
           disabled={!current?.parent}
           onClick={() => current?.parent && go(current.parent)}
         >
           <ArrowUp size={15} />
         </IconButton>
-        <IconButton type="button" aria-label="Home folder" title="Home" className="size-8 flex-none" onClick={() => go(undefined)}>
+        <IconButton
+          type="button"
+          aria-label={t("folderPicker.homeLabel")}
+          title={t("folderPicker.home")}
+          className="size-8 flex-none"
+          onClick={() => go(undefined)}
+        >
           <Home size={15} />
         </IconButton>
         <input
-          aria-label="Folder path"
+          aria-label={t("folderPicker.path")}
           value={typed ?? current?.path ?? path ?? ""}
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
@@ -89,11 +98,11 @@ export function FolderPicker({
 
       <div className="h-56 overflow-y-auto rounded-lg border border-line bg-panel" aria-busy={listing.isFetching}>
         {listing.isPending ? (
-          <p className="px-3 py-2.5 text-subtle">Loading folders…</p>
+          <p className="px-3 py-2.5 text-subtle">{t("folderPicker.loading")}</p>
         ) : listing.error ? (
-          <p className="px-3 py-2.5 text-bad">{errorMessage(listing.error)}</p>
+          <p className="px-3 py-2.5 text-bad">{errorMessage(listing.error, t)}</p>
         ) : current!.dirs.length === 0 ? (
-          <p className="px-3 py-2.5 text-subtle">No folders inside this one.</p>
+          <p className="px-3 py-2.5 text-subtle">{t("folderPicker.empty")}</p>
         ) : (
           <ul className="py-1">
             {current!.dirs.map((d) => (
@@ -108,7 +117,7 @@ export function FolderPicker({
                   {shared.has(d.path) && (
                     <span className="flex items-center gap-1 text-[11px] text-ok">
                       <Check size={12} aria-hidden="true" />
-                      Shared
+                      {t("folderPicker.shared")}
                     </span>
                   )}
                   <ChevronRight size={14} className="flex-none text-subtle" aria-hidden="true" />
@@ -119,21 +128,25 @@ export function FolderPicker({
         )}
       </div>
 
-      {share.error && <p className="text-bad">{errorMessage(share.error)}</p>}
+      {share.error && <p className="text-bad">{errorMessage(share.error, t)}</p>}
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 text-xs text-subtle">
-          {current && tooBroad && "Open a project folder to share it."}
+          {current && tooBroad && t("folderPicker.tooBroad")}
         </span>
         <GhostButton type="button" onClick={onCancel}>
-          Cancel
+          {t("folderPicker.cancel")}
         </GhostButton>
         {current && shared.has(current.path) ? (
           <Button type="button" onClick={() => onShared?.(current.path)} disabled={!onShared}>
-            Already shared
+            {t("folderPicker.alreadyShared")}
           </Button>
         ) : (
           <Button type="button" disabled={tooBroad || share.isPending} onClick={() => current && share.mutate(current.path)}>
-            {share.isPending ? "Sharing…" : `Share ${current && !tooBroad ? folderLabel(current.path) : "folder"}`}
+            {share.isPending
+              ? t("folderPicker.sharing")
+              : current && !tooBroad
+                ? t("folderPicker.shareNamed", { name: folderLabel(current.path) })
+                : t("folderPicker.share")}
           </Button>
         )}
       </div>

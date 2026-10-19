@@ -7,6 +7,7 @@ import { ADAPTERS, type ParseState } from "../src/clis";
 import { loadConfig, type RunnerConfig, SessionStore, saveConfig, shareFolder, unshareFolder } from "../src/config";
 import { RUNNER_VERSION } from "../src/runner";
 import { sharedFolder, TaskRunner } from "../src/tasks";
+import { isNewer } from "../src/update";
 
 let home: string;
 beforeEach(async () => {
@@ -173,5 +174,16 @@ describe("package", () => {
       }),
     );
     expect(versions).toEqual([RUNNER_VERSION, RUNNER_VERSION]);
+  });
+});
+
+describe("update", () => {
+  it("compares versions", () => {
+    expect(isNewer("0.3.0", "0.2.9")).toBe(true);
+    expect(isNewer("0.2.10", "0.2.9")).toBe(true);
+    expect(isNewer("1.0.0", "0.9.9")).toBe(true);
+    expect(isNewer("0.2.2", "0.2.2")).toBe(false);
+    expect(isNewer("0.2.1", "0.2.2")).toBe(false);
+    expect(isNewer("0.3.0-beta.1", "0.2.2")).toBe(true);
   });
 });

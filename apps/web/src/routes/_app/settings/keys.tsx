@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { ApiKey, ProviderId } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/_app/settings/keys")({
 });
 
 function KeysSettings() {
+  const t = useT();
   const { data: me } = useQuery(meQuery);
   const { data: keys = [] } = useQuery(keysQuery);
   const { data: providers } = useQuery(providersQuery);
@@ -58,11 +60,11 @@ function KeysSettings() {
       {canDelete && (
         <IconButton
           type="button"
-          aria-label={`Delete ${k.label}`}
-          title="Delete"
+          aria-label={t("keys.deleteLabel", { label: k.label })}
+          title={t("keys.delete")}
           disabled={remove.isPending}
           onClick={() => {
-            if (confirm(`Delete "${k.label}"? Projects using it fall back to the server's key.`)) remove.mutate(k.id);
+            if (confirm(t("keys.deleteConfirm", { label: k.label }))) remove.mutate(k.id);
           }}
         >
           <Trash2 size={15} />
@@ -74,16 +76,16 @@ function KeysSettings() {
   return (
     <>
       <Section
-        title="Your model keys"
-        description="Bring your own Fireworks, Anthropic or OpenAI key and pick it in a project's settings. Keys are encrypted on the server and never shown again."
+        title={t("keys.yours")}
+        description={t("keys.yoursDescription")}
       >
-        <List empty="You have not added a key yet.">{mine.map((k) => keyRow(k, true))}</List>
+        <List empty={t("keys.yoursEmpty")}>{mine.map((k) => keyRow(k, true))}</List>
       </Section>
 
-      <Section title="Add a key">
+      <Section title={t("keys.add")}>
         <form onSubmit={onSubmit} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Provider">
+            <Field label={t("keys.provider")}>
               <Select value={provider} onChange={(e) => setProvider(e.target.value as ProviderId)}>
                 {(providers?.providers ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
@@ -92,11 +94,11 @@ function KeysSettings() {
                 ))}
               </Select>
             </Field>
-            <Field label="Label">
-              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Personal" maxLength={80} required />
+            <Field label={t("keys.label")}>
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("keys.labelPlaceholder")} maxLength={80} required />
             </Field>
           </div>
-          <Field label="API key">
+          <Field label={t("keys.apiKey")}>
             <Input
               type="password"
               autoComplete="off"
@@ -111,21 +113,21 @@ function KeysSettings() {
           {isAdmin && (
             <label className="flex items-center gap-2 text-[13px] text-muted">
               <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
-              Share with every project on this server
+              {t("keys.share")}
             </label>
           )}
           <Button type="submit" disabled={add.isPending || !label.trim() || key.trim().length < 8}>
-            Add key
+            {t("keys.addButton")}
           </Button>
-          {add.error && <Notice>{errorMessage(add.error)}</Notice>}
+          {add.error && <Notice>{errorMessage(add.error, t)}</Notice>}
         </form>
       </Section>
 
       <Section
-        title="Server keys"
-        description="Shared by the server's admins. Projects without their own key use these, then the server's built-in key."
+        title={t("keys.server")}
+        description={t("keys.serverDescription")}
       >
-        <List empty="No shared keys.">{instance.map((k) => keyRow(k, isAdmin))}</List>
+        <List empty={t("keys.serverEmpty")}>{instance.map((k) => keyRow(k, isAdmin))}</List>
       </Section>
     </>
   );

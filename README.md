@@ -67,8 +67,10 @@ flowchart LR
 - **Realtime**: messages live in the project's Durable Object SQLite with a
   monotonically increasing `seq`, so clients resync after reconnecting.
 - **Web**: Vite, React 19, TanStack Router and Query, Tailwind CSS 4.
-- **Shared**: `packages/protocol` (zod schemas) and `packages/client` (fetch and
-  WebSocket client for web, desktop and React Native).
+- **Shared**: `packages/protocol` (zod schemas), `packages/client` (fetch and
+  WebSocket client for web, desktop and React Native) and `packages/i18n` (UI
+  strings in English and Turkish; read [its README](packages/i18n/README.md)
+  before adding UI text).
 
 More detail is in [docs/architecture.md](docs/architecture.md).
 
@@ -77,6 +79,7 @@ apps/api           Hono Worker, Durable Objects (ProjectAgent, ThreadAgent, Runn
 apps/web           Vite + React SPA
 packages/protocol  message/thread/project types, WebSocket events
 packages/client    typed API client + reconnecting project socket
+packages/i18n      UI strings (en, tr) for web and mobile
 packages/db        Drizzle schema and D1 migrations
 packages/altair-runner    @fibteq/altair-runner, the local daemon for your own coding CLI (altair-runner-alias: its short npm name)
 docs/              self-hosting, architecture, maintainer notes

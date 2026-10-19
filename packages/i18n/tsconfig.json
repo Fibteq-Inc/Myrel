@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Intl only: the same surface exists in browsers, Workers and React Native (Hermes).
+    "lib": ["es2023"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src", "test"]
+}

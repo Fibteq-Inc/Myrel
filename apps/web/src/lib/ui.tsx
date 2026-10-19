@@ -1,3 +1,5 @@
+import { relativeTime, type Translate } from "@altair/i18n";
+import { useI18n } from "@altair/i18n/react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
 /** Joins class names, skipping falsy ones. */
@@ -124,16 +126,12 @@ export function initials(name: string) {
   );
 }
 
-/** "now", "5m", "3h", "2d", then a short date. */
-export function relativeTime(iso: string, now = Date.now()) {
-  const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
-  if (s < 60) return "now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+/** "now", "5m", "3h", "2d", then a short date, in the user's language. */
+export function useRelativeTime() {
+  const { t, locale } = useI18n();
+  return (iso: string) => relativeTime(t, locale, iso);
 }
 
-export function errorMessage(err: unknown) {
-  return err instanceof Error ? err.message : "Something went wrong";
+export function errorMessage(err: unknown, t: Translate) {
+  return err instanceof Error ? err.message : t("common.error");
 }

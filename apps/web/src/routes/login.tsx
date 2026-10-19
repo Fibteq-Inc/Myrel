@@ -1,7 +1,9 @@
+import { useT } from "@altair/i18n/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
+import { LanguageSelect } from "../components/ui/language-select";
 import { ServerPicker } from "../lib/server-picker";
 import { Button, errorMessage, Input } from "../lib/ui";
 
@@ -15,6 +17,7 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
+  const t = useT();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -37,7 +40,7 @@ function LoginPage() {
       await queryClient.fetchQuery({ ...sessionQuery, staleTime: 0 });
       await navigate({ to: "/" });
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, t));
     } finally {
       setPending(false);
     }
@@ -52,20 +55,20 @@ function LoginPage() {
       )}
       {(!canChooseServer || server !== "") && (
         <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4">
-          <h1 className="text-2xl font-semibold">{mode === "signin" ? "Sign in to Altair" : "Create an account"}</h1>
-          {mode === "signup" && <Input name="name" placeholder="Name" required autoComplete="name" />}
-          <Input name="email" type="email" placeholder="Email" required autoComplete="email" />
+          <h1 className="text-2xl font-semibold">{mode === "signin" ? t("login.signInTitle") : t("login.signUpTitle")}</h1>
+          {mode === "signup" && <Input name="name" placeholder={t("login.name")} required autoComplete="name" />}
+          <Input name="email" type="email" placeholder={t("login.email")} required autoComplete="email" />
           <Input
             name="password"
             type="password"
-            placeholder="Password"
+            placeholder={t("login.password")}
             required
             minLength={8}
             autoComplete={mode === "signin" ? "current-password" : "new-password"}
           />
           {error && <p className="text-sm text-bad">{error}</p>}
           <Button type="submit" disabled={pending} className="w-full">
-            {mode === "signin" ? "Sign in" : "Sign up"}
+            {mode === "signin" ? t("login.signIn") : t("login.signUp")}
           </Button>
           {signUpAllowed ? (
             <button
@@ -73,13 +76,14 @@ function LoginPage() {
               className="w-full text-sm text-subtle hover:underline"
               onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
             >
-              {mode === "signin" ? "No account? Sign up" : "Have an account? Sign in"}
+              {mode === "signin" ? t("login.toSignUp") : t("login.toSignIn")}
             </button>
           ) : (
-            <p className="text-center text-sm text-subtle">New sign-ups are closed on this server.</p>
+            <p className="text-center text-sm text-subtle">{t("login.signUpClosed")}</p>
           )}
         </form>
       )}
+      <LanguageSelect />
     </main>
   );
 }

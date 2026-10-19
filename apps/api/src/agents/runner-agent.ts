@@ -218,7 +218,7 @@ export class RunnerAgent extends Agent<Env> {
       .from(schema.runners)
       .where(eq(schema.runners.id, this.name));
     if (!parseInfo(row?.info ?? null)?.features.includes("folders")) {
-      return { ok: false, reason: "Update altair-runner on this computer to add folders from here (npx altair-runner@latest)." };
+      return { ok: false, reason: "Update altair-runner on this computer to add folders from here (npx altair-runner@latest update)." };
     }
     const requestId = crypto.randomUUID();
     const answer = await new Promise<Answer | null>((resolve) => {

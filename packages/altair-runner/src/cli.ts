@@ -6,6 +6,7 @@ import { detectClis } from "./clis";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
+import { isNewer, latestVersion, runVersion } from "./update";
 
 const HELP = `altair-runner ${RUNNER_VERSION}
 Connects this computer to Altair, so projects can work in folders you share
@@ -24,6 +25,7 @@ Usage:
   altair-runner service status   Show whether the background runner is installed and running
   altair-runner start [--access read|edit|full] [--json]
                                  Connect and run tasks in this terminal until stopped (Ctrl+C)
+  altair-runner update           Update to the newest version and restart the background runner
   altair-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
@@ -119,6 +121,28 @@ async function main(argv: string[]) {
       if (arg === "uninstall") return printService(await uninstallService(), values.json);
       if (arg === "status" || !arg) return printService(await serviceStatus(), values.json);
       throw new Error("Usage: altair-runner service install|uninstall|status");
+    }
+    case "update": {
+      // Set when an older version handed the update over to this one.
+      const handedOver = process.env.ALTAIR_RUNNER_UPDATING;
+      const latest = handedOver ? null : await latestVersion();
+      if (!handedOver && !latest) console.log("Could not reach npm to look for a newer version.");
+      if (latest && isNewer(latest, RUNNER_VERSION)) {
+        console.log(`Updating altair-runner ${RUNNER_VERSION} to ${latest}…`);
+        process.exitCode = await runVersion(latest, argv);
+        return;
+      }
+      if (!handedOver && latest) console.log(`altair-runner ${RUNNER_VERSION} is the newest version.`);
+      if (!(await serviceStatus().catch(() => null))?.installed) {
+        console.log("The background runner is not installed, so there is nothing to restart. Install it with `altair-runner service install`.");
+        return;
+      }
+      if (values.access) await saveAccess(values.access);
+      // Replaces the background runner's copy with this version and restarts it.
+      const info = await installService(fileURLToPath(import.meta.url));
+      console.log(`Restarted the background runner on ${RUNNER_VERSION}.`);
+      printService(info, values.json);
+      return;
     }
     case "logout": {
       const config = await loadConfig();
