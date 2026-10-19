@@ -1,4 +1,4 @@
-import type { CreateProjectInput, Member, Message, Project, UsageSummary } from "@altair/protocol";
+import type { CreateProjectInput, Member, Message, Project, Task, TerminalLine, UsageSummary } from "@altair/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
@@ -100,6 +100,19 @@ export class ApiClient {
     return this.request<{ messages: Message[]; hasMore: boolean }>(
       `/api/projects/${encodeURIComponent(projectId)}/messages?after=${afterSeq}`,
     );
+  }
+
+  // --- tasks (run_task) ---
+
+  /** A thread's tasks with their recent terminal output. */
+  async listTasks(projectId: string, threadId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/tasks`;
+    return (await this.request<{ tasks: (Task & { log: TerminalLine[] })[] }>(path)).tasks;
+  }
+
+  cancelTask(projectId: string, threadId: string, taskId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/tasks/${encodeURIComponent(taskId)}/cancel`;
+    return this.request<{ ok: true }>(path, { method: "POST", body: {} });
   }
 
   // --- usage ---

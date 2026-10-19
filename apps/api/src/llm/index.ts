@@ -1,7 +1,7 @@
 import { anthropic } from "./anthropic";
 import { openAiCompatible } from "./openai";
 import type { ModelProvider } from "./types";
-import type { ModelConfig } from "@altair/runner";
+import type { ModelConfig } from "@altair/runner-core";
 
 export * from "./loop";
 export * from "./metering";

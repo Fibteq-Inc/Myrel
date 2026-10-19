@@ -1,10 +1,11 @@
-import { projectChat, threadByRoot, threadMessages } from "@altair/client";
-import type { Message, Thread } from "@altair/protocol";
+import { projectChat, threadByRoot, threadMessages, threadTasks } from "@altair/client";
+import type { Message, Task, TerminalLine, Thread } from "@altair/protocol";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, MessagesSquare, RotateCcw, CircleCheck, X } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { Checklist, Composer, MessageView, type Names, Thinking, ThreadCard, threadStatus } from "../../../components/chat";
+import { TaskPanel } from "../../../components/tasks";
 import { membersQuery, projectQuery } from "../../../lib/api";
 import { GhostButton } from "../../../lib/ui";
 import { useProject } from "../../../lib/use-project";
@@ -25,7 +26,11 @@ function ProjectPage() {
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const { data: members = [] } = useQuery(membersQuery(projectId));
   const names: Names = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m.name])), [members]);
-  const { state, status, send, emit } = useProject(projectId);
+  const { state, status, send, emit, loadTasks } = useProject(projectId);
+  useEffect(() => {
+    // Earlier tasks and their output are not in the live sync; fetch them when a thread opens.
+    if (openThreadId && status === "open") loadTasks(openThreadId).catch(() => {});
+  }, [openThreadId, status]);
 
   const chat = projectChat(state);
   const roots = threadByRoot(state);
@@ -77,6 +82,8 @@ function ProjectPage() {
           thread={openThread}
           root={state.messages.find((m) => m.id === openThread.rootMessageId)}
           messages={threadMessages(state, openThread.id)}
+          tasks={threadTasks(state, openThread.id)}
+          output={state.output}
           active={!!state.active[openThread.id]}
           me={user.id}
           names={names}
@@ -93,6 +100,8 @@ function ThreadPanel({
   thread,
   root,
   messages,
+  tasks,
+  output,
   active,
   me,
   names,
@@ -103,6 +112,8 @@ function ThreadPanel({
   thread: Thread;
   root?: Message;
   messages: Message[];
+  tasks: Task[];
+  output: Record<string, TerminalLine[]>;
   active: boolean;
   me: string;
   names: Names;
@@ -148,6 +159,8 @@ function ThreadPanel({
           <Checklist text={thread.statusText!} />
         </div>
       )}
+
+      <TaskPanel projectId={projectId} tasks={tasks} output={output} />
 
       <ScrollToEnd dep={messages.length + (active ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className="flex flex-col gap-6 px-5 py-6">

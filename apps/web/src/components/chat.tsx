@@ -7,6 +7,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDashed,
+  CircleX,
   CirclePause,
   LoaderCircle,
   MessageSquareText,
@@ -166,6 +167,7 @@ export function Checklist({ text }: { text: string }) {
               <LoaderCircle size={15} className="flex-none animate-spin text-accent" aria-hidden="true" />
             )}
             {item.state === "todo" && <CircleDashed size={15} className="flex-none" aria-hidden="true" />}
+            {item.state === "failed" && <CircleX size={15} className="flex-none text-bad" aria-hidden="true" />}
             {item.text}
           </li>
         ))}

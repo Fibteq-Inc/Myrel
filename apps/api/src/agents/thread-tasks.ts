@@ -1,5 +1,5 @@
 import type { Task, TerminalLine } from "@altair/protocol";
-import type { TaskProgress } from "@altair/runner";
+import type { TaskProgress } from "@altair/runner-core";
 
 /** What the run_task tool asks for, before the server fills in ids, model and credentials. */
 export type RunTaskInput = {

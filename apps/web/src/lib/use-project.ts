@@ -1,6 +1,7 @@
 import {
   applyEvent,
   applyMessage,
+  applyTasks,
   emptyProjectState,
   ProjectSocket,
   type ProjectState,
@@ -14,12 +15,14 @@ type Action =
   | Parameters<typeof applyEvent>[1]
   | { type: "reset" }
   | { type: "idle" }
-  | { type: "message"; message: Parameters<typeof applyMessage>[1] };
+  | { type: "message"; message: Parameters<typeof applyMessage>[1] }
+  | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "reset") return emptyProjectState;
   if (action.type === "idle") return { ...state, active: {} };
   if (action.type === "message") return applyMessage(state, action.message);
+  if (action.type === "tasks") return applyTasks(state, action.tasks);
   return applyEvent(state, action);
 }
 
@@ -50,5 +53,7 @@ export function useProject(projectId: string) {
     status,
     send: (body: string, threadId: string | null = null) => socketRef.current?.sendMessage(body, { threadId }),
     emit: (event: ClientEventInput) => socketRef.current?.send(event),
+    /** Loads a thread's tasks and their earlier terminal output. */
+    loadTasks: async (threadId: string) => dispatch({ type: "tasks", tasks: await api.listTasks(projectId, threadId) }),
   };
 }

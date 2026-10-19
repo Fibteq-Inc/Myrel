@@ -8,11 +8,11 @@ import {
   type RunnerEvent,
   type TaskProgress,
   TaskSpec,
-} from "@altair/runner";
+} from "@altair/runner-core";
 import { Agent, getAgentByName } from "agents";
 import { createProvider, runLoop, taskModel } from "../llm";
 import { normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
-import { meteredForTurn } from "../usage";
+import { meteredForTurn, recordTaskUsage } from "../usage";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
@@ -322,6 +322,11 @@ export class ThreadAgent extends Agent<Env> {
     if (lines.length) await project.broadcastTask({ type: "task.output", taskId, threadId, lines });
     await project.updateThread(threadId, { statusText: renderChecklist(spec.title, progress, row.language) });
     if (finished) {
+      if (spec.model) {
+        const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
+        const ms = Date.now() - Date.parse(row.created_at);
+        await recordTaskUsage(this.env, ctx, progress.usage, ms).catch((err) => console.error("task usage", err));
+      }
       await this.publishTask(taskId);
       // The agent reads the result and tells the person.
       await this.markDirty();

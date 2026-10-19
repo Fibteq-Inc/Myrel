@@ -1,4 +1,4 @@
-import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, TaskSpec, taskEnv, taskScript } from "@altair/runner";
+import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, TaskSpec, taskEnv, taskScript } from "@altair/runner-core";
 import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
 
@@ -14,7 +14,7 @@ const MAX_BATCH = 200;
 
 /**
  * One per thread (named by thread id): the thread's Linux container. It runs
- * one task at a time with the shared task script from @altair/runner and
+ * one task at a time with the shared task script from @altair/runner-core and
  * streams the events back to the ThreadAgent through `taskEvents`.
  */
 export class Sandbox extends DurableObject<Env> {

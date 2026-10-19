@@ -1,4 +1,4 @@
-import type { RunnerBackend, TaskSpec } from "@altair/runner";
+import type { RunnerBackend, TaskSpec } from "@altair/runner-core";
 
 /** The cloud backend: the thread's own container (see sandbox.ts). */
 export function sandboxBackend(env: Env, threadId: string): RunnerBackend {

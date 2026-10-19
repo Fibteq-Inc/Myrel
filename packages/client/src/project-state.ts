@@ -1,4 +1,4 @@
-import type { Message, Reaction, ServerEvent, Thread } from "@altair/protocol";
+import type { Message, Reaction, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -11,9 +11,32 @@ export type ProjectState = {
   reactions: Record<string, Reaction[]>;
   /** Agents working right now: "" is the coordinator, otherwise a thread id. */
   active: Record<string, true>;
+  /** Tasks (run_task) seen live or loaded with `applyTasks`, by id. */
+  tasks: Record<string, Task>;
+  /** Terminal output per task id, oldest first, capped at MAX_TERMINAL_LINES. */
+  output: Record<string, TerminalLine[]>;
 };
 
-export const emptyProjectState: ProjectState = { messages: [], threads: {}, reactions: {}, active: {} };
+export const emptyProjectState: ProjectState = { messages: [], threads: {}, reactions: {}, active: {}, tasks: {}, output: {} };
+
+/** Terminal lines kept per task on the client. */
+export const MAX_TERMINAL_LINES = 1000;
+
+/** Adds tasks fetched from the tasks endpoint, with their earlier output. */
+export function applyTasks(state: ProjectState, tasks: (Task & { log?: TerminalLine[] })[]): ProjectState {
+  const next = { ...state, tasks: { ...state.tasks }, output: { ...state.output } };
+  for (const { log, ...task } of tasks) {
+    next.tasks[task.id] = task;
+    // Live lines that arrived while fetching are newer than the fetched log.
+    if (log) next.output[task.id] = [...log, ...(state.output[task.id] ?? [])].slice(-MAX_TERMINAL_LINES);
+  }
+  return next;
+}
+
+export const threadTasks = (s: ProjectState, threadId: string) =>
+  Object.values(s.tasks)
+    .filter((t) => t.threadId === threadId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
 export function applyMessage(state: ProjectState, message: Message): ProjectState {
   return { ...state, messages: [...state.messages, message] };
@@ -32,6 +55,12 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
       if (event.active) active[key] = true;
       else delete active[key];
       return { ...state, active };
+    }
+    case "task.updated":
+      return { ...state, tasks: { ...state.tasks, [event.task.id]: event.task } };
+    case "task.output": {
+      const lines = [...(state.output[event.taskId] ?? []), ...event.lines].slice(-MAX_TERMINAL_LINES);
+      return { ...state, output: { ...state.output, [event.taskId]: lines } };
     }
     case "sync.result": {
       const threads = { ...state.threads };
