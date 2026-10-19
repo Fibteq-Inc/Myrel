@@ -1,0 +1,43 @@
+Fibteq Altair Enterprise License
+
+Copyright (c) 2026 Fibteq. All rights reserved.
+
+This license applies to all files in the "ee" directory of this repository and
+its subdirectories, unless a file states otherwise. Everything outside the "ee"
+directory is licensed under the GNU Affero General Public License v3.0, as
+described in the LICENSE file at the root of this repository.
+
+1. Production use. You may use the software in this directory in production,
+   or to provide a service to third parties, only with a valid commercial
+   license or subscription from Fibteq ("Commercial License") that covers the
+   features and the number of users you use, and only under its terms.
+
+2. Development and testing. Without a Commercial License, you may copy, modify
+   and run this software for development and testing, and to contribute to
+   it, but not for production use.
+
+3. Modifications. You may modify this software, but you may not remove,
+   circumvent or disable any license key checks or feature restrictions. All
+   rights, title and interest in modifications you make, including any
+   patches, stay subject to this license, and Fibteq retains all rights in
+   the software.
+
+4. Redistribution. You may not sell, sublicense, distribute or otherwise make
+   this software or modified versions of it available to third parties, except
+   as part of an unmodified copy of this repository.
+
+5. Third-party components. Third-party components in this directory are
+   licensed under their own licenses, which are stated in or next to them.
+
+6. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+   EVENT SHALL FIBTEQ BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+   IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+7. Termination. This license ends automatically if you break any of its
+   terms. Your rights under a Commercial License are governed by that license.
+
+For a Commercial License, contact Fibteq.
