@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppArtifactsRouteImport } from './routes/_app/artifacts'
+import { Route as AppDevicesRouteImport } from './routes/_app/devices'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppUsageRouteImport } from './routes/_app/usage'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app/projects/$projectId'
@@ -20,7 +22,10 @@ import { Route as AppSettingsInvitesRouteImport } from './routes/_app/settings/i
 import { Route as AppSettingsKeysRouteImport } from './routes/_app/settings/keys'
 import { Route as AppSettingsServerRouteImport } from './routes/_app/settings/server'
 import { Route as AppProjectsProjectIdIndexRouteImport } from './routes/_app/projects/$projectId/index'
+import { Route as AppProjectsProjectIdFilesRouteImport } from './routes/_app/projects/$projectId/files'
 import { Route as AppSettingsProjectsProjectIdRouteImport } from './routes/_app/settings/projects/$projectId'
+import { Route as AppProjectsProjectIdArtifactsIndexRouteImport } from './routes/_app/projects/$projectId/artifacts/index'
+import { Route as AppProjectsProjectIdArtifactsArtifactIdRouteImport } from './routes/_app/projects/$projectId/artifacts/$artifactId'
 import { Route as AppProjectsProjectIdThreadsThreadIdRouteImport } from './routes/_app/projects/$projectId/threads/$threadId'
 
 const AppRoute = AppRouteImport.update({
@@ -35,6 +40,16 @@ const LoginRoute = LoginRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppArtifactsRoute = AppArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
@@ -78,11 +93,29 @@ const AppProjectsProjectIdIndexRoute =
     path: '/',
     getParentRoute: () => AppProjectsProjectIdRoute,
   } as any)
+const AppProjectsProjectIdFilesRoute =
+  AppProjectsProjectIdFilesRouteImport.update({
+    id: '/files',
+    path: '/files',
+    getParentRoute: () => AppProjectsProjectIdRoute,
+  } as any)
 const AppSettingsProjectsProjectIdRoute =
   AppSettingsProjectsProjectIdRouteImport.update({
     id: '/projects/$projectId',
     path: '/projects/$projectId',
     getParentRoute: () => AppSettingsRoute,
+  } as any)
+const AppProjectsProjectIdArtifactsIndexRoute =
+  AppProjectsProjectIdArtifactsIndexRouteImport.update({
+    id: '/artifacts/',
+    path: '/artifacts/',
+    getParentRoute: () => AppProjectsProjectIdRoute,
+  } as any)
+const AppProjectsProjectIdArtifactsArtifactIdRoute =
+  AppProjectsProjectIdArtifactsArtifactIdRouteImport.update({
+    id: '/artifacts/$artifactId',
+    path: '/artifacts/$artifactId',
+    getParentRoute: () => AppProjectsProjectIdRoute,
   } as any)
 const AppProjectsProjectIdThreadsThreadIdRoute =
   AppProjectsProjectIdThreadsThreadIdRouteImport.update({
@@ -94,6 +127,8 @@ const AppProjectsProjectIdThreadsThreadIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
+  '/artifacts': typeof AppArtifactsRoute
+  '/devices': typeof AppDevicesRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/usage': typeof AppUsageRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
@@ -101,26 +136,36 @@ export interface FileRoutesByFullPath {
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
   '/settings/': typeof AppSettingsIndexRoute
+  '/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
   '/projects/$projectId/': typeof AppProjectsProjectIdIndexRoute
+  '/projects/$projectId/artifacts/$artifactId': typeof AppProjectsProjectIdArtifactsArtifactIdRoute
   '/projects/$projectId/threads/$threadId': typeof AppProjectsProjectIdThreadsThreadIdRoute
+  '/projects/$projectId/artifacts/': typeof AppProjectsProjectIdArtifactsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/artifacts': typeof AppArtifactsRoute
+  '/devices': typeof AppDevicesRoute
   '/usage': typeof AppUsageRoute
   '/': typeof AppIndexRoute
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
   '/settings': typeof AppSettingsIndexRoute
+  '/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
   '/projects/$projectId': typeof AppProjectsProjectIdIndexRoute
+  '/projects/$projectId/artifacts/$artifactId': typeof AppProjectsProjectIdArtifactsArtifactIdRoute
   '/projects/$projectId/threads/$threadId': typeof AppProjectsProjectIdThreadsThreadIdRoute
+  '/projects/$projectId/artifacts': typeof AppProjectsProjectIdArtifactsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/_app/artifacts': typeof AppArtifactsRoute
+  '/_app/devices': typeof AppDevicesRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/usage': typeof AppUsageRoute
   '/_app/': typeof AppIndexRoute
@@ -129,15 +174,20 @@ export interface FileRoutesById {
   '/_app/settings/keys': typeof AppSettingsKeysRoute
   '/_app/settings/server': typeof AppSettingsServerRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/_app/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
   '/_app/projects/$projectId/': typeof AppProjectsProjectIdIndexRoute
+  '/_app/projects/$projectId/artifacts/$artifactId': typeof AppProjectsProjectIdArtifactsArtifactIdRoute
   '/_app/projects/$projectId/threads/$threadId': typeof AppProjectsProjectIdThreadsThreadIdRoute
+  '/_app/projects/$projectId/artifacts/': typeof AppProjectsProjectIdArtifactsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/login'
+    | '/artifacts'
+    | '/devices'
     | '/settings'
     | '/usage'
     | '/projects/$projectId'
@@ -145,25 +195,35 @@ export interface FileRouteTypes {
     | '/settings/keys'
     | '/settings/server'
     | '/settings/'
+    | '/projects/$projectId/files'
     | '/settings/projects/$projectId'
     | '/projects/$projectId/'
+    | '/projects/$projectId/artifacts/$artifactId'
     | '/projects/$projectId/threads/$threadId'
+    | '/projects/$projectId/artifacts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/artifacts'
+    | '/devices'
     | '/usage'
     | '/'
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
     | '/settings'
+    | '/projects/$projectId/files'
     | '/settings/projects/$projectId'
     | '/projects/$projectId'
+    | '/projects/$projectId/artifacts/$artifactId'
     | '/projects/$projectId/threads/$threadId'
+    | '/projects/$projectId/artifacts'
   id:
     | '__root__'
     | '/_app'
     | '/login'
+    | '/_app/artifacts'
+    | '/_app/devices'
     | '/_app/settings'
     | '/_app/usage'
     | '/_app/'
@@ -172,9 +232,12 @@ export interface FileRouteTypes {
     | '/_app/settings/keys'
     | '/_app/settings/server'
     | '/_app/settings/'
+    | '/_app/projects/$projectId/files'
     | '/_app/settings/projects/$projectId'
     | '/_app/projects/$projectId/'
+    | '/_app/projects/$projectId/artifacts/$artifactId'
     | '/_app/projects/$projectId/threads/$threadId'
+    | '/_app/projects/$projectId/artifacts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -203,6 +266,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/artifacts': {
+      id: '/_app/artifacts'
+      path: '/artifacts'
+      fullPath: '/artifacts'
+      preLoaderRoute: typeof AppArtifactsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/devices': {
+      id: '/_app/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings': {
@@ -261,12 +338,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsProjectIdIndexRouteImport
       parentRoute: typeof AppProjectsProjectIdRoute
     }
+    '/_app/projects/$projectId/files': {
+      id: '/_app/projects/$projectId/files'
+      path: '/files'
+      fullPath: '/projects/$projectId/files'
+      preLoaderRoute: typeof AppProjectsProjectIdFilesRouteImport
+      parentRoute: typeof AppProjectsProjectIdRoute
+    }
     '/_app/settings/projects/$projectId': {
       id: '/_app/settings/projects/$projectId'
       path: '/projects/$projectId'
       fullPath: '/settings/projects/$projectId'
       preLoaderRoute: typeof AppSettingsProjectsProjectIdRouteImport
       parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/projects/$projectId/artifacts/': {
+      id: '/_app/projects/$projectId/artifacts/'
+      path: '/artifacts'
+      fullPath: '/projects/$projectId/artifacts/'
+      preLoaderRoute: typeof AppProjectsProjectIdArtifactsIndexRouteImport
+      parentRoute: typeof AppProjectsProjectIdRoute
+    }
+    '/_app/projects/$projectId/artifacts/$artifactId': {
+      id: '/_app/projects/$projectId/artifacts/$artifactId'
+      path: '/artifacts/$artifactId'
+      fullPath: '/projects/$projectId/artifacts/$artifactId'
+      preLoaderRoute: typeof AppProjectsProjectIdArtifactsArtifactIdRouteImport
+      parentRoute: typeof AppProjectsProjectIdRoute
     }
     '/_app/projects/$projectId/threads/$threadId': {
       id: '/_app/projects/$projectId/threads/$threadId'
@@ -299,20 +397,30 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 )
 
 interface AppProjectsProjectIdRouteChildren {
+  AppProjectsProjectIdFilesRoute: typeof AppProjectsProjectIdFilesRoute
   AppProjectsProjectIdIndexRoute: typeof AppProjectsProjectIdIndexRoute
+  AppProjectsProjectIdArtifactsArtifactIdRoute: typeof AppProjectsProjectIdArtifactsArtifactIdRoute
   AppProjectsProjectIdThreadsThreadIdRoute: typeof AppProjectsProjectIdThreadsThreadIdRoute
+  AppProjectsProjectIdArtifactsIndexRoute: typeof AppProjectsProjectIdArtifactsIndexRoute
 }
 
 const AppProjectsProjectIdRouteChildren: AppProjectsProjectIdRouteChildren = {
+  AppProjectsProjectIdFilesRoute: AppProjectsProjectIdFilesRoute,
   AppProjectsProjectIdIndexRoute: AppProjectsProjectIdIndexRoute,
+  AppProjectsProjectIdArtifactsArtifactIdRoute:
+    AppProjectsProjectIdArtifactsArtifactIdRoute,
   AppProjectsProjectIdThreadsThreadIdRoute:
     AppProjectsProjectIdThreadsThreadIdRoute,
+  AppProjectsProjectIdArtifactsIndexRoute:
+    AppProjectsProjectIdArtifactsIndexRoute,
 }
 
 const AppProjectsProjectIdRouteWithChildren =
   AppProjectsProjectIdRoute._addFileChildren(AppProjectsProjectIdRouteChildren)
 
 interface AppRouteChildren {
+  AppArtifactsRoute: typeof AppArtifactsRoute
+  AppDevicesRoute: typeof AppDevicesRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppUsageRoute: typeof AppUsageRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -320,6 +428,8 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppArtifactsRoute: AppArtifactsRoute,
+  AppDevicesRoute: AppDevicesRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppUsageRoute: AppUsageRoute,
   AppIndexRoute: AppIndexRoute,

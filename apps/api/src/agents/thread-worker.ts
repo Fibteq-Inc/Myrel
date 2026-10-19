@@ -1,18 +1,36 @@
-import { Decision, formatDecision, type Message, type Thread } from "@altair/protocol";
+import {
+  type Artifact,
+  CLI_NAMES,
+  Decision,
+  formatDecision,
+  MAX_ARTIFACT_BYTES,
+  type Message,
+  type ProjectRepo,
+  type ProjectWorkspace,
+  type Thread,
+} from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
+import { KNOWLEDGE_GUIDE, type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
 import { renderMessage } from "./render";
 import type { RunTaskInput } from "./thread-tasks";
 
 /** The thread operations the thread agent's tools act through. */
 export type ThreadHost = {
   reply(text: string): Promise<Message>;
+  publishArtifact(input: { artifactId?: string; title: string; description?: string; html: string }): Promise<Artifact>;
   setStatusText(text: string): Promise<void>;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
   resolve(): Promise<void>;
   /** Starts a task in the sandbox; throws when it cannot. */
   runTask(input: RunTaskInput): Promise<string>;
   cancelTask(): Promise<string>;
+  /** Directory listing of a connected repository. */
+  listRepoFiles(repo: string, path: string, ref?: string): Promise<string>;
+  /** Text of one file in a connected repository. */
+  readRepoFile(repo: string, path: string, ref?: string): Promise<string>;
+  /** Present when the project has a local folder: runs a task there and returns what to tell the model. */
+  runLocalTask?: (input: { title: string; prompt: string; language?: string }) => Promise<string>;
 };
 
 export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean };
@@ -23,12 +41,19 @@ Tools:
 - reply: the only way people see anything you say. Each reply is a message in this thread.
 - update_status: your progress checklist, shown on the thread while you work. Line 1 is a short header, then a blank line, then one step per line prefixed with ✓ (done), ✱ (in progress) or ○ (not started). Post it first on multi-step work and refresh it as steps complete. It is not a reply and notifies no one.
 - ask_decision: put a question to the person as a card with 2 to 4 options, one recommended. Use it instead of a reply whenever you need the person to choose; their pick arrives as their next message. Keep working on the recommended option meanwhile when you can.
+- publish_artifact: publish a self-contained HTML page (a report, a chart, a small app, a prototype) as an artifact people open in a viewer next to the chat. Pass artifact_id to publish a new version of an existing artifact instead of a new one; the address stays the same. The page runs sandboxed on its own origin: inline your CSS and JS, load libraries only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com or esm.sh with an exact version, and do not call any other server. Give it a <title>, a background and a layout that works at phone width. Artifacts you publish are attached to your next reply as cards, so publish first, then reply with one line about it. Use an artifact when the result is something to look at or use, or longer than about fifteen lines; answer short things in the reply itself.
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 - run_task: your hands. It starts a coding agent in this thread's own Linux sandbox (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. With repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. One task runs at a time. Its progress shows on the thread's checklist by itself, so do not call update_status while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link.
 - cancel_task: stop the running task.
 
-Use run_task for anything that needs code, files, commands or the internet. Without it you have no internet access and no files: work from your own knowledge, say so when facts may be out of date, and be clear about what you inferred. When a bug is reported against a repository, the person wants the fix: run a task that reproduces it, fixes it, runs the tests and opens a pull request.
+- memory_read / memory_write / memory_delete, list_files / read_file / write_file: the project's memory and shared files (below).
+- repo_list_files and repo_read_file: read the GitHub repositories connected to this project (listed in the prompt). Look at the code before answering questions about it. To change one or open a pull request, use run_task.
+- run_local_task (only when the project has a local folder connected): hand a task to the coding CLI on the person's own computer (Claude Code, Codex or Gemini CLI, signed in with their own account), working in that folder. Use it for anything that needs the project's files: reading code, editing, running commands or tests. Write the prompt as a complete, self-contained instruction; the CLI does not see this thread, but later tasks in this thread continue the same CLI session where the CLI supports it. Like run_task, its progress shows on the checklist and its result arrives in a later turn under "Tasks", so after starting one, tell the person briefly and end the turn. Never ask the person for passwords, tokens or API keys for it.
+
+${KNOWLEDGE_GUIDE}
+
+Use run_task for anything that needs code, commands or the internet, and run_local_task instead when the work needs the person's local folder. When a bug is reported against a repository, the person wants the fix: run a task that reproduces it, fixes it, runs the tests and opens a pull request. Outside those tasks, the repositories and the artifacts you publish, you have no internet access. Work from your own knowledge and the project's files, say so when facts may be out of date, and be clear about what you inferred. If the work needs the person's own files and no local folder is connected, tell them they can connect one from the project header.
 
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
@@ -46,18 +71,38 @@ export function threadPrompt(input: {
   names: Record<string, string>;
   lastSeenSeq: number;
   notes: CoordinatorNote[];
+  knowledge: KnowledgeSnapshot;
+  repos: ProjectRepo[];
   /** Rendered "Tasks" section (thread-tasks.ts), empty when none ran. */
   tasks?: string;
+  workspace?: ProjectWorkspace | null;
+  artifacts?: Artifact[];
 }): string {
   const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
+  const ws = input.workspace;
+  const workspace = ws
+    ? `## Local folder\n${ws.path} on "${ws.runnerName}", using ${CLI_NAMES[ws.cli]}. The computer is ${ws.online ? "online" : "offline right now, so run_local_task will fail until the person starts altair-runner again"}.`
+    : "## Local folder\nNone connected.";
   return [
     `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}`,
+    renderKnowledge(input.knowledge),
     `## Brief from the coordinator\n${input.brief}`,
+    input.repos.length
+      ? `## GitHub repositories connected to this project\n${input.repos
+          .map((r) => `- ${r.fullName} (default branch ${r.defaultBranch}${r.private ? ", private" : ""})`)
+          .join("\n")}`
+      : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
     `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
     `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
     notes.length ? `## Notes from the coordinator (not visible to people)\n${notes.join("\n")}` : "",
+    workspace,
     input.tasks ?? "",
+    input.artifacts?.length
+      ? `## Artifacts in this project (newest first; pass artifact_id to update one)\n${input.artifacts
+          .map((a) => `- [${a.id}] "${a.title}" · v${a.version}${a.threadId === input.thread.id ? " · from this thread" : ""}`)
+          .join("\n")}`
+      : "",
     input.thread.statusText ? `## Your current checklist\n${input.thread.statusText}` : "",
     "Continue the work now.",
   ]
@@ -96,6 +141,21 @@ export function threadTools(host: ThreadHost): Tool[] {
       },
     }),
     tool({
+      name: "publish_artifact",
+      description:
+        "Publish a self-contained HTML page as an artifact, or a new version of one (artifact_id). It is attached to your next reply.",
+      input: z.object({
+        title: z.string().trim().min(1).max(120),
+        html: z.string().min(1).max(MAX_ARTIFACT_BYTES),
+        description: z.string().max(500).optional().describe("One sentence shown on the artifact's card."),
+        artifact_id: z.string().optional().describe("An existing artifact's id, to publish a new version of it."),
+      }),
+      run: async ({ title, html, description, artifact_id }) => {
+        const a = await host.publishArtifact({ artifactId: artifact_id, title, description, html });
+        return `Published "${a.title}" v${a.version} (${a.id}). It will be attached to your next reply.`;
+      },
+    }),
+    tool({
       name: "request_coordinator",
       description: "Ask the coordinator for permission, routing or a handoff. The answer arrives in a later turn.",
       input: z.object({ kind: z.enum(["permission", "routing", "handoff"]), reason: z.string().min(1).max(4000) }),
@@ -103,6 +163,27 @@ export function threadTools(host: ThreadHost): Tool[] {
         await host.requestCoordinator(kind, reason);
         return "Sent to the coordinator. Its answer will arrive in a later turn.";
       },
+    }),
+    ...(host.runLocalTask ? [localTaskTool(host.runLocalTask)] : []),
+    tool({
+      name: "repo_list_files",
+      description: "List a directory in a connected GitHub repository. Use path \"\" for the root.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        path: z.string().default(""),
+        ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
+      }),
+      run: ({ repo, path, ref }) => host.listRepoFiles(repo, path, ref),
+    }),
+    tool({
+      name: "repo_read_file",
+      description: "Read a text file from a connected GitHub repository.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        path: z.string().min(1),
+        ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
+      }),
+      run: ({ repo, path, ref }) => host.readRepoFile(repo, path, ref),
     }),
     tool({
       name: "run_task",
@@ -132,7 +213,7 @@ export function threadTools(host: ThreadHost): Tool[] {
     }),
     tool({
       name: "cancel_task",
-      description: "Stop the task running in this thread's sandbox.",
+      description: "Stop the task running in this thread.",
       input: z.object({}),
       run: () => host.cancelTask(),
     }),
@@ -146,4 +227,18 @@ export function threadTools(host: ThreadHost): Tool[] {
       },
     }),
   ];
+}
+
+function localTaskTool(run: NonNullable<ThreadHost["runLocalTask"]>): Tool {
+  return tool({
+    name: "run_local_task",
+    description:
+      "Run a task with the coding CLI on the person's computer, in the project's local folder. Returns at once; the result arrives in a later turn.",
+    input: z.object({
+      title: z.string().min(1).max(120).optional().describe("Short name for the task, in the person's language."),
+      prompt: z.string().min(1).max(32_000),
+      language: z.string().max(10).optional().describe("The person's language code, e.g. tr or en, for the checklist."),
+    }),
+    run: async ({ title, prompt, language }) => run({ title: title ?? prompt.split("\n")[0]!.slice(0, 80), prompt, language }),
+  });
 }

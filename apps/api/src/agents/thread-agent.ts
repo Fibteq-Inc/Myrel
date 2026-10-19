@@ -1,4 +1,4 @@
-import { createId, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type ArtifactRef, createId, type ProjectWorkspace, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
 import {
   emptyProgress,
   HarnessId,
@@ -10,14 +10,20 @@ import {
   TaskSpec,
 } from "@altair/runner-core";
 import { Agent, getAgentByName } from "agents";
+import { listRepoFiles, readRepoFile } from "../github/files";
+import { listProjectRepos } from "../github/store";
 import { projectProvider, projectTaskModel } from "../keys";
 import { runLoop } from "../llm";
-import { normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
+import { getWorkspace } from "../runners";
+import { localBackend, normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
 import { meteredForTurn, recordTaskUsage } from "../usage";
+import { type Author, knowledgeTools } from "./knowledge";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
 import { type CoordinatorNote, THREAD_SYSTEM, threadPrompt, threadTools } from "./thread-worker";
+
+const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
 export type ThreadStart = { projectId: string; threadId: string; brief: string };
 
@@ -37,10 +43,20 @@ type TaskRow = {
   reported: number;
 };
 
+/** A task's spec as stored. Tasks on the person's computer name their CLI (claude, codex…) as the harness. */
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string };
+
 type LogRow = { stream: TerminalLine["stream"]; text: string };
 
 /** Terminal lines kept per task; older ones are dropped. */
 const MAX_LOG_LINES = 2000;
+/** A task on the person's computer has no sandbox, clone or pull request steps; its CLI just works. */
+const LOCAL_PHASES: RunnerEvent[] = [
+  { type: "phase", phase: "prepare", state: "skipped" },
+  { type: "phase", phase: "clone", state: "skipped" },
+  { type: "phase", phase: "publish", state: "skipped" },
+  { type: "phase", phase: "agent", state: "started" },
+];
 /** Extra time after a task's own timeout before it is declared lost (its runner went away). */
 const WATCHDOG_GRACE_SEC = 300;
 
@@ -49,8 +65,9 @@ const WATCHDOG_GRACE_SEC = 300;
  * wake queues a turn that reads the thread from the ProjectAgent, calls the
  * model and acts through reply / update_status / request_coordinator.
  * Messages themselves live in the ProjectAgent; this DO keeps the brief,
- * coordinator notes, a read cursor, and the tasks the agent ran with
- * run_task (their progress and terminal output).
+ * coordinator notes, a read cursor, and the tasks the agent ran (run_task in
+ * the sandbox, run_local_task on the person's computer) with their progress
+ * and terminal output.
  */
 export class ThreadAgent extends Agent<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -62,6 +79,7 @@ export class ThreadAgent extends Agent<Env> {
       created_at TEXT NOT NULL,
       seen INTEGER NOT NULL DEFAULT 0
     )`;
+    this.migrateLocalTasks();
     this.sql`CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       spec TEXT NOT NULL,
@@ -91,7 +109,7 @@ export class ThreadAgent extends Agent<Env> {
     await this.markDirty();
   }
 
-  /** A person wrote in the thread, or the coordinator sent a note. */
+  /** A person wrote in the thread, or the coordinator sent a note. Task results come through taskEvents. */
   async wake(reason: ThreadWake): Promise<void> {
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
@@ -115,6 +133,7 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
+    const artifacts = await project.listArtifacts();
 
     const llm = await projectProvider(this.env, projectId);
     if (!llm.ok) {
@@ -125,13 +144,14 @@ export class ThreadAgent extends Agent<Env> {
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
-    const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     const tasks = this.taskRows().map((row) => ({
       task: this.toTask(row),
       progress: JSON.parse(row.progress) as TaskProgress,
       log: row.status === "running" || row.reported ? [] : this.taskLog(row.id),
       isNew: row.status !== "running" && row.reported === 0,
     }));
+    const workspace = await getWorkspace(this.env, projectId);
+    const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     this.sql`UPDATE notes SET seen = 1`;
     this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
@@ -139,6 +159,8 @@ export class ThreadAgent extends Agent<Env> {
     // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
     let resolved: boolean = false as boolean;
     let asked: boolean = false as boolean;
+    // Artifacts published this turn, attached to the next reply.
+    let pending: ArtifactRef[] = [];
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
@@ -152,33 +174,84 @@ export class ThreadAgent extends Agent<Env> {
           agent: "thread",
         }),
         system: THREAD_SYSTEM,
-        prompt: threadPrompt({ ...ctx, brief: this.getMeta("brief") ?? "", lastSeenSeq, notes, tasks: renderTasks(tasks) }),
-        tools: threadTools({
-          reply: async (text) => {
-            const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: text });
-            // Our own replies are not news on the next turn.
-            this.setMeta("last_seen_seq", String(m.seq));
-            return m;
-          },
-          setStatusText: async (text) => {
-            await project.updateThread(threadId, { statusText: text });
-          },
-          requestCoordinator: async (kind, reason) => {
-            asked = true;
-            await project.requestCoordinator(threadId, kind, reason);
-          },
-          resolve: async () => {
-            resolved = true;
-          },
-          runTask: async (input) => {
-            const started = await this.startTask(input);
-            if (!started.ok) throw new Error(started.error);
-            return started.message;
-          },
-          cancelTask: () => this.cancelRunningTask(),
+        prompt: threadPrompt({
+          ...ctx,
+          brief: this.getMeta("brief") ?? "",
+          lastSeenSeq,
+          notes,
+          artifacts,
+          repos: await listProjectRepos(this.env.DB, projectId),
+          tasks: renderTasks(tasks),
+          workspace,
         }),
-        maxSteps: 12,
+        tools: [
+          ...threadTools({
+            reply: async (text) => {
+              const artifacts = pending;
+              pending = [];
+              const m = await project.sendMessage({
+                threadId,
+                authorKind: "agent",
+                authorId: THREAD_AGENT_ID,
+                body: text,
+                artifacts,
+              });
+              // Our own replies are not news on the next turn.
+              this.setMeta("last_seen_seq", String(m.seq));
+              return m;
+            },
+            publishArtifact: async (input) => {
+              const result = await project.publishArtifact({ ...input, threadId });
+              if ("error" in result) throw new Error(result.error);
+              const { artifact } = result;
+              // A second publish of the same artifact in one turn replaces its card.
+              pending = [
+                ...pending.filter((p) => p.artifactId !== artifact.id),
+                { artifactId: artifact.id, version: artifact.version, title: artifact.title },
+              ];
+              return artifact;
+            },
+            setStatusText: async (text) => {
+              await project.updateThread(threadId, { statusText: text });
+            },
+            requestCoordinator: async (kind, reason) => {
+              asked = true;
+              await project.requestCoordinator(threadId, kind, reason);
+            },
+            resolve: async () => {
+              resolved = true;
+            },
+            listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
+            readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+            runTask: async (input) => {
+              const started = await this.startTask(input);
+              if (!started.ok) throw new Error(started.error);
+              return started.message;
+            },
+            runLocalTask: workspace
+              ? async (input) => {
+                  const started = await this.startTask({ ...input, local: true });
+                  if (!started.ok) throw new Error(started.error);
+                  return started.message;
+                }
+              : undefined,
+            cancelTask: () => this.cancelRunningTask(),
+          }),
+          ...knowledgeTools({
+            memoryRead: (name) => project.getMemory(name),
+            memoryWrite: (name, description, content) => project.putMemory(name, { description, content }, BY),
+            memoryDelete: (name) => project.deleteMemory(name),
+            listFiles: (prefix) => project.listFiles(prefix),
+            readText: (path) => project.readFileText(path),
+            writeText: (path, content) => project.writeFileText(path, content, BY),
+          }),
+        ],
+        maxSteps: 16,
       });
+      // Published but never mentioned in a reply: still deliver the cards.
+      if (pending.length) {
+        await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending });
+      }
       const running = this.runningTask() !== null;
       await project.updateThread(threadId, {
         status: running ? "working" : resolved ? "done" : asked ? "blocked" : "review_ready",
@@ -194,29 +267,25 @@ export class ThreadAgent extends Agent<Env> {
       });
       await project.updateThread(threadId, { status: "failed" });
     } finally {
-      await project.setActivity(threadId, false);
+      // A running task keeps the thread visibly working.
+      await project.setActivity(threadId, this.runningTask() !== null);
     }
   }
 
-  // ---- Tasks (run_task) --------------------------------------------------
+  // ---- Tasks (run_task, run_local_task) -------------------------------------
 
-  /** Starts a task for the run_task tool, or says why it cannot. Callable over RPC. */
+  /** Starts a task for run_task or run_local_task, or says why it cannot. Callable over RPC. */
   async startTask(input: RunTaskInput): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
     try {
-      return { ok: true, message: await this.launchTask(input) };
+      return { ok: true, message: input.local ? await this.launchLocalTask(input) : await this.launchTask(input) };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
   private async launchTask(input: RunTaskInput): Promise<string> {
-    const projectId = this.getMeta("project_id");
-    const threadId = this.getMeta("thread_id");
-    if (!projectId || !threadId) throw new Error("This thread is not set up yet.");
-    const running = this.runningTask();
-    if (running) {
-      throw new Error(`"${this.toTask(running).title}" is still running. Wait for its result, or cancel it with cancel_task.`);
-    }
+    const { projectId, threadId } = this.ids();
+    this.assertIdle();
 
     const harness = HarnessId.catch("opencode").parse(input.harness ?? this.env.RUNNER_HARNESS);
     const secrets: Record<string, string> = {};
@@ -237,11 +306,6 @@ export class ThreadAgent extends Agent<Env> {
       const url = normalizeRepoUrl(input.repo);
       if (!url) throw new Error(`"${input.repo}" is not a repository I can clone. Use owner/name or an https URL.`);
       repo = { url, branch: input.branch || undefined, baseBranch: input.baseBranch || undefined };
-      const token = await repoToken(this.env, projectId, url);
-      if (token) secrets.GITHUB_TOKEN = token;
-      else if (input.openPr) {
-        throw new Error("Opening a pull request needs write access to the repository. Ask the person to connect it to this project in the project's GitHub settings.");
-      }
     } else if (input.openPr) {
       throw new Error("open_pr needs a repo.");
     }
@@ -255,25 +319,52 @@ export class ThreadAgent extends Agent<Env> {
       openPr: input.openPr ?? false,
       model,
     });
-    const backend = this.backendFor(threadId);
+    if (spec.repo) {
+      const token = await repoToken(this.env, projectId, spec.repo.url, spec.timeoutSec);
+      if (token) secrets.GITHUB_TOKEN = token;
+      else if (spec.openPr) {
+        throw new Error("Opening a pull request needs write access to the repository. Ask the person to connect it to this project in the project's GitHub settings.");
+      }
+    }
+    const backend = sandboxBackend(this.env, threadId);
     const unavailable = backend.unavailable(spec);
     if (unavailable) throw new Error(unavailable);
 
-    const now = new Date().toISOString();
+    await this.launch(spec, backend.id, () => backend.start(spec, secrets), input.language);
+    await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId: spec.taskId });
+    return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
+  }
+
+  private async launchLocalTask(input: RunTaskInput): Promise<string> {
+    const { projectId, threadId } = this.ids();
+    this.assertIdle();
+    const workspace = await getWorkspace(this.env, projectId);
+    if (!workspace) throw new Error("This project has no local folder connected.");
+    const spec = TaskSpec.parse({ taskId: createId("task"), title: input.title, prompt: input.prompt });
+    const backend = localBackend(this.env, { projectId, threadId, workspace });
+    const unavailable = backend.unavailable(spec);
+    if (unavailable) throw new Error(unavailable);
+    // The person's own CLI does the work, so the task shows that CLI instead of an Altair harness.
+    await this.launch({ ...spec, harness: workspace.cli }, backend.id, () => backend.start(spec, {}), input.language);
+    await this.taskEvents(spec.taskId, LOCAL_PHASES);
+    return "The task is running on the person's computer. Its result arrives in a later turn; tell the person you started it, then end this turn.";
+  }
+
+  /** Records a task, starts it on its backend and shows it. */
+  private async launch(spec: StoredSpec, backend: string, start: () => Promise<void>, language?: string) {
+    // Recorded before starting: a fast task can report back before start() returns.
     this.sql`INSERT INTO tasks (id, spec, backend, status, progress, language, created_at)
-      VALUES (${spec.taskId}, ${JSON.stringify(spec)}, ${backend.id}, ${"running"}, ${JSON.stringify(emptyProgress())},
-        ${input.language || "en"}, ${now})`;
+      VALUES (${spec.taskId}, ${JSON.stringify(spec)}, ${backend}, ${"running"}, ${JSON.stringify(emptyProgress())},
+        ${language || "en"}, ${new Date().toISOString()})`;
     await this.publishTask(spec.taskId);
     try {
-      await backend.start(spec, secrets);
+      await start();
     } catch (err) {
       await this.taskEvents(spec.taskId, [
         { type: "done", ok: false, error: `Could not start: ${err instanceof Error ? err.message : String(err)}` },
       ]);
       throw err;
     }
-    await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId: spec.taskId });
-    return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
   }
 
   /**
@@ -283,7 +374,7 @@ export class ThreadAgent extends Agent<Env> {
   async taskEvents(taskId: string, events: RunnerEvent[]): Promise<void> {
     const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
     if (!row || row.status !== "running") return;
-    const spec = JSON.parse(row.spec) as TaskSpec;
+    const spec = JSON.parse(row.spec) as StoredSpec;
 
     const lines: TerminalLine[] = [];
     let progress = JSON.parse(row.progress) as TaskProgress;
@@ -338,8 +429,11 @@ export class ThreadAgent extends Agent<Env> {
   async cancelRunningTask(): Promise<string> {
     const row = this.runningTask();
     if (!row) return "No task is running.";
-    const threadId = this.getMeta("thread_id")!;
-    await this.backendFor(threadId).cancel(row.id);
+    try {
+      await this.backendOf(row).cancel(row.id);
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
     return `Cancelling "${this.toTask(row).title}". Its result arrives in a later turn.`;
   }
 
@@ -349,11 +443,15 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /** Cancels a task on a person's request. Callable over RPC. */
-  async cancelTask(taskId: string): Promise<boolean> {
+  async cancelTask(taskId: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const row = this.runningTask();
-    if (!row || row.id !== taskId) return false;
-    await this.backendFor(this.getMeta("thread_id")!).cancel(taskId);
-    return true;
+    if (!row || row.id !== taskId) return { ok: false, error: "This task is not running." };
+    try {
+      await this.backendOf(row).cancel(taskId);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** Schedule callback: a task its runner never finished (the container went away). */
@@ -363,9 +461,26 @@ export class ThreadAgent extends Agent<Env> {
     ]);
   }
 
-  /** Where tasks run. The local altair-runner adds its backend here. */
-  private backendFor(threadId: string): RunnerBackend {
-    return sandboxBackend(this.env, threadId);
+  /** The backend a recorded task runs on, for cancelling it. */
+  private backendOf(row: TaskRow): Pick<RunnerBackend, "cancel"> {
+    if (row.backend === "local") {
+      return { cancel: () => Promise.reject(new Error("A task on the person's computer cannot be stopped from here yet. They can stop it there.")) };
+    }
+    return sandboxBackend(this.env, this.getMeta("thread_id")!);
+  }
+
+  private ids() {
+    const projectId = this.getMeta("project_id");
+    const threadId = this.getMeta("thread_id");
+    if (!projectId || !threadId) throw new Error("This thread is not set up yet.");
+    return { projectId, threadId };
+  }
+
+  private assertIdle() {
+    const running = this.runningTask();
+    if (running) {
+      throw new Error(`"${this.toTask(running).title}" is still running. Wait for its result, or cancel it with cancel_task.`);
+    }
   }
 
   private async publishTask(taskId: string) {
@@ -392,7 +507,7 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   private toTask(row: TaskRow): Task {
-    const spec = JSON.parse(row.spec) as TaskSpec;
+    const spec = JSON.parse(row.spec) as StoredSpec;
     return {
       id: row.id,
       threadId: this.getMeta("thread_id") ?? "",
@@ -405,6 +520,43 @@ export class ThreadAgent extends Agent<Env> {
       createdAt: row.created_at,
       finishedAt: row.finished_at,
     };
+  }
+
+  /**
+   * Threads that ran tasks on a person's computer before tasks were unified
+   * kept them in an older `tasks` table. Moves them into the current one.
+   */
+  private migrateLocalTasks() {
+    const columns = this.sql<{ name: string }>`PRAGMA table_info(tasks)`;
+    if (!columns.some((c) => c.name === "runner_id")) return;
+    type OldRow = { id: string; prompt: string; status: TaskStatus; result: string | null; created_at: string; seen: number };
+    const old = this.sql<OldRow>`SELECT * FROM tasks`;
+    this.sql`DROP TABLE tasks`;
+    this.sql`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      spec TEXT NOT NULL,
+      backend TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress TEXT NOT NULL,
+      summary TEXT,
+      pr_url TEXT,
+      language TEXT NOT NULL DEFAULT 'en',
+      created_at TEXT NOT NULL,
+      finished_at TEXT,
+      reported INTEGER NOT NULL DEFAULT 0
+    )`;
+    for (const t of old) {
+      const title = t.prompt.split("\n")[0]!.slice(0, 80) || "Task";
+      const spec = { taskId: t.id, title, prompt: t.prompt, harness: "cli", openPr: false, timeoutSec: 1800 };
+      const finished = t.status === "running" ? null : { ok: t.status === "done" };
+      const progress = [...LOCAL_PHASES, ...(finished ? [{ type: "done" as const, ...finished }] : [])].reduce(reduceTask, {
+        ...emptyProgress(),
+        lastText: t.result,
+      });
+      this.sql`INSERT INTO tasks (id, spec, backend, status, progress, summary, created_at, reported)
+        VALUES (${t.id}, ${JSON.stringify(spec)}, ${"local"}, ${t.status}, ${JSON.stringify(progress)}, ${t.result},
+          ${t.created_at}, ${t.seen})`;
+    }
   }
 
   private getMeta(key: string): string | null {

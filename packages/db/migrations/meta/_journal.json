@@ -22,6 +22,20 @@
       "when": 1792415465349,
       "tag": "0002_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792415717755,
+      "tag": "0003_github",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792417120596,
+      "tag": "0004_local_runners",
+      "breakpoints": true
     }
   ]
 }

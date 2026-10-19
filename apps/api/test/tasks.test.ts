@@ -1,8 +1,9 @@
 import type { Message, Project, ServerEvent, Task } from "@altair/protocol";
 import { getAgentByName } from "agents";
-import { env } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ThreadAgent } from "../src/agents/thread-agent";
 import { resetFakeModel, setFakeModel } from "./fake-llm";
 
 const BASE = "http://altair.test";
@@ -106,5 +107,22 @@ describe("run_task", () => {
     expect(ssh).toMatchObject({ ok: false, error: expect.stringContaining("not a repository I can clone") });
     expect(await threadAgent.getTasks()).toEqual([]);
     ws.close();
+  });
+});
+
+describe("tasks from before run_task", () => {
+  it("moves a thread's older local tasks into the tasks table", async () => {
+    const stub = env.THREAD_AGENT.get(env.THREAD_AGENT.idFromName(`thr_${crypto.randomUUID()}`));
+    await runInDurableObject(stub, async (instance: ThreadAgent, state) => {
+      const sql = state.storage.sql;
+      sql.exec("DROP TABLE tasks");
+      sql.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, runner_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL,
+        result TEXT, created_at TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0)`);
+      sql.exec("INSERT INTO tasks VALUES ('task_1', 'rnr_1', 'Run pnpm test\nand report', 'done', '12 passed', '2026-10-19T10:00:00.000Z', 1)");
+      (instance as unknown as { migrateLocalTasks(): void }).migrateLocalTasks();
+      expect(instance.getTasks()).toMatchObject([
+        { id: "task_1", title: "Run pnpm test", backend: "local", status: "done", summary: "12 passed", log: [] },
+      ]);
+    });
   });
 });

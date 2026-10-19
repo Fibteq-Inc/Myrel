@@ -1,4 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // For src/artifact-signature.ts (Web Crypto, btoa); the rest uses no globals.
+    "lib": ["es2023", "dom"]
+  },
   "include": ["src", "test"]
 }

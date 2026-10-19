@@ -4,6 +4,7 @@ import {
   applyEvent,
   applyMessage,
   applyTasks,
+  artifactList,
   emptyProjectState,
   parseChecklist,
   projectChat,
@@ -39,11 +40,40 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
 });
 
 describe("project state", () => {
+  it("keeps artifacts from sync and live updates, newest first", () => {
+    const art = (title: string, updatedAt: string, version = 1) => ({
+      id: createId("artifact"),
+      projectId,
+      threadId: null,
+      title,
+      description: null,
+      version,
+      createdAt: updatedAt,
+      updatedAt,
+    });
+    const old = art("Old", "2026-01-01T00:00:00.000Z");
+    const recent = art("Recent", "2026-02-01T00:00:00.000Z");
+    let s = applyEvent(emptyProjectState, {
+      type: "sync.result",
+      messages: [],
+      hasMore: false,
+      threads: [],
+      reactions: [],
+      artifacts: [old, recent],
+    });
+    expect(artifactList(s).map((a) => a.title)).toEqual(["Recent", "Old"]);
+    s = applyEvent(s, { type: "artifact.updated", artifact: { ...old, version: 2, updatedAt: "2026-03-01T00:00:00.000Z" } });
+    expect(artifactList(s).map((a) => [a.title, a.version])).toEqual([
+      ["Old", 2],
+      ["Recent", 1],
+    ]);
+  });
+
   it("splits project chat from threads and tracks thread updates, reactions and activity", () => {
     const root = msg(1);
     const t = thread(root.id);
     let s = applyMessage(emptyProjectState, root);
-    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [t], reactions: [] });
+    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [t], reactions: [], artifacts: [] });
     s = applyMessage(s, msg(2, t.id));
     s = applyEvent(s, { type: "thread.updated", thread: { ...t, status: "review_ready" } });
     const reaction = { messageId: root.id, emoji: "👍", authorKind: "agent" as const, authorId: "coordinator" };

@@ -25,10 +25,20 @@
     }
   ],
 
+  // R2 buckets. Create each once (`wrangler r2 bucket create <name>` or in the dashboard) before deploying.
+  // FILES: project files and message uploads, under projects/<projectId>/files/.
+  // ARTIFACTS: artifact versions (HTML); the artifact Worker (apps/artifacts) serves them from its own domain.
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "altair-files" },
+    { "binding": "ARTIFACTS", "bucket_name": "altair-artifacts" }
+  ],
+
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
       { "name": "THREAD_AGENT", "class_name": "ThreadAgent" },
+      // One per paired computer running altair-runner.
+      { "name": "RUNNER_AGENT", "class_name": "RunnerAgent" },
       // One Linux container per thread for run_task (src/sandbox). Needs Cloudflare Containers
       // (Workers Paid plan). Remove this binding and the "containers" block to run without it:
       // run_task then tells the agent there is no sandbox.
@@ -37,7 +47,8 @@
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ProjectAgent", "ThreadAgent"] },
-    { "tag": "v2", "new_sqlite_classes": ["Sandbox"] }
+    { "tag": "v2", "new_sqlite_classes": ["RunnerAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
   ],
 
   // The sandbox image (git, gh, jq, Node, OpenCode). Wrangler builds it with Docker on deploy.
@@ -75,6 +86,17 @@
   // LLM_PRICES: optional JSON of model prices in US dollars per million tokens, used for the
   // usage dashboard's cost estimates, e.g. {"firerouter/opus": {"input": 4, "output": 20, "cachedInput": 0.4}}.
   // Built-in prices cover Claude models; a model with no price is metered with no cost.
+  //
+  // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a
+  // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID,
+  // GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET.
+  //
+  // Artifacts. ARTIFACTS_URL: origin of the artifact Worker, e.g. its workers.dev address or a
+  // domain of its own. It must be a different site from the app (not a subdomain of the app's
+  // domain); a workers.dev address always is. Self-hosting: set your artifact Worker's origin. Empty = artifacts are
+  // published and listed but cannot be opened. ARTIFACT_SIGNING_SECRET (secret): shared with
+  // the artifact Worker, which only serves links signed with it.
+  //
   // Sandbox (run_task). Repository access comes from the project's GitHub connection.
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
   // RUNNER_HARNESS: default coding harness, opencode (default) or claude-code.
@@ -89,6 +111,7 @@
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
+    "ARTIFACTS_URL": "https://altair-artifacts.fibteq.workers.dev",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_HARNESS": "opencode",
     "RUNNER_MODEL": ""

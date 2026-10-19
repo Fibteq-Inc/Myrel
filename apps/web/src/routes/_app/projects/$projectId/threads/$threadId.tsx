@@ -2,6 +2,7 @@ import { threadMessages, threadTasks } from "@altair/client";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, CircleCheck, LoaderCircle, PanelRightClose, PanelRightOpen, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ArtifactCards, ThreadOutputs } from "../../../../../components/artifacts";
 import {
   Checklist,
   Composer,
@@ -15,10 +16,18 @@ import {
 import { PaneHeader } from "../../../../../components/shell/shell";
 import { withTasks } from "../../../../../components/workspace/tasks";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../../../../../components/workspace/workspace-panel";
+import { api } from "../../../../../lib/api";
 import { useProjectContext } from "../../../../../lib/project-context";
 import { cn, GhostButton, IconButton } from "../../../../../lib/ui";
 
+type Search = { artifact?: string; version?: number };
+
 export const Route = createFileRoute("/_app/projects/$projectId/threads/$threadId")({
+  // ?artifact= opens one of the thread's outputs in the workspace; ?version= pins an older one.
+  validateSearch: (s: Record<string, unknown>): Search => ({
+    ...(typeof s.artifact === "string" && { artifact: s.artifact }),
+    ...(Number.isInteger(Number(s.version)) && Number(s.version) > 0 && { version: Number(s.version) }),
+  }),
   component: ThreadView,
 });
 
@@ -39,6 +48,8 @@ function readPanelPref() {
  */
 function ThreadView() {
   const { threadId } = Route.useParams();
+  const { artifact: openArtifact, version: artifactVersion } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { user } = Route.useRouteContext();
   const { project, names, state, status, send, emit, loadTasks } = useProjectContext();
   useEffect(() => {
@@ -47,6 +58,15 @@ function ThreadView() {
   }, [threadId, status]);
   const [panelOpen, setPanelOpen] = useState(readPanelPref);
   const [mobileView, setMobileView] = useState<"messages" | "workspace">("messages");
+
+  // Opening an artifact brings the workspace into view, on its Outputs tab.
+  const [opened, setOpened] = useState(0);
+  useEffect(() => {
+    if (!openArtifact) return;
+    setOpened((n) => n + 1);
+    setPanelOpen(true);
+    if (!window.matchMedia("(min-width: 1024px)").matches) setMobileView("workspace");
+  }, [openArtifact]);
 
   const thread = state.threads[threadId];
   if (!thread) {
@@ -73,6 +93,31 @@ function ThreadView() {
   const active = !!state.active[thread.id];
   const working = thread.status === "working" && !thread.resolved;
   const showChecklist = !!thread.statusText && !thread.resolved;
+  // What this thread published, plus anything its messages delivered from elsewhere.
+  const attached = new Set(messages.flatMap((m) => m.artifacts?.map((a) => a.artifactId) ?? []));
+  const outputs = Object.values(state.artifacts)
+    .filter((a) => a.threadId === thread.id || attached.has(a.id))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const openOutput = (artifact: string | undefined, version?: number) =>
+    navigate({ search: artifact ? { artifact, version } : {}, replace: true });
+  const tabs = defaultWorkspaceTabs(thread).map((tab) =>
+    tab.id === "outputs"
+      ? {
+          ...tab,
+          count: outputs.length,
+          content: (
+            <ThreadOutputs
+              projectId={project.id}
+              thread={thread}
+              artifacts={outputs}
+              openId={openArtifact}
+              version={artifactVersion}
+              onOpen={openOutput}
+            />
+          ),
+        }
+      : tab,
+  );
 
   function togglePanel() {
     if (window.matchMedia("(min-width: 1024px)").matches) {
@@ -154,24 +199,36 @@ function ThreadView() {
                   names={names}
                   reactions={state.reactions[m.id]}
                   decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
-                />
+                >
+                  {m.artifacts?.length ? (
+                    <ArtifactCards
+                      projectId={project.id}
+                      threadId={thread.id}
+                      refs={m.artifacts}
+                      artifacts={state.artifacts}
+                      openId={openArtifact}
+                    />
+                  ) : null}
+                </MessageView>
               ))}
-              {active && <Thinking label={working ? "Working" : "Thinking"} />}
+              {active && <Thinking label={state.progress[thread.id] ?? (working ? "Working" : "Thinking")} />}
             </div>
           </ScrollToEnd>
 
           <div className="mx-auto w-full max-w-[808px]">
-            <Composer key={thread.id} placeholder="Reply in this thread" onSend={(body) => send(body, thread.id)} />
+            <Composer
+              key={thread.id}
+              placeholder="Reply in this thread"
+              onSend={(body, attachments) => send(body, thread.id, attachments)}
+              onUpload={(file) => api.upload(project.id, file.name, file)}
+            />
           </div>
         </section>
 
         <WorkspacePanel
-          key={thread.id}
-          tabs={withTasks(defaultWorkspaceTabs(thread), {
-            projectId: project.id,
-            tasks: threadTasks(state, thread.id),
-            output: state.output,
-          })}
+          key={`${thread.id}-${opened}`}
+          tabs={withTasks(tabs, { projectId: project.id, tasks: threadTasks(state, thread.id), output: state.output })}
+          initialTab={opened > 0 ? "outputs" : undefined}
           className={cn("flex-1", mobileView === "workspace" ? "flex" : "hidden", panelOpen ? "lg:flex" : "lg:hidden")}
         />
       </div>

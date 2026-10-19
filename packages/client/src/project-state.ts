@@ -1,4 +1,4 @@
-import type { Message, Reaction, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
+import type { Artifact, Message, Reaction, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -9,15 +9,27 @@ export type ProjectState = {
   messages: Message[];
   threads: Record<string, Thread>;
   reactions: Record<string, Reaction[]>;
+  artifacts: Record<string, Artifact>;
   /** Agents working right now: "" is the coordinator, otherwise a thread id. */
   active: Record<string, true>;
+  /** What an active agent is doing, when it said (e.g. a task on the person's computer). */
+  progress: Record<string, string>;
   /** Tasks (run_task) seen live or loaded with `applyTasks`, by id. */
   tasks: Record<string, Task>;
   /** Terminal output per task id, oldest first, capped at MAX_TERMINAL_LINES. */
   output: Record<string, TerminalLine[]>;
 };
 
-export const emptyProjectState: ProjectState = { messages: [], threads: {}, reactions: {}, active: {}, tasks: {}, output: {} };
+export const emptyProjectState: ProjectState = {
+  messages: [],
+  threads: {},
+  reactions: {},
+  artifacts: {},
+  active: {},
+  progress: {},
+  tasks: {},
+  output: {},
+};
 
 /** Terminal lines kept per task on the client. */
 export const MAX_TERMINAL_LINES = 1000;
@@ -47,14 +59,19 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
   switch (event.type) {
     case "thread.updated":
       return { ...state, threads: { ...state.threads, [event.thread.id]: event.thread } };
+    case "artifact.updated":
+      return { ...state, artifacts: { ...state.artifacts, [event.artifact.id]: event.artifact } };
     case "reaction.added":
       return { ...state, reactions: addReactions(state.reactions, [event.reaction]) };
     case "agent.activity": {
       const key = event.threadId ?? "";
       const active = { ...state.active };
+      const progress = { ...state.progress };
       if (event.active) active[key] = true;
       else delete active[key];
-      return { ...state, active };
+      if (event.active && event.label) progress[key] = event.label;
+      else delete progress[key];
+      return { ...state, active, progress };
     }
     case "task.updated":
       return { ...state, tasks: { ...state.tasks, [event.task.id]: event.task } };
@@ -65,7 +82,9 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
     case "sync.result": {
       const threads = { ...state.threads };
       for (const t of event.threads) threads[t.id] = t;
-      return { ...state, threads, reactions: addReactions(state.reactions, event.reactions) };
+      const artifacts = { ...state.artifacts };
+      for (const a of event.artifacts) artifacts[a.id] = a;
+      return { ...state, threads, artifacts, reactions: addReactions(state.reactions, event.reactions) };
     }
     default:
       return state;
@@ -82,6 +101,10 @@ function addReactions(current: Record<string, Reaction[]>, added: Reaction[]) {
   }
   return next;
 }
+
+/** The project's artifacts, most recently updated first (the Library). */
+export const artifactList = (s: ProjectState) =>
+  Object.values(s.artifacts).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
 export const projectChat = (s: ProjectState) => s.messages.filter((m) => m.threadId === null);
 
