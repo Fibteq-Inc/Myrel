@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { type ChatRequest, createProvider, type ModelProvider, runLoop, tool } from "../src/llm";
+import {
+  type CallRecord,
+  type ChatRequest,
+  costMicros,
+  createProvider,
+  DEFAULT_PRICES,
+  metered,
+  type ModelProvider,
+  parsePrices,
+  priceFor,
+  runLoop,
+  tool,
+} from "../src/llm";
 
 function recordingFetch(response: unknown) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -34,7 +46,8 @@ describe("createProvider", () => {
   it("speaks the OpenAI wire format to Fireworks", async () => {
     const f = recordingFetch({
       choices: [{ message: { content: "", tool_calls: [{ id: "t1", function: { name: "reply", arguments: '{"text":"ok"}' } }] } }],
-      usage: { prompt_tokens: 3, completion_tokens: 2 },
+      model: "accounts/fireworks/models/kimi-k2p6",
+      usage: { prompt_tokens: 3, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 1 } },
     });
     const res = createProvider({ FIREWORKS_API_KEY: "fw" }, f.fetchImpl);
     if (!res.ok) throw new Error(res.reason);
@@ -50,7 +63,8 @@ describe("createProvider", () => {
     expect(out).toEqual({
       text: "",
       toolCalls: [{ id: "t1", name: "reply", input: { text: "ok" } }],
-      usage: { inputTokens: 3, outputTokens: 2 },
+      usage: { inputTokens: 3, outputTokens: 2, cachedInputTokens: 1 },
+      model: "accounts/fireworks/models/kimi-k2p6",
     });
   });
 
@@ -60,6 +74,7 @@ describe("createProvider", () => {
         { type: "text", text: "thinking" },
         { type: "tool_use", id: "tu1", name: "reply", input: { text: "ok" } },
       ],
+      usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 30, cache_creation_input_tokens: 5 },
     });
     const res = createProvider(
       {
@@ -83,6 +98,8 @@ describe("createProvider", () => {
     expect(body.messages[2]).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "Sent." }] });
     expect(out.text).toBe("thinking");
     expect(out.toolCalls).toEqual([{ id: "tu1", name: "reply", input: { text: "ok" } }]);
+    // Cache reads and writes are folded into the input count.
+    expect(out.usage).toEqual({ inputTokens: 45, outputTokens: 4, cachedInputTokens: 30 });
   });
 });
 
@@ -157,5 +174,49 @@ describe("runLoop", () => {
       maxSteps: 2,
     });
     expect(capped).toMatchObject({ steps: 2, stopped: "max_steps" });
+  });
+});
+
+describe("pricing", () => {
+  it("finds prices by exact id, bare id and longest prefix", () => {
+    const prices = { ...DEFAULT_PRICES, "kimi-k2p6": { input: 0.6, output: 2.5 } };
+    expect(priceFor("claude-opus-5-5", prices)).toEqual(DEFAULT_PRICES["claude-opus-5-5"]);
+    expect(priceFor("accounts/fireworks/models/kimi-k2p6", prices)).toEqual({ input: 0.6, output: 2.5 });
+    expect(priceFor("claude-sonnet-5-5-20261001", prices)).toEqual(DEFAULT_PRICES["claude-sonnet-5-5"]);
+    expect(priceFor("firerouter/opus", prices)).toBeNull();
+  });
+
+  it("charges cached input at the cache rate, in micro-dollars", () => {
+    // 1M uncached input at $4 + 1M cached at $0.20 + 0.5M output at $20 = $14.20
+    const usage = { inputTokens: 2_000_000, cachedInputTokens: 1_000_000, outputTokens: 500_000 };
+    expect(costMicros(usage, { input: 4, output: 20, cachedInput: 0.2 })).toBe(14_200_000);
+    expect(costMicros({ inputTokens: 1000, outputTokens: 0 }, { input: 1, output: 1 })).toBe(1000);
+  });
+
+  it("reads LLM_PRICES and ignores malformed entries", () => {
+    expect(parsePrices('{"a": {"input": 1, "output": 2}, "b": {"input": "x"}}')).toEqual({
+      a: { input: 1, output: 2, cachedInput: undefined },
+    });
+    expect(parsePrices("not json")).toEqual({});
+  });
+});
+
+describe("metered", () => {
+  it("reports each call and never fails the call when recording does", async () => {
+    const seen: CallRecord[] = [];
+    const inner = scripted([
+      { text: "a", toolCalls: [], usage: { inputTokens: 5, outputTokens: 1 }, model: "routed-model" },
+      { text: "b", toolCalls: [] },
+    ]);
+    const provider = metered(inner, (call) => {
+      seen.push(call);
+      if (seen.length === 2) throw new Error("db down");
+    });
+    expect((await provider.chat(request)).text).toBe("a");
+    expect((await provider.chat(request)).text).toBe("b");
+    expect(seen.map((c) => [c.servedModel, c.usage.inputTokens])).toEqual([
+      ["routed-model", 5],
+      [null, 0],
+    ]);
   });
 });

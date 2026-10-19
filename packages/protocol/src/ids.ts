@@ -4,6 +4,7 @@ export const ID_PREFIXES = {
   message: "cmsg",
   thread: "thr",
   project: "proj",
+  usage: "use",
   task: "task",
 } as const;
 

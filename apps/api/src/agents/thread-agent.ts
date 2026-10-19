@@ -12,6 +12,7 @@ import {
 import { Agent, getAgentByName } from "agents";
 import { createProvider, runLoop, taskModel } from "../llm";
 import { normalizeRepoUrl, repoToken, sandboxBackend } from "../sandbox/backend";
+import { meteredForTurn } from "../usage";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
@@ -140,8 +141,15 @@ export class ThreadAgent extends Agent<Env> {
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
+      // Bill the turn to the newest person in the thread, else whoever asked in the root message.
+      const requester = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
       await runLoop({
-        provider: llm.provider,
+        provider: meteredForTurn(llm.provider, this.env, {
+          projectId,
+          threadId,
+          userId: requester.authorKind === "user" ? requester.authorId : null,
+          agent: "thread",
+        }),
         system: THREAD_SYSTEM,
         prompt: threadPrompt({ ...ctx, brief: this.getMeta("brief") ?? "", lastSeenSeq, notes, tasks: renderTasks(tasks) }),
         tools: threadTools({

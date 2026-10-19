@@ -14,6 +14,7 @@ import { Agent, type Connection, type ConnectionContext, getAgentByName } from "
 import { eq } from "drizzle-orm";
 import { createProvider, runLoop } from "../llm";
 import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
+import { meteredForTurn } from "../usage";
 import { COORDINATOR_ID, SYSTEM_ID } from "./names";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
@@ -321,7 +322,12 @@ export class ProjectAgent extends Agent<Env> {
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
       await runLoop({
-        provider: llm.provider,
+        provider: meteredForTurn(llm.provider, this.env, {
+          projectId: this.name,
+          threadId: null,
+          userId: this.turnRequester(inbox),
+          agent: "coordinator",
+        }),
         system: COORDINATOR_SYSTEM,
         prompt: coordinatorPrompt({ projectName, names, chat, threads: this.listThreads(), inbox }),
         tools: coordinatorTools(this.coordinatorHost()),
@@ -338,6 +344,15 @@ export class ProjectAgent extends Agent<Env> {
     } finally {
       this.setActivity(null, false);
     }
+  }
+
+  /** The person whose message this coordinator turn answers, for usage attribution. */
+  private turnRequester(inbox: InboxItem[]): string | null {
+    for (const item of inbox) {
+      const m = item.kind === "message" ? this.getMessage(item.messageId) : null;
+      if (m?.authorKind === "user") return m.authorId;
+    }
+    return null;
   }
 
   private coordinatorHost(): CoordinatorHost {
