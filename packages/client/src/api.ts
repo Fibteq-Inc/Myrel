@@ -1,4 +1,22 @@
-import type { CreateProjectInput, Member, Message, Project, UsageSummary } from "@altair/protocol";
+import type {
+  AdminSettings,
+  ApiKey,
+  CreateApiKeyInput,
+  CreateInviteInput,
+  CreateProjectInput,
+  Invite,
+  Me,
+  Member,
+  Message,
+  Project,
+  ProjectRole,
+  ProjectSettings,
+  ProviderId,
+  ProviderInfo,
+  UpdateAdminSettingsInput,
+  UpdateProjectSettingsInput,
+  UsageSummary,
+} from "@altair/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
@@ -96,6 +114,102 @@ export class ApiClient {
     return (await this.request<{ members: Member[] }>(`/api/projects/${encodeURIComponent(projectId)}/members`)).members;
   }
 
+  async getProjectSettings(projectId: string) {
+    return (await this.request<{ settings: ProjectSettings }>(`${projectPath(projectId)}/settings`)).settings;
+  }
+
+  async updateProjectSettings(projectId: string, input: UpdateProjectSettingsInput) {
+    return (
+      await this.request<{ settings: ProjectSettings }>(`${projectPath(projectId)}/settings`, {
+        method: "PATCH",
+        body: input,
+      })
+    ).settings;
+  }
+
+  async updateMemberRole(projectId: string, userId: string, role: ProjectRole) {
+    await this.request(`${projectPath(projectId)}/members/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: { role },
+    });
+  }
+
+  /** Removes a member; pass your own id to leave the project. */
+  async removeMember(projectId: string, userId: string) {
+    await this.request(`${projectPath(projectId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  }
+
+  async listProjectInvites(projectId: string) {
+    return (await this.request<{ invites: Invite[] }>(`${projectPath(projectId)}/invites`)).invites;
+  }
+
+  async invite(projectId: string, input: CreateInviteInput) {
+    return (await this.request<{ invite: Invite }>(`${projectPath(projectId)}/invites`, { method: "POST", body: input }))
+      .invite;
+  }
+
+  async revokeInvite(projectId: string, inviteId: string) {
+    await this.request(`${projectPath(projectId)}/invites/${encodeURIComponent(inviteId)}`, { method: "DELETE" });
+  }
+
+  // --- account ---
+
+  async getMe() {
+    return (await this.request<{ user: Me }>("/api/account")).user;
+  }
+
+  /** Better Auth endpoint. */
+  async updateProfile(input: { name: string }) {
+    await this.request("/api/auth/update-user", { method: "POST", body: input });
+  }
+
+  /** Better Auth endpoint. */
+  async changePassword(input: { currentPassword: string; newPassword: string }) {
+    await this.request("/api/auth/change-password", { method: "POST", body: { ...input, revokeOtherSessions: true } });
+  }
+
+  listProviders() {
+    return this.request<{ providers: ProviderInfo[]; serverDefault: ProviderId }>("/api/account/providers");
+  }
+
+  async listKeys() {
+    return (await this.request<{ keys: ApiKey[] }>("/api/account/keys")).keys;
+  }
+
+  async addKey(input: CreateApiKeyInput) {
+    return (await this.request<{ key: ApiKey }>("/api/account/keys", { method: "POST", body: input })).key;
+  }
+
+  async deleteKey(id: string) {
+    await this.request(`/api/account/keys/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async listMyInvites() {
+    return (await this.request<{ invites: Invite[] }>("/api/account/invites")).invites;
+  }
+
+  async acceptInvite(id: string) {
+    return this.request<{ projectId: string }>(`/api/account/invites/${encodeURIComponent(id)}/accept`, {
+      method: "POST",
+      body: {},
+    });
+  }
+
+  async declineInvite(id: string) {
+    await this.request(`/api/account/invites/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  // --- server administration ---
+
+  async getAdminSettings() {
+    return (await this.request<{ settings: AdminSettings }>("/api/admin/settings")).settings;
+  }
+
+  async updateAdminSettings(input: UpdateAdminSettingsInput) {
+    return (await this.request<{ settings: AdminSettings }>("/api/admin/settings", { method: "PATCH", body: input }))
+      .settings;
+  }
+
   getMessages(projectId: string, afterSeq = 0) {
     return this.request<{ messages: Message[]; hasMore: boolean }>(
       `/api/projects/${encodeURIComponent(projectId)}/messages?after=${afterSeq}`,
@@ -119,4 +233,8 @@ export class ApiClient {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
     return `${origin}/api/projects/${encodeURIComponent(projectId)}/ws${query}`;
   }
+}
+
+function projectPath(id: string) {
+  return `/api/projects/${encodeURIComponent(id)}`;
 }
