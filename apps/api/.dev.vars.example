@@ -1,0 +1,4 @@
+BETTER_AUTH_SECRET=change-me-to-a-long-random-string
+# Vite dev server proxies /api to wrangler dev, so the browser origin is :5173.
+BETTER_AUTH_URL=http://localhost:5173
+TRUSTED_ORIGINS=http://localhost:5173
