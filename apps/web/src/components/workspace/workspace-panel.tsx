@@ -1,5 +1,5 @@
 import type { Thread } from "@altair/protocol";
-import { FileText, GitCompareArrows, type LucideIcon, SquareTerminal } from "lucide-react";
+import { FileText, GitCompareArrows, type LucideIcon, SquareTerminal, X } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { cn } from "../../lib/ui";
 
@@ -51,18 +51,32 @@ export function defaultWorkspaceTabs(_thread: Thread): WorkspaceTab[] {
   ];
 }
 
-/** The right half of a thread: tabs over what the agent changed, ran and produced. */
+/**
+ * Tabs over what a thread changed, ran and produced. Pass `active` and
+ * `onActiveChange` to control the tab from outside, `onClose` for a close button.
+ */
 export function WorkspacePanel({
   tabs,
   status,
+  active: controlled,
+  onActiveChange,
+  onClose,
   className = "",
 }: {
   tabs: WorkspaceTab[];
   /** Shown at the right of the tab bar, e.g. which runner does the work. */
   status?: ReactNode;
+  active?: string;
+  onActiveChange?: (id: string) => void;
+  onClose?: () => void;
   className?: string;
 }) {
-  const [active, setActive] = useState(tabs[0]?.id);
+  const [uncontrolled, setUncontrolled] = useState(tabs[0]?.id);
+  const active = controlled ?? uncontrolled;
+  const setActive = (id: string) => {
+    setUncontrolled(id);
+    onActiveChange?.(id);
+  };
   const base = useId();
   const current = tabs.find((t) => t.id === active) ?? tabs[0];
 
@@ -102,6 +116,20 @@ export function WorkspacePanel({
           })}
         </div>
         {status && <div className="ml-auto flex flex-none items-center gap-1.5 pl-3 text-xs text-subtle">{status}</div>}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close workspace"
+            title="Close workspace"
+            className={cn(
+              "flex size-8 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg",
+              !status && "ml-auto",
+            )}
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
       {current && (
         <div
