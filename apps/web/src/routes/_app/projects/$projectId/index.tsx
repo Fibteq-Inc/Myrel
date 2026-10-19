@@ -72,7 +72,9 @@ function ProjectChat() {
                 reactions={state.reactions[m.id]}
                 decision={{ answer: answers.get(m.id), onChoose: (label) => send(label) }}
               >
-                <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
+                {m.artifacts?.length ? (
+                  <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
+                ) : null}
                 {thread && (
                   <ThreadCard projectId={project.id} thread={thread} replies={threadMessages(state, thread.id).length} />
                 )}

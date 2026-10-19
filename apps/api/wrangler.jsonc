@@ -74,8 +74,9 @@
   // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID,
   // GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET.
   //
-  // Artifacts. ARTIFACTS_URL: origin of the artifact Worker, e.g. https://altair-usercontent.dev.
-  // It must be a different site from the app (not a subdomain of it). Empty = artifacts are
+  // Artifacts. ARTIFACTS_URL: origin of the artifact Worker, e.g. its workers.dev address or a
+  // domain of its own. It must be a different site from the app (not a subdomain of the app's
+  // domain); a workers.dev address always is. Self-hosting: set your artifact Worker's origin. Empty = artifacts are
   // published and listed but cannot be opened. ARTIFACT_SIGNING_SECRET (secret): shared with
   // the artifact Worker, which only serves links signed with it.
   "vars": {
@@ -88,6 +89,6 @@
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
-    "ARTIFACTS_URL": ""
+    "ARTIFACTS_URL": "https://altair-artifacts.fibteq.workers.dev"
   }
 }

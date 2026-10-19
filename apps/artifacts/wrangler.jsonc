@@ -13,9 +13,10 @@
 
   // ARTIFACT_SIGNING_SECRET (secret, required): the same value as on the API Worker. Links the
   // API signs are the only thing this Worker serves.
-  // APP_ORIGINS: comma-separated origins allowed to frame artifacts, e.g. https://altair.example.com.
+  // APP_ORIGINS: comma-separated origins allowed to frame artifacts (the app's origin).
   // Empty = any origin (links are still signed and short-lived). Desktop app origins are always allowed.
+  // Self-hosting: set your own app's origin here.
   "vars": {
-    "APP_ORIGINS": ""
+    "APP_ORIGINS": "https://altair.fibteq.io"
   }
 }

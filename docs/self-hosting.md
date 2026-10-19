@@ -179,7 +179,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
-| `ARTIFACTS_URL` | empty | Origin of the artifact Worker, for example `https://altair-usercontent.dev`. Empty turns artifact previews off. |
+| `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://altair-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
 
 ### Bindings
 
@@ -221,8 +221,10 @@ immutable version in the `altair-artifacts` R2 bucket
 (`artifacts/{id}/v{n}/index.html`); the app's address for an artifact stays the
 same and opens the latest version. Artifacts are untrusted HTML, so a second
 Worker, `altair-artifacts` (`apps/artifacts`), serves them from **a different
-site** than the app (for example `altair-usercontent.dev` next to
-`altair.example.com`, never a subdomain of it). It sends a strict CSP that
+site** than the app: its own `workers.dev` address
+(`https://altair-artifacts.<your-subdomain>.workers.dev`) works, as does a
+separate domain such as `altair-usercontent.dev`, but never a subdomain of the
+app's domain. It sends a strict CSP that
 sandboxes each page into an opaque origin, and it only serves links the API
 signed within the last hour.
 
@@ -241,10 +243,12 @@ signed within the last hour.
    | Deploy command | `pnpm run deploy:artifacts` |
    | Non-production branch deploy command | `pnpm run deploy:artifacts:preview` |
 
-4. Attach a domain to `altair-artifacts` under **Settings → Domains & Routes**.
+4. Optionally attach a separate domain to `altair-artifacts` under
+   **Settings → Domains & Routes**; otherwise use its `workers.dev` address.
 5. Set `ARTIFACTS_URL` in `apps/api/wrangler.jsonc` to that origin, and
    `APP_ORIGINS` in `apps/artifacts/wrangler.jsonc` to the app's origin (only
-   those pages may frame artifacts; empty allows any).
+   those pages may frame artifacts; empty allows any). The values in the repo
+   are Fibteq's own deployment; replace them with yours.
 
 Without `ARTIFACTS_URL`, artifacts are still published, listed and readable as
 code, but the preview stays off. Locally, `pnpm dev` runs the artifact Worker

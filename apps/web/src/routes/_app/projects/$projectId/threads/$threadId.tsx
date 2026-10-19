@@ -54,9 +54,11 @@ function ThreadView() {
   const [panelOpen, setPanelOpen] = useState(readPanelPref);
   const [mobileView, setMobileView] = useState<"messages" | "workspace">("messages");
 
-  // Opening an artifact brings the workspace into view.
+  // Opening an artifact brings the workspace into view, on its Outputs tab.
+  const [opened, setOpened] = useState(0);
   useEffect(() => {
     if (!openArtifact) return;
+    setOpened((n) => n + 1);
     setPanelOpen(true);
     if (!window.matchMedia("(min-width: 1024px)").matches) setMobileView("workspace");
   }, [openArtifact]);
@@ -193,13 +195,15 @@ function ThreadView() {
                   reactions={state.reactions[m.id]}
                   decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
                 >
-                  <ArtifactCards
-                    projectId={project.id}
-                    threadId={thread.id}
-                    refs={m.artifacts}
-                    artifacts={state.artifacts}
-                    openId={openArtifact}
-                  />
+                  {m.artifacts?.length ? (
+                    <ArtifactCards
+                      projectId={project.id}
+                      threadId={thread.id}
+                      refs={m.artifacts}
+                      artifacts={state.artifacts}
+                      openId={openArtifact}
+                    />
+                  ) : null}
                 </MessageView>
               ))}
               {active && <Thinking label={state.progress[thread.id] ?? (working ? "Working" : "Thinking")} />}
@@ -217,9 +221,9 @@ function ThreadView() {
         </section>
 
         <WorkspacePanel
-          key={`${thread.id}-${openArtifact ?? ""}`}
+          key={`${thread.id}-${opened}`}
           tabs={tabs}
-          initialTab={openArtifact ? "outputs" : undefined}
+          initialTab={opened > 0 ? "outputs" : undefined}
           className={cn("flex-1", mobileView === "workspace" ? "flex" : "hidden", panelOpen ? "lg:flex" : "lg:hidden")}
         />
       </div>
