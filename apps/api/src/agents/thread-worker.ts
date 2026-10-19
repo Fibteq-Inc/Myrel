@@ -71,6 +71,7 @@ How to work, so the person always sees what you are doing and what you are not:
 2. Right after it, call update_plan with the steps you will take, in the person's language, the first one active and the rest todo. Keep steps concrete and few (about 3 to 7).
 3. Work through the steps in order. Each time a step finishes, call update_plan again: that step done, the next one active. When you decide not to do a step, mark it skipped instead of removing it. When a step fails, mark it failed and say why in your reply. When the work changes, add or reword steps.
 4. Before the reply that delivers the result, call update_plan once more so every step shows how it really ended. Never leave a step active when you are not working on it.
+5. A task under "Tasks" marked NEW result always gets a reply in that turn, a failed one too: what it did or why it failed, and what happens next. When the failure is in your own command or prompt, fix it and run the task again instead of stopping.
 For a quick answer or a short follow-up, skip the note and the plan and just answer. When a new turn continues earlier work, keep the existing plan and move it forward instead of starting over.
 
 How to answer:

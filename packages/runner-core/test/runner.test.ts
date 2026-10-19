@@ -15,6 +15,7 @@ import {
   reduceTask,
   renderChecklist,
   type RunnerEvent,
+  SETUP_NOTE,
   shell,
   taskBranch,
   taskEnv,
@@ -106,6 +107,13 @@ describe("progress", () => {
         "  ✱ Fix it",
         "○ Open the pull request",
       ].join("\n"),
+    );
+  });
+
+  it("says when the sandbox is installing its tools", () => {
+    const p = reduceTask(emptyProgress(), { type: "phase", phase: "prepare", state: "started", detail: SETUP_NOTE });
+    expect(renderChecklist("Run", p, "tr").split("\n")[2]).toBe(
+      "✱ Sandbox açılıyor: araçlar kuruluyor, yalnızca ilk sefer (birkaç dakika)",
     );
   });
 
