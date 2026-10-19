@@ -229,8 +229,8 @@ export const tr: Catalog = {
   "projectSettings.tasksDescription":
     "Thread ajanlarının kodu nerede çalıştıracağı: projenin yerel klasörünün olduğu bilgisayarda, oradaki kodlama CLI'ı ile ya da buluttaki bir sandbox'ta.",
   "projectSettings.runTasks": "Görevleri çalıştır",
-  "projectSettings.taskTarget.auto": "Otomatik: bilgisayar çevrimiçiyse orada, değilse bulutta",
-  "projectSettings.taskTarget.local": "Her zaman bilgisayarda",
+  "projectSettings.taskTarget.auto": "Otomatik: bulutta; projeye yerel klasör bağlanırsa ve bilgisayar açıksa orada",
+  "projectSettings.taskTarget.local": "Her zaman bilgisayarda (yerel klasör gerekir)",
   "projectSettings.taskTarget.cloud": "Her zaman bulutta",
   "members.title": "Üyeler",
   "members.description": "Sahipler ve yöneticiler üyeleri, davetleri ve ayarları yönetir.",
