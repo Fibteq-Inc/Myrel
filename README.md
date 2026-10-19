@@ -58,10 +58,15 @@ One-time setup:
    | Root directory | `/` |
    | Build command | `pnpm build:api` |
    | Deploy command | `pnpm run deploy` |
+   | Non-production branch deploy command | `pnpm run deploy:preview` |
 
-`pnpm run deploy` applies pending D1 migrations, then runs `wrangler deploy`.
+`pnpm run deploy` applies pending D1 migrations, then runs `wrangler deploy`. Other branches (pull requests) only upload a preview version with `wrangler versions upload`; previews share the production D1 database, so they never run migrations.
 
 Manual deploy from a laptop: `pnpm build:api && pnpm run deploy`.
+
+### Web UI on another origin
+
+The Worker serves the web app same-origin, using session cookies. To run the UI elsewhere (the desktop app, a separate domain), build it with `VITE_API_URL=https://<api-origin>`. It then uses bearer tokens, and the API must allow its origin through `TRUSTED_ORIGINS`; the desktop app origins are always allowed.
 
 ## License
 

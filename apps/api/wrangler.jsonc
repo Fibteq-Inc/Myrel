@@ -36,6 +36,7 @@
   // Set with `wrangler secret put` (or .dev.vars locally).
   "secrets": { "required": ["BETTER_AUTH_SECRET"] },
   // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
-  // TRUSTED_ORIGINS: extra comma-separated origins allowed to call /api/auth.
+  // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
+  // (the desktop app origins are always allowed, see src/origins.ts).
   "vars": { "BETTER_AUTH_URL": "", "TRUSTED_ORIGINS": "" }
 }

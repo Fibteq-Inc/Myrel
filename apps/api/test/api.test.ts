@@ -125,3 +125,23 @@ describe("ProjectAgent", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("cors", () => {
+  it("allows the desktop app origin and exposes the auth token header", async () => {
+    const res = await api("/api/health", { headers: { origin: "tauri://localhost" } });
+    expect(res.headers.get("access-control-allow-origin")).toBe("tauri://localhost");
+    expect(res.headers.get("access-control-expose-headers")).toContain("set-auth-token");
+
+    const preflight = await api("/api/projects", {
+      method: "OPTIONS",
+      headers: { origin: "http://tauri.localhost", "access-control-request-method": "POST" },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("http://tauri.localhost");
+  });
+
+  it("does not allow unknown origins", async () => {
+    const res = await api("/api/health", { headers: { origin: "https://evil.example" } });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
