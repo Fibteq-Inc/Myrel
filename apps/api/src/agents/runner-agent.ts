@@ -2,15 +2,25 @@ import { createDb, schema } from "@altair/db";
 import {
   type CliId,
   RUNNER_PROTOCOL_VERSION,
+  type RunnerDirListing,
+  type RunnerFolder,
   RunnerToServer,
   type ServerToRunner,
 } from "@altair/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { notifyRunnerProjects, RUNNER_ID_HEADER } from "../runners";
+import { notifyRunnerProjects, parseInfo, RUNNER_ID_HEADER } from "../runners";
 
 export type TaskStart = { taskId: string; projectId: string; threadId: string; folder: string; cli: CliId; prompt: string };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
+export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
+
+/** How long the web app waits for the computer to answer a folder request. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+type Answer = Extract<RunnerToServer, { requestId: string }>;
+type Question = Extract<ServerToRunner, { requestId: string }>;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 type TaskRow = {
   id: string;
@@ -27,6 +37,9 @@ type TaskRow = {
  */
 export class RunnerAgent extends Agent<Env> {
   static override options = { sendIdentityOnConnect: false };
+
+  /** Folder requests waiting for the computer's answer. In memory: they only live for a few seconds. */
+  private readonly waiting = new Map<string, (answer: Answer) => void>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -103,6 +116,15 @@ export class RunnerAgent extends Agent<Env> {
         if (task?.status === "running") await this.finish(task, frame.ok, frame.result);
         return;
       }
+      case "folders":
+        // Saved now, so the web app sees the change as soon as its request returns.
+        await this.saveFolders(frame.folders);
+        this.waiting.get(frame.requestId)?.(frame);
+        return;
+      case "dirs":
+      case "request.failed":
+        this.waiting.get(frame.requestId)?.(frame);
+        return;
     }
   }
 
@@ -140,12 +162,68 @@ export class RunnerAgent extends Agent<Env> {
     return { ok: true };
   }
 
+  /** The folders inside `path` on the computer (its home folder when absent). Callable over RPC. */
+  async listDirs(path?: string): Promise<RunnerResult<{ listing: RunnerDirListing }>> {
+    const answer = await this.ask({ type: "dirs.list", path });
+    if (answer.ok === false) return answer;
+    if (answer.type !== "dirs") return { ok: false, reason: "Unexpected answer from the computer." };
+    const { type: _t, requestId: _r, ...listing } = answer;
+    return { ok: true, listing };
+  }
+
+  /** Shares or stops sharing a folder on the computer. Callable over RPC. */
+  async setShared(path: string, shared: boolean): Promise<RunnerResult<{ folders: RunnerFolder[] }>> {
+    const answer = await this.ask({ type: shared ? "folder.share" : "folder.unshare", path });
+    if (answer.ok === false) return answer;
+    if (answer.type !== "folders") return { ok: false, reason: "Unexpected answer from the computer." };
+    await notifyRunnerProjects(this.env, this.name);
+    return { ok: true, folders: answer.folders };
+  }
+
   /** Stops every task and closes the connection, e.g. when the runner is removed. Callable over RPC. */
   async revoke(): Promise<void> {
     for (const task of this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running'`) {
       await this.finish(task, false, "The computer was disconnected from Altair.");
     }
     for (const c of this.getConnections()) c.close(4401, "runner removed");
+  }
+
+  /** Sends a folder request to the computer and waits for its answer. */
+  private async ask(
+    question: DistributiveOmit<Question, "requestId">,
+  ): Promise<{ ok: false; reason: string } | (Answer & { ok?: undefined })> {
+    const [connection] = this.getConnections();
+    if (!connection) return { ok: false, reason: "The computer is offline. Start altair-runner on it first." };
+    const [row] = await createDb(this.env.DB)
+      .select({ info: schema.runners.info })
+      .from(schema.runners)
+      .where(eq(schema.runners.id, this.name));
+    if (!parseInfo(row?.info ?? null)?.features.includes("folders")) {
+      return { ok: false, reason: "Update altair-runner on this computer to add folders from here (npx altair-runner@latest)." };
+    }
+    const requestId = crypto.randomUUID();
+    const answer = await new Promise<Answer | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), REQUEST_TIMEOUT_MS);
+      this.waiting.set(requestId, (a) => {
+        clearTimeout(timer);
+        resolve(a);
+      });
+      send(connection, { ...question, requestId } as Question);
+    }).finally(() => this.waiting.delete(requestId));
+    if (!answer) return { ok: false, reason: "The computer did not answer in time." };
+    if (answer.type === "request.failed") return { ok: false, reason: answer.message };
+    return answer;
+  }
+
+  private async saveFolders(folders: RunnerFolder[]) {
+    const db = createDb(this.env.DB);
+    const [row] = await db.select({ info: schema.runners.info }).from(schema.runners).where(eq(schema.runners.id, this.name));
+    const info = parseInfo(row?.info ?? null);
+    if (!info) return;
+    await db
+      .update(schema.runners)
+      .set({ info: JSON.stringify({ ...info, folders }) })
+      .where(eq(schema.runners.id, this.name));
   }
 
   private async finish(task: TaskRow, ok: boolean, result: string) {

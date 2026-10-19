@@ -43,7 +43,7 @@ async function pair(user: string) {
 }
 
 /** Plays the altair-runner side of the WebSocket. */
-async function connectRunner(token: string) {
+async function connectRunner(token: string, features: string[] = []) {
   const res = await api("/api/runner/connect", { token, headers: { upgrade: "websocket" } });
   expect(res.status).toBe(101);
   const ws = res.webSocket!;
@@ -61,6 +61,7 @@ async function connectRunner(token: string) {
     platform: "darwin",
     folders: [{ path: "/Users/ismail/code/altair", name: "altair" }],
     clis: [{ id: "claude", version: "2.1.0" }],
+    features,
     running: [],
   });
   return { ws, frames, send };
@@ -133,6 +134,80 @@ describe("local workspace", () => {
     expect((await api(`/api/runners/${runner.id}`, { method: "DELETE", token: user })).status).toBe(200);
     expect(await get()).toBeNull();
     expect((await api("/api/runner/connect", { token, headers: { upgrade: "websocket" } })).status).toBe(401);
+  });
+
+  it("browses and shares the computer's folders from the web app", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const dirs = (path = "") => api(`/api/runners/${runner.id}/dirs?path=${encodeURIComponent(path)}`, { token: user });
+    const share = (path: string, as = user) =>
+      api(`/api/runners/${runner.id}/folders`, { method: "POST", token: as, body: JSON.stringify({ path }) });
+    const unshare = (path: string) =>
+      api(`/api/runners/${runner.id}/folders?path=${encodeURIComponent(path)}`, { method: "DELETE", token: user });
+    const failure = async (res: Response) => ({ status: res.status, ...((await res.json()) as { message?: string }) });
+
+    expect(await failure(await dirs())).toMatchObject({ status: 409, message: expect.stringContaining("offline") });
+
+    // A runner from before this feature is asked to update instead of being sent frames it does not know.
+    const old = await connectRunner(token);
+    await until(async () => (await listRunners(user)).find((r) => r.online && r.folders.length), "hello");
+    expect(await failure(await dirs())).toMatchObject({ status: 409, message: expect.stringContaining("Update altair-runner") });
+    old.ws.close();
+
+    const { ws, frames, send } = await connectRunner(token, ["folders", "from-the-future"]);
+    let folders = [{ path: "/Users/ismail/code/altair", name: "altair" }];
+    ws.addEventListener("message", (e) => {
+      const frame = JSON.parse(e.data as string) as ServerToRunner;
+      if (frame.type === "dirs.list") {
+        if (frame.path === "/nope") return send({ type: "request.failed", requestId: frame.requestId, message: "/nope does not exist" });
+        send({
+          type: "dirs",
+          requestId: frame.requestId,
+          path: frame.path ?? "/Users/ismail",
+          parent: "/Users",
+          home: "/Users/ismail",
+          dirs: [{ name: "code", path: "/Users/ismail/code" }],
+        });
+      }
+      if (frame.type === "folder.share") {
+        folders = [...folders, { path: frame.path, name: frame.path.split("/").at(-1)! }];
+        send({ type: "folders", requestId: frame.requestId, folders });
+      }
+      if (frame.type === "folder.unshare") {
+        folders = folders.filter((f) => f.path !== frame.path);
+        send({ type: "folders", requestId: frame.requestId, folders });
+      }
+    });
+    await until(() => frames.find((f) => f.type === "welcome"), "welcome");
+    expect(await until(async () => (await listRunners(user)).find((r) => r.features.includes("folders")), "features")).toMatchObject({
+      features: ["folders"],
+    });
+
+    const listing = await dirs();
+    expect(listing.status).toBe(200);
+    expect(await listing.json()).toEqual({
+      path: "/Users/ismail",
+      parent: "/Users",
+      home: "/Users/ismail",
+      dirs: [{ name: "code", path: "/Users/ismail/code" }],
+    });
+    expect(await failure(await dirs("/nope"))).toMatchObject({ status: 409, message: "/nope does not exist" });
+
+    // Only the computer's owner can browse or share.
+    expect((await share("/Users/ismail/code/site", await signUp())).status).toBe(404);
+    expect((await share("/Users/ismail/code/site")).status).toBe(200);
+    const [after] = await listRunners(user);
+    expect(after!.folders.map((f) => f.path)).toEqual(["/Users/ismail/code/altair", "/Users/ismail/code/site"]);
+
+    // Stopping sharing a folder takes it away from projects working in it.
+    const project = await createProject(user);
+    const body = JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/site", cli: "claude" });
+    expect((await api(`/api/projects/${project.id}/workspace`, { method: "PUT", token: user, body })).status).toBe(200);
+    expect((await unshare("/Users/ismail/code/site")).status).toBe(200);
+    const workspace = await api(`/api/projects/${project.id}/workspace`, { token: user });
+    expect(((await workspace.json()) as { workspace: unknown }).workspace).toBeNull();
+    expect((await listRunners(user))[0]!.folders.map((f) => f.path)).toEqual(["/Users/ismail/code/altair"]);
+    ws.close();
   });
 
   it("lets the thread agent run a task on the computer and answer with its result", async () => {

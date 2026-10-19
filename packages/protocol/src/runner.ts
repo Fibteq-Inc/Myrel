@@ -33,6 +33,13 @@ export type RunnerFolder = z.infer<typeof RunnerFolder>;
 export const RunnerCli = z.object({ id: CliId, version: z.string().max(200).nullable() });
 export type RunnerCli = z.infer<typeof RunnerCli>;
 
+/**
+ * Optional abilities a runner announces in hello, so the server only asks
+ * what that version can do. "folders": browse and share folders from the web app.
+ */
+export const RunnerFeature = z.enum(["folders"]);
+export type RunnerFeature = z.infer<typeof RunnerFeature>;
+
 /** What the runner last told the server about the computer. */
 export const RunnerInfo = z.object({
   version: z.string().max(50),
@@ -40,10 +47,34 @@ export const RunnerInfo = z.object({
   platform: z.string().max(50),
   folders: z.array(RunnerFolder).max(200),
   clis: z.array(RunnerCli).max(10),
+  /** Unknown features from newer runners are dropped, not refused. */
+  features: z
+    .array(z.string().max(50))
+    .max(20)
+    .default([])
+    .transform((all) => all.filter((f): f is RunnerFeature => RunnerFeature.safeParse(f).success)),
 });
 export type RunnerInfo = z.infer<typeof RunnerInfo>;
 
 const MAX_TASK_TEXT = 100_000;
+
+/** Ties a runner's answer to the server's request. */
+export const RunnerRequestId = z.string().min(1).max(64);
+
+/** A folder inside the one being browsed. */
+export const RunnerDir = z.object({ name: z.string().max(255), path: z.string().max(1024) });
+export type RunnerDir = z.infer<typeof RunnerDir>;
+
+/** One level of the computer's folders, as shown in the folder picker. */
+export const RunnerDirListing = z.object({
+  path: z.string().max(1024),
+  /** null at the top (the filesystem root). */
+  parent: z.string().max(1024).nullable(),
+  /** The user's home folder, where browsing starts. */
+  home: z.string().max(1024),
+  dirs: z.array(RunnerDir).max(1000),
+});
+export type RunnerDirListing = z.infer<typeof RunnerDirListing>;
 
 /** Frames the runner sends. */
 export const RunnerToServer = z.discriminatedUnion("type", [
@@ -63,6 +94,10 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     result: z.string().max(MAX_TASK_TEXT),
   }),
   z.object({ type: z.literal("ping") }),
+  // Answers to the server's folder requests (feature "folders").
+  RunnerDirListing.extend({ type: z.literal("dirs"), requestId: RunnerRequestId }),
+  z.object({ type: z.literal("folders"), requestId: RunnerRequestId, folders: z.array(RunnerFolder).max(200) }),
+  z.object({ type: z.literal("request.failed"), requestId: RunnerRequestId, message: z.string().max(500) }),
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServer>;
 
@@ -80,6 +115,11 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
   }),
   z.object({ type: z.literal("pong") }),
+  /** List the folders inside `path` (the home folder when absent). Answered with "dirs". */
+  z.object({ type: z.literal("dirs.list"), requestId: RunnerRequestId, path: z.string().max(1024).optional() }),
+  /** Share or stop sharing a folder, as asked in the web app. Answered with "folders". */
+  z.object({ type: z.literal("folder.share"), requestId: RunnerRequestId, path: z.string().min(1).max(1024) }),
+  z.object({ type: z.literal("folder.unshare"), requestId: RunnerRequestId, path: z.string().min(1).max(1024) }),
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunner>;
 
@@ -127,6 +167,10 @@ export const ProjectWorkspace = z.object({
   online: z.boolean(),
 });
 export type ProjectWorkspace = z.infer<typeof ProjectWorkspace>;
+
+/** Share or stop sharing a folder on one of your computers. */
+export const RunnerFolderInput = z.object({ path: z.string().trim().min(1).max(1024) });
+export type RunnerFolderInput = z.infer<typeof RunnerFolderInput>;
 
 export const SetWorkspaceInput = z.object({
   runnerId: RunnerId,

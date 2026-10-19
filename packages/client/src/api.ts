@@ -23,6 +23,8 @@ import type {
   ProviderInfo,
   PutMemoryInput,
   Runner,
+  RunnerDirListing,
+  RunnerFolder,
   RunnerPairingCode,
   SetWorkspaceInput,
   UpdateAdminSettingsInput,
@@ -356,6 +358,27 @@ export class ApiClient {
 
   removeRunner(id: string) {
     return this.request<{ ok: true }>(`/api/runners/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** Folders inside `path` on one of your computers (its home folder when absent). */
+  listRunnerDirs(id: string, path?: string) {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.request<RunnerDirListing>(`/api/runners/${encodeURIComponent(id)}/dirs${query}`);
+  }
+
+  /** Shares a folder on one of your computers, so projects can work in it. */
+  async shareRunnerFolder(id: string, path: string) {
+    return (
+      await this.request<{ folders: RunnerFolder[] }>(`/api/runners/${encodeURIComponent(id)}/folders`, {
+        method: "POST",
+        body: { path },
+      })
+    ).folders;
+  }
+
+  async unshareRunnerFolder(id: string, path: string) {
+    const url = `/api/runners/${encodeURIComponent(id)}/folders?path=${encodeURIComponent(path)}`;
+    return (await this.request<{ folders: RunnerFolder[] }>(url, { method: "DELETE" })).folders;
   }
 
   async getWorkspace(projectId: string) {
