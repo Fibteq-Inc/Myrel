@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import type { AppEnv } from "./middleware";
+import { trustedOrigins } from "./origins";
 import { projectRoutes } from "./routes/projects";
 
 export { ProjectAgent } from "./agents/project-agent";
@@ -8,6 +10,15 @@ export { ThreadAgent } from "./agents/thread-agent";
 
 const app = new Hono<AppEnv>()
   .basePath("/api")
+  // Cross-origin clients (desktop app, a web UI on another domain) use bearer tokens.
+  .use("*", (c, next) =>
+    cors({
+      origin: trustedOrigins(c.env),
+      credentials: true,
+      allowHeaders: ["authorization", "content-type"],
+      exposeHeaders: ["set-auth-token"],
+    })(c, next),
+  )
   .get("/health", (c) => c.json({ ok: true }))
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
   .route("/projects", projectRoutes)

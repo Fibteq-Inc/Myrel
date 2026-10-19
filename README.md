@@ -63,6 +63,10 @@ One-time setup:
 
 Manual deploy from a laptop: `pnpm build:api && pnpm run deploy`.
 
+### Web UI on another origin
+
+The Worker serves the web app same-origin, using session cookies. To run the UI elsewhere (the desktop app, a separate domain), build it with `VITE_API_URL=https://<api-origin>`. It then uses bearer tokens, and the API must allow its origin through `TRUSTED_ORIGINS`; the desktop app origins are always allowed.
+
 ## License
 
 [AGPL-3.0](LICENSE)
