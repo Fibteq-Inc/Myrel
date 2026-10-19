@@ -68,6 +68,10 @@ Manual deploy from a laptop: `pnpm build:api && pnpm run deploy`.
 
 The Worker serves the web app same-origin, using session cookies. To run the UI elsewhere (the desktop app, a separate domain), build it with `VITE_API_URL=https://<api-origin>`. It then uses bearer tokens, and the API must allow its origin through `TRUSTED_ORIGINS`; the desktop app origins are always allowed.
 
+### Connecting apps to a self-hosted server
+
+The desktop and mobile apps are not tied to one server. On the sign-in screen the user enters any Altair address; the app checks `GET /api/info` (it must be an Altair server with the same API version) and keeps a separate sign-in per server. Set `INSTANCE_NAME` in `wrangler.jsonc` to name your deployment.
+
 ## License
 
 [AGPL-3.0](LICENSE)

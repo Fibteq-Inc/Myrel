@@ -1,18 +1,26 @@
-import { ApiClient, type Platform, webPlatform } from "@altair/client";
+import { ApiClient, currentServer, type Platform, saveServer, tokenStoreFor, webPlatform } from "@altair/client";
 import { QueryClient, queryOptions } from "@tanstack/react-query";
-
-/**
- * API origin. Empty = same origin (the Worker serves the web app). Set
- * VITE_API_URL when the UI runs elsewhere, e.g. inside the desktop app.
- */
-const apiUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
 // The desktop shell can inject its own platform (keychain, native dialogs) before the app boots.
 export const platform: Platform =
-  (globalThis as { __ALTAIR_PLATFORM__?: Platform }).__ALTAIR_PLATFORM__ ??
-  webPlatform({ crossOrigin: apiUrl !== "" && apiUrl !== globalThis.location?.origin });
+  (globalThis as { __ALTAIR_PLATFORM__?: Platform }).__ALTAIR_PLATFORM__ ?? webPlatform();
 
-export const api = new ApiClient({ baseUrl: apiUrl, tokens: platform.tokens });
+/**
+ * Server origin: the user's saved choice (desktop/mobile can point at any
+ * self-hosted Altair), else VITE_API_URL, else same origin ("").
+ */
+export const server = await currentServer(platform.storage, (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, ""));
+
+/** Apps that are not served by an Altair server let the user pick one. */
+export const canChooseServer = platform.name !== "web";
+
+export const api = new ApiClient({ baseUrl: server, tokens: tokenStoreFor(platform, server) });
+
+/** Switches to another server. The page reloads so every client and cache starts fresh. */
+export async function switchServer(origin: string) {
+  await saveServer(platform.storage, origin);
+  location.reload();
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: false } },

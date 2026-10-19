@@ -1,3 +1,4 @@
+import { API_VERSION, type ServerInfo } from "@altair/protocol";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
@@ -20,6 +21,15 @@ const app = new Hono<AppEnv>()
     })(c, next),
   )
   .get("/health", (c) => c.json({ ok: true }))
+  // Lets desktop and mobile apps check that an address is an Altair server they can talk to.
+  .get("/info", (c) =>
+    c.json({
+      app: "altair",
+      apiVersion: API_VERSION,
+      name: c.env.INSTANCE_NAME || "Altair",
+      auth: { emailPassword: true },
+    } satisfies ServerInfo),
+  )
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
   .route("/projects", projectRoutes)
   .notFound((c) => c.json({ error: "not_found" }, 404));

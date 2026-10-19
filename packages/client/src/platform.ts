@@ -1,5 +1,3 @@
-import type { TokenStore } from "./token-store";
-
 export type PlatformName = "web" | "desktop" | "mobile";
 
 /** Small persistent key/value store (localStorage, Tauri store, AsyncStorage). */
@@ -17,9 +15,9 @@ export type PickedFile = { name: string; type: string; size: number; blob: Blob 
  */
 export interface Platform {
   name: PlatformName;
-  /** Bearer token storage, or undefined to rely on same-origin cookies. */
-  tokens?: TokenStore;
   storage: KeyValueStore;
+  /** Storage for credentials (OS keychain); falls back to `storage` when absent. */
+  secrets?: KeyValueStore;
   notify(input: { title: string; body?: string }): void | Promise<void>;
   openExternal(url: string): void | Promise<void>;
   pickFiles(options?: { multiple?: boolean; accept?: string[] }): Promise<PickedFile[]>;
@@ -56,20 +54,11 @@ export function webStorage(prefix = "altair:"): KeyValueStore {
   };
 }
 
-export function storageTokenStore(storage: KeyValueStore, key = "token"): TokenStore {
-  return { get: () => storage.get(key), set: (token) => storage.set(key, token) };
-}
-
-/**
- * Browser platform. Same-origin deployments keep httpOnly session cookies (no
- * token in JS); a cross-origin API needs a bearer token, kept in localStorage.
- */
-export function webPlatform(options: { crossOrigin: boolean }): Platform {
-  const storage = webStorage();
+/** Browser platform. Bearer tokens for a cross-origin server live in localStorage (see `tokenStoreFor`). */
+export function webPlatform(): Platform {
   return {
     name: "web",
-    tokens: options.crossOrigin ? storageTokenStore(storage) : undefined,
-    storage,
+    storage: webStorage(),
     async notify({ title, body }) {
       if (typeof Notification === "undefined") return;
       if (Notification.permission === "default") await Notification.requestPermission();
