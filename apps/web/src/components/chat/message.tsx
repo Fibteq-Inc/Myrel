@@ -1,0 +1,115 @@
+import type { Message, Reaction } from "@altair/protocol";
+import { CircleAlert, LoaderCircle } from "lucide-react";
+import type { ReactNode } from "react";
+import { AltairMark, relativeTime } from "../../lib/ui";
+import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
+
+export type Names = Record<string, string>;
+
+/**
+ * One message, Claude style: people's messages as bubbles on the right,
+ * the assistant's as open text beside its mark, system notes as a banner.
+ * `children` renders under the message (e.g. its thread card).
+ */
+export function MessageView({
+  message,
+  me,
+  names,
+  reactions,
+  decision,
+  children,
+}: {
+  message: Message;
+  me: string;
+  names: Names;
+  reactions?: Reaction[];
+  decision?: DecisionHandlers;
+  children?: ReactNode;
+}) {
+  if (message.authorKind === "system") {
+    return (
+      <div className="flex items-start gap-2.5 rounded-xl border border-[#3b3218] bg-[#17150f] px-3.5 py-2.5 text-[13px] text-body">
+        <CircleAlert size={16} className="mt-0.5 flex-none text-warn" aria-hidden="true" />
+        <span className="whitespace-pre-wrap">{message.body}</span>
+      </div>
+    );
+  }
+
+  if (message.authorKind === "agent") {
+    return (
+      <div className="group flex gap-3.5">
+        <AltairMark size={28} />
+        <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
+          <MessageMarkdown body={message.body} decision={decision} />
+          {children}
+          <div className="-ml-1.5 -mt-1 flex items-center gap-1">
+            <Reactions reactions={reactions} />
+            <span className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+              <CopyButton text={message.body} label="Copy message" />
+              <time dateTime={message.createdAt} className="px-1 text-xs text-subtle">
+                {relativeTime(message.createdAt)}
+              </time>
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const mine = message.authorId === me;
+  return (
+    <div className="group flex flex-col items-end gap-1.5">
+      {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? "Member"}</span>}
+      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
+        {message.body}
+      </div>
+      <Reactions reactions={reactions} />
+      {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
+    </div>
+  );
+}
+
+function Reactions({ reactions }: { reactions?: Reaction[] }) {
+  if (!reactions?.length) return null;
+  const counts = new Map<string, number>();
+  for (const r of reactions) counts.set(r.emoji, (counts.get(r.emoji) ?? 0) + 1);
+  return (
+    <div className="flex gap-1">
+      {[...counts].map(([emoji, n]) => (
+        <span key={emoji} className="rounded-full border border-edge bg-raised px-2 py-0.5 text-xs">
+          {emoji}
+          {n > 1 && <span className="ml-1 text-subtle">{n}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function Thinking({ label = "Thinking" }: { label?: string }) {
+  return (
+    <div className="flex items-center gap-3.5" role="status">
+      <AltairMark size={28} />
+      <span className="flex items-center gap-2 text-[13px] text-subtle">
+        <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
+        {label}…
+      </span>
+    </div>
+  );
+}
+
+/**
+ * For each agent message, the first later message by a person in the same
+ * conversation: that is the answer to any decision card it carries.
+ */
+export function decisionAnswers(messages: Message[]): Map<string, string> {
+  const answers = new Map<string, string>();
+  let pending: string[] = [];
+  for (const m of messages) {
+    if (m.authorKind === "agent") pending.push(m.id);
+    else if (m.authorKind === "user") {
+      for (const id of pending) answers.set(id, m.body);
+      pending = [];
+    }
+  }
+  return answers;
+}
