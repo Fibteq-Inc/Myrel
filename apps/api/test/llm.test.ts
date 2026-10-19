@@ -43,7 +43,7 @@ describe("createProvider", () => {
     expect(f.calls[0]!.url).toBe("https://api.fireworks.ai/inference/v1/chat/completions");
     expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fw");
     const body = f.body();
-    expect(body.model).toBe("accounts/fireworks/models/kimi-k2p6");
+    expect(body.model).toBe("firerouter/opus");
     expect(body.messages.map((m: { role: string }) => m.role)).toEqual(["system", "user", "assistant", "tool"]);
     expect(body.messages[2].tool_calls[0].function).toEqual({ name: "reply", arguments: '{"text":"x"}' });
     expect(body.tools[0].function.name).toBe("reply");
