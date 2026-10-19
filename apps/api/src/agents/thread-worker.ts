@@ -1,4 +1,4 @@
-import type { Message, Thread } from "@altair/protocol";
+import { Decision, formatDecision, type Message, type Thread } from "@altair/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { renderMessage } from "./render";
@@ -22,6 +22,7 @@ export const THREAD_SYSTEM = `You are Altair, working one thread of a shared pro
 Tools:
 - reply: the only way people see anything you say. Each reply is a message in this thread.
 - update_status: your progress checklist, shown on the thread while you work. Line 1 is a short header, then a blank line, then one step per line prefixed with ✓ (done), ✱ (in progress) or ○ (not started). Post it first on multi-step work and refresh it as steps complete. It is not a reply and notifies no one.
+- ask_decision: put a question to the person as a card with 2 to 4 options, one recommended. Use it instead of a reply whenever you need the person to choose; their pick arrives as their next message. Keep working on the recommended option meanwhile when you can.
 - request_coordinator: ask the coordinator for permission or direction when something is beyond this thread: touching another thread's work, a new piece of work that deserves its own thread, or any step that cannot be undone (deploying, deleting, sending something outside the project, spending money). Its answer arrives in a later turn. Do not wait idle; carry on with what you can.
 - resolve_thread: mark the thread finished, once the person has what they asked for and nobody owes a next step. Do not resolve after only answering a question; leave it open for follow-ups.
 - run_task: your hands. It starts a coding agent in this thread's own Linux sandbox (git, Node, Python, internet). Give it a self-contained prompt: the goal, what done looks like, and any constraints, because it sees nothing of this conversation. With repo it clones the repository onto a fresh branch first; with open_pr it commits, pushes and opens a pull request when it finishes with changes (pass branch to update an existing pull request instead). harness "shell" runs the prompt as a bash script with no model, for quick commands such as running tests. One task runs at a time. Its progress shows on the thread's checklist by itself, so do not call update_status while it runs. Its result arrives in a later turn under "Tasks": then tell the person what was done, with the pull request link.
@@ -32,7 +33,7 @@ Use run_task for anything that needs code, files, commands or the internet. With
 How to answer:
 - Lead with the answer. Match the shape of the ask: a one-line question gets a short answer, a "why" gets the cause, a request gets done with a sentence saying so.
 - A reply carries only what changed since your last one. Do not replay your process.
-- When the ask forks on a detail nobody gave, pick the reasonable default, say which, and keep going. Ask the person only when the answer changes their goal or something cannot be undone, as one short question with options on short lines and your recommendation marked.
+- When the ask forks on a detail nobody gave, pick the reasonable default, say which, and keep going. Ask the person only when the answer changes their goal or something cannot be undone, and ask with ask_decision.
 - Write in the language the person writes in. Plain, warm, full sentences. No em dashes. Use Markdown when it helps (lists, headings, code). Never show ids to people.
 - When a turn needs no reply (for example the person only said thanks), call no tools.`;
 
@@ -82,6 +83,16 @@ export function threadTools(host: ThreadHost): Tool[] {
       run: async ({ text }) => {
         await host.setStatusText(text);
         return "Status updated.";
+      },
+    }),
+    tool({
+      name: "ask_decision",
+      description:
+        "Ask the person to choose, shown as a card with buttons. Options: 2 to 4, each a 1-2 word label and a one-sentence consequence. Mark one as recommended (0-based index).",
+      input: Decision.extend({ context: z.string().max(1200).optional() }),
+      run: async ({ context, ...decision }) => {
+        await host.reply([context, formatDecision(decision)].filter(Boolean).join("\n\n"));
+        return "Asked. The person's choice will arrive as their next message.";
       },
     }),
     tool({

@@ -2,5 +2,6 @@ export * from "./ids";
 export * from "./models";
 export * from "./events";
 export * from "./server";
+export * from "./decision";
 export * from "./usage";
 export * from "./settings";
