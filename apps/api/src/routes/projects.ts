@@ -310,6 +310,13 @@ export const projectRoutes = new Hono<AppEnv>()
     const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
     return c.json({ tasks: await agent.getTasks() });
   })
+  // What the thread's cloud tasks saved (its Artifacts workspace): history and one folder or file.
+  .get("/:id/threads/:threadId/files", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    return c.json({ workspace: await agent.readWorkspace(c.req.query("path") ?? "", c.req.query("ref") || undefined) });
+  })
   .post("/:id/threads/:threadId/tasks/:taskId/cancel", async (c) => {
     const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
     if (!thread) return c.json({ error: "not_found" }, 404);

@@ -166,11 +166,16 @@ export function taskEnv(
     ALTAIR_REPO_URL: spec.repo?.url ?? "",
     ALTAIR_BASE_BRANCH: spec.repo?.baseBranch ?? "",
     ALTAIR_WORKSPACE_REMOTE: spec.workspace?.remote ?? "",
-    // Without a repository, every task in the thread continues the same line of work.
-    ALTAIR_BRANCH: spec.repo ? spec.repo.branch || taskBranch(spec) : "main",
+    ALTAIR_BRANCH: workingBranch(spec),
     ALTAIR_OPEN_PR: spec.openPr ? "1" : "0",
     ALTAIR_PR_BODY: `${spec.prompt.slice(0, 4000)}\n\n---\n_Opened by Altair._`,
   };
+}
+
+/** The branch a task works on, and saves to in the thread's workspace. */
+export function workingBranch(spec: Pick<TaskSpec, "taskId" | "title" | "repo">): string {
+  // Without a repository, every task in the thread continues the same line of work.
+  return spec.repo ? spec.repo.branch || taskBranch(spec) : "main";
 }
 
 /** Default working branch for a task, e.g. `altair/fix-login-bug-x7k2pq`. */

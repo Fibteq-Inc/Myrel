@@ -518,6 +518,17 @@ export const tr: Catalog = {
   "tasks.cancelled": "İptal edildi",
   "tasks.stopFailed": "Görev durdurulamadı.",
   "tasks.failed": "Başarısız",
+  "files.workspace": "Dosyalar",
+  "files.workspaceEmpty": "Henüz kayıt yok",
+  "files.workspaceEmptyBody": "Bu thread'in bulut görevlerinin oluşturduğu dosyalar, görev bitince burada görünür.",
+  "files.workspaceError": "Kaydedilen dosyalar yüklenemedi.",
+  "files.workspacePath": "Klasör",
+  "files.workspaceRoot": "Çalışma alanı",
+  "files.workspaceBinary": "İkili dosya ({size} bayt), gösterilmiyor.",
+  "files.workspaceTruncated": "Bu dosyanın yalnızca başı gösteriliyor.",
+  "files.workspaceEmptyFolder": "Bu klasör boş.",
+  "files.workspaceMissing": "Bu yol kaydedilen çalışmada yok.",
+  "files.workspaceHistory": "Kayıtlar",
 
   // Routines
   "routines.title": "Rutinler",

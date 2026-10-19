@@ -1,3 +1,5 @@
+import type { ThreadFiles } from "@altair/protocol";
+
 /**
  * A thread's workspace: a Cloudflare Artifacts repository the sandbox saves
  * every task's work to, so the next task continues from it even after the
@@ -49,4 +51,59 @@ function bearer(plaintext: string): string {
 
 function errorCode(err: unknown): string | undefined {
   return typeof err === "object" && err && "code" in err ? String((err as { code: unknown }).code) : undefined;
+}
+
+/** What a thread's workspace holds at one branch: its history and one folder or file. */
+export type WorkspaceView = ThreadFiles;
+
+/** Text files larger than this are cut; binary files are not shown. */
+const MAX_FILE_BYTES = 200_000;
+
+/**
+ * Reads the thread's workspace without starting a sandbox: the last commits of
+ * `ref` and the folder or file at `path` (repository-relative, "" for the root).
+ * Null when the server has no workspaces or the thread never saved any work.
+ */
+export async function readWorkspace(env: Env, threadId: string, ref: string, path = ""): Promise<WorkspaceView | null> {
+  const artifacts = (env as Partial<Env>).WORKSPACES;
+  if (!artifacts) return null;
+  let repo: ArtifactsRepo;
+  try {
+    repo = await artifacts.get(workspaceName(threadId));
+  } catch (err) {
+    if (errorCode(err) === "NOT_FOUND") return null;
+    throw err;
+  }
+  try {
+    const log = await repo.log({ ref, limit: 20 });
+    const head = log[0];
+    if (!head) return null;
+    const commits = log.map((c) => ({ hash: c.hash, message: c.message, at: new Date(c.committedAt * 1000).toISOString() }));
+    const clean = path.split("/").filter((p) => p && p !== "." && p !== "..");
+    // Walk the tree down to the folder or file at `path`.
+    let tree = await repo.readTree(head.treeHash);
+    for (let i = 0; i < clean.length; i++) {
+      const entry = tree?.find((e) => e.name === clean[i]);
+      if (!entry) return { ref, commits, entries: null, file: null };
+      if (entry.type === "tree") {
+        tree = await repo.readTree(entry.hash);
+        continue;
+      }
+      if (i !== clean.length - 1 || (entry.type !== "blob" && entry.type !== "exec")) return { ref, commits, entries: null, file: null };
+      const blob = await repo.readBlob(entry.hash);
+      if (!blob) return { ref, commits, entries: null, file: null };
+      const bytes = new Uint8Array(await blob.slice(0, MAX_FILE_BYTES).arrayBuffer());
+      const binary = bytes.includes(0);
+      const text = binary ? null : new TextDecoder().decode(bytes);
+      return { ref, commits, entries: null, file: { path: clean.join("/"), text, size: blob.size, truncated: blob.size > MAX_FILE_BYTES } };
+    }
+    const prefix = clean.length ? `${clean.join("/")}/` : "";
+    const entries = (tree ?? [])
+      .filter((e) => e.type === "tree" || e.type === "blob" || e.type === "exec")
+      .map((e) => ({ name: e.name, path: `${prefix}${e.name}`, type: e.type === "tree" ? ("folder" as const) : ("file" as const) }))
+      .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1));
+    return { ref, commits, entries, file: null };
+  } finally {
+    repo[Symbol.dispose]?.();
+  }
 }

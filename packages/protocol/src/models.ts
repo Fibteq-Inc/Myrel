@@ -136,6 +136,15 @@ export const Task = z.object({
 });
 export type Task = z.infer<typeof Task>;
 
+/** What a thread's cloud tasks saved (its workspace): recent history and one folder or file. */
+export const ThreadFiles = z.object({
+  ref: z.string(),
+  commits: z.array(z.object({ hash: z.string(), message: z.string(), at: z.string() })),
+  entries: z.array(z.object({ name: z.string(), path: z.string(), type: z.enum(["file", "folder"]) })).nullable(),
+  file: z.object({ path: z.string(), text: z.string().nullable(), size: z.number(), truncated: z.boolean() }).nullable(),
+});
+export type ThreadFiles = z.infer<typeof ThreadFiles>;
+
 export const TerminalLine = z.object({ stream: z.enum(["stdout", "stderr", "system"]), text: z.string() });
 export type TerminalLine = z.infer<typeof TerminalLine>;
 

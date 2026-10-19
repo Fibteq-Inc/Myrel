@@ -2,6 +2,7 @@ import type { Task, TerminalLine } from "@altair/protocol";
 import {
   ChevronRight,
   CircleAlert,
+  FolderTree,
   CircleCheck,
   CircleSlash,
   ExternalLink,
@@ -10,25 +11,36 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react";
+import type { Translate } from "@altair/i18n";
 import { useT } from "@altair/i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { FilesTab } from "./files";
 import { EmptyTab, type WorkspaceTab } from "./workspace-panel";
 
-type TaskData = { projectId: string; tasks: Task[]; output: Record<string, TerminalLine[]> };
+type TaskData = { projectId: string; threadId: string; tasks: Task[]; output: Record<string, TerminalLine[]> };
 
 /**
  * Fills the workspace's Terminal and Changes tabs with the tasks the thread
  * agent ran (run_task): live terminal output, and what each task changed.
  */
-export function withTasks(tabs: WorkspaceTab[], data: TaskData): WorkspaceTab[] {
+export function withTasks(tabs: WorkspaceTab[], data: TaskData, t: Translate): WorkspaceTab[] {
   if (data.tasks.length === 0) return tabs;
   const prs = data.tasks.filter((task) => task.prUrl).length;
-  return tabs.map((tab) => {
+  const filled = tabs.map((tab) => {
     if (tab.id === "terminal") return { ...tab, count: data.tasks.length, content: <TerminalTab {...data} /> };
     if (tab.id === "changes") return { ...tab, count: prs || undefined, content: <ChangesTab tasks={data.tasks} /> };
     return tab;
   });
+  // Cloud tasks save their work in the thread's workspace; tasks on a computer work in its own folder.
+  if (!data.tasks.some((task) => task.backend === "sandbox")) return filled;
+  const files: WorkspaceTab = {
+    id: "files",
+    label: t("files.workspace"),
+    icon: FolderTree,
+    content: <FilesTab projectId={data.projectId} threadId={data.threadId} tasks={data.tasks} />,
+  };
+  return [...filled.slice(0, 2), files, ...filled.slice(2)];
 }
 
 /** Every task, newest last. The running one opens by itself; finished ones stay folded. */
