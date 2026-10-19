@@ -20,7 +20,7 @@
       "binding": "DB",
       "database_name": "altair",
       // Replace with the id printed by `wrangler d1 create altair` before deploying.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "0fdc232a-4bf4-4674-a1cc-a5f14e18911a",
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
