@@ -2,7 +2,7 @@ import { useT } from "@altair/i18n/react";
 import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, Folder, FolderPlus, Laptop } from "lucide-react";
+import { ChevronDown, Cloud, Folder, FolderPlus, Laptop } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, runnersQuery, workspaceQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton } from "../lib/ui";
@@ -43,7 +43,7 @@ export function WorkspaceButton({ project }: { project: Project }) {
         title={
           workspace
             ? t("localFolder.pathOn", { path: workspace.path, computer: workspace.runnerName })
-            : t("localFolder.buttonHint")
+            : t("localFolder.cloudHint")
         }
         className="flex h-8 max-w-[260px] items-center gap-2 rounded-lg border border-edge bg-raised px-2.5 text-[13px] text-fg hover:bg-hover"
       >
@@ -56,8 +56,8 @@ export function WorkspaceButton({ project }: { project: Project }) {
           </>
         ) : (
           <>
-            <FolderPlus size={14} className="flex-none text-muted" aria-hidden="true" />
-            <span className="hidden sm:inline">{t("localFolder.title")}</span>
+            <Cloud size={14} className="flex-none text-muted" aria-hidden="true" />
+            <span className="hidden sm:inline">{t("localFolder.cloud")}</span>
           </>
         )}
         <ChevronDown size={13} className="flex-none text-subtle" aria-hidden="true" />
@@ -151,7 +151,7 @@ function WorkspaceForm({
     >
       <div>
         <h3 className="font-semibold">{t("localFolder.title")}</h3>
-        <p className="mt-1 text-subtle">{t("localFolder.intro")}</p>
+        <p className="mt-1 text-subtle">{workspace ? t("localFolder.intro") : t("localFolder.introCloud")}</p>
       </div>
 
       {runners.length > 1 && (
