@@ -1,3 +1,5 @@
+import type { MessageKey } from "@altair/i18n";
+import { useT } from "@altair/i18n/react";
 import type { GithubRepo, ProjectRepo } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,14 +21,11 @@ import { api, githubReposQuery, githubStatusQuery, projectReposQuery } from "../
 import { errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
 
 /** Messages for `?github=` after the GitHub round trip (see apps/api/src/routes/github.ts). */
-const GITHUB_RESULTS: Record<string, { ok: boolean; text: string }> = {
-  connected: { ok: true, text: "GitHub is connected. Pick the repositories this project works on." },
-  no_code: {
-    ok: false,
-    text: "GitHub did not sign you in. Turn on “Request user authorization (OAuth) during installation” in the GitHub App, then try again.",
-  },
-  error: { ok: false, text: "Connecting GitHub failed. Try again." },
-  invalid_state: { ok: false, text: "That GitHub link expired or belongs to another account. Try again." },
+const GITHUB_RESULTS: Record<string, { ok: boolean; text: MessageKey }> = {
+  connected: { ok: true, text: "github.connected" },
+  no_code: { ok: false, text: "github.noCode" },
+  error: { ok: false, text: "github.error" },
+  invalid_state: { ok: false, text: "github.invalidState" },
 };
 
 /** The "GitHub repositories" section of a project's settings page. `githubResult` is `?github=` after connecting. */
@@ -39,6 +38,7 @@ export function GithubRepos({
   canManage: boolean;
   githubResult?: string;
 }) {
+  const t = useT();
   const status = useQuery(githubStatusQuery);
   const repos = useQuery(projectReposQuery(projectId));
   const result = githubResult ? GITHUB_RESULTS[githubResult] : undefined;
@@ -46,17 +46,16 @@ export function GithubRepos({
 
   return (
     <Section
-      title="GitHub repositories"
-      description="Threads read the code in these repositories. Cloning, running and opening pull requests come next."
+      title={t("github.title")}
+      description={t("github.description")}
     >
-      {result && <Notice ok={result.ok}>{result.text}</Notice>}
+      {result && <Notice ok={result.ok}>{t(result.text)}</Notice>}
 
       {status.isPending ? (
         <Loading />
       ) : status.data && !status.data.configured ? (
         <Notice ok={false}>
-          GitHub is not set up on this server yet. The server admin creates a GitHub App and adds its settings to the
-          Worker (see <code>apps/api/src/github/README.md</code>).
+          {t("github.notConfigured", { path: "apps/api/src/github/README.md" })}
         </Notice>
       ) : (
         <>
@@ -70,16 +69,17 @@ export function GithubRepos({
           {status.data?.installations.length ? (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-subtle">
               <span>
-                Connected:{" "}
-                {status.data.installations.map((i) => i.accountLogin).join(", ")}
+                {t("github.connectedAccounts", {
+                  accounts: status.data.installations.map((i) => i.accountLogin).join(", "),
+                })}
               </span>
               <a className="inline-flex items-center gap-1 hover:text-fg" href={api.githubConnectUrl("install", returnTo)}>
                 <ExternalLink size={13} aria-hidden="true" />
-                Add an account or repositories
+                {t("github.addAccount")}
               </a>
               <a className="inline-flex items-center gap-1 hover:text-fg" href={api.githubConnectUrl("authorize", returnTo)}>
                 <RefreshCw size={13} aria-hidden="true" />
-                Refresh from GitHub
+                {t("github.refresh")}
               </a>
             </div>
           ) : null}
@@ -90,10 +90,11 @@ export function GithubRepos({
 }
 
 function ConnectCard({ returnTo }: { returnTo: string }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-edge bg-panel p-4">
       <p className="text-[13px] text-body">
-        Install the Altair GitHub App on your account or organization and choose which repositories it can see.
+        {t("github.installHint")}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <a
@@ -101,13 +102,13 @@ function ConnectCard({ returnTo }: { returnTo: string }) {
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-fg px-3 text-sm font-medium text-ground hover:bg-white"
         >
           <GithubMark />
-          Connect GitHub
+          {t("github.connect")}
         </a>
         <a
           href={api.githubConnectUrl("authorize", returnTo)}
           className="inline-flex h-9 items-center rounded-lg px-3 text-[13px] text-muted hover:bg-hover hover:text-fg"
         >
-          Already installed? Sign in with GitHub
+          {t("github.signIn")}
         </a>
       </div>
     </div>
@@ -125,6 +126,7 @@ function RepoList({
   loading: boolean;
   canEdit: boolean;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const remove = useMutation({
     mutationFn: (repoId: number) => api.removeProjectRepo(projectId, repoId),
@@ -135,7 +137,7 @@ function RepoList({
   if (repos.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-edge px-4 py-6 text-center text-[13px] text-subtle">
-        No repositories connected yet.
+        {t("github.empty")}
       </div>
     );
   }
@@ -161,7 +163,7 @@ function RepoList({
               {r.private && (
                 <span className="inline-flex items-center gap-1">
                   <Lock size={12} aria-hidden="true" />
-                  Private
+                  {t("github.private")}
                 </span>
               )}
             </span>
@@ -169,8 +171,8 @@ function RepoList({
           {canEdit && (
             <IconButton
               type="button"
-              aria-label={`Disconnect ${r.fullName}`}
-              title="Disconnect"
+              aria-label={t("github.disconnectLabel", { repo: r.fullName })}
+              title={t("github.disconnect")}
               disabled={remove.isPending}
               onClick={() => remove.mutate(r.repoId)}
             >
@@ -184,6 +186,7 @@ function RepoList({
 }
 
 function RepoPicker({ projectId, connected }: { projectId: string; connected: ProjectRepo[] }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const queryClient = useQueryClient();
@@ -197,7 +200,7 @@ function RepoPicker({ projectId, connected }: { projectId: string; connected: Pr
     return (
       <GhostButton type="button" className="self-start" onClick={() => setOpen(true)}>
         <Plus size={14} aria-hidden="true" />
-        Add repository
+        {t("github.add")}
       </GhostButton>
     );
   }
@@ -213,19 +216,19 @@ function RepoPicker({ projectId, connected }: { projectId: string; connected: Pr
         <Input
           autoFocus
           className="pl-9"
-          placeholder="Search repositories"
-          aria-label="Search repositories"
+          placeholder={t("github.search")}
+          aria-label={t("github.search")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
       </div>
-      {add.error && <Notice ok={false}>{errorMessage(add.error)}</Notice>}
+      {add.error && <Notice ok={false}>{errorMessage(add.error, t)}</Notice>}
       <ul className="max-h-72 overflow-y-auto">
         {available.isPending ? (
           <Loading />
         ) : matches.length === 0 ? (
           <li className="px-2 py-4 text-center text-[13px] text-subtle">
-            {available.data?.length ? "No other repositories match." : "The app cannot see any repositories yet."}
+            {available.data?.length ? t("github.noMatch") : t("github.noneVisible")}
           </li>
         ) : (
           matches.map((r) => (
@@ -241,7 +244,7 @@ function RepoPicker({ projectId, connected }: { projectId: string; connected: Pr
                   <span className="block truncate">{r.fullName}</span>
                   {r.description && <span className="block truncate text-xs text-subtle">{r.description}</span>}
                 </span>
-                {r.private && <Lock size={13} className="flex-none text-subtle" aria-label="Private" />}
+                {r.private && <Lock size={13} className="flex-none text-subtle" aria-label={t("github.private")} />}
                 {add.isPending && add.variables?.id === r.id ? (
                   <LoaderCircle size={15} className="animate-spin text-muted" aria-hidden="true" />
                 ) : (
@@ -274,9 +277,10 @@ function Notice({ ok, children }: { ok: boolean; children: React.ReactNode }) {
 }
 
 function Loading() {
+  const t = useT();
   return (
     <div className="flex justify-center py-4 text-muted">
-      <LoaderCircle size={18} className="animate-spin" aria-label="Loading" />
+      <LoaderCircle size={18} className="animate-spin" aria-label={t("common.loading")} />
     </div>
   );
 }

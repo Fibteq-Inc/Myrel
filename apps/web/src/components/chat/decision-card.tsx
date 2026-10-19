@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import type { Decision } from "@altair/protocol";
 import { CircleCheck, CircleHelp } from "lucide-react";
 import { useId } from "react";
@@ -18,6 +19,7 @@ export function DecisionCard({
   /** Missing when the viewer cannot answer here (e.g. read-only). */
   onChoose?: (label: string) => void;
 }) {
+  const t = useT();
   const titleId = useId();
   const chosen = answer
     ? decision.options.findIndex((o) => o.label.trim().toLocaleLowerCase() === answer.trim().toLocaleLowerCase())
@@ -35,7 +37,7 @@ export function DecisionCard({
     >
       <div className={cn("flex items-center gap-2 text-xs", answered ? "text-subtle" : "text-warn")}>
         {answered ? <CircleCheck size={14} aria-hidden="true" /> : <CircleHelp size={14} aria-hidden="true" />}
-        {answered ? "Answered" : "Your call"}
+        {answered ? t("decision.answered") : t("decision.yourCall")}
       </div>
       <div id={titleId} className="font-medium text-fg">
         {decision.question}
@@ -65,8 +67,8 @@ export function DecisionCard({
             >
               <span className="flex items-center gap-2 font-medium text-fg">
                 {option.label}
-                {recommended && <span className="text-xs font-normal text-warn">recommended</span>}
-                {picked && <CircleCheck size={14} className="ml-auto text-accent" aria-label="Chosen" />}
+                {recommended && <span className="text-xs font-normal text-warn">{t("decision.recommended")}</span>}
+                {picked && <CircleCheck size={14} className="ml-auto text-accent" aria-label={t("decision.chosen")} />}
               </span>
               {option.consequence && <span className="text-[13px] text-muted">{option.consequence}</span>}
             </button>

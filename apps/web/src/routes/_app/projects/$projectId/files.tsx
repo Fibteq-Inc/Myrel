@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { FolderOpen } from "lucide-react";
 import { type PanelTab, ProjectKnowledge } from "../../../../components/project-knowledge";
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/_app/projects/$projectId/files")({
 
 /** The project's files, memory and instructions. */
 function FilesPage() {
+  const t = useT();
   const { project } = useProjectContext();
   const { tab = "files", file } = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -26,7 +28,7 @@ function FilesPage() {
       <PaneHeader>
         <NavToggle />
         <FolderOpen size={17} className="flex-none text-muted" aria-hidden="true" />
-        <h1 className="truncate text-[15px] font-semibold">Files and memory</h1>
+        <h1 className="truncate text-[15px] font-semibold">{t("sidebar.files")}</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline">{project.name}</span>
       </PaneHeader>
       <ProjectKnowledge

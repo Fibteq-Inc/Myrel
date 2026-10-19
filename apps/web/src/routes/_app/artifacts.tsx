@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Blocks, LoaderCircle } from "lucide-react";
@@ -11,6 +12,7 @@ export const Route = createFileRoute("/_app/artifacts")({
 
 /** Artifacts across every project the person is in, newest first. */
 function AllArtifacts() {
+  const t = useT();
   const { data: projects = [], isPending } = useQuery(projectsQuery);
   const lists = useQueries({
     queries: projects.map((p) => ({
@@ -28,14 +30,14 @@ function AllArtifacts() {
       <header className="flex h-14 flex-none items-center gap-3 border-b border-line px-4 sm:px-5">
         <NavToggle />
         <Blocks size={17} className="text-muted" aria-hidden="true" />
-        <h1 className="text-[15px] font-semibold">Artifacts</h1>
+        <h1 className="text-[15px] font-semibold">{t("sidebar.artifacts")}</h1>
         {items.length > 0 && <span className="ml-auto font-mono text-xs text-subtle">{items.length}</span>}
       </header>
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-3 py-5 sm:px-5">
           {loading ? (
             <div className="flex justify-center py-16 text-subtle" role="status">
-              <LoaderCircle size={18} className="animate-spin" aria-label="Loading" />
+              <LoaderCircle size={18} className="animate-spin" aria-label={t("common.loading")} />
             </div>
           ) : (
             <ArtifactList
@@ -43,8 +45,8 @@ function AllArtifacts() {
               empty={
                 <Empty
                   icon={<Blocks size={20} className="text-subtle" aria-hidden="true" />}
-                  title="No artifacts yet"
-                  body="When Altair publishes a page, report or prototype in any of your projects, it shows up here."
+                  title={t("artifacts.noneYet")}
+                  body={t("artifacts.noneYetBody")}
                 />
               }
             />

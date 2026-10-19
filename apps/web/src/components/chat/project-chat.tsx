@@ -1,4 +1,5 @@
 import { projectChat, threadByRoot, threadMessages } from "@altair/client";
+import { useT } from "@altair/i18n/react";
 import { Link } from "@tanstack/react-router";
 import { Hash, MessagesSquare, Settings } from "lucide-react";
 import { api } from "../../lib/api";
@@ -14,6 +15,7 @@ import { ThreadCard } from "./thread-card";
 
 /** The project chat: everything said to the coordinator, with a card for each thread it opened. */
 export function ProjectChat({ me, className = "" }: { me: string; className?: string }) {
+  const t = useT();
   const { project, members, names, state, send } = useProjectContext();
   const chat = projectChat(state);
   const roots = threadByRoot(state);
@@ -25,12 +27,12 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
       <PaneHeader>
         <NavToggle />
         <Hash size={17} className="flex-none text-muted" aria-hidden="true" />
-        <h1 className="flex-none text-[15px] font-semibold">Project chat</h1>
+        <h1 className="flex-none text-[15px] font-semibold">{t("chat.title")}</h1>
         <span className="hidden truncate text-xs text-subtle sm:inline @max-[640px]:!hidden">{project.name}</span>
         <div className="ml-auto flex-none whitespace-nowrap">
           <WorkspaceButton project={project} />
         </div>
-        <div className="ml-1 flex items-center @max-[520px]:hidden" aria-label={`${members.length} members`}>
+        <div className="ml-1 flex items-center @max-[520px]:hidden" aria-label={t("chat.membersLabel", { count: members.length })}>
           {members.slice(0, 4).map((m, i) => (
             <span key={m.id} title={m.name} className={i > 0 ? "-ml-2" : ""}>
               <UserAvatar id={m.id} name={m.name} size={26} className="border-2 border-ground" />
@@ -41,8 +43,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
         <Link
           to="/settings/projects/$projectId"
           params={{ projectId: project.id }}
-          aria-label="Project settings"
-          title="Project settings"
+          aria-label={t("chat.projectSettings")}
+          title={t("chat.projectSettings")}
           className="-mr-2 flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
         >
           <Settings size={16} />
@@ -78,7 +80,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
 
       <div className="mx-auto w-full max-w-[808px]">
         <Composer
-          placeholder="Give Altair a task"
+          placeholder={t("chat.placeholder")}
           onSend={(body, attachments) => send(body, null, attachments)}
           onUpload={(file) => api.upload(project.id, file.name, file)}
           autoFocus
@@ -89,16 +91,14 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
 }
 
 function EmptyChat() {
+  const t = useT();
   return (
     <div className="flex flex-col items-center gap-2 py-20 text-center">
       <span className="mb-2 flex size-12 items-center justify-center rounded-2xl border border-line bg-raised">
         <MessagesSquare size={22} className="text-muted" aria-hidden="true" />
       </span>
-      <p className="text-base font-medium">What should Altair work on?</p>
-      <p className="max-w-sm text-[13px] text-subtle">
-        Ask for anything. Altair opens a thread for each piece of work and reports back there, so this chat stays
-        readable.
-      </p>
+      <p className="text-base font-medium">{t("chat.emptyTitle")}</p>
+      <p className="max-w-sm text-[13px] text-subtle">{t("chat.emptyBody")}</p>
     </div>
   );
 }

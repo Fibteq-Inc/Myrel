@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -10,6 +11,7 @@ import { OnlineDot, RunnerIcon } from "./runners";
 
 /** Header control: the project's local folder and whether its computer is connected; owners can change it. */
 export function WorkspaceButton({ project }: { project: Project }) {
+  const t = useT();
   const { data: workspace, isPending } = useQuery(workspaceQuery(project.id));
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -38,7 +40,11 @@ export function WorkspaceButton({ project }: { project: Project }) {
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((o) => !o)}
-        title={workspace ? `${workspace.path} on ${workspace.runnerName}` : "Work in a folder on your computer"}
+        title={
+          workspace
+            ? t("localFolder.pathOn", { path: workspace.path, computer: workspace.runnerName })
+            : t("localFolder.buttonHint")
+        }
         className="flex h-8 max-w-[260px] items-center gap-2 rounded-lg border border-edge bg-raised px-2.5 text-[13px] text-fg hover:bg-hover"
       >
         {workspace ? (
@@ -46,12 +52,12 @@ export function WorkspaceButton({ project }: { project: Project }) {
             <OnlineDot online={workspace.online} />
             <Folder size={14} className="flex-none text-muted" aria-hidden="true" />
             <span className="truncate">{folderName(workspace.path)}</span>
-            <span className="sr-only">{workspace.online ? "connected" : "computer offline"}</span>
+            <span className="sr-only">{workspace.online ? t("localFolder.connected") : t("localFolder.computerOffline")}</span>
           </>
         ) : (
           <>
             <FolderPlus size={14} className="flex-none text-muted" aria-hidden="true" />
-            <span className="hidden sm:inline">Local folder</span>
+            <span className="hidden sm:inline">{t("localFolder.title")}</span>
           </>
         )}
         <ChevronDown size={13} className="flex-none text-subtle" aria-hidden="true" />
@@ -59,7 +65,7 @@ export function WorkspaceButton({ project }: { project: Project }) {
       {open && (
         <div
           role="dialog"
-          aria-label="Local folder"
+          aria-label={t("localFolder.title")}
           className="absolute right-0 top-10 z-20 w-[min(360px,calc(100vw-2rem))] rounded-xl border border-edge bg-raised p-4 shadow-2xl shadow-black/50"
         >
           {canEdit ? (
@@ -74,12 +80,13 @@ export function WorkspaceButton({ project }: { project: Project }) {
 }
 
 function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-1.5 text-[13px]">
       <span className="font-mono text-[12.5px]">{workspace.path}</span>
       <span className="flex items-center gap-1.5 text-subtle">
         <OnlineDot online={workspace.online} />
-        {workspace.runnerName} · {CLI_NAMES[workspace.cli]} · {workspace.online ? "connected" : "offline"}
+        {workspace.runnerName} · {CLI_NAMES[workspace.cli]} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
       </span>
     </div>
   );
@@ -94,6 +101,7 @@ function WorkspaceForm({
   workspace: ProjectWorkspace | null;
   onDone: () => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data: runners = [], isPending } = useQuery(runnersQuery);
   const [runnerId, setRunnerId] = useState(workspace?.runnerId ?? "");
@@ -116,17 +124,18 @@ function WorkspaceForm({
   });
   const clear = useMutation({ mutationFn: () => api.clearWorkspace(project.id), onSuccess: () => done(null) });
 
-  if (isPending) return <p className="text-[13px] text-subtle">Loading…</p>;
+  const [offlineBefore, offlineAfter = ""] = t("localFolder.runnerOffline", { computer: runner?.name ?? "" }).split(
+    "{command}",
+  );
+
+  if (isPending) return <p className="text-[13px] text-subtle">{t("common.loading")}</p>;
   if (!runner) {
     return (
       <div className="flex flex-col items-start gap-3 text-[13px]">
         <Laptop size={20} className="text-muted" aria-hidden="true" />
-        <p className="text-body">
-          Connect your computer first. Then this project can work in one of its folders with your own Claude Code, Codex
-          or Gemini CLI.
-        </p>
+        <p className="text-body">{t("localFolder.connectFirst")}</p>
         <Link to="/devices" className="font-medium text-accent hover:underline" onClick={onDone}>
-          Connect a computer
+          {t("localFolder.connectComputer")}
         </Link>
       </div>
     );
@@ -141,12 +150,12 @@ function WorkspaceForm({
       }}
     >
       <div>
-        <h3 className="font-semibold">Local folder</h3>
-        <p className="mt-1 text-subtle">Threads in this project run their coding tasks here, on your computer.</p>
+        <h3 className="font-semibold">{t("localFolder.title")}</h3>
+        <p className="mt-1 text-subtle">{t("localFolder.intro")}</p>
       </div>
 
       {runners.length > 1 && (
-        <Field label="Computer">
+        <Field label={t("localFolder.computer")}>
           <div className="flex flex-col gap-1">
             {runners.map((r) => (
               <Choice key={r.id} checked={r.id === runner.id} onChange={() => setRunnerId(r.id)} name="runner">
@@ -159,7 +168,9 @@ function WorkspaceForm({
         </Field>
       )}
 
-      <Field label={runners.length > 1 ? "Folder" : `Folder on ${runner.name}`}>
+      <Field
+        label={runners.length > 1 ? t("localFolder.folder") : t("localFolder.folderOn", { computer: runner.name })}
+      >
         {browsing ? (
           <FolderPicker
             runner={runner}
@@ -183,10 +194,10 @@ function WorkspaceForm({
                 ))}
               </div>
             )}
-            {folderPickerBlocker(runner) ? (
+            {folderPickerBlocker(runner, t) ? (
               runner.folders.length === 0 && (
                 <p className="rounded-lg border border-dashed border-edge px-3 py-2.5 text-subtle">
-                  No shared folders yet. {folderPickerBlocker(runner)}
+                  {t("localFolder.noFolders", { reason: folderPickerBlocker(runner, t) ?? "" })}
                 </p>
               )
             ) : (
@@ -196,19 +207,19 @@ function WorkspaceForm({
                 className="flex items-center gap-2 rounded-lg border border-dashed border-edge px-2.5 py-2 text-muted hover:bg-hover hover:text-fg"
               >
                 <FolderPlus size={14} className="flex-none" aria-hidden="true" />
-                {runner.folders.length === 0 ? "Choose a folder on this computer" : "Add another folder"}
+                {runner.folders.length === 0 ? t("localFolder.chooseFolder") : t("localFolder.addFolder")}
               </button>
             )}
           </>
         )}
       </Field>
 
-      <Field label="Coding CLI">
+      <Field label={t("localFolder.cli")}>
         {runner.clis.length === 0 ? (
           <p className="text-subtle">
             {runner.online
-              ? "No Claude Code, Codex or Gemini CLI found on this computer."
-              : "Start altair-runner on this computer to see its CLIs."}
+              ? t("localFolder.noClis")
+              : t("localFolder.startRunner")}
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -232,20 +243,23 @@ function WorkspaceForm({
       {!runner.online && (
         <p className="flex items-center gap-2 text-subtle">
           <OnlineDot online={false} />
-          {runner.name} is offline. Turn it on, or run{" "}
-          <code className="font-mono text-fg">npx altair-runner service install</code> on it.
+          <span>
+            {offlineBefore}
+            <code className="font-mono text-fg">npx altair-runner service install</code>
+            {offlineAfter}
+          </span>
         </p>
       )}
-      {(save.error || clear.error) && <p className="text-bad">{errorMessage(save.error ?? clear.error)}</p>}
+      {(save.error || clear.error) && <p className="text-bad">{errorMessage(save.error ?? clear.error, t)}</p>}
 
       <div className="flex items-center gap-2">
         {workspace && (
           <GhostButton type="button" onClick={() => clear.mutate()} disabled={clear.isPending}>
-            Disconnect
+            {t("localFolder.disconnect")}
           </GhostButton>
         )}
         <Button type="submit" className="ml-auto" disabled={!path || !cli || save.isPending}>
-          {workspace ? "Save" : "Use this folder"}
+          {workspace ? t("localFolder.save") : t("localFolder.useFolder")}
         </Button>
       </div>
     </form>

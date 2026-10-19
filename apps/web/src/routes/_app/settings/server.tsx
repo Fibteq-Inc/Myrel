@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Notice, Section } from "../../../components/settings";
@@ -9,6 +10,7 @@ export const Route = createFileRoute("/_app/settings/server")({
 });
 
 function ServerSettings() {
+  const t = useT();
   const { data: settings, error } = useQuery(adminSettingsQuery);
   const queryClient = useQueryClient();
   const update = useMutation({
@@ -19,10 +21,10 @@ function ServerSettings() {
     },
   });
 
-  if (error) return <Notice>{errorMessage(error)}</Notice>;
+  if (error) return <Notice>{errorMessage(error, t)}</Notice>;
   return (
     <>
-      <Section title="Sign-ups" description="Who can create an account on this server.">
+      <Section title={t("server.signUps")} description={t("server.signUpsDescription")}>
         <label className="flex items-start gap-3 rounded-xl border border-line bg-raised px-4 py-3">
           <input
             type="checkbox"
@@ -32,20 +34,21 @@ function ServerSettings() {
             onChange={(e) => update.mutate(e.target.checked)}
           />
           <span>
-            <span className="block font-medium">Anyone can sign up</span>
-            <span className="block text-[13px] text-subtle">
-              When off, only existing accounts can sign in. People invited to a project can still create an account
-              with the invited email.
-            </span>
+            <span className="block font-medium">{t("server.anyoneCanSignUp")}</span>
+            <span className="block text-[13px] text-subtle">{t("server.anyoneCanSignUpHint")}</span>
           </span>
         </label>
-        {update.error && <Notice>{errorMessage(update.error)}</Notice>}
+        {update.error && <Notice>{errorMessage(update.error, t)}</Notice>}
       </Section>
       <Section
-        title="Shared model keys"
+        title={t("server.sharedKeys")}
         description={
           <>
-            Add keys every project can use under <Link to="/settings/keys" className="text-accent hover:underline">Model keys</Link>.
+            {t("server.sharedKeysBefore")}{" "}
+            <Link to="/settings/keys" className="text-accent hover:underline">
+              {t("settings.keys")}
+            </Link>
+            {t("server.sharedKeysAfter")}
           </>
         }
       />

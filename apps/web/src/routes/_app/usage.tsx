@@ -1,3 +1,4 @@
+import { useT } from "@altair/i18n/react";
 import { USAGE_RANGES, type UsageSummary, type UsageTotals } from "@altair/protocol";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -6,7 +7,7 @@ import { type ReactNode, useState } from "react";
 import { NavToggle } from "../../components/shell/shell";
 import { type ChartMetric, SERIES, UsageChart } from "../../components/usage-chart";
 import { api, projectsQuery } from "../../lib/api";
-import { formatCost, formatTokens } from "../../lib/format";
+import { formatCost, useFormat } from "../../lib/format";
 import { errorMessage } from "../../lib/ui";
 
 type Search = { days?: number; project?: string };
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/_app/usage")({
 });
 
 function UsagePage() {
+  const t = useT();
   const { days = 30, project } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [metric, setMetric] = useState<ChartMetric>("tokens");
@@ -37,19 +39,19 @@ function UsagePage() {
       <header className="flex h-14 flex-none items-center gap-3 border-b border-line px-4 sm:px-5">
         <NavToggle />
         <BarChart3 size={17} className="text-muted" aria-hidden="true" />
-        <h1 className="text-[15px] font-semibold">Usage</h1>
+        <h1 className="text-[15px] font-semibold">{t("usage.title")}</h1>
       </header>
 
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-5 px-4 py-6 sm:px-6">
           <div className="flex flex-wrap items-center gap-2">
             <select
-              aria-label="Project"
+              aria-label={t("usage.project")}
               value={project ?? ""}
               onChange={(e) => setSearch({ project: e.target.value || undefined })}
               className="h-8 max-w-[240px] rounded-lg border border-edge bg-raised px-2.5 text-[13px] text-fg outline-none focus:border-accent"
             >
-              <option value="">All projects</option>
+              <option value="">{t("usage.allProjects")}</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -57,16 +59,16 @@ function UsagePage() {
               ))}
             </select>
             <Segmented
-              label="Range"
+              label={t("usage.range")}
               value={days}
-              options={USAGE_RANGES.map((d) => ({ value: d, label: `${d}d` }))}
+              options={USAGE_RANGES.map((d) => ({ value: d, label: t("usage.rangeDays", { count: d }) }))}
               onChange={(d) => setSearch({ days: d })}
             />
-            {isFetching && !isPending && <span className="text-xs text-subtle">Updating…</span>}
+            {isFetching && !isPending && <span className="text-xs text-subtle">{t("usage.updating")}</span>}
           </div>
 
           {error ? (
-            <p className="text-sm text-bad">{errorMessage(error)}</p>
+            <p className="text-sm text-bad">{errorMessage(error, t)}</p>
           ) : !data ? (
             <Skeleton />
           ) : (
@@ -79,24 +81,26 @@ function UsagePage() {
 }
 
 function Dashboard({ data, metric, onMetric }: { data: UsageSummary; metric: ChartMetric; onMetric: (m: ChartMetric) => void }) {
+  const t = useT();
+  const fmt = useFormat();
   const { totals } = data;
   const tokens = totals.inputTokens + totals.outputTokens;
   const agent = (kind: "coordinator" | "thread") => data.byAgent.find((a) => a.agent === kind);
 
   return (
     <>
-      <section aria-label="Totals" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat icon={<Coins size={15} />} label="Estimated cost" value={formatCost(totals.costMicros)}>
-          {totals.unpricedCalls > 0 ? `${totals.unpricedCalls} call${totals.unpricedCalls === 1 ? "" : "s"} unpriced` : "List prices"}
+      <section aria-label={t("usage.totals")} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat icon={<Coins size={15} />} label={t("usage.cost")} value={fmt.cost(totals.costMicros)}>
+          {totals.unpricedCalls > 0 ? t("usage.unpriced", { count: totals.unpricedCalls }) : t("usage.listPrices")}
         </Stat>
-        <Stat icon={<Network size={15} />} label="Tokens" value={formatTokens(tokens)}>
-          {formatTokens(totals.inputTokens)} in · {formatTokens(totals.outputTokens)} out
+        <Stat icon={<Network size={15} />} label={t("usage.tokens")} value={fmt.tokens(tokens)}>
+          {t("usage.inOut", { input: fmt.tokens(totals.inputTokens), output: fmt.tokens(totals.outputTokens) })}
         </Stat>
-        <Stat icon={<Workflow size={15} />} label="Model calls" value={formatTokens(totals.calls)}>
-          {totals.calls ? `${formatTokens(Math.round(tokens / totals.calls))} tokens per call` : "None yet"}
+        <Stat icon={<Workflow size={15} />} label={t("usage.calls")} value={fmt.tokens(totals.calls)}>
+          {totals.calls ? t("usage.perCall", { tokens: fmt.tokens(Math.round(tokens / totals.calls)) }) : t("usage.noneYet")}
         </Stat>
-        <Stat icon={<Bot size={15} />} label="Cached input" value={pct(totals.cachedInputTokens, totals.inputTokens)}>
-          {formatTokens(totals.cachedInputTokens)} tokens from cache
+        <Stat icon={<Bot size={15} />} label={t("usage.cached")} value={pct(totals.cachedInputTokens, totals.inputTokens)}>
+          {t("usage.fromCache", { tokens: fmt.tokens(totals.cachedInputTokens) })}
         </Stat>
       </section>
 
@@ -104,21 +108,21 @@ function Dashboard({ data, metric, onMetric }: { data: UsageSummary; metric: Cha
         <p className="flex items-start gap-2 rounded-lg border border-line bg-panel px-3 py-2.5 text-[13px] text-muted">
           <Info size={15} className="mt-0.5 flex-none text-subtle" aria-hidden="true" />
           <span>
-            Some calls used a model with no known price, so the cost leaves them out. A server admin can add prices
-            with the <code className="rounded bg-hover px-1 font-mono text-xs text-fg">LLM_PRICES</code> setting.
+            {t("usage.unpricedNoteBefore")} <code className="rounded bg-hover px-1 font-mono text-xs text-fg">LLM_PRICES</code>{" "}
+            {t("usage.unpricedNoteAfter")}
           </span>
         </p>
       )}
 
       <Card
-        title="Daily usage"
+        title={t("usage.daily")}
         action={
           <Segmented
-            label="Measure"
+            label={t("usage.measure")}
             value={metric}
             options={[
-              { value: "tokens", label: "Tokens" },
-              { value: "cost", label: "Cost" },
+              { value: "tokens", label: t("usage.tokens") },
+              { value: "cost", label: t("usage.costShort") },
             ]}
             onChange={onMetric}
           />
@@ -126,19 +130,19 @@ function Dashboard({ data, metric, onMetric }: { data: UsageSummary; metric: Cha
       >
         {metric === "tokens" && (
           <div className="mb-2 flex gap-4 text-xs text-muted">
-            <Legend color={SERIES.input} label="Input" />
-            <Legend color={SERIES.output} label="Output" />
+            <Legend color={SERIES.input} label={t("usage.input")} />
+            <Legend color={SERIES.output} label={t("usage.output")} />
           </div>
         )}
         {totals.calls === 0 ? (
-          <Empty>No model calls in this range yet. Usage shows up here as soon as Altair answers in a project.</Empty>
+          <Empty>{t("usage.emptyRange")}</Empty>
         ) : (
           <UsageChart days={data.daily} metric={metric} />
         )}
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card title="By model">
+        <Card title={t("usage.byModel")}>
           <Breakdown
             rows={data.byModel.map((m) => ({
               key: `${m.provider}/${m.model}`,
@@ -150,7 +154,7 @@ function Dashboard({ data, metric, onMetric }: { data: UsageSummary; metric: Cha
             total={totals}
           />
         </Card>
-        <Card title="By project">
+        <Card title={t("usage.byProject")}>
           <Breakdown
             rows={data.byProject.map((p) => ({ key: p.projectId, label: p.name, totals: p, to: p.projectId }))}
             total={totals}
@@ -159,26 +163,26 @@ function Dashboard({ data, metric, onMetric }: { data: UsageSummary; metric: Cha
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <Card title="Who spent it">
+        <Card title={t("usage.whoSpent")}>
           <AgentSplit coordinator={agent("coordinator")} thread={agent("thread")} />
         </Card>
-        <Card title="Top threads">
+        <Card title={t("usage.topThreads")}>
           {data.topThreads.length === 0 ? (
-            <Empty>No thread work in this range.</Empty>
+            <Empty>{t("usage.noThreadWork")}</Empty>
           ) : (
             <ul className="-mx-1 divide-y divide-line">
-              {data.topThreads.map((t) => (
-                <li key={t.threadId}>
+              {data.topThreads.map((th) => (
+                <li key={th.threadId}>
                   <Link
                     to="/projects/$projectId"
-                    params={{ projectId: t.projectId }}
-                    search={{ thread: t.threadId }}
+                    params={{ projectId: th.projectId }}
+                    search={{ thread: th.threadId }}
                     className="flex items-center gap-3 rounded-lg px-1 py-2 hover:bg-hover"
                   >
                     <MessagesSquare size={15} className="flex-none text-subtle" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                    <span className="text-xs tabular-nums text-subtle">{formatTokens(t.inputTokens + t.outputTokens)}</span>
-                    <span className="w-16 text-right text-[13px] tabular-nums">{costOrDash(t)}</span>
+                    <span className="min-w-0 flex-1 truncate">{th.title}</span>
+                    <span className="text-xs tabular-nums text-subtle">{fmt.tokens(th.inputTokens + th.outputTokens)}</span>
+                    <span className="w-16 text-right text-[13px] tabular-nums">{costOrDash(th, fmt.cost)}</span>
                   </Link>
                 </li>
               ))}
@@ -194,15 +198,17 @@ type BreakdownRow = { key: string; label: string; sub?: string; totals: UsageTot
 
 /** One row per item with its share of all tokens as a bar. */
 function Breakdown({ rows, total }: { rows: BreakdownRow[]; total: UsageTotals }) {
-  if (rows.length === 0) return <Empty>Nothing in this range.</Empty>;
+  const t = useT();
+  const fmt = useFormat();
+  if (rows.length === 0) return <Empty>{t("usage.nothing")}</Empty>;
   const all = total.inputTokens + total.outputTokens;
   return (
     <table className="w-full table-fixed text-[13px]">
       <thead>
         <tr className="text-left text-xs text-subtle">
-          <th className="pb-2 font-normal">Name</th>
-          <th className="w-20 pb-2 text-right font-normal">Tokens</th>
-          <th className="w-20 pb-2 text-right font-normal">Cost</th>
+          <th className="pb-2 font-normal">{t("usage.name")}</th>
+          <th className="w-20 pb-2 text-right font-normal">{t("usage.tokens")}</th>
+          <th className="w-20 pb-2 text-right font-normal">{t("usage.costShort")}</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-line">
@@ -228,7 +234,7 @@ function Breakdown({ rows, total }: { rows: BreakdownRow[]; total: UsageTotals }
                 <div
                   className="mt-1.5 h-1 overflow-hidden rounded-full bg-hover"
                   role="meter"
-                  aria-label={`${Math.round(share * 100)}% of tokens`}
+                  aria-label={t("usage.share", { percent: Math.round(share * 100) })}
                   aria-valuenow={Math.round(share * 100)}
                   aria-valuemin={0}
                   aria-valuemax={100}
@@ -237,10 +243,10 @@ function Breakdown({ rows, total }: { rows: BreakdownRow[]; total: UsageTotals }
                 </div>
               </td>
               <td className="py-2.5 pl-2 text-right align-top tabular-nums text-muted">
-                {formatTokens(tokens)}
+                {fmt.tokens(tokens)}
                 <div className="text-[11px] text-subtle">{Math.round(share * 100)}%</div>
               </td>
-              <td className="py-2.5 pl-3 text-right align-top tabular-nums">{costOrDash(r.totals)}</td>
+              <td className="py-2.5 pl-3 text-right align-top tabular-nums">{costOrDash(r.totals, fmt.cost)}</td>
             </tr>
           );
         })}
@@ -251,18 +257,20 @@ function Breakdown({ rows, total }: { rows: BreakdownRow[]; total: UsageTotals }
 
 /** Coordinator (routing) versus thread agents (the work), as one split bar. */
 function AgentSplit({ coordinator, thread }: { coordinator?: UsageTotals; thread?: UsageTotals }) {
-  const tok = (t?: UsageTotals) => (t ? t.inputTokens + t.outputTokens : 0);
+  const t = useT();
+  const fmt = useFormat();
+  const tok = (u?: UsageTotals) => (u ? u.inputTokens + u.outputTokens : 0);
   const all = tok(coordinator) + tok(thread);
-  if (!all) return <Empty>Nothing in this range.</Empty>;
+  if (!all) return <Empty>{t("usage.nothing")}</Empty>;
   const parts = [
-    { label: "Thread agents", hint: "Doing the work", color: SERIES.input, t: thread },
-    { label: "Coordinator", hint: "Routing", color: SERIES.output, t: coordinator },
+    { label: t("usage.threadAgents"), hint: t("usage.threadAgentsHint"), color: SERIES.input, totals: thread },
+    { label: t("usage.coordinator"), hint: t("usage.coordinatorHint"), color: SERIES.output, totals: coordinator },
   ];
   return (
     <div className="space-y-4">
       <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
         {parts.map((p) =>
-          tok(p.t) ? <div key={p.label} style={{ width: `${(tok(p.t) / all) * 100}%`, background: p.color }} /> : null,
+          tok(p.totals) ? <div key={p.label} style={{ width: `${(tok(p.totals) / all) * 100}%`, background: p.color }} /> : null,
         )}
       </div>
       <ul className="space-y-2.5">
@@ -272,8 +280,8 @@ function AgentSplit({ coordinator, thread }: { coordinator?: UsageTotals; thread
             <span>
               {p.label} <span className="text-xs text-subtle">{p.hint}</span>
             </span>
-            <span className="ml-auto tabular-nums text-muted">{pct(tok(p.t), all)}</span>
-            <span className="w-16 text-right tabular-nums">{p.t ? costOrDash(p.t) : "$0"}</span>
+            <span className="ml-auto tabular-nums text-muted">{pct(tok(p.totals), all)}</span>
+            <span className="w-16 text-right tabular-nums">{p.totals ? costOrDash(p.totals, fmt.cost) : "$0"}</span>
           </li>
         ))}
       </ul>
@@ -358,9 +366,9 @@ function Skeleton() {
   );
 }
 
-function costOrDash(t: UsageTotals) {
+function costOrDash(u: UsageTotals, cost: (micros: number) => string = formatCost) {
   // Every call unpriced: a $0 would read as free.
-  return t.calls > 0 && t.unpricedCalls === t.calls ? "—" : formatCost(t.costMicros);
+  return u.calls > 0 && u.unpricedCalls === u.calls ? "—" : cost(u.costMicros);
 }
 
 function pct(part: number, whole: number) {
