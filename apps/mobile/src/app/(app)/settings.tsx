@@ -9,7 +9,7 @@ import { useSession } from "../../lib/session";
 import { colors, radius } from "../../theme";
 
 // The app's own policies, published by Fibteq; a self-hosted server's operator sets that server's terms.
-const LEGAL_SITE = "https://altair.fibteq.io";
+const LEGAL_SITE = "https://myrel.fibteq.io";
 
 /** Account, language and server, like the web settings' Account page. */
 export default function SettingsScreen() {

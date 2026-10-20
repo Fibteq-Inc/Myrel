@@ -13,7 +13,7 @@ const args = Object.fromEntries(
 );
 const port = Number(args.port ?? 8765);
 const local = `http://localhost:${port}`;
-const defaults = { origin: args.origin ?? "https://altair.fibteq.io", org: args.org ?? "Fibteq-Inc", name: args.name ?? "Fibteq Myrel" };
+const defaults = { origin: args.origin ?? "https://myrel.fibteq.io", org: args.org ?? "Fibteq-Inc", name: args.name ?? "Fibteq Myrel" };
 
 // Must match apps/api/src/github/README.md and src/routes/github.ts.
 function manifest(origin, name, isPublic) {
