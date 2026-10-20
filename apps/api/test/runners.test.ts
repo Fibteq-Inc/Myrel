@@ -1,10 +1,10 @@
-import type { Project, ProjectWorkspace, Runner, ServerEvent, ServerToRunner } from "@altair/protocol";
+import type { Project, ProjectWorkspace, Runner, ServerToRunner } from "@altair/protocol";
 import { RUNNER_PROTOCOL_VERSION } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
-import { resetFakeModel, setFakeModel } from "./fake-llm";
+import { resetFakeModel } from "./fake-llm";
 
 const BASE = "http://altair.test";
 
@@ -74,6 +74,23 @@ async function until<T>(fn: () => T | Promise<T>, what: string): Promise<NonNull
     await new Promise((r) => setTimeout(r, 25));
   }
   throw new Error(`Timed out waiting for ${what}`);
+}
+
+/** A project chat socket, which also tells the project its public address (the sandbox calls back there). */
+async function openChat(projectId: string, user: string) {
+  const ws = (await api(`/api/projects/${projectId}/ws?token=${encodeURIComponent(user)}`, { headers: { upgrade: "websocket" } })).webSocket!;
+  ws.accept();
+  return ws;
+}
+
+/** Opens a thread in the project and starts its agent. */
+async function startThread(projectId: string) {
+  const projectAgent = await getAgentByName(env.PROJECT_AGENT, projectId);
+  const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
+  const thread = await projectAgent.createThread(root.id, "Testler");
+  const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+  await threadAgent.start({ projectId, threadId: thread.id, brief: "x" });
+  return { projectAgent, threadAgent, thread };
 }
 
 const listRunners = async (token: string) =>
@@ -220,72 +237,6 @@ describe("local workspace", () => {
     ws.close();
   });
 
-  it("lets the thread agent run a task on the computer and answer with its result", async () => {
-    const call = (name: string, input: unknown) => ({ id: crypto.randomUUID(), name, input });
-    const threadPrompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1) return { text: "", toolCalls: [] };
-      if (req.system.includes("coordinator of a shared project chat")) {
-        const id = /\[(cmsg_[0-9A-Z]{26})\][^\n]*· NEW/.exec(req.prompt)?.[1];
-        return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Testler", instructions: "Run the tests.", project_ack: "On it." })] }
-          : { text: "", toolCalls: [] };
-      }
-      threadPrompts.push(req.prompt);
-      if (req.prompt.includes("(done, NEW result)")) {
-        return { text: "", toolCalls: [call("reply", { text: "Testler geçti: 12 passed." })] };
-      }
-      return {
-        text: "",
-        toolCalls: [call("run_task", { title: "Testler", prompt: "Run pnpm test" }), call("reply", { text: "Testleri bilgisayarında çalıştırıyorum." })],
-      };
-    });
-
-    const user = await signUp();
-    const { runner, token } = await pair(user);
-    const runnerSide = await connectRunner(token);
-    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
-    const project = await createProject(user);
-    await api(`/api/projects/${project.id}/workspace`, {
-      method: "PUT",
-      token: user,
-      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
-    });
-
-    const chat = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(user)}`, {
-      headers: { upgrade: "websocket" },
-    })).webSocket!;
-    const events: ServerEvent[] = [];
-    chat.addEventListener("message", (e) => {
-      events.push(JSON.parse(e.data as string) as ServerEvent);
-    });
-    chat.accept();
-    chat.send(JSON.stringify({ type: "message.send", body: "testleri çalıştır" }));
-
-    const start = await until(
-      () => runnerSide.frames.find((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start"),
-      "task.start",
-    );
-    expect(start).toMatchObject({ folder: "/Users/ismail/code/altair", cli: "claude", prompt: "Run pnpm test" });
-    expect(threadPrompts[0]).toContain("/Users/ismail/code/altair on \"Laptop\"");
-
-    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
-    const threadId = start.threadId;
-    // While the task runs the thread shows as working, with the CLI's latest step.
-    await until(async () => (await agent.getThread(threadId))?.status === "working" && events.some((e) => e.type === "agent.activity" && e.threadId === threadId && e.active), "working");
-    runnerSide.send({ type: "task.progress", taskId: start.taskId, text: "Running pnpm test" });
-    await until(() => events.some((e) => e.type === "agent.activity" && e.label === "Running pnpm test"), "progress label");
-
-    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "12 passed" });
-    const bodies = async () => ((await agent.getThreadContext(threadId))?.messages ?? []).map((m) => m.body);
-    await until(async () => (await bodies()).includes("Testler geçti: 12 passed."), "answer with the result");
-    expect(threadPrompts.at(-1)).toContain("Result:\n12 passed");
-    await until(async () => (await agent.getThread(threadId))?.status === "review_ready", "idle again");
-
-    chat.close();
-    runnerSide.ws.close();
-  });
-
   it("lets the person's Claude Code be the thread's agent, talking through Altair's tools over MCP", { timeout: 20_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
@@ -297,13 +248,6 @@ describe("local workspace", () => {
       token: user,
       body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
     });
-    const settings = await api(`/api/projects/${project.id}/settings`, {
-      method: "PATCH",
-      token: user,
-      body: JSON.stringify({ threadEngine: "harness" }),
-    });
-    expect(((await settings.json()) as { settings: { threadEngine: string } }).settings.threadEngine).toBe("harness");
-
     const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
     const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "README'yi özetle" });
     const thread = await projectAgent.createThread(root.id, "README özeti");
@@ -314,7 +258,7 @@ describe("local workspace", () => {
     const starts = () => runnerSide.frames.filter((f): f is Start => f.type === "task.start");
     const start = await until(() => starts()[0], "agent task.start");
     expect(start.agent?.mcpPath).toBe(`/api/agent-mcp/${thread.id}`);
-    expect(start.prompt).toContain("running as Claude Code on the person's own computer");
+    expect(start.prompt).toContain("You run as Claude Code on the person's own computer");
     expect(start.prompt).toContain("Summarize the README.");
 
     const mcp = (body: unknown, bearer = start.agent!.token) =>
@@ -362,7 +306,7 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
-  it("keeps Altair's loop for runners that cannot host the agent", async () => {
+  it("asks the person to update a runner that cannot host the agent", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
     const runnerSide = await connectRunner(token, ["cancel"]);
@@ -373,26 +317,21 @@ describe("local workspace", () => {
       token: user,
       body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
     });
-    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ threadEngine: "harness" }) });
-    const threadPrompts: string[] = [];
-    setFakeModel((req) => {
-      if (!req.system.includes("coordinator of a shared project chat")) threadPrompts.push(req.prompt);
-      return { text: "", toolCalls: [] };
-    });
-    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
-    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
-    const thread = await projectAgent.createThread(root.id, "Eski runner");
-    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
-    await until(() => threadPrompts.length, "loop turn");
+    const { projectAgent, thread } = await startThread(project.id);
+    const notice = await until(
+      async () => (await projectAgent.getThreadContext(thread.id))?.messages.find((m) => m.authorKind === "system"),
+      "the notice",
+    );
+    expect(notice.body).toContain("npx altair-runner@latest update");
+    expect((await projectAgent.getThread(thread.id))?.status).toBe("blocked");
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
     runnerSide.ws.close();
   });
 
-  it("runs tasks where the project's setting says and stops them on the computer", async () => {
+  it("runs the agent where the project's setting says and stops it on the computer", { timeout: 20_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
-    const runnerSide = await connectRunner(token, ["cancel"]);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
     await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
     const project = await createProject(user);
     await api(`/api/projects/${project.id}/workspace`, {
@@ -400,14 +339,11 @@ describe("local workspace", () => {
       token: user,
       body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
     });
-    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
-    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
-    const thread = await projectAgent.createThread(root.id, "Testler");
-    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+    const chat = await openChat(project.id, user);
+    const { projectAgent, threadAgent, thread } = await startThread(project.id);
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
 
-    // Auto: the computer is online, so the task goes there.
-    expect(await threadAgent.startTask({ title: "Testler", prompt: "Run pnpm test" })).toMatchObject({ ok: true });
+    // Auto: the computer is online, so the turn goes there.
     const start = await until(
       () => runnerSide.frames.find((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start"),
       "task.start",
@@ -417,38 +353,40 @@ describe("local workspace", () => {
     await until(() => runnerSide.frames.some((f) => f.type === "task.cancel" && f.taskId === start.taskId), "task.cancel");
     runnerSide.send({ type: "task.done", taskId: start.taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
     await until(async () => (await threadAgent.getTasks())[0]?.status === "cancelled", "cancelled");
-    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "local", harness: "claude" });
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "local", harness: "claude", title: "Claude Code" });
+    await until(async () => (await bodies()).some((b) => b.startsWith('The task "Claude Code" was cancelled.')), "the report");
 
-    // Cloud: the same project sends tasks to the sandbox, which this test runtime does not have.
+    // Cloud: the same project sends the next turn to the sandbox, which this test runtime does not have.
     await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "cloud" }) });
-    await threadAgent.startTask({ title: "Bulut", prompt: "echo hi", harness: "shell" });
-    await until(async () => (await threadAgent.getTasks())[1]?.status === "failed", "cloud task");
-    expect((await threadAgent.getTasks())[1]).toMatchObject({ backend: "sandbox" });
+    const next = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "again" });
+    await threadAgent.wake({ kind: "message", messageId: next.id });
+    await until(async () => (await threadAgent.getTasks())[1]?.status === "failed", "cloud turn");
+    expect((await threadAgent.getTasks())[1]).toMatchObject({ backend: "sandbox", harness: "opencode" });
 
-    // Local with the computer offline: refused, with the reason.
+    // Local with the computer offline: the thread says why it cannot work.
     await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "local" }) });
     runnerSide.ws.close();
     await until(async () => !(await listRunners(user))[0]?.online, "offline");
-    expect(await threadAgent.startTask({ title: "x", prompt: "y" })).toMatchObject({ ok: false, error: expect.stringContaining("offline") });
+    const last = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "once more" });
+    await threadAgent.wake({ kind: "message", messageId: last.id });
+    await until(async () => (await bodies()).some((b) => b.includes("it is offline")), "offline notice");
+    chat.close();
   });
 
   it("keeps a project without a local folder in the cloud, even with the computer online", async () => {
     const user = await signUp();
     const { token } = await pair(user);
-    const runnerSide = await connectRunner(token, ["cancel"]);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
     await until(async () => (await listRunners(user))[0]?.online, "online");
     const project = await createProject(user);
     expect(((await (await api(`/api/projects/${project.id}/workspace`, { token: user })).json()) as { workspace: unknown }).workspace).toBeNull();
-    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
-    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
-    const thread = await projectAgent.createThread(root.id, "Bulut");
-    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
-
-    await threadAgent.startTask({ title: "Bulut", prompt: "echo hi", harness: "shell" });
-    await until(async () => (await threadAgent.getTasks())[0]?.status === "failed", "cloud task");
+    const chat = await openChat(project.id, user);
+    const { threadAgent } = await startThread(project.id);
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "failed", "cloud turn");
     expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    chat.close();
+    runnerSide.ws.close();
   });
 
   it("asks older runners to update before stopping their tasks", async () => {

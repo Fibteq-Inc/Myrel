@@ -1,9 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer, ServerToRunner } from "@altair/protocol";
-import { ADAPTERS, ALTAIR_MCP_SERVER, type ParseState } from "./clis";
+import { ADAPTERS, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
 import { threadWorktree, type Worktree } from "./worktrees";
 
@@ -77,25 +77,17 @@ export class TaskRunner {
 
     // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
     let agentDir: string | undefined;
-    let mcpConfig: string | undefined;
-    if (task.agent && task.cli === "claude" && config.server) {
+    let agent: { args: string[]; env?: Record<string, string> } = { args: [] };
+    if (task.agent && config.server) {
       agentDir = await mkdtemp(join(tmpdir(), "altair-agent-"));
-      mcpConfig = join(agentDir, "mcp.json");
-      const server = {
-        type: "http",
-        url: `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`,
-        headers: { Authorization: `Bearer ${task.agent.token}` },
-      };
-      // Only this user can read it: it holds the thread's token for this turn.
-      await writeFile(mcpConfig, JSON.stringify({ mcpServers: { [ALTAIR_MCP_SERVER]: server } }), { mode: 0o600 });
-      // Windows runs the CLI through a shell, which would split a path with spaces.
-      if (process.platform === "win32") mcpConfig = `"${mcpConfig}"`;
+      const url = `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`;
+      agent = await adapter.agent({ url, token: task.agent.token, dir: agentDir });
     }
     const cleanup = () => (agentDir ? rm(agentDir, { recursive: true, force: true }).catch(() => {}) : Promise.resolve());
 
-    const child = (this.opts.spawn ?? spawn)(adapter.bin, adapter.args({ access: config.access, resume, mcpConfig }), {
+    const child = (this.opts.spawn ?? spawn)(adapter.bin, adapter.args({ access: config.access, resume, extra: agent.args }), {
       cwd,
-      env: process.env,
+      env: { ...process.env, ...agent.env },
       stdio: ["pipe", "pipe", "pipe"],
       // Windows CLIs are .cmd shims. Only fixed flags are on the command line; the prompt goes on stdin.
       shell: process.platform === "win32",

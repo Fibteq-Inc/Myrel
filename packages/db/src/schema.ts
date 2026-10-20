@@ -107,7 +107,6 @@ export const projects = sqliteTable("projects", {
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
   /** Where tasks run: auto, local or cloud (see TaskTarget in @altair/protocol). */
   taskTarget: text("task_target").notNull().default("auto"),
-  threadEngine: text("thread_engine").notNull().default("loop"),
   ...timestamps,
 });
 

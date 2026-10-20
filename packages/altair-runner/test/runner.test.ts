@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@altair/protocol";
@@ -88,6 +88,30 @@ describe("CLI output parsing", () => {
     const gemini: ParseState = {};
     ADAPTERS.gemini.end!(JSON.stringify({ response: "Merhaba" }), gemini);
     expect(gemini.result).toBe("Merhaba");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
+  const mcp = () => ({ url: "https://altair.test/api/agent-mcp/thr_1", token: "t".repeat(32), dir: home });
+
+  it("gives Codex the endpoint as config overrides and the token in its environment", async () => {
+    const agent = await ADAPTERS.codex.agent(mcp());
+    expect(agent).toEqual({
+      args: ["-c", 'mcp_servers.altair.url="https://altair.test/api/agent-mcp/thr_1"', "-c", 'mcp_servers.altair.bearer_token_env_var="ALTAIR_MCP_TOKEN"'],
+      env: { ALTAIR_MCP_TOKEN: "t".repeat(32) },
+    });
+    // The prompt still comes last, on stdin.
+    expect(ADAPTERS.codex.args({ access: "edit", extra: agent.args }).at(-1)).toBe("-");
+  });
+
+  it("gives Gemini CLI its own settings file, readable only by the user", async () => {
+    const agent = await ADAPTERS.gemini.agent(mcp());
+    const path = agent.env!.GEMINI_CLI_SYSTEM_SETTINGS_PATH!;
+    expect(path).toBe(join(home, "settings.json"));
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      mcpServers: { altair: { httpUrl: mcp().url, headers: { Authorization: `Bearer ${"t".repeat(32)}` }, trust: true } },
+    });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
 });
 

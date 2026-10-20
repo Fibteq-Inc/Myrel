@@ -1,10 +1,10 @@
 import { createDb, schema } from "@altair/db";
-import { type ProjectWorkspace, TaskTarget, ThreadEngine } from "@altair/protocol";
+import { type ProjectWorkspace, TaskTarget } from "@altair/protocol";
 import type { RunnerBackend, TaskSpec } from "@altair/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { githubConfigured } from "../github/app";
-import { projectRepoToken } from "../github/store";
+import { githubConfigured, installationToken } from "../github/app";
+import { listProjectRepos } from "../github/store";
 import { getWorkspace } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts). */
@@ -95,48 +95,23 @@ export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace>
   };
 }
 
-/** Who works the project's threads (see ThreadEngine in @altair/protocol). */
-export async function threadEngine(env: Env, projectId: string): Promise<ThreadEngine> {
-  const [row] = await createDb(env.DB)
-    .select({ threadEngine: schema.projects.threadEngine })
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId));
-  return ThreadEngine.catch("loop").parse(row?.threadEngine);
-}
-
 /**
- * The token a task gets for cloning, pushing and opening pull requests: a
- * GitHub App installation token limited to that one repository, which must be
- * connected to the project. Null otherwise; public repositories still clone
- * without it. GitHub's tokens last an hour, so a task gets one that is valid
- * for as much of its run as possible.
+ * The token a cloud agent turn gets for the project's connected repositories, so git and gh work
+ * in the sandbox without asking. One installation token covers every connected repository of the
+ * first repository's installation (nearly always all of them). Null without any.
  */
-export async function repoToken(env: Env, projectId: string, repoUrl: string, runSec: number): Promise<string | null> {
-  const match = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+?)\.git$/.exec(repoUrl);
-  if (!match || !githubConfigured(env)) return null;
-  const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
+export async function projectGithubToken(env: Env, projectId: string, runSec: number): Promise<string | null> {
+  if (!githubConfigured(env)) return null;
+  const repos = await listProjectRepos(env.DB, projectId);
+  const first = repos[0];
+  if (!first) return null;
+  const repositoryIds = repos.filter((r) => r.installationId === first.installationId).map((r) => r.repoId);
   const permissions = { contents: "write", pull_requests: "write", metadata: "read" } as const;
   try {
-    return (await projectRepoToken(env, projectId, match[1]!, permissions, minValidMs)).token;
+    const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
+    return (await installationToken(env, first.installationId, { repositoryIds, permissions }, minValidMs)).token;
   } catch (err) {
-    console.warn("no repository token", repoUrl, err);
-    return null;
-  }
-}
-
-/** Accepts `owner/name`, a github.com URL or any HTTPS git URL; returns an HTTPS clone URL. */
-export function normalizeRepoUrl(repo: string): string | null {
-  const trimmed = repo.trim().replace(/\/+$/, "");
-  if (/^[\w.-]+\/[\w.-]+$/.test(trimmed)) return `https://github.com/${trimmed.replace(/\.git$/, "")}.git`;
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "https:" || url.username || url.password) return null;
-    if (url.hostname === "github.com") {
-      const [owner, name] = url.pathname.split("/").filter(Boolean);
-      return owner && name ? `https://github.com/${owner}/${name.replace(/\.git$/, "")}.git` : null;
-    }
-    return url.href;
-  } catch {
+    console.warn("no GitHub token for the project", projectId, err);
     return null;
   }
 }

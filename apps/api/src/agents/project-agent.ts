@@ -398,13 +398,18 @@ export class ProjectAgent extends Agent<Env> {
     };
   }
 
+  /** This server's public address (for links and for the sandbox to call back), or null before anyone connected. Callable over RPC. */
+  publicOrigin(): string | null {
+    return this.env.BETTER_AUTH_URL?.replace(/\/$/, "") || (this.ctx.storage.kv.get<string>("origin") ?? null);
+  }
+
   /** A thread's turn ended in a way people should hear about. Callable over RPC. */
   async notifyThread(threadId: string, kind: NotificationKind, text: string): Promise<void> {
     const thread = this.getThread(threadId);
     if (!thread) return;
     try {
       const { projectName } = await this.directory();
-      const origin = this.env.BETTER_AUTH_URL?.replace(/\/$/, "") || (this.ctx.storage.kv.get<string>("origin") ?? null);
+      const origin = this.publicOrigin();
       await deliverNotification(this.env, {
         projectId: this.name,
         projectName,

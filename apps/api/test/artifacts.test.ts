@@ -5,6 +5,7 @@ import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { agentProject, modelAgent } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
 const BASE = "http://altair.test";
@@ -26,8 +27,8 @@ async function signUp() {
 
 async function setup() {
   const token = await signUp();
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
-  const { project } = (await res.json()) as { project: Project };
+  // Its threads are worked by the fake model, as the person's CLI (see fake-agent.ts).
+  const { project } = await agentProject(token, modelAgent);
   const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, {
     headers: { upgrade: "websocket" },
   })).webSocket!;

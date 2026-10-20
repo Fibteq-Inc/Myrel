@@ -44,18 +44,19 @@ project socket that resyncs from the last `seq` it saw).
 The plan, phase by phase, is in the [README roadmap](../README.md#roadmap). The
 main additions:
 
-- **Runners for real work (phase 2).** A thread agent that needs a filesystem
-  and shell calls `run_task`, which starts a runner in a
-  [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/). The runner
-  interface is swappable; OpenCode comes first because it works with many
-  models, and others (Claude Agent SDK, Goose, OpenHands) can follow.
+- **Harnesses as thread agents (shipped).** A thread's agent is a coding
+  harness, not Altair's own loop: each turn is one run of the person's CLI on
+  their computer (projects with a local folder) or of OpenCode in the thread's
+  [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/). It talks to
+  people through Altair's tools over MCP (`ThreadAgent.agentMcp`), and the
+  `ThreadAgent` Durable Object keeps the thread's state between turns. The
+  coordinator stays a small loop in the Worker.
 - **Project files and artifacts (phases 2 and 3)** on R2.
 - **Local runner (shipped).** `altair-runner` pairs with an account through a
   one-time code from the Devices page, then keeps an outbound WebSocket to a
   `RunnerAgent`. A project picks one of the folders shared on that computer and a
-  CLI (Claude Code, Codex or Gemini CLI). The thread agent's `run_local_task`
-  sends the prompt there; the CLI runs with the user's own login, and its answer
-  comes back as a later turn. Subscription credentials never leave the computer;
+  CLI (Claude Code, Codex or Gemini CLI), which then works that project's
+  threads with the user's own login. Subscription credentials never leave the computer;
   the server stores only a hash of the runner's own token.
 - **Mobile (Expo) and desktop (Tauri 2) apps** reuse `packages/client` and can
   connect to any Altair server.
