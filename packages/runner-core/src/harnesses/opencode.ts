@@ -50,7 +50,10 @@ export const opencode: Harness = {
           ];
         }
         const title = str(state.title) || str(input.description) || str(input.command) || str(input.filePath) || tool;
-        const events: RunnerEvent[] = [{ type: "tool", name: tool, title: title.slice(0, 500) }];
+        // OpenCode reports a tool once it finished, with when it started and ended.
+        const time = obj(state.time);
+        const ms = num(time.end) - num(time.start);
+        const events: RunnerEvent[] = [{ type: "tool", name: tool, title: title.slice(0, 500), ...(num(time.start) > 0 && ms >= 0 && { ms }) }];
         const output = str(state.output);
         if (tool === "bash" && output) events.push(log(output.trimEnd()));
         return events;

@@ -12,9 +12,10 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import type { Translate } from "@myrel/i18n";
-import { useT } from "@myrel/i18n/react";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { duration } from "../chat/message-stats";
 import { FilesTab } from "./files";
 import { EmptyTab, type WorkspaceTab } from "./workspace-panel";
 
@@ -97,9 +98,15 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
   const [open, setOpen] = useState(running);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  const now = useNow(running);
+  const dur = useDuration();
   useEffect(() => {
     if (running) setOpen(true);
   }, [running]);
+  const started = Date.parse(task.createdAt);
+  const total = (task.finishedAt ? Date.parse(task.finishedAt) : now) - started;
+  const lastAt = lines.findLast((l) => l.at !== undefined)?.at ?? started;
+  const quietMs = running ? now - lastAt : 0;
 
   return (
     <div className="flex flex-col gap-2">
@@ -116,6 +123,9 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
           <span className="truncate font-medium">{task.title}</span>
           <span className="flex-none text-xs text-subtle">{task.harness}</span>
         </button>
+        <span className="flex-none text-xs tabular-nums text-subtle" title={t("tasks.totalTime")}>
+          {dur(Math.max(0, total))}
+        </span>
         {task.prUrl && (
           <a
             href={task.prUrl}
@@ -150,13 +160,53 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
         )}
       </div>
       {stopError && running && <p className="pl-6 text-xs text-bad">{stopError}</p>}
-      {open && <Terminal lines={lines} />}
+      {open && <Terminal lines={lines} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
+      {quietMs > QUIET_MS && <p className="pl-6 text-xs text-muted">{t("tasks.quiet", { time: dur(quietMs) })}</p>}
     </div>
   );
 }
 
-function Terminal({ lines }: { lines: TerminalLine[] }) {
+/** Past this long without a new line, a running task says it may be stuck. */
+const QUIET_MS = 3 * 60_000;
+
+/** The current time, ticking every second while `live`. */
+function useNow(live: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!live) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [live]);
+  return now;
+}
+
+function useDuration() {
   const t = useT();
+  const { locale } = useI18n();
+  return (ms: number) => duration(ms, t, locale);
+}
+
+/**
+ * How long each line's step took: what the runner reported, or for a tool call reported when it
+ * started, until the next tool call (or the end of the task).
+ */
+function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
+  let next: number | undefined;
+  const times: (number | undefined)[] = new Array(lines.length);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i]!;
+    if (l.ms !== undefined) times[i] = l.ms;
+    else if (l.tool && l.at !== undefined) times[i] = Math.max(0, (next ?? end) - l.at);
+    if (l.tool && l.at !== undefined) next = l.at;
+  }
+  return times;
+}
+
+function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
+  const t = useT();
+  const dur = useDuration();
+  const times = stepTimes(lines, end);
   const ref = useRef<HTMLPreElement>(null);
   const pinned = useRef(true);
   useEffect(() => {
@@ -178,9 +228,14 @@ function Terminal({ lines }: { lines: TerminalLine[] }) {
       {lines.map((l, i) => (
         <div
           key={i}
-          className={`whitespace-pre-wrap break-words ${l.stream === "stderr" ? "text-bad" : l.stream === "system" ? "text-subtle" : ""}`}
+          className={`flex items-start gap-3 ${l.stream === "stderr" ? "text-bad" : l.stream === "system" ? "text-subtle" : ""}`}
         >
-          {l.text}
+          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{l.text}</span>
+          {times[i] !== undefined && (
+            <span className="flex-none tabular-nums text-subtle" title={t("tasks.stepTime")}>
+              {dur(times[i]!)}
+            </span>
+          )}
         </div>
       ))}
     </pre>

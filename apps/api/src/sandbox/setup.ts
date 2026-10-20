@@ -10,6 +10,8 @@ export const BASE_IMAGE = "cloudflare/debian-trixie";
 const OPENCODE_VERSION = "1.19.3";
 const CLAUDE_CODE_VERSION = "2.1.303";
 const PNPM_VERSION = "10.28.0";
+/** Installs the Python libraries below (several times faster than pip), and uvx starts Python MCP servers people connect. */
+const UV_VERSION = "0.12.24";
 
 /**
  * Python libraries for the files people attach (PDF, Excel/CSV, Word, PowerPoint, images): reading
@@ -28,8 +30,6 @@ const PYTHON_PACKAGES = [
   "reportlab==4.4.4",
   "pillow==11.3.0",
   "matplotlib==3.10.7",
-  // uvx starts Python MCP servers people connect (see connectors).
-  "uv==0.12.24",
 ];
 
 /** The user harnesses run as: Claude Code refuses to skip permissions as root. */
@@ -38,6 +38,9 @@ export const SANDBOX_HOME = `/home/${SANDBOX_USER}`;
 
 /** Runs as root in a fresh container. Exits non-zero on any failure. */
 export const SETUP_SCRIPT = `set -euo pipefail
+# Each step's time shows in the build output, to see what makes preparing the sandbox slow.
+PS4='+ [\${SECONDS}s] '
+set -x
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o Acquire::Retries=5 update
 apt-get -o Acquire::Retries=5 install -y --no-install-recommends \\
@@ -46,7 +49,8 @@ apt-get -o Acquire::Retries=5 install -y --no-install-recommends \\
   poppler-utils qpdf tesseract-ocr tesseract-ocr-eng tesseract-ocr-tur fonts-dejavu-core
 rm -rf /var/lib/apt/lists/*
 # The sandbox is the boundary, so the system Python is fine (Debian marks it externally managed).
-pip3 install --break-system-packages --no-cache-dir ${PYTHON_PACKAGES.map((p) => `"${p}"`).join(" ")}
+pip3 install --break-system-packages --no-cache-dir "uv==${UV_VERSION}"
+uv pip install --system --break-system-packages --no-cache ${PYTHON_PACKAGES.map((p) => `"${p}"`).join(" ")}
 export COREPACK_HOME=/usr/local/share/corepack
 npm install -g "opencode-ai@${OPENCODE_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" --activate
