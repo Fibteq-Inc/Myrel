@@ -1,9 +1,9 @@
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
-import { ChevronLeft, Folder, KeyRound, Mail, Server, UserRound } from "lucide-react";
+import { ChevronLeft, CreditCard, Folder, KeyRound, Mail, Server, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
-import { meQuery, myInvitesQuery, projectsQuery } from "../../lib/api";
+import { meQuery, myInvitesQuery, projectsQuery, serverInfoQuery } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/settings")({
   loader: ({ context }) => context.queryClient.ensureQueryData(meQuery),
@@ -15,6 +15,7 @@ function SettingsLayout() {
   const { data: me } = useQuery(meQuery);
   const { data: projects = [] } = useQuery(projectsQuery);
   const { data: invites = [] } = useQuery(myInvitesQuery);
+  const { data: info } = useQuery(serverInfoQuery);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -30,6 +31,11 @@ function SettingsLayout() {
           <NavItem to="/settings" icon={<UserRound size={15} />} exact>
             {t("settings.account")}
           </NavItem>
+          {info?.billing && (
+            <NavItem to="/settings/billing" icon={<CreditCard size={15} />}>
+              {t("settings.billing")}
+            </NavItem>
+          )}
           <NavItem to="/settings/keys" icon={<KeyRound size={15} />}>
             {t("settings.keys")}
           </NavItem>
@@ -83,7 +89,7 @@ function NavItem({
   exact,
   children,
 }: {
-  to: "/settings" | "/settings/keys" | "/settings/invites" | "/settings/server";
+  to: "/settings" | "/settings/billing" | "/settings/keys" | "/settings/invites" | "/settings/server";
   icon: ReactNode;
   exact?: boolean;
   children: ReactNode;

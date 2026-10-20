@@ -62,6 +62,7 @@ export const serverInfoQuery = queryOptions({
 
 // --- settings ---
 
+export const billingQuery = queryOptions({ queryKey: ["billing"], queryFn: () => api.getBilling() });
 export const meQuery = queryOptions({ queryKey: ["me"], queryFn: () => api.getMe() });
 export const providersQuery = queryOptions({ queryKey: ["providers"], queryFn: () => api.listProviders() });
 export const keysQuery = queryOptions({ queryKey: ["keys"], queryFn: () => api.listKeys() });

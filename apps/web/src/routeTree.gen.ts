@@ -18,6 +18,7 @@ import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppUsageRouteImport } from './routes/_app/usage'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app/projects/$projectId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
 import { Route as AppSettingsInvitesRouteImport } from './routes/_app/settings/invites'
 import { Route as AppSettingsKeysRouteImport } from './routes/_app/settings/keys'
 import { Route as AppSettingsServerRouteImport } from './routes/_app/settings/server'
@@ -70,6 +71,11 @@ const AppProjectsProjectIdRoute = AppProjectsProjectIdRouteImport.update({
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsInvitesRoute = AppSettingsInvitesRouteImport.update({
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/usage': typeof AppUsageRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
+  '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/devices': typeof AppDevicesRoute
   '/usage': typeof AppUsageRoute
   '/': typeof AppIndexRoute
+  '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   '/_app/usage': typeof AppUsageRoute
   '/_app/': typeof AppIndexRoute
   '/_app/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
+  '/_app/settings/billing': typeof AppSettingsBillingRoute
   '/_app/settings/invites': typeof AppSettingsInvitesRoute
   '/_app/settings/keys': typeof AppSettingsKeysRoute
   '/_app/settings/server': typeof AppSettingsServerRoute
@@ -191,6 +200,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/projects/$projectId'
+    | '/settings/billing'
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
     | '/devices'
     | '/usage'
     | '/'
+    | '/settings/billing'
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/_app/usage'
     | '/_app/'
     | '/_app/projects/$projectId'
+    | '/_app/settings/billing'
     | '/_app/settings/invites'
     | '/_app/settings/keys'
     | '/_app/settings/server'
@@ -310,6 +322,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/billing': {
+      id: '/_app/settings/billing'
+      path: '/billing'
+      fullPath: '/settings/billing'
+      preLoaderRoute: typeof AppSettingsBillingRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/invites': {
       id: '/_app/settings/invites'
       path: '/invites'
@@ -377,6 +396,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppSettingsRouteChildren {
+  AppSettingsBillingRoute: typeof AppSettingsBillingRoute
   AppSettingsInvitesRoute: typeof AppSettingsInvitesRoute
   AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsServerRoute: typeof AppSettingsServerRoute
@@ -385,6 +405,7 @@ interface AppSettingsRouteChildren {
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsBillingRoute: AppSettingsBillingRoute,
   AppSettingsInvitesRoute: AppSettingsInvitesRoute,
   AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsServerRoute: AppSettingsServerRoute,

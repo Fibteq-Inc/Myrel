@@ -4,6 +4,7 @@ import type {
   ArtifactVersion,
   ArtifactView,
   AdminSettings,
+  BillingSummary,
   ApiKey,
   CreateApiKeyInput,
   CreateInviteInput,
@@ -400,6 +401,30 @@ export class ApiClient {
     const query = new URLSearchParams({ days: String(input.days), tzOffset: String(input.tzOffset ?? 0) });
     if (input.projectId) query.set("projectId", input.projectId);
     return this.request<UsageSummary>(`/api/usage?${query}`);
+  }
+
+  // --- plans and billing (hosted service only; see ServerInfo.billing) ---
+
+  getBilling() {
+    return this.request<BillingSummary>("/api/billing");
+  }
+
+  /** A Stripe Checkout URL for Pro or Team. */
+  startCheckout(input: { plan: "pro" | "team"; interval: "month" | "year"; seats?: number }) {
+    return this.request<{ url: string }>("/api/billing/checkout", { method: "POST", body: input });
+  }
+
+  /** A Stripe billing portal URL: change plan or card, cancel, invoices. */
+  openBillingPortal() {
+    return this.request<{ url: string }>("/api/billing/portal", { method: "POST", body: {} });
+  }
+
+  addTeamMember(email: string) {
+    return this.request<null>("/api/billing/team/members", { method: "POST", body: { email } });
+  }
+
+  removeTeamMember(userId: string) {
+    return this.request<null>(`/api/billing/team/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
   // --- local computers (myrel-runner) ---
