@@ -1,0 +1,1 @@
+ALTER TABLE `project_workspaces` ADD `folders` text DEFAULT '[]' NOT NULL;

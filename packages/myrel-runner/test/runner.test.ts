@@ -78,6 +78,18 @@ describe("CLI output parsing", () => {
     );
   });
 
+  it("passes the project's other folders to each CLI", () => {
+    expect(ADAPTERS.claude.args({ access: "full", dirs: ["/a"] })).toEqual(
+      expect.arrayContaining(["--permission-mode", "bypassPermissions", "--add-dir", "/a"]),
+    );
+    expect(ADAPTERS.codex.args({ access: "edit", dirs: ["/a", "/b"] })).toEqual(
+      expect.arrayContaining(["--add-dir", "/a", "--add-dir", "/b"]),
+    );
+    expect(ADAPTERS.gemini.args({ access: "edit", dirs: ["/a", "/b"] })).toEqual(
+      expect.arrayContaining(["--include-directories", "/a,/b"]),
+    );
+  });
+
   it("reads Codex JSONL and Gemini JSON", () => {
     const codex: ParseState = {};
     ADAPTERS.codex.line(JSON.stringify({ type: "item.started", item: { type: "command_execution", command: "ls" } }), codex);
@@ -257,6 +269,47 @@ echo "args: $*" >&2`,
         },
       },
     });
+  });
+
+  it("gives the agent the project's other shared folders and reports where it works", async () => {
+    await fakeClaude(`read prompt
+printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$*"`);
+    const folder = join(home, "main");
+    const docs = join(home, "docs");
+    const secret = join(home, "secret");
+    await Promise.all([folder, docs, secret].map((d) => mkdir(d)));
+    const config: RunnerConfig = {
+      server: "https://myrel.test",
+      folders: [
+        { path: folder, name: "main" },
+        { path: docs, name: "docs" },
+      ],
+      access: "full",
+      worktrees: false,
+    };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    const taskId = "task_01JTEST0000000000000000003";
+    await runner.start({
+      type: "task.start",
+      taskId,
+      threadId: "thr_01JTEST0000000000000000008",
+      folder,
+      folders: [docs, secret],
+      cli: "claude",
+      prompt: "x",
+      agent: { mcpPath: "/api/agent-mcp/thr_01JTEST0000000000000000008", token: "t".repeat(32) },
+    });
+    const real = async (p: string) => (await import("node:fs/promises")).realpath(p);
+    expect(frames[0]).toEqual({ type: "task.folders", taskId, folders: [await real(folder), await real(docs)] });
+    const args = (frames.at(-1) as { result: string }).result;
+    expect(args).toContain(`--add-dir ${await real(docs)}`);
+    expect(args).not.toContain(secret);
+    // Full access still asks about folders outside the project, through Myrel.
+    expect(args).toContain("--permission-mode acceptEdits");
+    expect(args).toContain("--permission-prompt-tool mcp__myrel__approve_access");
+    expect(args).toMatch(/--allowedTools mcp__myrel,Bash,WebFetch,WebSearch/);
   });
 
   it("refuses folders that are not shared and reports a failing CLI", async () => {

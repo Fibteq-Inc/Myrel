@@ -334,6 +334,8 @@ export const projectWorkspaces = sqliteTable(
       .notNull()
       .references(() => runners.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
+    /** JSON array of other folders on the same runner the agent may work in too. */
+    folders: text("folders").notNull().default("[]"),
     cli: text("cli", { enum: ["claude", "codex", "gemini"] }).notNull(),
     createdBy: text("created_by")
       .notNull()

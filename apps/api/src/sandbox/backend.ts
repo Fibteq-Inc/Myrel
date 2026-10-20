@@ -45,6 +45,7 @@ export function localBackend(
         projectId,
         threadId,
         folder: workspace.path,
+        folders: workspace.folders,
         cli: workspace.cli,
         prompt: spec.prompt,
         agent,

@@ -17,6 +17,8 @@ export type TaskStart = {
   projectId: string;
   threadId: string;
   folder: string;
+  /** The project's other folders on this computer. */
+  folders?: string[];
   cli: CliId;
   prompt: string;
   /** The CLI runs as the thread's agent, connected to the thread's MCP endpoint (needs feature "agent"). */
@@ -126,6 +128,12 @@ export class RunnerAgent extends Agent<Env> {
         await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.slice(0, 200) }]);
         return;
       }
+      case "task.folders": {
+        const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
+        if (task?.status !== "running") return;
+        await (await getAgentByName(this.env.THREAD_AGENT, task.thread_id)).agentFolders(task.id, frame.folders);
+        return;
+      }
       case "task.done": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
         if (task?.status !== "running") return;
@@ -173,6 +181,7 @@ export class RunnerAgent extends Agent<Env> {
       taskId,
       threadId: input.threadId,
       folder: input.folder,
+      ...(input.folders?.length && { folders: input.folders }),
       cli: input.cli,
       prompt: input.prompt,
       ...(input.agent && { agent: input.agent }),

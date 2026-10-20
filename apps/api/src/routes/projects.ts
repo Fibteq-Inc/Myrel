@@ -10,7 +10,9 @@ import {
   type ProjectRole,
   type ProjectSettings,
   UpdateMemberInput,
+  MAX_WORKSPACE_FOLDERS,
   SetWorkspaceInput,
+  WorkspaceFolderInput,
   TaskTarget,
   UpdateProjectSettingsInput,
 } from "@myrel/protocol";
@@ -24,7 +26,7 @@ import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
-import { getWorkspace, notifyProject, parseInfo } from "../runners";
+import { getWorkspace, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
 
@@ -372,11 +374,45 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const now = new Date();
     const values = { ...input.data, updatedAt: now };
+    // The other folders belong to the computer: they stay only while the project stays on it.
+    const [before] = await db.select().from(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
+    const kept = before?.runnerId === input.data.runnerId ? parseFolders(before.folders).filter((f) => f !== input.data.path) : [];
     await db
       .insert(projectWorkspaces)
-      .values({ projectId: id, createdBy: userId, createdAt: now, ...values })
-      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, createdBy: userId } });
+      .values({ projectId: id, createdBy: userId, createdAt: now, ...values, folders: JSON.stringify(kept) })
+      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, folders: JSON.stringify(kept), createdBy: userId } });
     await notifyProject(c.env, id);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  // Other folders on the same computer the project's agent may work in, besides its main folder.
+  .post("/:id/workspace/folders", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const input = WorkspaceFolderInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const workspace = await getWorkspace(c.env, id);
+    if (!workspace) return c.json({ error: "invalid_input", message: "Connect a local folder to this project first." }, 400);
+    if (workspace.folders.length >= MAX_WORKSPACE_FOLDERS) {
+      return c.json({ error: "invalid_input", message: `A project can have at most ${MAX_WORKSPACE_FOLDERS} other folders.` }, 400);
+    }
+    // Like the main folder, only one shared on that computer (the folder picker shares it first).
+    const [runner] = await createDb(c.env.DB).select().from(runners).where(eq(runners.id, workspace.runnerId));
+    if (!parseInfo(runner?.info ?? null)?.folders.some((f) => f.path === input.data.path)) {
+      return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
+    }
+    await setWorkspaceFolder(c.env, id, input.data.path, true);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  .delete("/:id/workspace/folders", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const path = c.req.query("path");
+    if (!path) return c.json({ error: "invalid_input", message: "Which folder?" }, 400);
+    await setWorkspaceFolder(c.env, id, path, false);
     return c.json({ workspace: await getWorkspace(c.env, id) });
   })
   .delete("/:id/workspace", async (c) => {

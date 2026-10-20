@@ -11,7 +11,11 @@ import { ROUTINE_GUIDE } from "./routine-tools";
 
 /** Where the thread's agent runs this turn. */
 export type AgentPlace =
-  | { kind: "local"; cli: CliId; folder: string; computer: string }
+  /**
+   * folders: the project's other folders on that computer. asks: Claude Code asks the person
+   * through Myrel before reaching outside them (a runner with feature "project-folders").
+   */
+  | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean }
   /** images: its model reads images, so it can look at screenshots itself. */
   | { kind: "cloud"; images: boolean };
 
@@ -33,6 +37,18 @@ export function filesGuide(place: AgentPlace): string {
 - To make a file, write it in your folder with those libraries and check it (read it back, or render a PDF page to PNG and look at it). Then upload each with file_upload_url to a path under a folder named for the work and attach them to your reply with reply's files, so people can open them.`;
 }
 
+/** Which folders a local agent may use, and what happens when it needs another one. */
+function localFolders(place: Extract<AgentPlace, { kind: "local" }>): string {
+  const others = place.folders ?? [];
+  const list = others.length
+    ? `Work only in the project's folders: ${place.folder} and ${others.join(", ")}.`
+    : "Work in this folder only.";
+  const outside = place.asks
+    ? "When the work needs a folder outside them, just use it: Myrel asks the person for you and your step waits for their answer. If they say no, carry on without it."
+    : "When the work needs a folder outside them, ask the person in a reply to add it under Folders in the project's settings; until then you cannot reach it.";
+  return `${list} ${outside}`;
+}
+
 /** Folder in the sandbox for repositories, next to (not inside) the folder saved between turns. */
 export const SANDBOX_REPOS = "/workspace/repos";
 
@@ -40,7 +56,7 @@ export const SANDBOX_REPOS = "/workspace/repos";
 export function agentSystem(place: AgentPlace): string {
   const where =
     place.kind === "local"
-      ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: work in this folder only, and never change git history you did not make.`
+      ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${localFolders(place)}`
       : `You run as OpenCode in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead: git and gh already have access to the connected ones. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends.`;
   return `You are Myrel, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Myrel.
 

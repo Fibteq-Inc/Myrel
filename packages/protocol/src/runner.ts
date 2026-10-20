@@ -38,8 +38,11 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
  * "agent-clis": the same for Codex CLI and Gemini CLI.
  * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
+ * "project-folders": the CLI also gets the project's other folders (task.start's `folders`), reports
+ * the folders it works in ("task.folders"), and Claude Code asks people through Myrel before touching
+ * anything outside them (the thread's approve_access tool).
  */
-export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "project-folders"]);
 
 /**
  * A connector (MCP server) for the CLI running as the thread's agent. A remote one is on this
@@ -125,6 +128,8 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     cancelled: z.boolean().optional(),
   }),
   z.object({ type: z.literal("ping") }),
+  /** The folders a task's CLI can work in without asking: where it runs first (feature "project-folders"). */
+  z.object({ type: z.literal("task.folders"), taskId: TaskId, folders: z.array(z.string().min(1).max(1024)).max(60) }),
   // Answers to the server's folder requests (feature "folders").
   RunnerDirListing.extend({ type: z.literal("dirs"), requestId: RunnerRequestId }),
   z.object({ type: z.literal("folders"), requestId: RunnerRequestId, folders: z.array(RunnerFolder).max(200) }),
@@ -144,6 +149,8 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     folder: z.string().min(1).max(1024),
     cli: CliId,
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
+    /** The project's other folders the CLI may also work in; each must be shared too (feature "project-folders"). */
+    folders: z.array(z.string().min(1).max(1024)).max(50).optional(),
     /**
      * Present when the CLI runs as the thread's agent instead of doing one task for it: the
      * runner connects the CLI to the thread's MCP endpoint (server origin + mcpPath) with this
@@ -209,6 +216,8 @@ export const ProjectWorkspace = z.object({
   runnerId: RunnerId,
   runnerName: z.string(),
   path: z.string(),
+  /** Other folders on the same computer the agent may work in too. Anything else needs the person's OK. */
+  folders: z.array(z.string()).default([]),
   cli: CliId,
   online: z.boolean(),
 });
@@ -224,3 +233,10 @@ export const SetWorkspaceInput = z.object({
   cli: CliId,
 });
 export type SetWorkspaceInput = z.infer<typeof SetWorkspaceInput>;
+
+/** Adds one of the computer's shared folders to the project's other folders. */
+export const WorkspaceFolderInput = z.object({ path: z.string().min(1).max(1024) });
+export type WorkspaceFolderInput = z.infer<typeof WorkspaceFolderInput>;
+
+/** How many other folders a project can have besides its main one. */
+export const MAX_WORKSPACE_FOLDERS = 20;

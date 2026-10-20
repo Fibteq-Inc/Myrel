@@ -331,6 +331,106 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("works in the project's folders and asks the person before reaching outside them", { timeout: 30_000 }, async () => {
+    const res = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "İsmail" }),
+    });
+    const user = res.headers.get("set-auth-token")!;
+    const me = ((await res.json()) as { user: { id: string } }).user.id;
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "folders", "project-folders"]);
+    let shared = [{ path: "/Users/ismail/code/myrel", name: "myrel" }];
+    runnerSide.ws.addEventListener("message", (e) => {
+      const frame = JSON.parse(e.data as string) as ServerToRunner;
+      if (frame.type === "folder.share") {
+        shared = [...shared, { path: frame.path, name: frame.path.split("/").at(-1)! }];
+        runnerSide.send({ type: "folders", requestId: frame.requestId, folders: shared });
+      }
+    });
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    const workspace = async () =>
+      ((await (await api(`/api/projects/${project.id}/workspace`, { token: user })).json()) as { workspace: ProjectWorkspace }).workspace;
+    const addFolder = (path: string) =>
+      api(`/api/projects/${project.id}/workspace/folders`, { method: "POST", token: user, body: JSON.stringify({ path }) });
+    // No local folder yet, so no other folders either.
+    expect((await addFolder("/Users/ismail/code/myrel")).status).toBe(400);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    // Only a folder shared on that computer.
+    expect((await addFolder("/Users/ismail/docs")).status).toBe(400);
+    expect((await api(`/api/runners/${runner.id}/folders`, { method: "POST", token: user, body: JSON.stringify({ path: "/Users/ismail/docs" }) })).status).toBe(200);
+    expect((await addFolder("/Users/ismail/docs")).status).toBe(200);
+    expect((await workspace()).folders).toEqual(["/Users/ismail/docs"]);
+
+    const { projectAgent, thread } = await startThread(project.id);
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const start = await until(() => runnerSide.frames.find((f): f is Start => f.type === "task.start"), "task.start");
+    expect(start.folders).toEqual(["/Users/ismail/docs"]);
+    expect(start.prompt).toContain("/Users/ismail/code/myrel and /Users/ismail/docs");
+    expect(start.prompt).toContain("Myrel asks the person for you");
+    // The CLI works in a worktree, with the project's folders added.
+    runnerSide.send({ type: "task.folders", taskId: start.taskId, folders: ["/Users/ismail/.myrel-runner/worktrees/x", "/Users/ismail/code/myrel", "/Users/ismail/docs"] });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const mcp = (body: unknown) =>
+      api(start.agent!.mcpPath, { method: "POST", headers: { authorization: `Bearer ${start.agent!.token}` }, body: JSON.stringify(body) });
+    let id = 10;
+    const ask = async (tool_name: string, input: Record<string, unknown>) => {
+      const raw = await mcp({ jsonrpc: "2.0", id: id++, method: "tools/call", params: { name: "approve_access", arguments: { tool_name, input } } });
+      const res = (await raw.json()) as {
+        result: { content: { text: string }[] };
+      };
+      return JSON.parse(res.result.content[0]!.text) as { behavior: string; message?: string };
+    };
+    const cards = async () =>
+      ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).filter((m) => m.body.includes("```decision"));
+    const answer = async (body: string) => {
+      const m = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: me, body });
+      const agent = await getAgentByName(env.THREAD_AGENT, thread.id);
+      await agent.wake({ kind: "message", messageId: m.id, body, authorId: me, seq: m.seq });
+    };
+
+    // Inside its folders, a question is about the runner's access level, which stays as it is.
+    expect(await ask("Bash", { command: "rm -rf build" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("access level") });
+    expect((await ask("Edit", { file_path: "src/../src/a.ts" })).behavior).toBe("deny");
+    expect(await cards()).toHaveLength(0);
+
+    // Outside them, the person is asked and the step waits for the answer.
+    const once = ask("Read", { file_path: "/Users/ismail/notes/todo.md" });
+    const [card] = await until(async () => ((await cards()).length ? cards() : null), "folder card");
+    expect(card!.body).toContain("/Users/ismail/notes");
+    expect((await projectAgent.getThread(thread.id))?.status).toBe("blocked");
+    await answer("Bu sefer izin ver");
+    expect((await once).behavior).toBe("allow");
+    // Allowed once: the rest of this turn uses it without asking again.
+    expect((await ask("Grep", { pattern: "TODO", path: "/Users/ismail/notes/2026" })).behavior).toBe("allow");
+    expect(await cards()).toHaveLength(1);
+
+    const refused = ask("Read", { file_path: "/Users/ismail/.ssh/id_ed25519" });
+    await until(async () => (await cards()).length === 2, "second card");
+    await answer("İzin verme");
+    expect((await refused).behavior).toBe("deny");
+
+    // Added to the project: shared on the computer and listed in the project's settings.
+    const always = ask("Glob", { pattern: "/Users/ismail/code/site/**/*.md" });
+    await until(async () => (await cards()).length === 3, "third card");
+    await answer("Projeye ekle");
+    expect((await always).behavior).toBe("allow");
+    expect((await workspace()).folders).toEqual(["/Users/ismail/docs", "/Users/ismail/code/site"]);
+    expect(shared.map((f) => f.path)).toContain("/Users/ismail/code/site");
+    // Answers to the cards did not queue another turn.
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(1);
+    runnerSide.ws.close();
+  });
+
   it("asks the person to update a runner that cannot host the agent", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

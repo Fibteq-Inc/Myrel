@@ -12,7 +12,7 @@ import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.7.0";
+export const RUNNER_VERSION = "0.8.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -105,7 +105,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       platform: platform(),
       folders: config.folders,
       clis,
-      features: ["folders", "cancel", "agent", "agent-clis", "connectors"],
+      features: ["folders", "cancel", "agent", "agent-clis", "connectors", "project-folders"],
       running: tasks.runningIds(),
     });
   tasks.setSender(send);

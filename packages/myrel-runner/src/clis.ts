@@ -29,8 +29,12 @@ export type ParseState = {
 export type CliAdapter = {
   id: CliId;
   bin: string;
-  /** extra: flags from `agent`, placed before the CLI's own trailing arguments. */
-  args(opts: { access: Access; resume?: string; extra?: string[] }): string[];
+  /**
+   * extra: flags from `agent`, placed before the CLI's own trailing arguments. dirs: other folders
+   * the CLI may work in besides its current one. asks: Claude Code sends permission prompts to
+   * Myrel's approve_access tool, which asks the person (see AgentMcp.asks).
+   */
+  args(opts: { access: Access; resume?: string; extra?: string[]; dirs?: string[]; asks?: boolean }): string[];
   /**
    * Connects the CLI to the thread's MCP endpoint for a run as the thread's agent, so it talks
    * to people through Myrel's tools without asking for permission. `dir` is a private folder
@@ -50,7 +54,24 @@ export const MYREL_MCP_SERVER = "myrel";
  * The thread's MCP endpoint for one agent run, and its connectors: remote ones on the same server
  * with the same token, commands started on this computer with their own environment.
  */
-export type AgentMcp = { url: string; token: string; dir: string; connectors?: AgentServer[] };
+export type AgentMcp = {
+  url: string;
+  token: string;
+  dir: string;
+  connectors?: AgentServer[];
+  /**
+   * Claude Code asks Myrel (the approve_access tool) instead of failing when a step needs
+   * permission, so a step outside the project's folders waits for the person's answer.
+   */
+  asks?: boolean;
+  access?: Access;
+};
+
+/** Claude Code's permission prompt tool on Myrel's MCP server. */
+export const APPROVE_TOOL = "mcp__myrel__approve_access";
+
+/** How long Claude Code waits on one Myrel tool call: the person may take a few minutes to answer. */
+const ASK_TIMEOUT_MS = 15 * 60 * 1000;
 
 export type AgentServer =
   | { transport: "http"; name: string; url: string }
@@ -70,17 +91,21 @@ async function privateFile(dir: string, name: string, content: unknown): Promise
 const claude: CliAdapter = {
   id: "claude",
   bin: "claude",
-  args: ({ access, resume, extra = [] }) => [
+  args: ({ access, resume, extra = [], dirs = [], asks }) => [
     "-p",
     "--output-format",
     "stream-json",
     "--verbose",
     "--permission-mode",
-    { read: "plan", edit: "acceptEdits", full: "bypassPermissions" }[access],
+    // Bypassing permissions would skip the question about folders outside the project, so full
+    // access with Myrel asking pre-allows the rest instead (see agent()).
+    { read: "plan", edit: "acceptEdits", full: asks ? "acceptEdits" : "bypassPermissions" }[access],
+    ...dirs.flatMap((d) => ["--add-dir", d]),
+    ...(asks ? ["--permission-prompt-tool", APPROVE_TOOL] : []),
     ...(resume ? ["--resume", resume] : []),
     ...extra,
   ],
-  async agent({ url, token, dir, connectors = [] }) {
+  async agent({ url, token, dir, connectors = [], asks, access }) {
     const headers = { Authorization: `Bearer ${token}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers } };
     for (const c of connectors) {
@@ -88,8 +113,13 @@ const claude: CliAdapter = {
         c.transport === "http" ? { type: "http", url: c.url, headers } : { type: "stdio", command: c.command, args: c.args, env: c.env };
     }
     const config = await privateFile(dir, "mcp.json", { mcpServers: servers });
-    const allowed = [MYREL_MCP_SERVER, ...connectors.map((c) => c.name)].map((name) => `mcp__${name}`).join(",");
-    return { args: ["--mcp-config", config, "--allowedTools", allowed] };
+    const allowed = [MYREL_MCP_SERVER, ...connectors.map((c) => c.name)].map((name) => `mcp__${name}`);
+    // Full access: commands and the web need no question; only files outside the folders do.
+    if (asks && access === "full") allowed.push("Bash", "WebFetch", "WebSearch");
+    return {
+      args: ["--mcp-config", config, "--allowedTools", allowed.join(",")],
+      ...(asks && { env: { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) } }),
+    };
   },
   line(line, state) {
     const event = parseJson(line);
@@ -128,12 +158,13 @@ const claude: CliAdapter = {
 const codex: CliAdapter = {
   id: "codex",
   bin: "codex",
-  args: ({ access, extra = [] }) => [
+  args: ({ access, extra = [], dirs = [] }) => [
     "exec",
     "--json",
     "--skip-git-repo-check",
     "--sandbox",
     { read: "read-only", edit: "workspace-write", full: "danger-full-access" }[access],
+    ...dirs.flatMap((d) => ["--add-dir", d]),
     ...extra,
     "-",
   ],
@@ -183,11 +214,12 @@ const codex: CliAdapter = {
 const gemini: CliAdapter = {
   id: "gemini",
   bin: "gemini",
-  args: ({ access, extra = [] }) => [
+  args: ({ access, extra = [], dirs = [] }) => [
     "--output-format",
     "json",
     "--approval-mode",
     { read: "default", edit: "auto_edit", full: "yolo" }[access],
+    ...(dirs.length ? ["--include-directories", dirs.join(",")] : []),
     ...extra,
   ],
   // Gemini CLI has no flag for an MCP config, so the run gets its own system settings file.
