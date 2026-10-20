@@ -60,6 +60,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (rpc.method === "tools/list") return answer(tools);
     }
   }
+  if (url.hostname === "open.example.com" && url.pathname === "/mcp") {
+    // Needs no sign-in at all.
+    if (!rpc?.id) return new Response(null, { status: 202 });
+    if (rpc.method === "initialize") return answer({ protocolVersion: "2025-06-18", capabilities: {} });
+    if (rpc.method === "tools/list") return answer(tools);
+  }
   return new Response("not found", { status: 404 });
 }) as typeof fetch;
 
@@ -237,6 +243,16 @@ describe("connectors API", () => {
     await json(api(`/api/account/connectors/${connector.id}`, { method: "PATCH", token: me.token, body: { enabled: false } }));
     expect(await remoteTarget(env, connector.id)).toBeNull();
     expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "cloud" })).length).toBe(0);
+  });
+
+  it("adds a server picked to sign in to as it is when it has no sign-in", async () => {
+    const me = await signUp();
+    const created = await json<{ connector: Connector; authorizeUrl?: string }>(
+      api("/api/account/connectors", { method: "POST", token: me.token, body: { transport: "http", name: "Docs", url: "https://open.example.com/mcp", auth: "oauth" } }),
+      201,
+    );
+    expect(created.authorizeUrl).toBeUndefined();
+    expect(created.connector).toMatchObject({ auth: "none", status: "ok", tools: [{ name: "create_issue" }, { name: "list_issues" }] });
   });
 
   it("signs in to an OAuth server with PKCE and keeps the token on the server", async () => {

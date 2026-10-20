@@ -3,6 +3,7 @@ import { createId, CreateConnectorInput, UpdateConnectorInput } from "@myrel/pro
 import { and, asc, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
+import { searchCatalog } from "../connectors/catalog";
 import { blockedUrl } from "../connectors/client";
 import { finishAuthorization, pendingSignIn, startAuthorization } from "../connectors/oauth";
 import {
@@ -85,6 +86,13 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
           const authorizeUrl = await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id);
           return c.json({ connector: toConnector(row, true), authorizeUrl }, 201);
         } catch (err) {
+          // A server without a sign-in may need none at all (catalog entries don't say): try it as it is.
+          const open = await checkConnector(c.env, { ...row, auth: "none" });
+          if (open.status === "ok") {
+            const next = { ...row, auth: "none" as const, ...open };
+            await createDb(c.env.DB).update(connectors).set({ auth: "none", ...open }).where(eq(connectors.id, id));
+            return c.json({ connector: toConnector(next, true) }, 201);
+          }
           const lastError = err instanceof Error ? err.message : String(err);
           await createDb(c.env.DB).update(connectors).set({ status: "error", lastError }).where(eq(connectors.id, id));
           return c.json({ connector: toConnector({ ...row, status: "error", lastError }, true) }, 201);
@@ -259,4 +267,10 @@ export const projectConnectorRoutes = connectorRoutes(async (c) => {
   const project = await findMembership(c.env, projectId, c.get("user").id);
   if (!project) return null;
   return { owner: { projectId }, canEdit: project.role === "owner" || project.role === "admin" };
+});
+
+/** Mounted at /api/connectors/catalog: search the connector catalog (a copy of the official MCP Registry). */
+export const connectorCatalogRoutes = new Hono<AppEnv>().use(requireUser).get("/", async (c) => {
+  const { q, offset } = c.req.query();
+  return c.json(await searchCatalog(c.env, { q, offset: Number(offset) || 0 }));
 });

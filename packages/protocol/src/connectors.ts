@@ -170,3 +170,62 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
     runsOn: "both",
   },
 ];
+
+/**
+ * A remote MCP server from the connector catalog: the official MCP Registry
+ * (registry.modelcontextprotocol.io), which Myrel copies every hour. Only servers reachable over
+ * streamable HTTP are listed.
+ */
+export const CatalogConnector = z.object({
+  /** The registry name, e.g. "com.notion/mcp". */
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  websiteUrl: z.string().nullable(),
+  iconUrl: z.string().nullable(),
+  url: z.string(),
+  /** "headers": the server asks for a key (headerHint names it); "oauth": it signs in, or needs nothing. */
+  auth: z.enum(["oauth", "headers"]),
+  headerHint: z.object({ name: z.string(), placeholder: z.string() }).nullable(),
+  /** One of the well-known services Myrel lists first. */
+  popular: z.boolean(),
+});
+export type CatalogConnector = z.infer<typeof CatalogConnector>;
+
+export const CatalogPage = z.object({
+  connectors: z.array(CatalogConnector),
+  /** Pass as `offset` for the next page; null on the last one. */
+  nextOffset: z.number().nullable(),
+  /** When the catalog was last copied from the registry; null before the first copy. */
+  syncedAt: z.iso.datetime().nullable(),
+});
+export type CatalogPage = z.infer<typeof CatalogPage>;
+
+/**
+ * Registry names of the services' own servers, listed first in this order. The registry has
+ * thousands of entries, many of them tests or unofficial copies, so these are picked by hand.
+ */
+export const POPULAR_CATALOG_IDS = [
+  "com.notion/mcp",
+  "app.linear/linear",
+  "com.atlassian/atlassian-mcp-server",
+  "com.figma.mcp/mcp",
+  "com.stripe/mcp",
+  "com.canva.mcp/mcp",
+  "com.vercel/vercel-mcp",
+  "com.gitlab/mcp",
+  "io.github.PostHog/mcp",
+  "com.zapier/mcp",
+  "com.airtable/mcp",
+  "com.monday/monday.com",
+  "com.paypal.mcp/mcp",
+  "com.webflow/mcp",
+  "com.wix/mcp",
+  "com.neon/mcp",
+  "com.railway/mcp",
+  "co.huggingface/hf-mcp-server",
+  "com.cloudflare.mcp/mcp",
+  "com.apify/apify-mcp-server",
+  "ai.exa/exa",
+  "com.microsoft/microsoft-learn-mcp",
+];

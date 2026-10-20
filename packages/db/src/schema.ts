@@ -485,6 +485,44 @@ export const connectors = sqliteTable(
 );
 
 /**
+ * The connector catalog: remote MCP servers listed in the official MCP Registry
+ * (registry.modelcontextprotocol.io), copied here by an hourly cron (see apps/api/src/connectors/catalog.ts)
+ * so the settings can search it without calling the registry. One row per server, its latest version;
+ * `id` is the registry name (e.g. "com.notion/mcp").
+ */
+export const connectorCatalog = sqliteTable(
+  "connector_catalog",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    websiteUrl: text("website_url"),
+    iconUrl: text("icon_url"),
+    /** The streamable HTTP address the connector is added with. */
+    url: text("url").notNull(),
+    /** "headers": the server asks for a secret header (an API key); otherwise it signs in or needs nothing. */
+    auth: text("auth", { enum: ["oauth", "headers"] }).notNull(),
+    headerName: text("header_name"),
+    headerPlaceholder: text("header_placeholder"),
+    version: text("version").notNull(),
+    /** When the registry last changed this entry. */
+    registryUpdatedAt: text("registry_updated_at").notNull(),
+    syncedAt: integer("synced_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("connector_catalog_title_idx").on(t.title)],
+);
+
+/** Where the catalog sync stands: one row ("registry"). */
+export const connectorCatalogSync = sqliteTable("connector_catalog_sync", {
+  id: text("id").primaryKey(),
+  /** Start of the last sync that finished; the next one asks the registry for changes since then. */
+  since: text("since"),
+  /** A sync that ran out of time continues from this page. */
+  cursor: text("cursor"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
  * Skills (Agent Skills: a SKILL.md and its files) the thread's agent may use (see @myrel/protocol
  * skills.ts). A row belongs to a person (owner_id) or to a project (project_id), never both. The
  * files live in R2 (FILES bucket) as one bundle at `skills/<id>.json`; `files` lists them.
