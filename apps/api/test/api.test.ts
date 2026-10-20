@@ -1,4 +1,4 @@
-import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@myrel/protocol";
+import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo, SYNC_PAGE_SIZE } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { createAuth } from "../src/auth";
 import { setExtensions } from "../src/extensions";
@@ -125,6 +125,35 @@ describe("ProjectAgent", () => {
     ws.send(JSON.stringify({ type: "sync", afterSeq: 0 }));
     const sync = await waitFor("sync.result");
     expect(sync.messages.map((m) => m.body)).toEqual(["hello"]);
+    ws.close();
+  });
+
+  it("streams every sync page when the client asks for all of them", async () => {
+    const token = await signUp();
+    const project = await createProject(token);
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    for (let i = 0; i < SYNC_PAGE_SIZE + 5; i++) {
+      await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: `m${i}` });
+    }
+    const res = await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } });
+    const ws = res.webSocket!;
+    const pages: Extract<ServerEvent, { type: "sync.result" }>[] = [];
+    let done!: () => void;
+    const finished = new Promise<void>((r) => (done = r));
+    ws.addEventListener("message", (e) => {
+      const event = ServerEvent.parse(JSON.parse(e.data as string));
+      if (event.type !== "sync.result") return;
+      pages.push(event);
+      if (!event.hasMore) done();
+    });
+    ws.accept();
+    ws.send(JSON.stringify({ type: "sync", afterSeq: 0, all: true }));
+    await finished;
+    expect(pages.map((p) => [p.messages.length, p.hasMore, p.streamed])).toEqual([
+      [SYNC_PAGE_SIZE, true, true],
+      [5, false, true],
+    ]);
+    expect(pages[1]!.messages.at(-1)!.seq).toBe(SYNC_PAGE_SIZE + 5);
     ws.close();
   });
 

@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { DECISION_LANG, parseDecision, threadIdFromHref } from "@myrel/protocol";
 import { Link, useParams } from "@tanstack/react-router";
 import { Check, Copy, MessagesSquare } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { memo, type ReactNode, useCallback, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DecisionCard } from "./decision-card";
@@ -15,6 +15,23 @@ export type DecisionHandlers = {
 
 /** An agent message body: GitHub-flavored Markdown, code blocks with a copy button, decision cards. */
 export function MessageMarkdown({ body, decision }: { body: string; decision?: DecisionHandlers }) {
+  // Parsing Markdown is the costly part of drawing a message; the body is parsed again only when it
+  // (or its decision's answer) changes, however often the conversation around it redraws.
+  const latest = useRef(decision?.onChoose);
+  latest.current = decision?.onChoose;
+  const onChoose = useCallback((label: string) => latest.current?.(label), []);
+  return <MarkdownBody body={body} answer={decision?.answer} onChoose={decision?.onChoose ? onChoose : undefined} />;
+}
+
+const MarkdownBody = memo(function MarkdownBody({
+  body,
+  answer,
+  onChoose,
+}: {
+  body: string;
+  answer?: string;
+  onChoose?: (label: string) => void;
+}) {
   const { projectId } = useParams({ strict: false });
   const components: Components = {
     pre: ({ children }) => <>{children}</>,
@@ -25,7 +42,7 @@ export function MessageMarkdown({ body, decision }: { body: string; decision?: D
       if (!lang && !text.includes("\n")) return <code>{children}</code>;
       if (lang === DECISION_LANG) {
         const parsed = parseDecision(text);
-        if (parsed) return <DecisionCard decision={parsed} answer={decision?.answer} onChoose={decision?.onChoose} />;
+        if (parsed) return <DecisionCard decision={parsed} answer={answer} onChoose={onChoose} />;
       }
       return <CodeBlock lang={lang}>{text.replace(/\n$/, "")}</CodeBlock>;
     },
@@ -47,7 +64,7 @@ export function MessageMarkdown({ body, decision }: { body: string; decision?: D
       </Markdown>
     </div>
   );
-}
+});
 
 function ThreadLink({ projectId, threadId, children }: { projectId: string; threadId: string; children: ReactNode }) {
   return (

@@ -3,7 +3,7 @@ import { useT } from "@myrel/i18n/react";
 import { planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
@@ -11,6 +11,7 @@ import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import {
   Composer,
   decisionAnswers,
+  EarlierMessages,
   mentionedPullRequests,
   MessageView,
   PlanCard,
@@ -18,6 +19,7 @@ import {
   PullRequestCards,
   ScrollToEnd,
   Thinking,
+  useHistoryWindow,
 } from "../chat";
 import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
@@ -49,7 +51,7 @@ export function ThreadPanel({
   onOpenArtifact: (artifact: string | undefined, version?: number) => void;
 }) {
   const t = useT();
-  const { project, state, status, emit, loadTasks } = useProjectContext();
+  const { project, state, status, ready, emit, loadTasks } = useProjectContext();
   const panel = useThreadPanel();
   const navigate = useNavigate();
   const ref = useRef<HTMLElement>(null);
@@ -195,7 +197,7 @@ export function ThreadPanel({
       )}
 
       {!thread ? (
-        <PanelMissing loading={status !== "open" || Object.keys(state.threads).length === 0} onClose={close} />
+        <PanelMissing loading={!ready} onClose={close} />
       ) : (
         <>
           <header className="flex h-14 flex-none items-center gap-1 border-b border-line pl-4 pr-2">
@@ -302,6 +304,7 @@ export function ThreadPanel({
           <div id="thread-tabpanel" role="tabpanel" aria-labelledby={`thread-tab-${tool ?? CONVERSATION}`} className="flex min-h-0 flex-1">
             {/* The conversation stays mounted so a half-written reply survives a look at another tab. */}
             <Conversation
+              key={thread.id}
               threadId={thread.id}
               me={me}
               wide={measured > 900}
@@ -334,7 +337,9 @@ function Conversation({
   const thread = state.threads[threadId]!;
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
+  const history = useHistoryWindow(messages);
   const answers = decisionAnswers(messages);
+  const choose = useCallback((label: string) => send(label, threadId), [send, threadId]);
   // Each pull request shows under the message that links it; one no message linked yet shows at the end.
   const pullRequests = threadPullRequests(state, thread.id);
   const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
@@ -360,8 +365,9 @@ function Conversation({
       )}
       <ScrollToEnd dep={messages.length + (active ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
-          {root && <MessageView message={root} me={me} names={names} />}
-          {messages.map((m) => {
+          {root && !history.hidden && <MessageView message={root} me={me} names={names} />}
+          <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
+          {history.visible.map((m) => {
             const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
             if (plan !== null) {
               const current = m.id === currentPlan?.id;
@@ -381,7 +387,7 @@ function Conversation({
                 me={me}
                 names={names}
                 reactions={state.reactions[m.id]}
-                decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
+                decision={{ answer: answers.get(m.id), onChoose: choose }}
               >
                 {m.artifacts?.length ? (
                   <ArtifactCards

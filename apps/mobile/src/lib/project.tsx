@@ -1,6 +1,6 @@
 import {
   applyEvent,
-  applyMessage,
+  applyMessages,
   emptyProjectState,
   ProjectSocket,
   type ProjectState,
@@ -17,12 +17,12 @@ type Action =
   | Parameters<typeof applyEvent>[1]
   | { type: "reset" }
   | { type: "idle" }
-  | { type: "message"; message: Parameters<typeof applyMessage>[1] };
+  | { type: "messages"; messages: Parameters<typeof applyMessages>[1] };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "reset") return emptyProjectState;
   if (action.type === "idle") return { ...state, active: {} };
-  if (action.type === "message") return applyMessage(state, action.message);
+  if (action.type === "messages") return applyMessages(state, action.messages);
   return applyEvent(state, action);
 }
 
@@ -58,7 +58,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     dispatch({ type: "reset" });
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
-      onMessage: (message) => dispatch({ type: "message", message }),
+      // A sync page lands in one update instead of one per message.
+      onMessages: (messages) => dispatch({ type: "messages", messages }),
       onEvent: (event) => {
         if (event.type === "knowledge.changed" && event.kind === "files") {
           void queryClient.invalidateQueries({ queryKey: filesQueryKey(server, projectId) });

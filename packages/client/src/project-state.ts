@@ -79,7 +79,13 @@ export const threadTasks = (s: ProjectState, threadId: string) =>
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
 export function applyMessage(state: ProjectState, message: Message): ProjectState {
-  return { ...state, messages: [...state.messages, message] };
+  return applyMessages(state, [message]);
+}
+
+/** Adds a run of new messages in one step (a sync page), instead of copying the list once per message. */
+export function applyMessages(state: ProjectState, messages: Message[]): ProjectState {
+  if (messages.length === 0) return state;
+  return { ...state, messages: state.messages.concat(messages) };
 }
 
 /** Applies the non-message parts of a server event (messages arrive through `applyMessage`). */
@@ -155,9 +161,33 @@ function addReactions(current: Record<string, Reaction[]>, added: Reaction[]) {
 export const artifactList = (s: ProjectState) =>
   Object.values(s.artifacts).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-export const projectChat = (s: ProjectState) => s.messages.filter((m) => m.threadId === null);
+const EMPTY: Message[] = [];
+const byThreadCache = new WeakMap<Message[], Map<string | null, Message[]>>();
 
-export const threadMessages = (s: ProjectState, threadId: string) => s.messages.filter((m) => m.threadId === threadId);
+/**
+ * Messages grouped by thread (null = project chat), built once per messages
+ * array: every view asks for its slice on each render, and a long project has
+ * thousands of messages across dozens of threads.
+ */
+function messagesByThread(messages: Message[]): Map<string | null, Message[]> {
+  let index = byThreadCache.get(messages);
+  if (!index) {
+    index = new Map();
+    for (const m of messages) {
+      const list = index.get(m.threadId);
+      if (list) list.push(m);
+      else index.set(m.threadId, [m]);
+    }
+    byThreadCache.set(messages, index);
+  }
+  return index;
+}
+
+/** The project chat's messages. The same array comes back until the messages change. */
+export const projectChat = (s: ProjectState) => messagesByThread(s.messages).get(null) ?? EMPTY;
+
+/** One thread's messages. The same array comes back until the messages change. */
+export const threadMessages = (s: ProjectState, threadId: string) => messagesByThread(s.messages).get(threadId) ?? EMPTY;
 
 /** What one message's stats line counts, its task included. Cost is null when any part has no price. */
 export function messageUsage(st: MessageStats): { inputTokens: number; outputTokens: number; durationMs: number; costMicros: number | null } {
@@ -191,8 +221,16 @@ export function threadUsage(s: ProjectState, threadId: string): { tokens: number
 }
 
 /** How many replies a thread has, not counting the agent's plan cards. */
-export const threadReplyCount = (s: ProjectState, threadId: string) =>
-  threadMessages(s, threadId).filter((m) => planChecklist(m.body) === null).length;
+export function threadReplyCount(s: ProjectState, threadId: string): number {
+  const messages = threadMessages(s, threadId);
+  let count = replyCountCache.get(messages);
+  if (count === undefined) {
+    count = messages.filter((m) => planChecklist(m.body) === null).length;
+    replyCountCache.set(messages, count);
+  }
+  return count;
+}
+const replyCountCache = new WeakMap<Message[], number>();
 
 export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
