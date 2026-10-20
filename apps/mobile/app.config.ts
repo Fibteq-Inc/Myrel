@@ -18,6 +18,8 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: "io.fibteq.altair",
     supportsTablet: true,
+    // Only HTTPS/TLS, which is exempt from export compliance; saves the question on every upload.
+    infoPlist: { ITSAppUsesNonExemptEncryption: false },
   },
   android: {
     package: "io.fibteq.altair",
