@@ -162,6 +162,25 @@ export const usageEvents = sqliteTable(
   ],
 );
 
+/**
+ * One row per finished agent turn that ran in a cloud sandbox: how long the task ran. The
+ * hosted service's plans limit sandbox time with it, and the Usage page shows it. Like
+ * usage_events it has no foreign keys, so the record outlives the project and thread.
+ */
+export const sandboxRuns = sqliteTable(
+  "sandbox_runs",
+  {
+    /** The task's id. */
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }).notNull(),
+    seconds: integer("seconds").notNull(),
+  },
+  (t) => [index("sandbox_runs_project_ended_idx").on(t.projectId, t.endedAt)],
+);
+
 /** Pending invitations to a project. The invitee accepts after signing in with `email`. */
 export const projectInvites = sqliteTable(
   "project_invites",

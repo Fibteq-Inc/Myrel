@@ -224,6 +224,15 @@ describe("coordinator and thread agent", () => {
       costMicros: 0,
       unpricedCalls: 2,
     });
+    // The thread's agent ran on the person's computer, so no sandbox time.
+    expect(summary.sandbox).toEqual({ runs: 0, seconds: 0 });
+    await env.DB.prepare(
+      "INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("task_sandbox_test", project.id, "thread_x", Date.now() - 90_000, Date.now(), 90)
+      .run();
+    expect((await usage()).sandbox).toEqual({ runs: 1, seconds: 90 });
+    expect((await usage("&projectId=proj_01JZZZZZZZZZZZZZZZZZZZZZZZ")).sandbox).toEqual({ runs: 0, seconds: 0 });
     expect(summary.daily).toHaveLength(7);
     expect(summary.daily.at(-1)!.calls).toBe(2);
     expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Myrel", calls: 2 })]);

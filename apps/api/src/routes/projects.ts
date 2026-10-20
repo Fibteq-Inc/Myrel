@@ -22,6 +22,7 @@ import { GithubError, githubConfigured, installationToken } from "../github/app"
 import { listPullRequests } from "../github/pulls";
 import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
+import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
 import { getWorkspace, notifyProject, parseInfo } from "../runners";
 
@@ -43,6 +44,8 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
 
     const userId = c.get("user").id;
+    const allowed = await canCreateProject(c.env, userId);
+    if (!allowed.ok) return c.json({ error: "limit_reached", message: allowed.reason }, 402);
     const id = createId("project");
     const createdAt = new Date();
     const db = createDb(c.env.DB);

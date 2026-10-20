@@ -1,6 +1,7 @@
 import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { createAuth } from "../src/auth";
+import { setExtensions } from "../src/extensions";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -184,5 +185,21 @@ describe("sign-up switch", () => {
     expect(refused.ok).toBe(false);
     const signedIn = await req("sign-in/email", { email, password: "correct-horse-battery" });
     expect(signedIn.status).toBe(200);
+  });
+});
+
+describe("extensions", () => {
+  it("lets a deployment's plan limits refuse a new project", async () => {
+    const token = await signUp();
+    await createProject(token, "First");
+    setExtensions({ canCreateProject: async () => ({ ok: false, reason: "Your plan allows 1 project." }) });
+    try {
+      const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Second" }) });
+      expect(res.status).toBe(402);
+      expect(await res.json()).toEqual({ error: "limit_reached", message: "Your plan allows 1 project." });
+    } finally {
+      setExtensions({});
+    }
+    await createProject(token, "Second");
   });
 });

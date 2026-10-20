@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { type UsageSummary, type UsageTotals } from "@myrel/protocol";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Bot, Coins, Info, MessagesSquare, Network, Workflow } from "lucide-react";
+import { Bot, Box, Coins, Info, MessagesSquare, Network, Workflow } from "lucide-react";
 import { type ReactNode } from "react";
 import { api } from "../lib/api";
 import { formatCost, useFormat } from "../lib/format";
@@ -37,7 +37,7 @@ export function UsageDashboard({
 
   return (
     <>
-      <section aria-label={t("usage.totals")} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section aria-label={t("usage.totals")} className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat icon={<Coins size={15} />} label={t("usage.cost")} value={fmt.cost(totals.costMicros)}>
           {totals.unpricedCalls > 0 ? t("usage.unpriced", { count: totals.unpricedCalls }) : t("usage.listPrices")}
         </Stat>
@@ -49,6 +49,9 @@ export function UsageDashboard({
         </Stat>
         <Stat icon={<Bot size={15} />} label={t("usage.cached")} value={pct(totals.cachedInputTokens, totals.inputTokens)}>
           {t("usage.fromCache", { tokens: fmt.tokens(totals.cachedInputTokens) })}
+        </Stat>
+        <Stat icon={<Box size={15} />} label={t("usage.sandbox")} value={sandboxTime(t, data.sandbox.seconds)}>
+          {t("usage.sandboxRuns", { count: data.sandbox.runs })}
         </Stat>
       </section>
 
@@ -237,6 +240,12 @@ function AgentSplit({ coordinator, thread }: { coordinator?: UsageTotals; thread
       </ul>
     </div>
   );
+}
+
+/** Cloud sandbox time: minutes under an hour, else hours to one decimal. */
+function sandboxTime(t: ReturnType<typeof useT>, seconds: number) {
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? t("usage.minutes", { count: minutes }) : t("usage.hours", { count: Math.round(minutes / 6) / 10 });
 }
 
 function Stat({ icon, label, value, children }: { icon: ReactNode; label: string; value: string; children: ReactNode }) {

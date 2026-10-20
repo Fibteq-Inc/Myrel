@@ -36,7 +36,7 @@ export const usageRoutes = new Hono<AppEnv>().use(requireUser).get("/", async (c
   const db = c.env.DB;
   const q = (sql: string, ...extra: unknown[]) => db.prepare(sql).bind(...args, ...extra);
 
-  const [totals, daily, byProject, byModel, byAgent, threads] = await db.batch<Record<string, unknown>>([
+  const [totals, daily, byProject, byModel, byAgent, threads, sandbox] = await db.batch<Record<string, unknown>>([
     q(`SELECT ${TOTALS} FROM usage_events u WHERE ${where}`),
     q(
       `SELECT strftime('%Y-%m-%d', (u.created_at - ?4) / 1000, 'unixepoch') AS date, ${TOTALS}
@@ -58,6 +58,11 @@ export const usageRoutes = new Hono<AppEnv>().use(requireUser).get("/", async (c
       `SELECT u.project_id AS projectId, u.thread_id AS threadId, ${TOTALS}
        FROM usage_events u WHERE ${where} AND u.thread_id IS NOT NULL
        GROUP BY 1, 2 ORDER BY costMicros DESC, inputTokens + outputTokens DESC LIMIT ${TOP_THREADS}`,
+    ),
+    // Same filter, on sandbox_runs (aliased u, keyed by when the run ended).
+    q(
+      `SELECT COUNT(*) AS runs, COALESCE(SUM(u.seconds), 0) AS seconds FROM sandbox_runs u
+       WHERE ${where.replace("u.created_at", "u.ended_at")}`,
     ),
   ]);
 
@@ -91,6 +96,7 @@ export const usageRoutes = new Hono<AppEnv>().use(requireUser).get("/", async (c
     byModel: byModel!.results.map((r) => ({ provider: r.provider as string, model: r.model as string, ...totalsOf(r) })),
     byAgent: byAgent!.results.map((r) => ({ agent: r.agent as "coordinator" | "thread", ...totalsOf(r) })),
     topThreads,
+    sandbox: { runs: Number(sandbox!.results[0]?.runs ?? 0), seconds: Number(sandbox!.results[0]?.seconds ?? 0) },
   } satisfies UsageSummary);
 });
 

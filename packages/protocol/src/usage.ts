@@ -22,6 +22,8 @@ export type UsageSummary = {
   byModel: (UsageTotals & { provider: string; model: string })[];
   byAgent: (UsageTotals & { agent: "coordinator" | "thread" })[];
   topThreads: (UsageTotals & { projectId: string; threadId: string; title: string })[];
+  /** Agent turns that ran in a cloud sandbox, and how long they ran in total. */
+  sandbox: { runs: number; seconds: number };
 };
 
 export const USAGE_RANGES = [7, 30, 90] as const;

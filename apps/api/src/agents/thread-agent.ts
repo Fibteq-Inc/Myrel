@@ -10,6 +10,7 @@ import {
   workingBranch,
 } from "@myrel/runner-core";
 import { Agent, getAgentByName } from "agents";
+import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
@@ -18,7 +19,7 @@ import { handleMcp, type Tool } from "../llm";
 import { runnerHasFeature } from "../runners";
 import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
-import { recordTaskUsage } from "../usage";
+import { recordSandboxRun, recordTaskUsage } from "../usage";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
@@ -290,6 +291,8 @@ export class ThreadAgent extends Agent<Env> {
         await this.launch(stored(local, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(local, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
       } else {
+        const allowed = await canUseSandbox(this.env, projectId);
+        if (!allowed.ok) throw new Error(allowed.reason);
         const origin = await project.publicOrigin();
         if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
         const model = await projectTaskModel(this.env, projectId);
@@ -566,6 +569,10 @@ export class ThreadAgent extends Agent<Env> {
         const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
         const ms = Date.now() - Date.parse(row.created_at);
         await recordTaskUsage(this.env, ctx, progress.usage, ms).catch((err) => console.error("task usage", err));
+      }
+      if (row.backend === "sandbox") {
+        const run = { taskId, projectId, threadId, startedAt: new Date(row.created_at), endedAt: new Date() };
+        await recordSandboxRun(this.env.DB, run).catch((err) => console.error("sandbox run", err));
       }
       await this.publishTask(taskId);
       // From now on the webhook keeps the pull request's state current and wakes this thread on CI and reviews.
