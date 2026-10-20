@@ -67,13 +67,14 @@ export function ProjectFolders({ project, canManage }: { project: Project; canMa
     <Row key="main">
       <Folder size={16} className="flex-none text-muted" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[12.5px]" title={workspace.path}>
-          {workspace.path}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-subtle">
+        <div className="flex items-center gap-1.5 text-[13px] font-medium">
           <OnlineDot online={workspace.online} />
-          {t("projectFolders.main")} · {t("projectFolders.mainHint", { computer: workspace.runnerName, cli: CLI_NAMES[workspace.cli] })}
+          <span className="truncate">{folderName(workspace.path)}</span>
+          <span className="flex-none text-xs font-normal text-subtle">
+            {t("projectFolders.main")} · {t("projectFolders.mainHint", { computer: workspace.runnerName, cli: CLI_NAMES[workspace.cli] })}
+          </span>
         </div>
+        <FolderPath path={workspace.path} />
       </div>
       {canManage && (
         <GhostButton type="button" onClick={() => setMode("connect")}>
@@ -85,10 +86,11 @@ export function ProjectFolders({ project, canManage }: { project: Project; canMa
       <Row key={path}>
         <Folder size={16} className="flex-none text-subtle" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-mono text-[12.5px]" title={path}>
-            {path}
+          <div className="flex items-center gap-1.5 text-[13px] font-medium">
+            <span className="truncate">{folderName(path)}</span>
+            <span className="flex-none text-xs font-normal text-subtle">{t("projectFolders.other")}</span>
           </div>
-          <div className="mt-0.5 text-xs text-subtle">{t("projectFolders.other")}</div>
+          <FolderPath path={path} />
         </div>
         {canManage && (
           <IconButton
@@ -129,4 +131,17 @@ export function ProjectFolders({ project, canManage }: { project: Project; canMa
       {(add.error || remove.error) && <Notice>{errorMessage(add.error ?? remove.error, t)}</Notice>}
     </Section>
   );
+}
+
+/** A long path keeps its end in view: that is the part that tells folders apart. */
+function FolderPath({ path }: { path: string }) {
+  return (
+    <div className="mt-0.5 truncate font-mono text-[12px] text-subtle [direction:rtl] [text-align:left]" title={path}>
+      <bdi>{path}</bdi>
+    </div>
+  );
+}
+
+function folderName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
