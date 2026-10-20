@@ -1,6 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import { createId, type MessageStats, type Runtime, type TaskStats } from "@myrel/protocol";
-import { type CallRecord, costMicros, DEFAULT_PRICES, type LlmEnv, metered, type ModelProvider, parsePrices, priceFor } from "./llm";
+import { type CallRecord, costMicros, DEFAULT_PRICES, type LlmEnv, metered, type ModelProvider, parsePrices, type Price, priceFor } from "./llm";
 
 /** Who a turn's model calls are billed to. */
 export type UsageContext = {
@@ -67,12 +67,20 @@ export function meteredForTurn(
   const turnId = crypto.randomUUID();
   const prices = { ...DEFAULT_PRICES, ...parsePrices(env.LLM_PRICES) };
   return metered(provider, async (call) => {
-    // A router's served model is what was actually billed, so price that first.
-    const price = (call.servedModel && priceFor(call.servedModel, prices)) || priceFor(call.model, prices);
-    const cost = price ? costMicros(call.usage, price) : null;
+    const cost = callCostMicros(call, prices);
     meter?.add(call, cost);
     await recordUsage(env.DB, { ...ctx, turnId }, call, cost);
   });
+}
+
+/**
+ * The provider's own figure when the response carries one; otherwise the price table,
+ * trying a router's served model first, since that is what was actually billed.
+ */
+export function callCostMicros(call: CallRecord, prices: Record<string, Price>): number | null {
+  if (call.costUsd !== undefined) return Math.round(call.costUsd * 1_000_000);
+  const price = (call.servedModel && priceFor(call.servedModel, prices)) || priceFor(call.model, prices);
+  return price ? costMicros(call.usage, price) : null;
 }
 
 async function recordUsage(d1: D1Database, ctx: UsageContext & { turnId: string }, call: CallRecord, cost: number | null) {

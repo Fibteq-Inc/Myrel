@@ -35,6 +35,8 @@ export type ChatResponse = {
   usage?: Usage;
   /** The model the provider reports answering, which a router may pick per call. */
   model?: string;
+  /** What the call cost in US dollars, when the provider says so in its response. */
+  costUsd?: number;
 };
 
 export interface ModelProvider {
