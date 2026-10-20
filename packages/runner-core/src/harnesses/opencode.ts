@@ -60,7 +60,7 @@ export const opencode: Harness = {
         const ms = num(time.end) - num(time.start);
         const events: RunnerEvent[] = [{ type: "tool", name: tool, title: title.slice(0, 500), ...(num(time.start) > 0 && ms >= 0 && { ms }) }];
         const output = str(state.output);
-        if (tool === "bash" && output) events.push(log(output.trimEnd()));
+        if (tool === "bash" && output) events.push(log(settleProgress(output).trimEnd()));
         return events;
       }
       case "step_finish": {
@@ -132,4 +132,15 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
           },
         };
   return config;
+}
+
+/**
+ * Progress lines (git's "Updating files: 15%…") redraw themselves with carriage returns; keep only
+ * what each line finally showed, as a terminal would.
+ */
+export function settleProgress(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.split("\r").filter((part) => part.length > 0).pop() ?? "")
+    .join("\n");
 }

@@ -837,6 +837,7 @@ export class ThreadAgent extends Agent<Env> {
           save({ planDone: plan.steps.every((s) => s.state !== "todo" && s.state !== "active"), doneReplyAt: undefined });
           await this.showStatus();
         },
+        planned: () => turn().planDone !== undefined,
         requestCoordinator: async (kind, reason) => {
           save({ asked: true });
           await project.requestCoordinator(threadId, kind, reason);

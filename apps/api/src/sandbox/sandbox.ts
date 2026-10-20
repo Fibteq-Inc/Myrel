@@ -38,6 +38,8 @@ export class Sandbox extends DurableObject<Env> {
   private ended: string | null = null;
   /** A container start under way (from warm or a task), which a second caller joins rather than restarting it. */
   private starting: Promise<void> | null = null;
+  /** How the last start went: until the container took its first command, and how many tries that took. */
+  private lastStart: { ms: number; tries: number } | null = null;
 
   /** Starts a task and returns once it is running. Its events go to the thread. */
   async run(input: SandboxRun): Promise<void> {
@@ -119,8 +121,12 @@ export class Sandbox extends DurableObject<Env> {
         { type: "phase", phase: "prepare", state: "started" },
         { type: "log", stream: "system", text: `Starting ${harness.label} in the sandbox…` },
       );
+      // Which kind of start it was, so a slow one can be told apart: a fresh container (the image
+      // still has to reach the machine), one a warm-up was starting, or one already running.
+      const state = this.ctx.container?.running ? "already running" : this.starting ? "warming up" : "new";
       const container = await this.container(signal);
-      push({ type: "log", stream: "system", text: "Sandbox ready", ms: Date.now() - opening });
+      const start = state !== "already running" && this.lastStart ? `, first command after ${clock(this.lastStart.ms)} and ${this.lastStart.tries} tries` : "";
+      push({ type: "log", stream: "system", text: `Sandbox ready (${state}${start})`, ms: Date.now() - opening });
       const timeout = AbortSignal.timeout(spec.timeoutSec * 1000);
       const proc = await execWhenReady(container, ["bash", "-c", taskScript()], {
         env: { HOME: SANDBOX_HOME, CI: "1", GIT_TERMINAL_PROMPT: "0", ...taskEnv(spec, harness), ...secrets },
@@ -205,6 +211,7 @@ export class Sandbox extends DurableObject<Env> {
     if (container.running) await container.destroy();
     const image = container.images[IMAGE];
     if (!image) throw new Error("This server's sandbox image is missing. Its admin needs to deploy with `wrangler deploy` (see containers in wrangler.jsonc).");
+    const started = Date.now();
     container.start({
       image,
       entrypoint: ENTRYPOINT,
@@ -213,8 +220,11 @@ export class Sandbox extends DurableObject<Env> {
       instance: (this.env.SANDBOX_INSTANCE_TYPE || "standard-1") as ContainerStartupOptions["instance"],
     });
     await container.setInactivityTimeout(IDLE_MS);
-    const probe = await execWhenReady(container, ["true"], {});
+    let tries = 0;
+    const probe = await execWhenReady(container, ["true"], {}, () => tries++);
     if ((await probe.exitCode) !== 0) throw new Error("The sandbox did not start.");
+    this.lastStart = { ms: Date.now() - started, tries: tries + 1 };
+    console.log(`sandbox: started in ${clock(this.lastStart.ms)} after ${this.lastStart.tries} tries`);
   }
 }
 
@@ -235,12 +245,13 @@ function clock(ms: number): string {
 }
 
 /** A container that was just started may refuse exec for a moment; retry briefly. */
-async function execWhenReady(container: Container, cmd: string[], options: ContainerExecOptions): Promise<ExecProcess> {
+async function execWhenReady(container: Container, cmd: string[], options: ContainerExecOptions, onRetry?: () => void): Promise<ExecProcess> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await container.exec(cmd, options);
     } catch (err) {
       if (attempt >= 20 || options.signal?.aborted) throw err;
+      onRetry?.();
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
