@@ -6,7 +6,7 @@ Please do not report security issues in public issues, discussions or pull
 requests.
 
 Report them privately through GitHub:
-[Report a vulnerability](https://github.com/Fibteq-Inc/altair/security/advisories/new).
+[Report a vulnerability](https://github.com/Fibteq-Inc/myrel/security/advisories/new).
 If you cannot use GitHub, email **security@fibteq.com**.
 
 Include what you found, how to reproduce it, and what an attacker could do
