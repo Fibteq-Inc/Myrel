@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { RunnerToServer, ServerToRunner } from "@myrel/protocol";
 import { ADAPTERS, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
+import { downloadSkills, type RunSkills } from "./skills";
 import { threadWorktree, type Worktree } from "./worktrees";
 
 type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
@@ -78,13 +79,21 @@ export class TaskRunner {
     // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
     let agentDir: string | undefined;
     let agent: { args: string[]; env?: Record<string, string> } = { args: [] };
+    let skills: RunSkills | null = null;
     if (task.agent && config.server) {
       agentDir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
       const origin = config.server.replace(/\/$/, "");
       const connectors = (task.agent.connectors ?? []).map((c) =>
         c.transport === "http" ? { transport: c.transport, name: c.name, url: `${origin}${c.path}` } : c,
       );
-      agent = await adapter.agent({ url: `${origin}${task.agent.mcpPath}`, token: task.agent.token, dir: agentDir, connectors });
+      skills = task.agent.skills ? await downloadSkills(`${origin}${task.agent.skills.path}`, task.agent.token, agentDir) : null;
+      agent = await adapter.agent({
+        url: `${origin}${task.agent.mcpPath}`,
+        token: task.agent.token,
+        dir: agentDir,
+        connectors,
+        ...(skills && { skills: { plugin: skills.plugin, dir: skills.skills } }),
+      });
     }
     const cleanup = () => (agentDir ? rm(agentDir, { recursive: true, force: true }).catch(() => {}) : Promise.resolve());
 
@@ -139,7 +148,8 @@ export class TaskRunner {
       if (stderr.length < 20_000) stderr += chunk;
     });
     child.stdin!.on("error", () => {}); // the CLI may exit before reading all of stdin
-    child.stdin!.end(task.prompt);
+    // The prompt lists the skills; only the runner knows where they are on this computer.
+    child.stdin!.end(skills ? `${task.prompt}\n\nSkills folder for this run: ${skills.skills}` : task.prompt);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
 

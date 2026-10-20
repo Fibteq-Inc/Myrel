@@ -9,6 +9,7 @@ import type {
   Connector,
   CreateApiKeyInput,
   CreateConnectorInput,
+  CreateSkillInput,
   CreateInviteInput,
   CreateProjectInput,
   Instructions,
@@ -34,11 +35,14 @@ import type {
   RunnerFolder,
   RunnerPairingCode,
   SetWorkspaceInput,
+  Skill,
+  SkillDetail,
   Task,
   ThreadFiles,
   TerminalLine,
   UpdateAdminSettingsInput,
   UpdateConnectorInput,
+  UpdateSkillInput,
   UpdateProjectSettingsInput,
   CreateRoutineInputRaw,
   Notification,
@@ -307,6 +311,48 @@ export class ApiClient {
         body: {},
       })
     ).connector;
+  }
+
+  // --- skills ---
+
+  /** A person's own skills, or a project's when `projectId` is given. */
+  private skillsPath(projectId?: string) {
+    return projectId ? `/api/projects/${encodeURIComponent(projectId)}/skills` : "/api/account/skills";
+  }
+
+  async listSkills(projectId?: string) {
+    return (await this.request<{ skills: Skill[] }>(this.skillsPath(projectId))).skills;
+  }
+
+  /** One skill with its SKILL.md. */
+  async getSkill(id: string, projectId?: string) {
+    return (await this.request<{ skill: SkillDetail }>(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}`)).skill;
+  }
+
+  /**
+   * Adds a skill. A GitHub source with several skills fails with 409 and a SkillChoices body
+   * (`error: "choose_skill"`): add again with `skill` set to one of them.
+   */
+  async createSkill(input: CreateSkillInput, projectId?: string) {
+    return (await this.request<{ skill: Skill }>(this.skillsPath(projectId), { method: "POST", body: input })).skill;
+  }
+
+  async updateSkill(id: string, input: UpdateSkillInput, projectId?: string) {
+    return (
+      await this.request<{ skill: Skill }>(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}`, { method: "PATCH", body: input })
+    ).skill;
+  }
+
+  /** Takes a GitHub skill again from its branch as it is now. `changed` is false when nothing moved. */
+  updateSkillFromSource(id: string, projectId?: string) {
+    return this.request<{ skill: Skill; changed: boolean }>(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}/update`, {
+      method: "POST",
+      body: {},
+    });
+  }
+
+  async deleteSkill(id: string, projectId?: string) {
+    await this.request(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   /** A sign-in link for an OAuth connector. */

@@ -5,6 +5,7 @@ import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
+import { Skills } from "./skills";
 import { GithubRepos } from "./github-repos";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
@@ -62,6 +63,7 @@ export function ProjectSettings({
       <GeneralAndModel projectId={projectId} canManage={canManage} />
       <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />
       <Connectors projectId={projectId} canManage={canManage} result={connectorResult} connectorId={connectorId} />
+      <Skills projectId={projectId} canManage={canManage} />
       <Members projectId={projectId} myRole={project.role} />
       {canManage && <Invites projectId={projectId} />}
       {project.role === "owner" && <DangerZone projectId={projectId} name={project.name} />}
