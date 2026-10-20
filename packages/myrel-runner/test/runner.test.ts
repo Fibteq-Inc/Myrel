@@ -144,6 +144,23 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
+
+  it("adds the thread's connectors and allows their tools", async () => {
+    const connectors = [
+      { transport: "http" as const, name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
+      { transport: "stdio" as const, name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } },
+    ];
+    const claude = await ADAPTERS.claude.agent({ ...mcp(), connectors });
+    expect(claude.args.slice(-2)).toEqual(["--allowedTools", "mcp__myrel,mcp__linear,mcp__db"]);
+    const config = JSON.parse(await readFile(claude.args[1]!, "utf8"));
+    expect(config.mcpServers.linear).toEqual({ type: "http", url: connectors[0]!.url, headers: { Authorization: `Bearer ${"t".repeat(32)}` } });
+    expect(config.mcpServers.db).toEqual({ type: "stdio", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } });
+
+    const codex = await ADAPTERS.codex.agent({ ...mcp(), connectors });
+    expect(codex.args).toContain('mcp_servers.linear.url="https://myrel.test/api/agent-mcp/thr_1/c/linear"');
+    expect(codex.args).toContain('mcp_servers.db.args=["-y","pg-mcp"]');
+    expect(codex.args).toContain('mcp_servers.db.env={ DATABASE_URL = "postgres://x" }');
+  });
 });
 
 describe.skipIf(process.platform === "win32")("TaskRunner", () => {

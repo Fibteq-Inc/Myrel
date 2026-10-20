@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
+import { type AgentConnector, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
 import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -31,7 +31,7 @@ export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: { mcpPath: string; token: string } },
+  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: { mcpPath: string; token: string; connectors?: AgentConnector[] } },
 ): RunnerBackend {
   const { projectId, threadId, workspace, agent } = where;
   return {

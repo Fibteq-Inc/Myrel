@@ -1,5 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import {
+  type AgentConnector,
   type CliId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerDirListing,
@@ -19,7 +20,7 @@ export type TaskStart = {
   cli: CliId;
   prompt: string;
   /** The CLI runs as the thread's agent, connected to the thread's MCP endpoint (needs feature "agent"). */
-  agent?: { mcpPath: string; token: string };
+  agent?: { mcpPath: string; token: string; connectors?: AgentConnector[] };
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };

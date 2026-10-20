@@ -37,8 +37,26 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * what that version can do. "folders": browse and share folders from the web app.
  * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
  * "agent-clis": the same for Codex CLI and Gemini CLI.
+ * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
  */
-export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors"]);
+
+/**
+ * A connector (MCP server) for the CLI running as the thread's agent. A remote one is on this
+ * runner's server (origin + path, with the run's token); a command starts on this computer with
+ * these environment variables.
+ */
+export const AgentConnector = z.discriminatedUnion("transport", [
+  z.object({ transport: z.literal("http"), name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/), path: z.string().regex(/^\/api\/[\w/-]+$/).max(300) }),
+  z.object({
+    transport: z.literal("stdio"),
+    name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/),
+    command: z.string().min(1).max(200),
+    args: z.array(z.string().max(2000)).max(50),
+    env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(4000)),
+  }),
+]);
+export type AgentConnector = z.infer<typeof AgentConnector>;
 export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /** What the runner last told the server about the computer. */
@@ -132,7 +150,12 @@ export const ServerToRunner = z.discriminatedUnion("type", [
      * token, so it talks to people through Myrel's tools. Needs feature "agent".
      */
     agent: z
-      .object({ mcpPath: z.string().regex(/^\/api\/[\w/-]+$/).max(300), token: z.string().min(20).max(200) })
+      .object({
+        mcpPath: z.string().regex(/^\/api\/[\w/-]+$/).max(300),
+        token: z.string().min(20).max(200),
+        /** Connectors besides Myrel's tools (feature "connectors"); older runners ignore them. */
+        connectors: z.array(AgentConnector).max(30).optional(),
+      })
       .optional(),
   }),
   /** Stop a running task. The runner answers with its "task.done" (cancelled: true). Needs feature "cancel". */

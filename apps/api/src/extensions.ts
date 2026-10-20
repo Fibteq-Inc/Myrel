@@ -23,6 +23,8 @@ export type Extensions = {
    * a version (such as their effective date) recorded with each acceptance.
    */
   legal?: LegalLinks;
+  /** Before a connector (MCP server) is added: a person's own, or a project's. */
+  canAddConnector?: (env: Env, owner: { userId: string } | { projectId: string }) => Promise<LimitCheck>;
 };
 
 const ALLOWED: LimitCheck = { ok: true };
@@ -59,4 +61,8 @@ export function legalLinks(env: Env, origin: string): LegalLinks | null {
       : current.legal;
   if (!links) return null;
   return { terms: new URL(links.terms, origin).href, privacy: new URL(links.privacy, origin).href, version: links.version };
+}
+
+export async function canAddConnector(env: Env, owner: { userId: string } | { projectId: string }): Promise<LimitCheck> {
+  return current.canAddConnector ? current.canAddConnector(env, owner) : ALLOWED;
 }

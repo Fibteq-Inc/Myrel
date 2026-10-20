@@ -17,6 +17,8 @@ import { usageRoutes } from "./routes/usage";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
+import { accountConnectorRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
+import { proxyMcp } from "./connectors/gateway";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -61,11 +63,25 @@ const app = new Hono<AppEnv>()
     if (!result.ok) return c.json({ error: "unauthorized" }, 401);
     return result.answer === null ? c.body(null, 202) : c.json(result.answer);
   })
+  // A remote connector (MCP server) of the thread's agent, through Myrel: the turn's token in, the
+  // connector's own credentials added here. Streams the server's answer (JSON or SSE) back as is.
+  .on(["GET", "POST", "DELETE"], "/agent-mcp/:threadId/c/:name", async (c) => {
+    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const threadId = ThreadId.safeParse(c.req.param("threadId"));
+    if (!token || !threadId.success) return c.json({ error: "unauthorized" }, 401);
+    const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
+    const target = await thread.connectorTarget(token, c.req.param("name"));
+    if (!target.ok) return c.json({ error: target.error }, target.error === "unauthorized" ? 401 : 404);
+    return proxyMcp(c.req.raw, target);
+  })
   .route("/file-links", fileLinkRoutes)
+  .route("/connectors/oauth", connectorOAuthRoutes)
+  .route("/account/connectors", accountConnectorRoutes)
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
   .route("/projects/:id/artifacts", artifactRoutes)
   .route("/projects/:projectId/routines", routineRoutes)
+  .route("/projects/:id/connectors", projectConnectorRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)

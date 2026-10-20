@@ -99,6 +99,13 @@
       "when": 1792498763878,
       "tag": "0013_terms_accepted",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792499362283,
+      "tag": "0014_connectors",
+      "breakpoints": true
     }
   ]
 }
