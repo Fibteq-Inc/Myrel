@@ -21,7 +21,7 @@ import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBacke
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { meteredForTurn, recordTaskUsage, taskCostMicros, taskRuntime, TurnMeter } from "../usage";
 import { type Author, knowledgeTools } from "./knowledge";
-import { composeStatus, type Plan } from "./plan";
+import { composeStatus, newlyDone, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { routineTools } from "./routine-tools";
@@ -216,6 +216,17 @@ export class ThreadAgent extends Agent<Env> {
     // Artifacts published this turn, attached to the next reply.
     let pending: ArtifactRef[] = [];
     let lastReply: { text: string; needs?: ReplyNeeds } | null = null as { text: string; needs?: ReplyNeeds } | null;
+    // Work the agent did this turn and since its last plan update, so a step is only marked done
+    // on the back of something real: a task result, a file or artifact written or read, a lookup.
+    let workThisTurn = finishedTask !== undefined;
+    let workSincePlan = workThisTurn;
+    // Steps marked done with no work behind them, and whether a reply followed the last plan update.
+    const unearned: string[] = [];
+    let repliedSincePlan = false;
+    const work = <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A): R => {
+      workThisTurn = workSincePlan = true;
+      return fn(...args);
+    };
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
@@ -259,6 +270,7 @@ export class ThreadAgent extends Agent<Env> {
               pending = [];
               // A later plain reply does not cancel an earlier ask in the same turn.
               lastReply = { text, needs: needs ?? lastReply?.needs };
+              repliedSincePlan = true;
               const m = await project.sendMessage({
                 threadId,
                 authorKind: "agent",
@@ -272,6 +284,7 @@ export class ThreadAgent extends Agent<Env> {
               return m;
             },
             publishArtifact: async (input) => {
+              workThisTurn = workSincePlan = true;
               const result = await project.publishArtifact({ ...input, threadId });
               if ("error" in result) throw new Error(result.error);
               const { artifact } = result;
@@ -283,6 +296,12 @@ export class ThreadAgent extends Agent<Env> {
               return artifact;
             },
             setPlan: async (plan) => {
+              const prev = this.getMeta("plan");
+              const claimed = newlyDone(prev ? (JSON.parse(prev) as Plan) : null, plan);
+              // One closing step (e.g. "report the result") may follow work done earlier in the turn.
+              if (claimed.length > 0 && !workSincePlan && !(claimed.length === 1 && workThisTurn)) unearned.push(...claimed);
+              repliedSincePlan = false;
+              workSincePlan = false;
               this.setMeta("plan", JSON.stringify(plan));
               // A finished task's steps go once the agent moves its plan on.
               if (!this.runningTask()) this.deleteMeta("task_checklist");
@@ -295,29 +314,31 @@ export class ThreadAgent extends Agent<Env> {
             resolve: async () => {
               resolved = true;
             },
-            listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
-            readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+            listRepoFiles: work((repo: string, path: string, ref?: string) => listRepoFiles(this.env, projectId, repo, path, ref)),
+            readRepoFile: work((repo: string, path: string, ref?: string) => readRepoFile(this.env, projectId, repo, path, ref)),
             runTask: async (input) => {
               const started = await this.startTask(input);
               if (!started.ok) throw new Error(started.error);
               return started.message;
             },
             cancelTask: () => this.cancelRunningTask(),
-            readWorkspace: (path) => this.readWorkspace(path),
+            readWorkspace: work((path: string) => this.readWorkspace(path)),
           }),
           ...knowledgeTools({
-            memoryRead: (name) => project.getMemory(name),
-            memoryWrite: (name, description, content) => project.putMemory(name, { description, content }, BY),
-            memoryDelete: (name) => project.deleteMemory(name),
-            listFiles: (prefix) => project.listFiles(prefix),
-            readText: (path) => project.readFileText(path),
-            writeText: (path, content) => project.writeFileText(path, content, BY),
+            memoryRead: work((name: string) => project.getMemory(name)),
+            memoryWrite: work((name: string, description: string, content: string) =>
+              project.putMemory(name, { description, content }, BY),
+            ),
+            memoryDelete: work((name: string) => project.deleteMemory(name)),
+            listFiles: work((prefix?: string) => project.listFiles(prefix)),
+            readText: work((path: string) => project.readFileText(path)),
+            writeText: work((path: string, content: string) => project.writeFileText(path, content, BY)),
           }),
           ...routineTools({
             listRoutines: () => project.listRoutines(),
-            createRoutine: (input) => project.createRoutine(input, "agent"),
-            setPaused: (id, paused) => project.updateRoutine(id, { paused }),
-            deleteRoutine: (id) => project.deleteRoutine(id),
+            createRoutine: work((input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, "agent")),
+            setPaused: work((id: string, paused: boolean) => project.updateRoutine(id, { paused })),
+            deleteRoutine: work((id: string) => project.deleteRoutine(id)),
             defaultTimezone: ctx.defaultTimezone,
             threadId,
           }),
@@ -325,6 +346,28 @@ export class ThreadAgent extends Agent<Env> {
         // The opening note and each plan update take a step of their own.
         maxSteps: 24,
       });
+      // Steps marked done although nothing was done, and the person was told nothing: the agent claimed
+      // work it never did. Put those steps back and give it one more turn to do the work for real.
+      const planNudged = this.getMeta("plan_nudged") === "1";
+      if (workThisTurn || this.runningTask()) this.deleteMeta("plan_nudged");
+      else if (unearned.length && !repliedSincePlan && !planNudged) {
+        const stored = this.getMeta("plan");
+        if (stored) {
+          const plan = JSON.parse(stored) as Plan;
+          const back = new Set(unearned);
+          let first = true;
+          for (const step of plan.steps) {
+            if (step.state !== "done" || !back.has(step.text)) continue;
+            step.state = first && !plan.steps.some((s) => s.state === "active") ? "active" : "todo";
+            first = false;
+          }
+          this.setMeta("plan", JSON.stringify(plan));
+          await this.showStatus();
+        }
+        this.setMeta("plan_nudged", "1");
+        this.sql`INSERT INTO notes (body, created_at) VALUES (${`You marked ${unearned.map((t) => `"${t}"`).join(", ")} done, but nothing was done this turn: no task ran, nothing was written or published, and the person was told nothing. Those steps are back to todo. Do the work now (for files, code or commands, run_task, and mark the step done once its result arrives), or tell the person why you cannot.`}, ${new Date().toISOString()})`;
+        await this.markDirty();
+      }
       // A finished task always gets an answer. A failed one first gets one more turn to fix it and run it
       // again; if the agent stays silent, the thread posts the result and hands it to the coordinator.
       const nudged = this.getMeta("task_nudged");
