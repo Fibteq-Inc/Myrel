@@ -13,7 +13,7 @@ const config: ExpoConfig = {
   scheme: "altair",
   version: "0.1.0",
   orientation: "portrait",
-  // Rendered from assets/icon.svg (the web favicon's star); re-export the PNGs when it changes.
+  // "FA" (Fibteq Altair) monogram, rendered from assets/icon.svg; re-export the PNGs when it changes.
   icon: "./assets/icon.png",
   userInterfaceStyle: "dark",
   backgroundColor: "#0e0e10",
