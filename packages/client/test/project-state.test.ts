@@ -1,4 +1,4 @@
-import { createId, type Message, type Task, type Thread } from "@altair/protocol";
+import { createId, formatPlan, type Message, planChecklist, type Task, type Thread } from "@altair/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,
@@ -12,6 +12,7 @@ import {
   threadByCard,
   threadByRoot,
   threadMessages,
+  threadReplyCount,
   threadTasks,
 } from "../src/project-state";
 
@@ -115,6 +116,15 @@ describe("project state", () => {
         { state: "todo", text: "Reply", depth: 0 },
       ],
     });
+  });
+
+  it("updates a plan card in place and leaves it out of the reply count", () => {
+    const t = createId("thread");
+    const card = { ...msg(2, t), authorKind: "agent" as const, body: formatPlan("Plan\n\n✱ a\n○ b") };
+    let s = applyMessage(applyMessage(emptyProjectState, msg(1, t)), card);
+    s = applyEvent(s, { type: "message.updated", message: { ...card, body: formatPlan("Plan\n\n✓ a\n✱ b") } });
+    expect(threadMessages(s, t).map((m) => planChecklist(m.body))).toEqual([null, "Plan\n\n✓ a\n✱ b"]);
+    expect(threadReplyCount(s, t)).toBe(1);
   });
 
   it("parses skipped steps and a task's steps nested under the plan", () => {

@@ -1,4 +1,4 @@
-import { threadMessages } from "@altair/client";
+import { threadReplyCount } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import type { Thread } from "@altair/protocol";
 import { type Href, useRouter } from "expo-router";
@@ -57,7 +57,7 @@ export function ThreadsTab() {
             </View>
             <View style={{ alignItems: "flex-end", gap: 3 }}>
               <Text style={styles.meta}>{relativeTime(item.updatedAt)}</Text>
-              <Text style={styles.meta}>{t("threadCard.replies", { count: threadMessages(state, item.id).length })}</Text>
+              <Text style={styles.meta}>{t("threadCard.replies", { count: threadReplyCount(state, item.id) })}</Text>
             </View>
           </Pressable>
         );

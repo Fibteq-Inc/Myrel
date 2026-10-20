@@ -1,4 +1,4 @@
-import type { Message, Project, ServerEvent, Task } from "@altair/protocol";
+import { formatPlan, type Message, planChecklist, type Project, type ServerEvent, type Task } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -95,6 +95,9 @@ describe("run_task", () => {
     // The task's steps sit under the agent's own plan step.
     expect(t.statusText).toMatch(/^Testler\n\n✱ Testleri çalıştır\n {2}✗ Sandbox açılamadı: The sandbox container is not configured/);
     expect(t.statusText).toContain("\n○ Sonucu bildir");
+    // The conversation has one plan card for it, holding the same steps.
+    const cards = (await bodies()).filter((b) => planChecklist(b) !== null);
+    expect(cards).toEqual([formatPlan(t.statusText!)]);
 
     // Clients heard about the task and its output live.
     expect(events.some((e) => e.type === "task.updated" && e.task.status === "running")).toBe(true);

@@ -610,8 +610,6 @@ export const en = {
   "mobile.signOutConfirm": "Sign out of {email}?",
   "mobile.openInBrowser": "Open in browser",
   "mobile.badLink": "This link can't be opened.",
-  "mobile.showProgress": "Show progress",
-  "mobile.hideProgress": "Hide progress",
   "mobile.noPreview": "No preview for this kind of file.",
   "mobile.newProject": "New project",
 } satisfies Record<string, string | PluralMessage>;

@@ -1,4 +1,15 @@
-import type { Artifact, Message, PullRequest, Reaction, Routine, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
+import {
+  type Artifact,
+  type Message,
+  planChecklist,
+  type PullRequest,
+  type Reaction,
+  type Routine,
+  type ServerEvent,
+  type Task,
+  type TerminalLine,
+  type Thread,
+} from "@altair/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -73,6 +84,8 @@ export function applyMessage(state: ProjectState, message: Message): ProjectStat
 /** Applies the non-message parts of a server event (messages arrive through `applyMessage`). */
 export function applyEvent(state: ProjectState, event: ServerEvent): ProjectState {
   switch (event.type) {
+    case "message.updated":
+      return { ...state, messages: state.messages.map((m) => (m.id === event.message.id ? event.message : m)) };
     case "thread.updated":
       return { ...state, threads: { ...state.threads, [event.thread.id]: event.thread } };
     case "artifact.updated":
@@ -135,6 +148,10 @@ export const artifactList = (s: ProjectState) =>
 export const projectChat = (s: ProjectState) => s.messages.filter((m) => m.threadId === null);
 
 export const threadMessages = (s: ProjectState, threadId: string) => s.messages.filter((m) => m.threadId === threadId);
+
+/** How many replies a thread has, not counting the agent's plan cards. */
+export const threadReplyCount = (s: ProjectState, threadId: string) =>
+  threadMessages(s, threadId).filter((m) => planChecklist(m.body) === null).length;
 
 export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));

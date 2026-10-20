@@ -1,4 +1,4 @@
-import { projectChat, threadByCard, threadMessages } from "@altair/client";
+import { projectChat, threadByCard, threadReplyCount } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import { MessagesSquare } from "lucide-react";
 import { api } from "../../lib/api";
@@ -39,7 +39,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                   <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
                 ) : null}
                 {thread && (
-                  <ThreadCard projectId={project.id} thread={thread} replies={threadMessages(state, thread.id).length} />
+                  <ThreadCard projectId={project.id} thread={thread} replies={threadReplyCount(state, thread.id)} />
                 )}
               </MessageView>
             );
