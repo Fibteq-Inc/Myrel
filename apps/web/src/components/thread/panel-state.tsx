@@ -6,14 +6,12 @@ export type PanelLayout = {
   width: number;
   /** Fills the main area; the chat hides. */
   maximized: boolean;
-  /** The open workspace tab (changes, terminal, outputs), or null. */
+  /** The open tab (changes, pull request, terminal, outputs), or null for the conversation. */
   tool: string | null;
 };
 
 export const PANEL_MIN = 380;
 export const PANEL_DEFAULT = 520;
-/** Wide enough to show the conversation and a workspace tab side by side. */
-export const PANEL_SPLIT = 920;
 /** The chat keeps at least this much room while the panel is docked. */
 export const CHAT_MIN = 360;
 

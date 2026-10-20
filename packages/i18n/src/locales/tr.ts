@@ -142,8 +142,6 @@ export const tr: Catalog = {
   "thread.placeholder": "Bu thread'de yanıtla",
 
   // Workspace
-  "workspace.label": "Çalışma alanı",
-  "workspace.tabs": "Çalışma alanı sekmeleri",
   "workspace.changes": "Değişiklikler",
   "workspace.changesEmpty": "Henüz değişiklik yok",
   "workspace.changesEmptyBody": "Bu thread kodu değiştirdiğinde fark ve pull request'i burada görünür.",
@@ -353,7 +351,6 @@ export const tr: Catalog = {
   "rail.filesNoProjectTitle": "Dosyalarını görmek için bir proje aç",
   "sidebar.files": "Dosyalar ve hafıza",
   "sidebar.artifacts": "Artifact'ler",
-  "workspace.close": "Çalışma alanını kapat",
 
   // Devices, runners and the thread panel
   "runners.online": "Çevrimiçi",
@@ -390,16 +387,19 @@ export const tr: Catalog = {
   "devices.noFolders": "Henüz yok. Projelerin çalışabileceği klasörleri ekle.",
   "devices.stopSharing": "Paylaşmayı durdur",
   "devices.stopSharingLabel": "{path} paylaşımını durdur",
+  "workspace.pr": "PR",
+  "workspace.prEmpty": "Henüz PR yok",
+  "workspace.prEmptyBody": "Bu thread bir pull request açtığında durumu ve kontrolleri burada görünür.",
+  "threadPanel.conversation": "Konuşma",
   "threadPanel.label": "Thread: {title}",
   "threadPanel.labelEmpty": "Thread",
   "threadPanel.resize": "Thread panelini yeniden boyutlandır",
-  "threadPanel.tools": "Çalışma alanı araçları",
+  "threadPanel.tools": "Thread bölümleri",
   "threadPanel.reopen": "Thread'i yeniden aç",
   "threadPanel.resolve": "Çözüldü olarak işaretle",
   "threadPanel.restore": "Panel boyutunu geri al",
   "threadPanel.maximize": "Paneli büyüt",
   "threadPanel.close": "Thread'i kapat",
-  "threadPanel.backToConversation": "Sohbete dön",
 
   // Files, memory and local folders
   "knowledge.label": "Proje bilgisi",
