@@ -1,4 +1,14 @@
-import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, SETUP_NOTE, TaskSpec, taskEnv, taskScript } from "@myrel/runner-core";
+import {
+  HARNESSES,
+  LineSplitter,
+  parseLine,
+  type RunnerEvent,
+  SETUP_NOTE,
+  STOP_HARNESS_SCRIPT,
+  TaskSpec,
+  taskEnv,
+  taskScript,
+} from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
 import { BASE_IMAGE, SANDBOX_HOME, SANDBOX_USER, SETUP_SCRIPT, SETUP_VERSION } from "./setup";
@@ -47,6 +57,17 @@ export class Sandbox extends DurableObject<Env> {
 
   async cancel(taskId: string): Promise<void> {
     if (this.current?.taskId === taskId) this.current.abort.abort(new Error("Cancelled"));
+  }
+
+  /**
+   * Ends a task's harness as finished, when its turn is done but the harness has not exited by
+   * itself. The task's script goes on to save the work. False when nothing was running.
+   */
+  async finish(taskId: string): Promise<boolean> {
+    const container = this.ctx.container;
+    if (this.current?.taskId !== taskId || !container?.running) return false;
+    const proc = await container.exec(["bash", "-c", STOP_HARNESS_SCRIPT], { user: SANDBOX_USER });
+    return (await proc.exitCode) === 0;
   }
 
   /** For project deletion: stops the task and the container and erases this sandbox's storage. */

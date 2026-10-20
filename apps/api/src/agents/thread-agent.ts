@@ -86,12 +86,21 @@ type AgentTurn = {
   mark?: StatsMark;
   /** Its latest reply and where that reply's line started, so the usage after it can join it when the turn ends. */
   lastReplyStats?: { id: string; from: StatsMark };
+  /** Every step of the plan it set this turn is settled (none to do or active). */
+  planDone?: boolean;
+  /** When it replied with its plan done; the turn ends a minute later unless it moves on. */
+  doneReplyAt?: number;
 };
 
 /** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
 const MAX_AGENT_PROMPT = 90_000;
 /** How long one agent turn may run. */
 const AGENT_TURN_SEC = 3600;
+/**
+ * After the agent replied with its plan done, how long its harness may keep going before the turn
+ * is ended for it (some models keep calling tools after their last reply).
+ */
+const FINISH_AFTER_REPLY_SEC = 60;
 
 type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null };
 
@@ -551,6 +560,11 @@ export class ThreadAgent extends Agent<Env> {
             ...(counted && { stats: counted.stats }),
           });
           if (counted) save({ lastReplyStats: { id: m.id, from: counted.from } });
+          if (t.planDone && row?.backend === "sandbox") {
+            const at = Date.now();
+            save({ doneReplyAt: at });
+            await this.schedule(FINISH_AFTER_REPLY_SEC, "finishAfterReply", { taskId: row.id, at });
+          }
           // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
           // A pull request it links to is followed even when it forgot track_pull_request.
@@ -567,6 +581,8 @@ export class ThreadAgent extends Agent<Env> {
         },
         setPlan: async (plan) => {
           this.setMeta("plan", JSON.stringify(plan));
+          // A plan with work left (again) keeps the turn going after a reply.
+          save({ planDone: plan.steps.every((s) => s.state !== "todo" && s.state !== "active"), doneReplyAt: undefined });
           await this.showStatus();
         },
         requestCoordinator: async (kind, reason) => {
@@ -787,6 +803,21 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /** Schedule callback: a task its runner never finished (the container went away). */
+  /**
+   * A minute after the agent replied with its plan done: if its run is still going and it has not
+   * replied or changed its plan since, the turn is over, so its harness is ended (as finished).
+   */
+  async finishAfterReply(payload: { taskId: string; at: number }): Promise<void> {
+    const row = this.runningTask();
+    if (!row || row.id !== payload.taskId || row.backend !== "sandbox") return;
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    if (!turn?.planDone || turn.doneReplyAt !== payload.at) return;
+    const ended = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!)
+      .finish(row.id)
+      .catch((err) => (console.warn("ending a finished turn failed", err), false));
+    if (!ended) console.warn("ending a finished turn: its harness was not running", row.id);
+  }
+
   async taskWatchdog(payload: { taskId: string }): Promise<void> {
     await this.taskEvents(payload.taskId, [
       { type: "done", ok: false, error: "The runner stopped answering, so the task was given up." },
