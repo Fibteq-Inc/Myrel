@@ -1,5 +1,5 @@
 import { createDb, schema } from "@altair/db";
-import { type CliId, type ProjectWorkspace, type Runner, RunnerInfo } from "@altair/protocol";
+import { type CliId, type ProjectWorkspace, type Runner, type RunnerFeature, RunnerInfo } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 
@@ -81,6 +81,12 @@ export async function getWorkspace(env: Env, projectId: string): Promise<Project
     .limit(1);
   if (!row) return null;
   return { projectId, ...row, cli: row.cli as CliId, online: await isRunnerOnline(env, row.runnerId) };
+}
+
+/** Whether a paired computer's altair-runner announced a feature in its last hello. */
+export async function runnerHasFeature(env: Env, runnerId: string, feature: RunnerFeature): Promise<boolean> {
+  const [row] = await createDb(env.DB).select({ info: runners.info }).from(runners).where(eq(runners.id, runnerId));
+  return parseInfo(row?.info ?? null)?.features.includes(feature) ?? false;
 }
 
 /** Tells every project working on this runner that its workspace changed, so open clients refresh. */

@@ -151,6 +151,42 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s in %s
     expect(await new SessionStore().get("thr_01JTEST0000000000000000000")).toBe("sess-42");
   });
 
+  it("connects the CLI to the thread's MCP endpoint when it runs as the thread's agent", async () => {
+    // Prints the --mcp-config file it was given (which the runner deletes afterwards) as the result.
+    await fakeClaude(
+      `read prompt
+cfg=""; prev=""; for a in "$@"; do [ "$prev" = "--mcp-config" ] && cfg="$a"; prev="$a"; done
+printf '{"type":"result","subtype":"success","is_error":false,"result":%s}\n' "$(cat "$cfg" | sed 's/"/\\\\"/g; s/^/"/; s/$/"/')"
+echo "args: $*" >&2`,
+    );
+    const folder = join(home, "proj3");
+    await mkdir(folder);
+    const config: RunnerConfig = { server: "https://altair.test/", folders: [{ path: folder, name: "proj3" }], access: "edit" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    await runner.start({
+      type: "task.start",
+      taskId: "task_01JTEST0000000000000000002",
+      threadId: "thr_01JTEST0000000000000000009",
+      folder,
+      cli: "claude",
+      prompt: "answer the person",
+      agent: { mcpPath: "/api/agent-mcp/thr_01JTEST0000000000000000009", token: "t".repeat(32) },
+    });
+    const done = frames.at(-1) as { ok: boolean; result: string };
+    expect(done.ok).toBe(true);
+    expect(JSON.parse(done.result)).toEqual({
+      mcpServers: {
+        altair: {
+          type: "http",
+          url: "https://altair.test/api/agent-mcp/thr_01JTEST0000000000000000009",
+          headers: { Authorization: `Bearer ${"t".repeat(32)}` },
+        },
+      },
+    });
+  });
+
   it("refuses folders that are not shared and reports a failing CLI", async () => {
     await fakeClaude(`echo "boom" >&2; exit 3`);
     const folder = join(home, "proj2");

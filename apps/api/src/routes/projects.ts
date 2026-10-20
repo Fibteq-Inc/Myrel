@@ -12,6 +12,7 @@ import {
   UpdateMemberInput,
   SetWorkspaceInput,
   TaskTarget,
+  ThreadEngine,
   UpdateProjectSettingsInput,
 } from "@altair/protocol";
 import { getAgentByName } from "agents";
@@ -80,7 +81,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, model, taskTarget } = input.data;
+    const { name, model, taskTarget, threadEngine } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -99,6 +100,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(name !== undefined && { name }),
         ...(model !== undefined && { llmModel: model || null }),
         ...(taskTarget !== undefined && { taskTarget }),
+        ...(threadEngine !== undefined && { threadEngine }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -440,6 +442,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       model: projects.llmModel,
       keyId: projects.llmKeyId,
       taskTarget: projects.taskTarget,
+      threadEngine: projects.threadEngine,
     })
     .from(projects)
     .where(eq(projects.id, projectId));
@@ -447,5 +450,6 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
     ...row!,
     provider: row!.provider as ProjectSettings["provider"],
     taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
+    threadEngine: ThreadEngine.catch("loop").parse(row!.threadEngine),
   };
 }

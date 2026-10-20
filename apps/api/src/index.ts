@@ -1,4 +1,5 @@
-import { API_VERSION, type ServerInfo } from "@altair/protocol";
+import { API_VERSION, type ServerInfo, ThreadId } from "@altair/protocol";
+import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
@@ -43,6 +44,20 @@ const app = new Hono<AppEnv>()
     } satisfies ServerInfo),
   )
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
+  // MCP endpoint of a thread whose agent is the person's Claude Code (thread engine "harness"). No user
+  // session: the bearer token is the one the thread gave that agent turn. Stateless JSON, so no SSE stream.
+  .on(["GET", "DELETE"], "/agent-mcp/:threadId", (c) => c.body(null, 405))
+  .post("/agent-mcp/:threadId", async (c) => {
+    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const threadId = ThreadId.safeParse(c.req.param("threadId"));
+    if (!token || !threadId.success) return c.json({ error: "unauthorized" }, 401);
+    const body: unknown = await c.req.json().catch(() => undefined);
+    if (body === undefined) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
+    const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
+    const result = await thread.agentMcp(token, body);
+    if (!result.ok) return c.json({ error: "unauthorized" }, 401);
+    return result.answer === null ? c.body(null, 202) : c.json(result.answer);
+  })
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
   .route("/projects/:id/artifacts", artifactRoutes)

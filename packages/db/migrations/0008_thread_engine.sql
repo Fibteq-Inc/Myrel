@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `thread_engine` text DEFAULT 'loop' NOT NULL;

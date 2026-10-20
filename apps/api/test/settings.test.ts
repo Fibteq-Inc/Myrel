@@ -131,10 +131,12 @@ describe("project settings", () => {
       model: "claude-opus-5-5",
       keyId: aliceKey.id,
       taskTarget: "auto",
+      threadEngine: "loop",
     });
     const cloud = await json<{ settings: ProjectSettings }>(patch(alice.token, { taskTarget: "cloud" }));
     expect(cloud.settings.taskTarget).toBe("cloud");
     expect((await patch(alice.token, { taskTarget: "moon" })).status).toBe(400);
+    expect((await patch(alice.token, { threadEngine: "moon" })).status).toBe(400);
 
     let seen: { url: string; key: string | null; model: string } | undefined;
     const llm = await projectProvider(env, project.id, (async (input: RequestInfo | URL, init?: RequestInit) => {

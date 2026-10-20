@@ -68,7 +68,7 @@ export async function runLoop(opts: LoopOptions): Promise<LoopResult> {
   return { steps: maxSteps, finalText: "", toolCalls: calls, stopped: "max_steps" };
 }
 
-async function runTool(t: Tool | undefined, call: ToolCall): Promise<{ result: ToolResult; stop: boolean }> {
+export async function runTool(t: Tool | undefined, call: ToolCall): Promise<{ result: ToolResult; stop: boolean }> {
   const fail = (output: string) => ({ result: { id: call.id, name: call.name, output, isError: true }, stop: false });
   if (!t) return fail(`Unknown tool "${call.name}".`);
   const parsed = t.input.safeParse(call.input);
