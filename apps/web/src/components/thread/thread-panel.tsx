@@ -243,15 +243,24 @@ export function ThreadPanel({
                       document.getElementById(`thread-tab-${next.id}`)?.focus();
                     }}
                     className={cn(
-                      "relative flex size-7 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
-                      selected ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg",
+                      "relative flex h-7 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                      selected ? "bg-hover text-fg max-sm:w-7 sm:gap-1.5 sm:pl-2 sm:pr-2.5" : "w-7 text-muted hover:bg-hover hover:text-fg",
                     )}
                   >
-                    <tab.icon size={15} aria-hidden="true" />
+                    <tab.icon size={15} aria-hidden="true" className="flex-none" />
+                    {selected ? (
+                      <span aria-hidden="true" className="hidden max-w-[9rem] truncate text-[13px] font-medium sm:inline">
+                        {tab.label}
+                        {tab.count ? <span className="ml-1 font-mono text-xs text-muted">{tab.count}</span> : null}
+                      </span>
+                    ) : null}
                     {tab.count ? (
                       <span
                         aria-hidden="true"
-                        className="absolute -right-1 -top-1 min-w-3.5 rounded-full bg-raised px-[3px] text-center font-mono text-[9px] leading-[14px] text-muted ring-1 ring-line"
+                        className={cn(
+                          "absolute -right-1 -top-1 min-w-3.5 rounded-full bg-raised px-[3px] text-center font-mono text-[9px] leading-[14px] text-muted ring-1 ring-line",
+                          selected && "sm:hidden",
+                        )}
                       >
                         {tab.count}
                       </span>
