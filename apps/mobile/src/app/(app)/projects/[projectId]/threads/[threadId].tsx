@@ -1,5 +1,5 @@
-import { threadMessages } from "@myrel/client";
-import { useT } from "@myrel/i18n/react";
+import { threadMessages, threadUsage } from "@myrel/client";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { planChecklist } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { CircleCheck, RotateCcw } from "lucide-react-native";
@@ -8,6 +8,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
 import { Conversation } from "../../../../../components/conversation";
 import { ThreadStatusIcon } from "../../../../../components/thread-status";
+import { formatCost, formatTokens } from "../../../../../lib/format";
 import { useProject } from "../../../../../lib/project";
 import { useSession } from "../../../../../lib/session";
 import { colors } from "../../../../../theme";
@@ -20,6 +21,14 @@ export default function ThreadScreen() {
   const { projectId, state, send, emit } = useProject();
   const names = useNames(projectId);
   const thread = state.threads[threadId];
+  const { locale } = useI18n();
+  const usage = thread ? threadUsage(state, threadId) : null;
+  const usageText =
+    usage && usage.tokens > 0
+      ? [t("stats.tokens", { tokens: formatTokens(usage.tokens, locale) }), usage.costMicros ? formatCost(usage.costMicros, locale) : null]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   // The message that opened the thread leads the conversation.
   const messages = useMemo(() => {
@@ -49,9 +58,16 @@ export default function ThreadScreen() {
             thread ? (
               <View style={styles.title}>
                 <ThreadStatusIcon thread={thread} />
-                <Text style={styles.titleText} numberOfLines={1}>
-                  {thread.title}
-                </Text>
+                <View style={styles.titleLines}>
+                  <Text style={styles.titleText} numberOfLines={1}>
+                    {thread.title}
+                  </Text>
+                  {usageText && (
+                    <Text style={styles.usage} numberOfLines={1}>
+                      {usageText}
+                    </Text>
+                  )}
+                </View>
               </View>
             ) : (
               <Text style={styles.titleText}>{t("thread.loading")}</Text>
@@ -93,7 +109,9 @@ export default function ThreadScreen() {
 
 const styles = StyleSheet.create({
   title: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 },
+  titleLines: { flexShrink: 1 },
   titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", flexShrink: 1 },
+  usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"] },
   resolve: {
     width: 36,
     height: 36,

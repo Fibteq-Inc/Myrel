@@ -330,6 +330,14 @@ export class ProjectAgent extends Agent<Env> {
     return message;
   }
 
+  /** Replaces what an agent message's stats line says, e.g. with usage reported after it was sent. Callable over RPC. */
+  setMessageStats(id: string, stats: MessageStats): Message | null {
+    this.sql`UPDATE messages SET stats = ${JSON.stringify(stats)} WHERE id = ${id}`;
+    const message = this.getMessage(id);
+    if (message) this.emit({ type: "message.updated", message });
+    return message;
+  }
+
   addReaction(reaction: Reaction): void {
     this.sql`INSERT OR IGNORE INTO reactions (message_id, emoji, author_kind, author_id)
       VALUES (${reaction.messageId}, ${reaction.emoji}, ${reaction.authorKind}, ${reaction.authorId})`;

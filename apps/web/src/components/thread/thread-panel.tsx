@@ -1,4 +1,4 @@
-import { threadMessages, threadPullRequests, threadTasks } from "@myrel/client";
+import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
@@ -19,6 +19,7 @@ import {
   ScrollToEnd,
   Thinking,
 } from "../chat";
+import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
@@ -71,6 +72,7 @@ export function ThreadPanel({
 
   const thread = state.threads[threadId];
   const messages = thread ? threadMessages(state, thread.id) : [];
+  const usage = thread ? threadUsage(state, thread.id) : null;
   // What this thread published, plus anything its messages delivered from elsewhere.
   const attached = new Set(messages.flatMap((m) => m.artifacts?.map((a) => a.artifactId) ?? []));
   const outputs = Object.values(state.artifacts)
@@ -198,8 +200,16 @@ export function ThreadPanel({
             <ThreadStatusIcon thread={thread} />
             <div className="ml-1.5 flex min-w-0 flex-1 flex-col leading-tight">
               <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
-              <span className={cn("truncate text-[11px]", threadStatus(thread, t).tone)}>
-                {threadStatus(thread, t).label}
+              <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                <span className={cn("truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
+                {usage && usage.tokens > 0 && (
+                  <>
+                    <span aria-hidden="true" className="text-[#3a3a42]">
+                      ·
+                    </span>
+                    <ThreadUsageLabel usage={usage} />
+                  </>
+                )}
               </span>
             </div>
 

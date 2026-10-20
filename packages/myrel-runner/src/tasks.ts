@@ -105,11 +105,19 @@ export class TaskRunner {
     let buffered = "";
     let lastProgress = 0;
     let sentProgress: string | undefined;
+    let sentUsage = "";
+    /** The CLI's usage so far, for the server to show under the agent's replies. */
+    const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
     const flushProgress = () => {
-      if (!state.progress || state.progress === sentProgress) return;
+      const u = usage();
+      const usageKey = u ? JSON.stringify(u) : "";
+      const textChanged = !!state.progress && state.progress !== sentProgress;
+      if (!textChanged && usageKey === sentUsage) return;
       sentProgress = state.progress;
+      sentUsage = usageKey;
       lastProgress = Date.now();
-      this.send({ type: "task.progress", taskId: task.taskId, text: state.progress });
+      // Unchanged text goes as empty, so the server does not log the same step twice.
+      this.send({ type: "task.progress", taskId: task.taskId, text: textChanged ? state.progress! : "", ...(u && { usage: u }) });
     };
 
     child.stdout!.setEncoding("utf8");
@@ -119,7 +127,9 @@ export class TaskRunner {
       const lines = buffered.split("\n");
       buffered = lines.pop()!;
       for (const line of lines) adapter.line(line.trim(), state);
-      if (Date.now() - lastProgress >= PROGRESS_EVERY_MS) flushProgress();
+      // New usage goes at once, so a reply the agent sends right after can count it.
+      const u = usage();
+      if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage)) flushProgress();
     });
     child.stderr!.setEncoding("utf8");
     child.stderr!.on("data", (chunk: string) => {
@@ -145,7 +155,14 @@ export class TaskRunner {
           return resolve();
         }
         log(`${ok ? "✓" : "✗"} ${adapter.id} task finished`);
-        this.send({ type: "task.done", taskId: task.taskId, ok, result: result.slice(0, MAX_RESULT - where.length) + where });
+        const u = usage();
+        this.send({
+          type: "task.done",
+          taskId: task.taskId,
+          ok,
+          result: result.slice(0, MAX_RESULT - where.length) + where,
+          ...(u && { usage: u }),
+        });
         resolve();
       };
       child.on("error", (err: NodeJS.ErrnoException) => {

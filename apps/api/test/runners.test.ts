@@ -281,9 +281,23 @@ describe("local workspace", () => {
       result: { isError: boolean };
     };
     expect(planned.result.isError).toBe(false);
+    // The CLI's usage so far, as the runner reports it; only usage, so no new step is shown.
+    runnerSide.send({ type: "task.progress", taskId: start.taskId, text: "", usage: { inputTokens: 1200, outputTokens: 80, model: "claude-sonnet-5-5" } });
+    await new Promise((r) => setTimeout(r, 200));
     await call(4, "reply", { text: "README'yi okuyorum." });
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
+    const messages = async () => (await projectAgent.getThreadContext(thread.id))?.messages ?? [];
+    const bodies = async () => (await messages()).map((m) => m.body);
     expect(await bodies()).toContain("README'yi okuyorum.");
+    // Its reply carries the line the coordinator's do: where, which CLI and model, tokens; no price on their own CLI.
+    const first = (await messages()).find((m) => m.body === "README'yi okuyorum.")!;
+    expect(first.stats).toMatchObject({
+      runtime: "local",
+      harness: "claude",
+      model: "claude-sonnet-5-5",
+      inputTokens: 1200,
+      outputTokens: 80,
+      costMicros: null,
+    });
 
     // A message during the turn waits for it instead of starting a second agent.
     const followUp = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "kısa tut" });
@@ -291,7 +305,16 @@ describe("local workspace", () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(starts()).toHaveLength(1);
 
-    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Summary posted." });
+    runnerSide.send({
+      type: "task.done",
+      taskId: start.taskId,
+      ok: true,
+      result: "Summary posted.",
+      usage: { inputTokens: 1500, outputTokens: 120, model: "claude-sonnet-5-5" },
+    });
+    // What it used after its last reply joins that reply.
+    await until(async () => (await messages()).find((m) => m.id === first.id)?.stats?.inputTokens === 1500, "tail usage");
+    expect((await messages()).find((m) => m.id === first.id)!.stats!.outputTokens).toBe(120);
     // The turn's token dies with it, and the waiting message gets the next turn.
     await until(async () => (await mcp({ jsonrpc: "2.0", id: 5, method: "tools/list" })).status === 401, "token revoked");
     const next = await until(() => starts()[1], "next agent turn");
@@ -302,6 +325,8 @@ describe("local workspace", () => {
 
     runnerSide.send({ type: "task.done", taskId: next.taskId, ok: true, result: "Kısa özet: Myrel bir proje asistanı." });
     await until(async () => (await bodies()).includes("Kısa özet: Myrel bir proje asistanı."), "final message as reply");
+    // A runner that reports no usage still gets the line, without tokens.
+    expect((await messages()).find((m) => m.body.startsWith("Kısa özet"))!.stats).toMatchObject({ runtime: "local", harness: "claude", inputTokens: 0 });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
     runnerSide.ws.close();
   });

@@ -116,15 +116,20 @@ export class RunnerAgent extends Agent<Env> {
       case "task.progress": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
         if (task?.status !== "running") return;
+        const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
+        if (frame.usage) await thread.cliUsage(task.id, frame.usage);
+        // Empty text: only the usage changed.
+        if (!frame.text) return;
         const project = await getAgentByName(this.env.PROJECT_AGENT, task.project_id);
         await project.setActivity(task.thread_id, true, frame.text.slice(0, 200));
-        const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
         await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.slice(0, 200) }]);
         return;
       }
       case "task.done": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
-        if (task?.status === "running") await this.finish(task, frame.ok, frame.result, frame.cancelled);
+        if (task?.status !== "running") return;
+        if (frame.usage) await (await getAgentByName(this.env.THREAD_AGENT, task.thread_id)).cliUsage(task.id, frame.usage);
+        await this.finish(task, frame.ok, frame.result, frame.cancelled);
         return;
       }
       case "folders":

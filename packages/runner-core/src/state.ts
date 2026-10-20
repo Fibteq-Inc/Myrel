@@ -12,6 +12,8 @@ export type TaskProgress = {
   lastTool: string | null;
   prUrl: string | null;
   usage: { inputTokens: number; outputTokens: number; costUsd: number };
+  /** The model the harness says it used (absent on older runs). */
+  model?: string;
   finished: null | { ok: boolean; exitCode?: number; error?: string };
 };
 
@@ -53,6 +55,7 @@ export function reduceTask(p: TaskProgress, e: RunnerEvent): TaskProgress {
           outputTokens: p.usage.outputTokens + e.outputTokens,
           costUsd: p.usage.costUsd + (e.costUsd ?? 0),
         },
+        ...(e.model && { model: e.model }),
       };
     case "done":
       return { ...p, finished: { ok: e.ok, exitCode: e.exitCode, error: e.error } };
