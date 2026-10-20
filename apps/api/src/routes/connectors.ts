@@ -2,12 +2,12 @@ import { createDb, schema } from "@myrel/db";
 import { createId, CreateConnectorInput, UpdateConnectorInput } from "@myrel/protocol";
 import { and, asc, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
-import { blockedUrl, probeConnector } from "../connectors/client";
+import { blockedUrl } from "../connectors/client";
 import { finishAuthorization, startAuthorization } from "../connectors/oauth";
 import {
   type ConnectorOwner,
+  checkConnector,
   type ConnectorRow,
-  connectorHeaders,
   findConnector,
   freeSlug,
   ownerWhere,
@@ -89,7 +89,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
           return c.json({ connector: toConnector({ ...row, status: "error", lastError }, true) }, 201);
         }
       }
-      Object.assign(row, await check(c.env, row));
+      Object.assign(row, await checkConnector(c.env, row));
       await createDb(c.env.DB).insert(connectors).values(row);
       return c.json({ connector: toConnector(row, true) }, 201);
     })
@@ -131,7 +131,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       if (row.auth === "oauth" && fields.url !== undefined && fields.url !== row.url) {
         Object.assign(next, { secret: null, status: "needs_auth" as const, lastError: null });
       } else if (newSecrets || fields.url !== undefined || fields.command !== undefined || fields.args !== undefined) {
-        Object.assign(next, await check(c.env, next));
+        Object.assign(next, await checkConnector(c.env, next));
       }
       const { id: _, ...set } = next;
       await createDb(c.env.DB).update(connectors).set(set).where(eq(connectors.id, row.id));
@@ -151,7 +151,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       if (!s) return c.json({ error: "not_found" }, 404);
       const row = await findConnector(c.env, s.owner, c.req.param("connectorId"));
       if (!row) return c.json({ error: "not_found" }, 404);
-      const next = { ...row, ...(await check(c.env, row)), updatedAt: new Date() };
+      const next = { ...row, ...(await checkConnector(c.env, row)), updatedAt: new Date() };
       await createDb(c.env.DB)
         .update(connectors)
         .set({ status: next.status, lastError: next.lastError, tools: next.tools, updatedAt: next.updatedAt })
@@ -179,18 +179,6 @@ export function publicOrigin(c: Context<AppEnv>): string {
 }
 
 /**
- * Connects to a remote server and lists its tools. A command (stdio) only starts next to the
- * agent, so its tools are known once a run has used it.
- */
-async function check(env: Env, row: ConnectorRow): Promise<Pick<ConnectorRow, "status" | "lastError" | "tools">> {
-  if (row.transport !== "http" || !row.url) return { status: "unknown", lastError: null, tools: row.tools };
-  const headers = await connectorHeaders(env, row);
-  if (!headers) return { status: "needs_auth", lastError: row.lastError, tools: row.tools };
-  const probe = await probeConnector(row.url, headers);
-  return probe.ok ? { status: "ok", lastError: null, tools: probe.tools } : { status: "error", lastError: probe.error, tools: row.tools };
-}
-
-/**
  * Mounted at /api/connectors/oauth: where a connector's sign-in comes back to. No session needed:
  * the state names the sign-in Myrel started. Ends on the settings page with the result.
  */
@@ -200,7 +188,7 @@ export const connectorOAuthRoutes = new Hono<AppEnv>().get("/callback", async (c
   const [row] = result.id ? await createDb(c.env.DB).select().from(connectors).where(eq(connectors.id, result.id)) : [];
   if (result.ok) {
     if (row) {
-      const checked = await check(c.env, row);
+      const checked = await checkConnector(c.env, row);
       await createDb(c.env.DB).update(connectors).set(checked).where(eq(connectors.id, row.id));
     }
   }

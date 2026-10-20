@@ -693,7 +693,7 @@ export const en = {
   "connectors.signIn": "Sign in",
   "connectors.signInAgain": "Sign in again",
   "connectors.retry": "Retry",
-  "connectors.check": "Check connection",
+  "connectors.refreshTools": "Refresh tools",
   "connectors.on": "On",
   "connectors.off": "Off",
   "connectors.enabledLabel": "Use {name}",

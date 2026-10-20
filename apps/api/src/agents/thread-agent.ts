@@ -23,7 +23,7 @@ import {
   workingBranch,
 } from "@myrel/runner-core";
 import { Agent, getAgentByName } from "agents";
-import { readSecrets, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
+import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
@@ -502,6 +502,9 @@ export class ThreadAgent extends Agent<Env> {
       return [];
     });
     this.setMeta("agent_connectors", JSON.stringify(connectors.map((c) => ({ id: c.id, name: c.name, transport: c.transport }))));
+    // Servers gain tools over time; keep the list settings show current without holding up the turn.
+    const remote = connectors.filter((c) => c.transport === "http").map((c) => c.id);
+    this.ctx.waitUntil(refreshStaleTools(this.env, remote).catch((err) => console.error("connector tools", err)));
     return connectors;
   }
 
