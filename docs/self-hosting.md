@@ -1,6 +1,6 @@
 # Self-hosting Fibteq Myrel on Cloudflare
 
-Myrel runs as a single Cloudflare Worker named `altair`. The same Worker serves
+Myrel runs as a single Cloudflare Worker named `myrel`. The same Worker serves
 the web app, the HTTP API and three Durable Object classes, and keeps accounts and
 projects in a D1 database. This guide sets up your own copy and keeps it
 deploying from Git with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
@@ -41,7 +41,7 @@ pnpm --filter @altair/api exec wrangler login
 ## 2. Create the D1 database
 
 ```sh
-pnpm --filter @altair/api exec wrangler d1 create altair
+pnpm --filter @altair/api exec wrangler d1 create myrel
 ```
 
 Copy the `database_id` it prints into `apps/api/wrangler.jsonc`, replacing the
@@ -52,14 +52,14 @@ in your account):
 "d1_databases": [
   {
     "binding": "DB",
-    "database_name": "altair",
+    "database_name": "myrel",
     "database_id": "<your database id>",
     "migrations_dir": "../../packages/db/migrations"
   }
 ]
 ```
 
-Commit and push the change. Keep the database name `altair`: the deploy script
+Commit and push the change. Keep the database name `myrel`: the deploy script
 applies migrations to the database with that name. You do not need to run the
 migrations by hand; every production deploy applies pending ones first.
 
@@ -70,13 +70,13 @@ Project files and message uploads are stored in R2 (binding `FILES` in
 missing:
 
 ```sh
-pnpm --filter @altair/api exec wrangler r2 bucket create altair-files
+pnpm --filter @altair/api exec wrangler r2 bucket create myrel-files
 ```
 
 ## 3. Set the required secret
 
 Myrel needs one secret before it can start: `BETTER_AUTH_SECRET`, which signs
-sessions. Setting it also creates the `altair` Worker if it does not exist yet.
+sessions. Setting it also creates the `myrel` Worker if it does not exist yet.
 
 ```sh
 openssl rand -base64 32    # copy the output
@@ -183,7 +183,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
-| `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://altair-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
+| `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://myrel-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
@@ -204,9 +204,9 @@ supply the D1 id.
 | `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
 | `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the myrel-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
-| `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
+| `ARTIFACTS` | R2 bucket `myrel-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for its cloud agent (see [Code sandbox](#code-sandbox)) |
-| `WORKSPACES` | Artifacts namespace `altair` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
+| `WORKSPACES` | Artifacts namespace `myrel` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
 | `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) |
 
 ## Optional features
@@ -239,19 +239,19 @@ provider and put that URL in `LLM_BASE_URL`.
 ### Artifacts
 
 Thread agents publish HTML pages with `publish_artifact`. Each publish is an
-immutable version in the `altair-artifacts` R2 bucket
+immutable version in the `myrel-artifacts` R2 bucket
 (`artifacts/{id}/v{n}/index.html`); the app's address for an artifact stays the
 same and opens the latest version. Artifacts are untrusted HTML, so a second
-Worker, `altair-artifacts` (`apps/artifacts`), serves them from **a different
+Worker, `myrel-artifacts` (`apps/artifacts`), serves them from **a different
 site** than the app: its own `workers.dev` address
-(`https://altair-artifacts.<your-subdomain>.workers.dev`) works, as does a
-separate domain such as `altair-usercontent.dev`, but never a subdomain of the
+(`https://myrel-artifacts.<your-subdomain>.workers.dev`) works, as does a
+separate domain such as `myrel-usercontent.dev`, but never a subdomain of the
 app's domain. It sends a strict CSP that
 sandboxes each page into an opaque origin, and it only serves links the API
 signed within the last hour.
 
 1. Create the bucket **before** deploying the API, since it binds it:
-   `pnpm --filter @altair/api exec wrangler r2 bucket create altair-artifacts`.
+   `pnpm --filter @altair/api exec wrangler r2 bucket create myrel-artifacts`.
 2. Pick one random value (`openssl rand -base64 32`) and set it as
    `ARTIFACT_SIGNING_SECRET` on both Workers:
    `pnpm --filter @altair/api exec wrangler secret put ARTIFACT_SIGNING_SECRET` and
@@ -265,7 +265,7 @@ signed within the last hour.
    | Deploy command | `pnpm run deploy:artifacts` |
    | Non-production branch deploy command | `pnpm run deploy:artifacts:preview` |
 
-4. Optionally attach a separate domain to `altair-artifacts` under
+4. Optionally attach a separate domain to `myrel-artifacts` under
    **Settings → Domains & Routes**; otherwise use its `workers.dev` address.
 5. Set `ARTIFACTS_URL` in `apps/api/wrangler.jsonc` to that origin, and
    `APP_ORIGINS` in `apps/artifacts/wrangler.jsonc` to the app's origin (only
@@ -315,7 +315,7 @@ without a local folder then say there is no sandbox.
 A container's disk does not survive its sleep. With
 [Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (beta,
 Workers Paid), each thread gets its own git repository, `thread-<thread id>`
-in the `altair` namespace. The sandbox commits and pushes every task's work
+in the `myrel` namespace. The sandbox commits and pushes every task's work
 there, unfinished work included, and the thread's next task starts from it:
 without a repository it continues in the same files, and with one it
 continues the same branch.
@@ -401,7 +401,7 @@ has a layout the button can build, use the steps above.
 - **The project chat says a secret is missing.** Set the key for the provider in
   `LLM_PROVIDER` and redeploy, or wait a few seconds for the secret to apply.
 - **Build fails on `d1 migrations apply`.** The `database_id` in `wrangler.jsonc`
-  does not belong to your account, or the database is not named `altair`.
+  does not belong to your account, or the database is not named `myrel`.
 - **Sign-in works locally but not in production.** Check `BETTER_AUTH_URL`
   matches your public origin, or leave it empty.
 - **Cross-origin requests are rejected.** Add the UI's origin to `TRUSTED_ORIGINS`.
