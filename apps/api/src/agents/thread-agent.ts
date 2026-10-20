@@ -187,6 +187,7 @@ export class ThreadAgent extends Agent<Env> {
     }));
     const workspace = await getWorkspace(this.env, projectId);
     const place = await taskPlace(this.env, projectId);
+    const firstTurn = this.getMeta("last_seen_seq") === null;
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     // Only the last few runs matter; older ones are history the thread already acted on.
     const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
@@ -366,6 +367,21 @@ export class ThreadAgent extends Agent<Env> {
         }
         this.setMeta("plan_nudged", "1");
         this.sql`INSERT INTO notes (body, created_at) VALUES (${`You marked ${unearned.map((t) => `"${t}"`).join(", ")} done, but nothing was done this turn: no task ran, nothing was written or published, and the person was told nothing. Those steps are back to todo. Do the work now (for files, code or commands, run_task, and mark the step done once its result arrives), or tell the person why you cannot.`}, ${new Date().toISOString()})`;
+        await this.markDirty();
+      }
+      // The first turn ended on the opening note alone: no plan, no work, no task, nothing asked. The agent
+      // said it would start and stopped, so give it one more turn to do what it said.
+      if (
+        firstTurn &&
+        lastReply &&
+        !lastReply.needs &&
+        !workThisTurn &&
+        !asked &&
+        !resolved &&
+        !this.runningTask() &&
+        !this.getMeta("plan")
+      ) {
+        this.sql`INSERT INTO notes (body, created_at) VALUES (${"Your last turn ended right after your reply, with no plan, no task and nothing asked. If that reply said what you were going to do, do it now: update_plan, then the work (run_task for files, code or commands). If the reply already answered fully, end this turn without calling any tool."}, ${new Date().toISOString()})`;
         await this.markDirty();
       }
       // A finished task always gets an answer. A failed one first gets one more turn to fix it and run it

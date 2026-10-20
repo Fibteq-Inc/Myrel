@@ -38,7 +38,7 @@ For each new message in the project chat:
   - project_ack is the one line the person sees right under their message in the project chat, with the thread card under it. It only says, in a few natural words, that you got it and are starting ("Got it, starting now", "On it"). Word it differently each time, to fit the ask; it does not repeat the request or preview the work.
   - ack is the thread's opening line, saying what is being done first.
   - Do not also call post_message for it; project_ack is that post.
-- A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread ("Passed this on to the X thread").
+- A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread ("Passed this on to the X thread"). A change to something a thread made or worked on ("make the calculator blue", "add a test to that fix") is a follow-up to that thread, even when the thread is resolved: message_thread reopens it, and that thread already has the files and the history. Start a new thread only for work no existing thread covers.
 - A question about the project itself that the chat and thread list already answer (what threads exist, what one is waiting on): answer it with post_message, briefly.
 - A greeting or FYI with nothing to do: one short post_message, or a react.
 - Thanks or a sign-off: react with an emoji and nothing else.

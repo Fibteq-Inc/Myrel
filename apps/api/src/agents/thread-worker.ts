@@ -181,7 +181,8 @@ export function threadTools(host: ThreadHost): Tool[] {
       }),
       run: async ({ text, needs }) => {
         await host.reply(text, needs);
-        return "Sent.";
+        // Weaker models read their opening note as the end of the turn; it is not.
+        return "Sent. Your turn goes on until you stop calling tools: if this reply said what you are going to do, do it now (update_plan, then run_task for files, code or commands).";
       },
     }),
     tool({
