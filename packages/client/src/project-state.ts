@@ -123,7 +123,16 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
       for (const a of event.artifacts) artifacts[a.id] = a;
       // The sync carries every routine, so it replaces the list (deletions while offline drop out).
       const routines = Object.fromEntries(event.routines.map((r) => [r.id, r]));
-      return { ...state, threads, artifacts, routines, reactions: addReactions(state.reactions, event.reactions) };
+      // Agents still working are sent again right after the sync, so any other "thinking" is stale.
+      return {
+        ...state,
+        threads,
+        artifacts,
+        routines,
+        reactions: addReactions(state.reactions, event.reactions),
+        active: {},
+        progress: {},
+      };
     }
     default:
       return state;
