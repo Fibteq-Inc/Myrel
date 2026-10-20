@@ -12,6 +12,8 @@
     "build:api": "turbo run build --filter=@myrel/api",
     "deploy": "pnpm --filter @myrel/api run deploy",
     "deploy:preview": "pnpm --filter @myrel/api run deploy:preview",
+    "deploy:hosted": "pnpm --filter @myrel/api run deploy:hosted",
+    "deploy:hosted:preview": "pnpm --filter @myrel/api run deploy:hosted:preview",
     "deploy:api": "pnpm run deploy",
     "deploy:api:preview": "pnpm run deploy:preview",
     "deploy:artifacts": "pnpm --filter @myrel/artifacts run deploy",

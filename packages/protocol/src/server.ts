@@ -18,5 +18,7 @@ export const ServerInfo = z.object({
     /** Whether new accounts can be created. Older servers do not send it and always allowed it. */
     signUp: z.boolean().default(true),
   }),
+  /** Whether this server sells plans (the hosted service); self-hosted servers have none. */
+  billing: z.boolean().default(false),
 });
 export type ServerInfo = z.infer<typeof ServerInfo>;

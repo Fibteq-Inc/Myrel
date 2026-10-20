@@ -8,10 +8,14 @@
 export type LimitCheck = { ok: true } | { ok: false; reason: string };
 
 export type Extensions = {
+  /** Whether this server sells plans, so clients show a billing page. */
+  billing?: boolean;
   /** Before a person creates a project. */
   canCreateProject?: (env: Env, userId: string) => Promise<LimitCheck>;
   /** Before a project's agent turn starts in a cloud sandbox. Local turns are never limited. */
   canUseSandbox?: (env: Env, projectId: string) => Promise<LimitCheck>;
+  /** Before a coordinator turn. A project with its own model key is the extension's to exempt. */
+  canUseCoordinator?: (env: Env, projectId: string) => Promise<LimitCheck>;
 };
 
 const ALLOWED: LimitCheck = { ok: true };
@@ -27,4 +31,12 @@ export async function canCreateProject(env: Env, userId: string): Promise<LimitC
 
 export async function canUseSandbox(env: Env, projectId: string): Promise<LimitCheck> {
   return current.canUseSandbox ? current.canUseSandbox(env, projectId) : ALLOWED;
+}
+
+export async function canUseCoordinator(env: Env, projectId: string): Promise<LimitCheck> {
+  return current.canUseCoordinator ? current.canUseCoordinator(env, projectId) : ALLOWED;
+}
+
+export function sellsPlans(): boolean {
+  return current.billing ?? false;
 }

@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
+import { sellsPlans } from "./extensions";
 import { signUpEnabled } from "./instance";
 import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
@@ -41,6 +42,7 @@ const app = new Hono<AppEnv>()
       apiVersion: API_VERSION,
       name: c.env.INSTANCE_NAME || "Myrel",
       auth: { emailPassword: true, signUp: await signUpEnabled(c.env) },
+      billing: sellsPlans(),
     } satisfies ServerInfo),
   )
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))

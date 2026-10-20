@@ -385,3 +385,54 @@ export const notificationSettings = sqliteTable("notification_settings", {
   push: integer("push", { mode: "boolean" }).notNull().default(true),
   updatedAt: timestamps.updatedAt,
 });
+
+// ---- Hosted billing ---------------------------------------------------------
+// Written only by the hosted service's billing extension (ee/billing). They stay empty on a
+// self-hosted server, which has no plans or limits.
+
+/** A person's Stripe customer. One per person; a Team plan is bought by its owner. */
+export const billingCustomers = sqliteTable("billing_customers", {
+  userId: text("user_id").primaryKey(),
+  stripeCustomerId: text("stripe_customer_id").notNull().unique(),
+  /** Set once the person started a trial, so they get only one. */
+  trialUsed: integer("trial_used", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** A Stripe subscription as its webhooks last described it. */
+export const billingSubscriptions = sqliteTable(
+  "billing_subscriptions",
+  {
+    /** Stripe's subscription id. */
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    plan: text("plan", { enum: ["pro", "team"] }).notNull(),
+    interval: text("interval", { enum: ["month", "year"] }).notNull(),
+    /** Stripe's status: trialing, active, past_due, canceled, unpaid, incomplete, ... */
+    status: text("status").notNull(),
+    seats: integer("seats").notNull().default(1),
+    currentPeriodEnd: integer("current_period_end", { mode: "timestamp_ms" }),
+    trialEnd: integer("trial_end", { mode: "timestamp_ms" }),
+    cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" }).notNull().default(false),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("billing_subscriptions_user_idx").on(t.userId)],
+);
+
+/** The people a Team plan covers besides its owner. */
+export const billingTeamMembers = sqliteTable(
+  "billing_team_members",
+  {
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.ownerId, t.userId] }), uniqueIndex("billing_team_members_user_idx").on(t.userId)],
+);
+
+/** Stripe webhook events already handled, so a redelivery is ignored. */
+export const stripeEvents = sqliteTable("stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
