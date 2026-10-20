@@ -27,10 +27,12 @@ Everything runs in one Cloudflare Worker (`apps/api`):
 |---|---|---|
 | HTTP API | Hono, `apps/api/src/index.ts`, `routes/` | Auth, projects, membership, `GET /api/info` |
 | Auth | Better Auth, `apps/api/src/auth.ts` | Cookies for the same-origin web app, bearer tokens for apps |
-| Global data | D1, schema in `packages/db` | Users, sessions, projects, members |
+| Global data | D1, schema in `packages/db` | Users, sessions, projects, members, skills, connectors, usage |
 | Project chat | `ProjectAgent` Durable Object | One per project; messages in its SQLite with a `seq`; WebSocket fan-out |
 | Coordinator | `apps/api/src/agents/coordinator.ts` | Tools: `post_message`, `start_thread`, `message_thread`, `react` |
-| Thread | `ThreadAgent` Durable Object | One per thread; tools: `reply`, `update_status`, `request_coordinator`, `resolve_thread`, `run_local_task` |
+| Thread | `ThreadAgent` Durable Object | One per thread; keeps its state and serves Myrel's tools to the harness over MCP (`reply`, `update_plan`, `ask_decision`, `publish_artifact`, `request_coordinator`, `resolve_thread`, …) |
+| Cloud harness | `Sandbox` Durable Object + Container, `apps/api/src/sandbox` | One container per thread running OpenCode; started from a snapshot |
+| Files and artifacts | R2 (`FILES`, `ARTIFACTS`), `apps/artifacts` | Project files and artifact versions; artifacts are served from a separate origin |
 | Local runner | `RunnerAgent` Durable Object, `packages/myrel-runner` | One per paired computer; holds the runner's outbound WebSocket, sends tasks, wakes the thread with each result |
 | Model calls | `apps/api/src/llm` | Small provider-neutral loop; Fireworks, Anthropic, OpenAI; optional AI Gateway |
 | Web app | `apps/web`, served as static assets | Vite, React 19, TanStack Router and Query, Tailwind CSS 4 |
@@ -39,10 +41,10 @@ Clients share `packages/protocol` (zod schemas for messages, threads and
 WebSocket events) and `packages/client` (typed API client and a reconnecting
 project socket that resyncs from the last `seq` it saw).
 
-## Where it is going
+## Recent and coming pieces
 
 The plan, phase by phase, is in the [README roadmap](../README.md#roadmap). The
-main additions:
+main pieces:
 
 - **Harnesses as thread agents (shipped).** A thread's agent is a coding
   harness, not Myrel's own loop: each turn is one run of the person's CLI on
@@ -51,7 +53,6 @@ main additions:
   people through Myrel's tools over MCP (`ThreadAgent.agentMcp`), and the
   `ThreadAgent` Durable Object keeps the thread's state between turns. The
   coordinator stays a small loop in the Worker.
-- **Project files and artifacts (phases 2 and 3)** on R2.
 - **Local runner (shipped).** `myrel-runner` pairs with an account through a
   one-time code from the Devices page, then keeps an outbound WebSocket to a
   `RunnerAgent`. A project picks one of the folders shared on that computer and a
