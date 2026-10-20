@@ -118,8 +118,21 @@ if [ -n "\${MYREL_FILES:-}" ]; then
 fi
 
 phase agent started
-eval "$MYREL_HARNESS_COMMAND"
+# The harness runs in its own process group, recorded in HARNESS_PID_FILE, so the runner can end a
+# turn that is done (its reply sent, its plan finished) when the harness does not exit by itself:
+# it creates HARNESS_DONE_FILE and stops the group, and the work is saved as finished.
+HARNESS_PID_FILE=/tmp/myrel-harness.pid
+HARNESS_DONE_FILE=/tmp/myrel-harness.done
+rm -f "$HARNESS_DONE_FILE"
+if command -v setsid >/dev/null 2>&1; then setsid bash -c "$MYREL_HARNESS_COMMAND" & else bash -c "$MYREL_HARNESS_COMMAND" & fi
+echo "$!" > "$HARNESS_PID_FILE"
+wait "$!"
 CODE=$?
+if [ -e "$HARNESS_DONE_FILE" ]; then
+  CODE=0
+  note "Ended $MYREL_HARNESS_LABEL: its reply was sent and its plan is done."
+fi
+rm -f "$HARNESS_PID_FILE" "$HARNESS_DONE_FILE"
 if [ "$CODE" -eq 0 ]; then phase agent done; else phase agent failed "$MYREL_HARNESS_LABEL exited with code $CODE"; fi
 
 # Every result is saved, unfinished work too, so the next task can pick it up.
@@ -161,6 +174,16 @@ else
 fi
 `;
 }
+
+/**
+ * Run next to a task's script: ends its harness as finished (see the agent phase of `taskScript`).
+ * Exits non-zero when no harness is running.
+ */
+export const STOP_HARNESS_SCRIPT = `PID=$(cat /tmp/myrel-harness.pid 2>/dev/null) || exit 1
+touch /tmp/myrel-harness.done
+kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID"
+# A harness that ignores the request is stopped for good shortly after.
+(sleep 10; kill -KILL -- "-$PID" 2>/dev/null || kill -KILL "$PID") >/dev/null 2>&1 &`;
 
 /** Non-secret environment for `taskScript`. */
 export function taskEnv(

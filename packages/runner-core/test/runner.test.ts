@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import {
   shell,
   taskBranch,
   taskEnv,
+  STOP_HARNESS_SCRIPT,
   taskScript,
   TaskSpec,
 } from "../src";
@@ -201,6 +202,24 @@ describe("task script", () => {
       "agent:done",
       "publish:skipped",
     ]);
+  });
+
+  it("ends a harness that keeps going after its turn is done, as finished", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "echo replied && sleep 30 && echo too-late" });
+    const child = spawn("bash", ["-c", taskScript()], {
+      env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), "myrel-home-")), ...taskEnv(s, shell, { workdir }) },
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    const exited = new Promise<number | null>((resolve) => child.on("close", resolve));
+    while (!out.includes("replied")) await new Promise((r) => setTimeout(r, 50));
+    expect(spawnSync("bash", ["-c", STOP_HARNESS_SCRIPT]).status).toBe(0);
+    expect(await exited).toBe(0);
+    const events = out.split("\n").flatMap((l) => parseLine(shell, l));
+    expect(events).toContainEqual({ type: "phase", phase: "agent", state: "done" });
+    expect(events).toContainEqual({ type: "log", stream: "system", text: "Ended Shell: its reply was sent and its plan is done." });
+    expect(out).not.toContain("too-late");
   });
 
   it("downloads the thread's attachments next to the work before the harness starts", () => {
