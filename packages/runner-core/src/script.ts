@@ -11,7 +11,8 @@ import type { TaskSpec } from "./spec";
  * Inputs come from the environment (`taskEnv` plus secrets) so nothing the
  * person or the model wrote is ever spliced into the script itself.
  * Secrets: GITHUB_TOKEN (clone and push; also read by `gh` as GH_TOKEN),
- * ALTAIR_WORKSPACE_TOKEN (the workspace remote) and ALTAIR_MODEL_API_KEY. Needs git, jq and, to open pull requests, gh.
+ * ALTAIR_WORKSPACE_TOKEN (the workspace remote), ALTAIR_MODEL_API_KEY and ALTAIR_FILES (download links of
+ * the thread's attachments). Needs git, jq and, to open pull requests, gh.
  */
 export function taskScript(): string {
   return `set -uo pipefail
@@ -100,6 +101,20 @@ elif [ -n "$WS" ]; then
   phase clone done
 else
   phase clone skipped
+fi
+
+# Files attached in the thread ([{path,url}] in ALTAIR_FILES), next to the saved folder rather than
+# in it, so they are at hand without being saved with the work. An upload never changes, so one
+# already here is kept.
+if [ -n "\${ALTAIR_FILES:-}" ]; then
+  FILES_DIR="$ALTAIR_WORKDIR/files"
+  while IFS=$'\t' read -r FILE_PATH FILE_URL; do
+    case "/$FILE_PATH/" in */../*|*/./*|//) continue ;; esac
+    DEST="$FILES_DIR/$FILE_PATH"
+    case "$FILE_PATH" in uploads/*) [ -s "$DEST" ] && continue ;; esac
+    mkdir -p "$(dirname "$DEST")" && curl -fsSL --retry 2 -o "$DEST.part" "$FILE_URL" && mv -f "$DEST.part" "$DEST" ||
+      { rm -f "$DEST.part"; note "Could not download $FILE_PATH; read_file gives a fresh link."; }
+  done < <(printf '%s' "$ALTAIR_FILES" | jq -r '.[] | [.path, .url] | @tsv')
 fi
 
 phase agent started

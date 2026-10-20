@@ -225,4 +225,43 @@ describe("binary files and harness agents", () => {
     expect(await agent.getFile("reports/chart.png")).toMatchObject({ size: png.length, contentType: "image/png", updatedByKind: "agent" });
     ws.close();
   });
+  it("attaches files the agent made to its reply, and refuses a path with no file", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [call("start_thread", { message_id: newMessageId(req.prompt), title: "Rapor", instructions: "Make it.", project_ack: "On it." })],
+      };
+    });
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "İsmail" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const results: { isError: boolean; text: string }[] = [];
+    let done = false;
+    const { project } = await agentProject(token, async (turn: Turn) => {
+      expect(turn.prompt).toContain("file_upload_url");
+      results.push(await turn.call("reply", { text: "Here.", files: ["reports/missing.xlsx"] }));
+      await turn.call("write_file", { path: "reports/summary.csv", content: "a,b\n1,2\n" });
+      results.push(await turn.call("reply", { text: "Tablo hazır.", files: ["reports/summary.csv"] }));
+      done = true;
+    });
+    const base = `/api/projects/${project.id}`;
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const ws = (await api(`${base}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
+    ws.accept();
+    ws.send(JSON.stringify({ type: "message.send", body: "Rapor hazırla" }));
+    await until(() => done, "the agent turn");
+
+    expect(results[0]!.isError).toBe(true);
+    expect(results[1]!.isError).toBe(false);
+    const thread = (await agent.listThreads())[0]!;
+    const messages = (await agent.getThreadContext(thread.id))!.messages;
+    expect(messages.map((m: Message) => m.body)).not.toContain("Here.");
+    expect(messages.find((m: Message) => m.body === "Tablo hazır.")?.attachments).toEqual([
+      { path: "reports/summary.csv", name: "summary.csv", size: 8, contentType: "text/csv; charset=utf-8" },
+    ]);
+    ws.close();
+  });
 });

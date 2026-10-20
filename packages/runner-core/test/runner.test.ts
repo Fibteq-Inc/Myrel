@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -69,6 +69,14 @@ describe("opencode", () => {
     const config = JSON.stringify(opencodeConfig(s));
     expect(config).toContain("{env:ALTAIR_MODEL_API_KEY}");
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
+  });
+
+  it("lets a model that reads images see the images OpenCode reads", () => {
+    const model = { kind: "openai" as const, provider: "fireworks", id: "qwen-vl", baseUrl: "https://api.fireworks.ai/inference/v1" };
+    const entry = (images?: boolean) =>
+      (opencodeConfig(spec({ model: { ...model, images } })).provider as Record<string, { models: Record<string, unknown> }>).altair!.models["qwen-vl"];
+    expect(entry(true)).toMatchObject({ attachment: true, modalities: { input: ["text", "image"], output: ["text"] } });
+    expect(entry()).not.toHaveProperty("modalities");
   });
 
   it("connects to the thread's MCP endpoint as the thread's agent, with the token from the environment", () => {
@@ -171,6 +179,27 @@ describe("task script", () => {
       "agent:done",
       "publish:skipped",
     ]);
+  });
+
+  it("downloads the thread's attachments next to the work before the harness starts", () => {
+    const source = mkdtempSync(join(tmpdir(), "altair-src-"));
+    writeFileSync(join(source, "report.pdf"), "%PDF-1.7\n");
+    const workdir = mkdtempSync(join(tmpdir(), "altair-work-"));
+    const files = [
+      { path: "uploads/abc-report.pdf", url: `file://${join(source, "report.pdf")}` },
+      { path: "../escape.txt", url: `file://${join(source, "report.pdf")}` },
+      { path: "uploads/missing.png", url: `file://${join(source, "missing.png")}` },
+    ];
+    const s = spec({ harness: "shell", prompt: "cat files/uploads/abc-report.pdf" });
+    const { code, events } = runScript({ ...taskEnv(s, shell, { workdir }), ALTAIR_FILES: JSON.stringify(files) });
+    expect(code).toBe(0);
+    expect(events).toContainEqual({ type: "log", stream: "stdout", text: "%PDF-1.7" });
+    expect(events).toContainEqual({
+      type: "log",
+      stream: "system",
+      text: "Could not download uploads/missing.png; read_file gives a fresh link.",
+    });
+    expect(existsSync(join(workdir, "escape.txt"))).toBe(false);
   });
 
   it("saves every result to the workspace and starts the next task from it", () => {

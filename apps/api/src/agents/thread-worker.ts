@@ -18,7 +18,8 @@ import { renderRoutine } from "./routine-tools";
 
 /** The thread operations the thread agent's tools act through. */
 export type ThreadHost = {
-  reply(text: string, needs?: ReplyNeeds): Promise<Message>;
+  /** `files`: project file paths attached to the message, shown as cards people open. */
+  reply(text: string, needs?: ReplyNeeds, files?: string[]): Promise<Message>;
   publishArtifact(input: { artifactId?: string; title: string; description?: string; html: string }): Promise<Artifact>;
   /** Replaces the plan shown on the thread as a checklist. */
   setPlan(plan: Plan): Promise<void>;
@@ -110,9 +111,14 @@ export function threadTools(host: ThreadHost): Tool[] {
           .enum(["decision", "blocked"])
           .optional()
           .describe("decision: asks people to choose or approve. blocked: stuck on something only they can change."),
+        files: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe("Project file paths to attach (files you made, e.g. reports/summary.xlsx); upload them first."),
       }),
-      run: async ({ text, needs }) => {
-        await host.reply(text, needs);
+      run: async ({ text, needs, files }) => {
+        await host.reply(text, needs, files);
         // Weaker models read their opening note as the end of the turn; it is not.
         return "Sent.";
       },

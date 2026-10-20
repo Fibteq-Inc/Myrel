@@ -11,6 +11,25 @@ const OPENCODE_VERSION = "1.19.3";
 const CLAUDE_CODE_VERSION = "2.1.303";
 const PNPM_VERSION = "10.28.0";
 
+/**
+ * Python libraries for the files people attach (PDF, Excel/CSV, Word, PowerPoint, images): reading
+ * them (MarkItDown turns any of them into Markdown) and making new ones. Pinned so the snapshot is
+ * reproducible; changing one rebuilds it.
+ */
+const PYTHON_PACKAGES = [
+  "markitdown[pdf,docx,pptx,xlsx,xls]==0.1.3",
+  "pdfplumber==0.11.7",
+  "pypdf==6.1.1",
+  "pandas==2.3.3",
+  "openpyxl==3.1.5",
+  "xlsxwriter==3.2.9",
+  "python-docx==1.2.0",
+  "python-pptx==1.0.2",
+  "reportlab==4.4.4",
+  "pillow==11.3.0",
+  "matplotlib==3.10.7",
+];
+
 /** The user harnesses run as: Claude Code refuses to skip permissions as root. */
 export const SANDBOX_USER = "altair";
 export const SANDBOX_HOME = `/home/${SANDBOX_USER}`;
@@ -21,8 +40,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -o Acquire::Retries=5 update
 apt-get -o Acquire::Retries=5 install -y --no-install-recommends \\
   bash ca-certificates curl git jq less openssh-client procps ripgrep unzip \\
-  build-essential python3 python3-pip python3-venv gh
+  build-essential python3 python3-pip python3-venv gh \\
+  poppler-utils qpdf tesseract-ocr tesseract-ocr-eng tesseract-ocr-tur fonts-dejavu-core
 rm -rf /var/lib/apt/lists/*
+# The sandbox is the boundary, so the system Python is fine (Debian marks it externally managed).
+pip3 install --break-system-packages --no-cache-dir ${PYTHON_PACKAGES.map((p) => `"${p}"`).join(" ")}
 export COREPACK_HOME=/usr/local/share/corepack
 npm install -g "opencode-ai@${OPENCODE_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" --activate

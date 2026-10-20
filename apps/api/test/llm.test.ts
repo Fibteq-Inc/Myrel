@@ -10,7 +10,9 @@ import {
   type ModelProvider,
   parsePrices,
   priceFor,
+  readsImages,
   runLoop,
+  taskModel,
   tool,
 } from "../src/llm";
 
@@ -259,5 +261,26 @@ describe("TurnMeter", () => {
     };
     // With no new calls, the turn's last model still names who wrote it.
     expect(meter.take(task)).toMatchObject({ model: "firerouter/opus", calls: 0, runtime: "local", task });
+  });
+});
+
+describe("readsImages", () => {
+  it("guesses from the model's name, never trusting a router", () => {
+    expect(readsImages("anthropic", "claude-sonnet-4-5")).toBe(true);
+    expect(readsImages("openai", "gpt-4o-mini")).toBe(true);
+    expect(readsImages("openai", "accounts/fireworks/models/qwen2p5-vl-32b-instruct")).toBe(true);
+    expect(readsImages("openai", "accounts/fireworks/models/kimi-k2p6")).toBe(true);
+    expect(readsImages("openai", "accounts/fireworks/models/glm-5p3")).toBe(false);
+    expect(readsImages("openai", "firerouter/opus")).toBe(false);
+  });
+
+  it("lets RUNNER_IMAGES decide for the harness's model", () => {
+    const env = { LLM_PROVIDER: "fireworks", LLM_MODEL: "firerouter/opus", FIREWORKS_API_KEY: "k" };
+    const pick = (RUNNER_IMAGES: string) => {
+      const r = taskModel({ ...env, RUNNER_IMAGES } as never);
+      return r.ok ? r.model.images : null;
+    };
+    expect(pick("")).toBe(false);
+    expect(pick("true")).toBe(true);
   });
 });
