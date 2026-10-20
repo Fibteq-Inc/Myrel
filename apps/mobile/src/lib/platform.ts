@@ -6,7 +6,7 @@ import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { secureKey } from "./secure-key";
 
-const PREFIX = "altair:";
+const PREFIX = "myrel:";
 
 const storage: KeyValueStore = {
   get: (key) => AsyncStorage.getItem(PREFIX + key),

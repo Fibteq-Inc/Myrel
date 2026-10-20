@@ -6,7 +6,7 @@ import { platform } from "./platform";
 
 const LOCALE_KEY = "locale";
 
-/** The saved language, else the first device language Altair speaks, else English. */
+/** The saved language, else the first device language Myrel speaks, else English. */
 async function initialLocale(): Promise<Locale> {
   const saved = await platform.storage.get(LOCALE_KEY);
   if (isLocale(saved)) return saved;

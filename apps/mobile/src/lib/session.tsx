@@ -13,14 +13,14 @@ import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, us
 import { platform } from "./platform";
 
 /** Server a fresh install points at; empty means the user picks one first. */
-const DEFAULT_SERVER = (process.env.EXPO_PUBLIC_ALTAIR_SERVER ?? "").replace(/\/$/, "");
+const DEFAULT_SERVER = (process.env.EXPO_PUBLIC_MYREL_SERVER ?? "").replace(/\/$/, "");
 
 /** Native requests carry the app's own origin (trusted by the API) and never use cookies. */
 export function createApi(server: string) {
   return new ApiClient({
     baseUrl: server,
     tokens: tokenStoreFor(platform, server),
-    headers: { origin: "altair://" },
+    headers: { origin: "myrel://" },
     credentials: "omit",
   });
 }
