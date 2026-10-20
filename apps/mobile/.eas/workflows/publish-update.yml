@@ -15,14 +15,26 @@ on:
         type: string
         required: false
 
+# One job per platform: "all" would also export web, which the app doesn't ship.
 jobs:
-  publish_update:
-    name: Publish update
+  publish_android:
+    name: Publish Android update
     type: update
     environment: ${{ inputs.channel || 'production' }}
     # Same default server the build profiles in eas.json set.
     env:
       EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
     params:
+      platform: android
+      branch: ${{ inputs.channel || 'production' }}
+      message: ${{ inputs.message || github.commit_message }}
+  publish_ios:
+    name: Publish iOS update
+    type: update
+    environment: ${{ inputs.channel || 'production' }}
+    env:
+      EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
+    params:
+      platform: ios
       branch: ${{ inputs.channel || 'production' }}
       message: ${{ inputs.message || github.commit_message }}
