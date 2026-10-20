@@ -195,6 +195,22 @@ describe("hosted billing", () => {
     expect(row).toEqual({ status: "canceled", past_due_since: null });
   });
 
+  it("allows two connectors on Free, counting the person's own and their projects'", async () => {
+    const { token, userId } = await signUp();
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    const add = (column: "owner_id" | "project_id", value: string) =>
+      env.DB.prepare(`INSERT INTO connectors (id, ${column}, name, slug, transport) VALUES (?, ?, 'C', 'c', 'http')`)
+        .bind(`connector_${crypto.randomUUID()}`, value)
+        .run();
+    expect(await billingExtensions.canAddConnector!(workerEnv, { userId })).toEqual({ ok: true });
+    await add("owner_id", userId);
+    await add("project_id", project.id);
+    const refused = await billingExtensions.canAddConnector!(workerEnv, { projectId: project.id });
+    expect(refused.ok || refused.reason).toContain("2 connectors");
+    await webhook(subscriptionEvent(userId, "myrel_pro_monthly"));
+    expect(await billingExtensions.canAddConnector!(workerEnv, { userId })).toEqual({ ok: true });
+  });
+
   it("opens a Checkout with a seven-day trial and tax for a first subscription", async () => {
     const { token } = await signUp();
     const calls: { url: string; body: string }[] = [];

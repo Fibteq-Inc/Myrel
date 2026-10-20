@@ -13,6 +13,8 @@ export type Limits = {
    * projects without their own key), in millionths of a dollar.
    */
   modelMicros: number;
+  /** Connectors (MCP servers) a person may have: their own plus those on projects they own; null = no limit. */
+  connectors: number | null;
 };
 
 const HOUR = 3600;
@@ -20,15 +22,15 @@ const DOLLAR = 1_000_000;
 
 /** Per person; a Team plan multiplies sandbox time and model spend by its seats, pooled. */
 export const PLANS: Record<PlanId, Limits> = {
-  free: { projects: 3, sandboxSeconds: 2 * HOUR, modelMicros: 1 * DOLLAR },
-  pro: { projects: null, sandboxSeconds: 100 * HOUR, modelMicros: 5 * DOLLAR },
-  team: { projects: null, sandboxSeconds: 150 * HOUR, modelMicros: 5 * DOLLAR },
+  free: { projects: 3, sandboxSeconds: 2 * HOUR, modelMicros: 1 * DOLLAR, connectors: 2 },
+  pro: { projects: null, sandboxSeconds: 100 * HOUR, modelMicros: 5 * DOLLAR, connectors: null },
+  team: { projects: null, sandboxSeconds: 150 * HOUR, modelMicros: 5 * DOLLAR, connectors: null },
 };
 
 export function limitsFor(plan: PlanId, seats = 1): Limits {
   const base = PLANS[plan];
   const n = plan === "team" ? Math.max(seats, 1) : 1;
-  return { projects: base.projects, sandboxSeconds: base.sandboxSeconds * n, modelMicros: base.modelMicros * n };
+  return { ...base, sandboxSeconds: base.sandboxSeconds * n, modelMicros: base.modelMicros * n };
 }
 
 /** Stripe price lookup keys. The setup script creates prices with these keys. */
