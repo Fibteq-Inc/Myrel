@@ -1,6 +1,6 @@
-# Self-hosting Fibteq Altair on Cloudflare
+# Self-hosting Fibteq Myrel on Cloudflare
 
-Altair runs as a single Cloudflare Worker named `altair`. The same Worker serves
+Myrel runs as a single Cloudflare Worker named `altair`. The same Worker serves
 the web app, the HTTP API and three Durable Object classes, and keeps accounts and
 projects in a D1 database. This guide sets up your own copy and keeps it
 deploying from Git with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
@@ -20,7 +20,7 @@ deploying from Git with [Workers Builds](https://developers.cloudflare.com/worke
 
 ## What you need
 
-- A Cloudflare account. The Workers Free plan is enough to try Altair; heavier
+- A Cloudflare account. The Workers Free plan is enough to try Myrel; heavier
   use (long agent turns, many projects) fits the Workers Paid plan better.
 - A GitHub or GitLab account for Workers Builds.
 - An API key for at least one model provider: Fireworks, Anthropic or OpenAI.
@@ -75,7 +75,7 @@ pnpm --filter @altair/api exec wrangler r2 bucket create altair-files
 
 ## 3. Set the required secret
 
-Altair needs one secret before it can start: `BETTER_AUTH_SECRET`, which signs
+Myrel needs one secret before it can start: `BETTER_AUTH_SECRET`, which signs
 sessions. Setting it also creates the `altair` Worker if it does not exist yet.
 
 ```sh
@@ -142,7 +142,7 @@ To create your own account:
 
 1. Set `SIGNUP_ENABLED` to `"true"` in `apps/api/wrangler.jsonc` and push (or
    set it as a plain-text variable in the dashboard).
-2. Open your Altair URL and create your account.
+2. Open your Myrel URL and create your account.
 3. Set `SIGNUP_ENABLED` back to `"false"` and push, unless you want open sign-ups.
 
 ## Configuration reference
@@ -161,7 +161,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | Secret | Needed for | Required |
 |---|---|---|
 | `BETTER_AUTH_SECRET` | Signing sessions and tokens | Always |
-| `KEY_ENCRYPTION_SECRET` | Encrypting model API keys people save in Altair. Falls back to `BETTER_AUTH_SECRET`; set it once and never change it, or saved keys can no longer be read | Recommended |
+| `KEY_ENCRYPTION_SECRET` | Encrypting model API keys people save in Myrel. Falls back to `BETTER_AUTH_SECRET`; set it once and never change it, or saved keys can no longer be read | Recommended |
 | `FIREWORKS_API_KEY` | Agents, when `LLM_PROVIDER` is `fireworks` | For that provider |
 | `ANTHROPIC_API_KEY` | Agents, when `LLM_PROVIDER` is `anthropic` | For that provider |
 | `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
@@ -177,7 +177,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 |---|---|---|
 | `BETTER_AUTH_URL` | empty | Public origin, for example `https://altair.example.com`. Inferred from the request when empty. The cloud thread agent calls back on it, so set it when the server sits behind a proxy that changes the host. |
 | `TRUSTED_ORIGINS` | empty | Extra comma-separated origins allowed to call the API cross-origin. The desktop app origins are always allowed. |
-| `INSTANCE_NAME` | `Altair` | Name shown to apps that connect to this server. |
+| `INSTANCE_NAME` | `Myrel` | Name shown to apps that connect to this server. |
 | `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. |
 | `LLM_PROVIDER` | `fireworks` | `fireworks`, `anthropic` or `openai`. |
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
@@ -187,7 +187,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
-| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Altair <altair@example.com>`. Empty turns email off. |
+| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <altair@example.com>`. Empty turns email off. |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | Fibteq's GitHub App | Your GitHub App's id and URL name. GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
@@ -202,7 +202,7 @@ supply the D1 id.
 | `DB` | D1 database | Accounts, sessions, projects, membership |
 | `PROJECT_AGENT` | Durable Object (`ProjectAgent`) | One per project: coordinator, project chat, live WebSocket |
 | `THREAD_AGENT` | Durable Object (`ThreadAgent`) | One per thread: the thread agent and its state |
-| `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the altair-runner connection and its tasks |
+| `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the myrel-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
 | `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for its cloud agent (see [Code sandbox](#code-sandbox)) |
@@ -217,9 +217,9 @@ and describe the setup in a section below.
 
 ### GitHub App
 
-Each Altair server needs its own GitHub App for connecting repositories and
+Each Myrel server needs its own GitHub App for connecting repositories and
 for threads to open pull requests. Run `node scripts/create-github-app.mjs`
-with `--origin` set to your Altair URL, or follow the manual steps in
+with `--origin` set to your Myrel URL, or follow the manual steps in
 [`apps/api/src/github/README.md`](../apps/api/src/github/README.md). Put the
 app id and slug in `vars` and the four secrets above on the Worker.
 
@@ -278,12 +278,12 @@ on `:8788`; copy `apps/artifacts/.dev.vars.example` too.
 
 ### Code sandbox
 
-A thread's agent is a coding agent, not a loop of Altair's own. In a project
-with a local folder (see `altair-runner`), it is the person's own CLI on their
+A thread's agent is a coding agent, not a loop of Myrel's own. In a project
+with a local folder (see `myrel-runner`), it is the person's own CLI on their
 computer. Otherwise it is OpenCode in the thread's own Linux container: each
 turn of the thread is one OpenCode run there, which clones repositories, edits
 code, runs commands and tests, and opens pull requests, and talks to people
-through Altair's tools over MCP (`/api/agent-mcp/<thread>`, with a token valid
+through Myrel's tools over MCP (`/api/agent-mcp/<thread>`, with a token valid
 for that turn only). Its terminal output streams into the thread. The
 coordinator in the project chat stays a small loop in the Worker and never uses
 a container.
@@ -303,7 +303,7 @@ a container.
 - Containers sleep after 10 idle minutes; a thread's next turn wakes its own.
 - Each project chooses where its threads work under **Settings → Tasks**:
   automatic (on the computer with the project's local folder while
-  `altair-runner` is online there, otherwise in this sandbox), always on that
+  `myrel-runner` is online there, otherwise in this sandbox), always on that
   computer, or always in the cloud.
 
 To run without a sandbox, remove the `SANDBOX` binding and the `containers`
@@ -329,7 +329,7 @@ tasks then keep only what they push to GitHub.
 
 Routines are scheduled wake-ups: a prompt that runs on a cron schedule (in a
 time zone) or once at a set time. People create them from the alarm clock button in
-the project chat's header, or by asking Altair ("every weekday at 9, summarize open
+the project chat's header, or by asking Myrel ("every weekday at 9, summarize open
 threads"). Each run either posts in the project chat, where the coordinator
 opens a thread for it, or wakes an existing thread. They run on Durable Object
 alarms, so they need no setup. Set `DEFAULT_TIMEZONE` to your team's zone.
@@ -367,7 +367,7 @@ the API must allow its origin through `TRUSTED_ORIGINS`.
 ### Desktop and mobile apps
 
 The apps are not tied to one server. On the sign-in screen the user enters any
-Altair address; the app checks `GET /api/info` (it must be an Altair server
+Myrel address; the app checks `GET /api/info` (it must be a Myrel server
 with the same API version) and keeps a separate sign-in per server. Set
 `INSTANCE_NAME` so people can tell your server apart.
 
@@ -384,7 +384,7 @@ git push
 
 Workers Builds deploys the new version and applies new migrations. Keep your
 own `database_id` when resolving the conflict in `wrangler.jsonc`. Read the
-release notes before updating while Altair is pre-1.0: migrations only move
+release notes before updating while Myrel is pre-1.0: migrations only move
 forward, so back up D1 first (**D1 → altair → Time Travel** can restore to a
 point in time).
 

@@ -68,7 +68,7 @@ export const githubRoutes = new Hono<AppEnv>()
   .get("/callback", async (c) => {
     const state = await verifyState(c.env.BETTER_AUTH_SECRET, c.req.query("state") ?? "");
     // The state must belong to whoever is signed in here, so nobody can attach
-    // their GitHub to someone else's Altair account (or the other way round).
+    // their GitHub to someone else's Myrel account (or the other way round).
     if (!state || state.userId !== c.get("user").id) return c.redirect("/?github=invalid_state");
     const back = (result: string) => c.redirect(`${state.returnTo}${state.returnTo.includes("?") ? "&" : "?"}github=${result}`);
 

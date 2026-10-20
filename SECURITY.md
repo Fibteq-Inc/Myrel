@@ -23,7 +23,7 @@ issue publicly. We aim to fix critical issues within 30 days.
 
 ## Supported versions
 
-Altair is pre-1.0. Only the latest commit on `main` and the latest release get
+Myrel is pre-1.0. Only the latest commit on `main` and the latest release get
 security fixes.
 
 ## Scope

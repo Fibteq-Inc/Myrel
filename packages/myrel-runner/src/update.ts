@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-export const PACKAGE_NAME = "@fibteq/altair-runner";
+export const PACKAGE_NAME = "@fibteq/myrel-runner";
 
 /** The version npm installs as latest, or null when npm cannot be reached. */
 export async function latestVersion(registry = "https://registry.npmjs.org"): Promise<string | null> {
@@ -27,13 +27,13 @@ export function isNewer(a: string, b: string): boolean {
 }
 
 /**
- * Runs `altair-runner <args>` from the given npm version, so the newest code
+ * Runs `myrel-runner <args>` from the given npm version, so the newest code
  * does the rest of the update. Resolves with its exit code.
  */
 export function runVersion(version: string, args: string[]): Promise<number> {
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
   return new Promise((resolve, reject) => {
-    const child = spawn(npx, ["--yes", `--package=${PACKAGE_NAME}@${version}`, "--", "altair-runner", ...args], {
+    const child = spawn(npx, ["--yes", `--package=${PACKAGE_NAME}@${version}`, "--", "myrel-runner", ...args], {
       stdio: "inherit",
       shell: process.platform === "win32",
       // Tells the new version not to look for a newer one again.

@@ -10,7 +10,7 @@ import type { RunnerFolder } from "@altair/protocol";
 export type Access = "read" | "edit" | "full";
 
 export type RunnerConfig = {
-  /** Origin of the Altair server, e.g. https://altair.example.com */
+  /** Origin of the Myrel server, e.g. https://altair.example.com */
   server?: string;
   runnerId?: string;
   /** The runner's secret. Only ever sent to `server`. */

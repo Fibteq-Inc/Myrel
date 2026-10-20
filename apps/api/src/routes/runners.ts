@@ -24,11 +24,11 @@ import {
 const { runners, runnerPairings } = schema;
 
 /**
- * Endpoints the altair-runner daemon calls. They authenticate with a pairing
+ * Endpoints the myrel-runner daemon calls. They authenticate with a pairing
  * code or the runner's own token, never with a user session.
  */
 export const runnerDeviceRoutes = new Hono<AppEnv>()
-  // `altair-runner pair` trades a code from the web app for a runner token.
+  // `myrel-runner pair` trades a code from the web app for a runner token.
   .post("/pair", async (c) => {
     const input = PairRunnerInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
@@ -38,7 +38,7 @@ export const runnerDeviceRoutes = new Hono<AppEnv>()
     // Single use: deleting and reading in one statement means two racing pairs cannot both win.
     const [pairing] = await db.delete(runnerPairings).where(eq(runnerPairings.codeHash, codeHash)).returning();
     if (!pairing || pairing.expiresAt.getTime() < Date.now()) {
-      return c.json({ error: "invalid_code", message: "This code is wrong or has expired. Create a new one in Altair." }, 400);
+      return c.json({ error: "invalid_code", message: "This code is wrong or has expired. Create a new one in Myrel." }, 400);
     }
 
     const id = createId("runner");
@@ -96,7 +96,7 @@ export const runnerRoutes = new Hono<AppEnv>()
       .orderBy(desc(runners.createdAt));
     return c.json({ runners: await Promise.all(rows.map((r) => toRunner(c.env, r))) });
   })
-  // A code for `altair-runner pair`. Codes are stored hashed and expire after a few minutes.
+  // A code for `myrel-runner pair`. Codes are stored hashed and expire after a few minutes.
   .post("/pairing", async (c) => {
     const db = createDb(c.env.DB);
     await db.delete(runnerPairings).where(lt(runnerPairings.expiresAt, new Date()));
@@ -118,7 +118,7 @@ export const runnerRoutes = new Hono<AppEnv>()
     if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
     return c.json(result.listing);
   })
-  // Shares a folder on the computer, as `altair-runner share` would.
+  // Shares a folder on the computer, as `myrel-runner share` would.
   .post("/:id/folders", async (c) => {
     const id = c.req.param("id");
     const input = RunnerFolderInput.safeParse(await c.req.json().catch(() => null));

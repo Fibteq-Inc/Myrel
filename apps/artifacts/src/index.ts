@@ -1,7 +1,7 @@
 import { artifactObjectKey } from "@altair/protocol";
 import { verifyArtifact } from "@altair/protocol/artifact-signature";
 
-/** Origins the Altair desktop app serves its UI from (see apps/api/src/origins.ts). */
+/** Origins the Myrel desktop app serves its UI from (see apps/api/src/origins.ts). */
 const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
 
 /** CDNs an artifact may load scripts, styles and data from. Everything else is inline. */
@@ -15,7 +15,7 @@ export default {
       return text("Method not allowed", 405, { allow: "GET, HEAD" });
     }
     const url = new URL(request.url);
-    if (url.pathname === "/") return text("Altair artifacts", 200);
+    if (url.pathname === "/") return text("Myrel artifacts", 200);
 
     const match = PATH.exec(url.pathname);
     if (!match) return text("Not found", 404);
@@ -25,7 +25,7 @@ export default {
     const exp = Number(url.searchParams.get("exp"));
     const sig = url.searchParams.get("sig") ?? "";
     if (!env.ARTIFACT_SIGNING_SECRET || !(await verifyArtifact(env.ARTIFACT_SIGNING_SECRET, artifactId, version, exp, sig))) {
-      return text("This link has expired. Open the artifact again from Altair.", 403);
+      return text("This link has expired. Open the artifact again from Myrel.", 403);
     }
 
     const object = await env.ARTIFACTS.get(artifactObjectKey(artifactId, version));

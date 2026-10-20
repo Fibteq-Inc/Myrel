@@ -5,7 +5,7 @@ export type TaskSink = (events: RunnerEvent[]) => Promise<void>;
 
 /**
  * Somewhere tasks run: the cloud sandbox (a container per thread) or a
- * person's own machine through `altair-runner`. The thread agent picks a
+ * person's own machine through `myrel-runner`. The thread agent picks a
  * backend, starts the task, and receives its events through the sink until
  * `done`. `start` returns once the task is running, not when it finishes.
  */

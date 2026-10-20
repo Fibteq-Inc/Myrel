@@ -12,5 +12,5 @@ ignoredBuiltDependencies:
 
 peerDependencyRules:
   allowedVersions:
-    # Only needed by the agents SDK's optional Vite decorator plugin, which Altair doesn't use.
+    # Only needed by the agents SDK's optional Vite decorator plugin, which Myrel doesn't use.
     "@babel/core": "7"

@@ -4,7 +4,7 @@ import type { HarnessId, RunnerEvent, TaskSpec } from "./spec";
 /**
  * A coding CLI the runner can start. Pure description: it says how to invoke
  * the CLI and how to read its output, so the cloud sandbox and the local
- * `altair-runner` run the same harnesses the same way.
+ * `myrel-runner` run the same harnesses the same way.
  *
  * The command runs under bash in the task's working directory with these
  * variables set: ALTAIR_PROMPT (the task prompt), plus whatever `env` returns

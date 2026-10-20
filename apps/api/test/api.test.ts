@@ -160,7 +160,7 @@ describe("GET /api/info", () => {
     expect(ServerInfo.parse(await res.json())).toMatchObject({
       app: "altair",
       apiVersion: API_VERSION,
-      name: "Altair",
+      name: "Myrel",
       auth: { emailPassword: true, signUp: true },
     });
   });

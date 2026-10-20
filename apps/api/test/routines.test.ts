@@ -209,8 +209,8 @@ describe("routines", () => {
     // Filtered by subject: a late turn from an earlier test's thread can also send mail here.
     const emails = () => sentEmails.filter((e) => e.subject.endsWith("· Reminder"));
     const sent = emails()[0]!;
-    expect(sent.subject).toBe("[Altair] Needs your decision · Reminder");
-    expect(sent.from).toEqual({ name: "Altair", email: "altair@example.com" });
+    expect(sent.subject).toBe("[Myrel] Needs your decision · Reminder");
+    expect(sent.from).toEqual({ name: "Myrel", email: "altair@example.com" });
     expect(sent.html).toContain(`http://altair.test/projects/${thread.projectId}/threads/${thread.id}`);
 
     // The one-off run wakes the thread; afterwards nothing is left to schedule.

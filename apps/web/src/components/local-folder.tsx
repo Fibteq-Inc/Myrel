@@ -245,7 +245,7 @@ function WorkspaceForm({
           <OnlineDot online={false} />
           <span>
             {offlineBefore}
-            <code className="font-mono text-fg">npx altair-runner service install</code>
+            <code className="font-mono text-fg">npx myrel-runner service install</code>
             {offlineAfter}
           </span>
         </p>

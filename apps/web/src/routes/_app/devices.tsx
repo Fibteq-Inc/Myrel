@@ -129,7 +129,7 @@ function RunnerRow({ runner, onRemoved }: { runner: Runner; onRemoved: () => voi
           <span className="flex items-center gap-1.5 text-xs text-subtle">
             <OnlineDot online={runner.online} />
             {lastSeen(runner, t)}
-            {runner.version && <span className="hidden sm:inline">· altair-runner {runner.version}</span>}
+            {runner.version && <span className="hidden sm:inline">· myrel-runner {runner.version}</span>}
           </span>
         </span>
         {confirming ? (

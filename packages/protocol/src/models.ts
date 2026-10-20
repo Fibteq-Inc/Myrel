@@ -32,7 +32,7 @@ export const ArtifactRef = z.object({
 });
 export type ArtifactRef = z.infer<typeof ArtifactRef>;
 
-/** Where a reply's work ran: Altair's cloud (the Worker or a sandbox) or the person's computer (altair-runner). */
+/** Where a reply's work ran: Myrel's cloud (the Worker or a sandbox) or the person's computer (myrel-runner). */
 export const Runtime = z.enum(["cloud", "local"]);
 export type Runtime = z.infer<typeof Runtime>;
 
@@ -44,7 +44,7 @@ export const TaskStats = z.object({
   /** The harness or the person's CLI, e.g. "opencode", "claude". */
   harness: z.string(),
   runtime: Runtime,
-  /** The task's model, when Altair chose it; a person's own CLI picks its own. */
+  /** The task's model, when Myrel chose it; a person's own CLI picks its own. */
   model: z.string().nullable(),
   durationMs: Count,
   inputTokens: Count,

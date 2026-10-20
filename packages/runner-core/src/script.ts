@@ -176,14 +176,14 @@ export function taskEnv(
     ALTAIR_HARNESS_COMMAND: harness.command(spec),
     ALTAIR_HARNESS_LABEL: harness.label,
     ALTAIR_WORKDIR: opts.workdir ?? "/workspace",
-    ALTAIR_GIT_NAME: opts.gitName ?? "Altair",
+    ALTAIR_GIT_NAME: opts.gitName ?? "Myrel",
     ALTAIR_GIT_EMAIL: opts.gitEmail ?? "altair@users.noreply.github.com",
     ALTAIR_REPO_URL: spec.repo?.url ?? "",
     ALTAIR_BASE_BRANCH: spec.repo?.baseBranch ?? "",
     ALTAIR_WORKSPACE_REMOTE: spec.workspace?.remote ?? "",
     ALTAIR_BRANCH: workingBranch(spec),
     ALTAIR_OPEN_PR: spec.openPr ? "1" : "0",
-    ALTAIR_PR_BODY: `${spec.prompt.slice(0, 4000)}\n\n---\n_Opened by Altair._`,
+    ALTAIR_PR_BODY: `${spec.prompt.slice(0, 4000)}\n\n---\n_Opened by Myrel._`,
   };
 }
 

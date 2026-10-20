@@ -50,7 +50,7 @@ export async function checkPairing(config: Pick<RunnerConfig, "server" | "token"
 }
 
 const UNPAIRED =
-  "This computer is not paired with Altair any more (it was removed, or paired again elsewhere). Get a new code in Altair > Devices and run `altair-runner pair <code> --server <url>`.";
+  "This computer is not paired with Myrel any more (it was removed, or paired again elsewhere). Get a new code in Myrel > Devices and run `myrel-runner pair <code> --server <url>`.";
 
 export type RunnerHandle = { stop(): void; done: Promise<void> };
 
@@ -78,7 +78,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const log = opts.log ?? ((line: string) => console.log(line));
   const status = opts.onStatus ?? (() => {});
   let config = await loadConfig();
-  if (!config.server || !config.token) throw new Error("This computer is not paired yet. Run `altair-runner pair <code> --server <url>` first.");
+  if (!config.server || !config.token) throw new Error("This computer is not paired yet. Run `myrel-runner pair <code> --server <url>` first.");
 
   const clis = await detectClis();
   const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log });
@@ -110,7 +110,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     });
   tasks.setSender(send);
 
-  // `altair-runner share` in another terminal shows up in the web app without a restart.
+  // `myrel-runner share` in another terminal shows up in the web app without a restart.
   const onConfigChange = async () => {
     config = await loadConfig().catch(() => config);
     hello();
@@ -144,9 +144,9 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     config = await loadConfig();
     if (frame.type === "folder.share") {
       const path = await shareableFolder(frame.path);
-      if (shareFolder(config, path)) log(`Shared ${path} (from Altair)`);
+      if (shareFolder(config, path)) log(`Shared ${path} (from Myrel)`);
     } else if (unshareFolder(config, frame.path)) {
-      log(`Stopped sharing ${frame.path} (from Altair)`);
+      log(`Stopped sharing ${frame.path} (from Myrel)`);
     }
     await saveConfig(config);
     send({ type: "folders", requestId, folders: config.folders });
@@ -197,13 +197,13 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         return stop();
       }
       if (e.code === 4401) {
-        log("This computer was removed from Altair. Pair it again with `altair-runner pair`.");
+        log("This computer was removed from Myrel. Pair it again with `myrel-runner pair`.");
         opts.onRevoked?.();
         stopReason = "revoked";
         return stop();
       }
       if (e.code === 4000) {
-        log("altair-runner was started somewhere else with this computer's login, so this one stops.");
+        log("myrel-runner was started somewhere else with this computer's login, so this one stops.");
         stopReason = "replaced";
         return stop();
       }

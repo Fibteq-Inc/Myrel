@@ -11,7 +11,7 @@ export const API_VERSION = 1;
 export const ServerInfo = z.object({
   app: z.literal("altair"),
   apiVersion: z.number().int().positive(),
-  /** Display name of this deployment, e.g. "Altair Cloud" or a company's self-hosted instance. */
+  /** Display name of this deployment, e.g. "Myrel Cloud" or a company's self-hosted instance. */
   name: z.string(),
   auth: z.object({
     emailPassword: z.boolean(),

@@ -24,7 +24,7 @@ async function signUp() {
 }
 
 async function createProject(token: string): Promise<Project> {
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
+  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Myrel" }) });
   return ((await res.json()) as { project: Project }).project;
 }
 
@@ -42,7 +42,7 @@ async function pair(user: string) {
   return { code, ...((await res.json()) as { runner: { id: string }; token: string }) };
 }
 
-/** Plays the altair-runner side of the WebSocket. */
+/** Plays the myrel-runner side of the WebSocket. */
 async function connectRunner(token: string, features: string[] = []) {
   const res = await api("/api/runner/connect", { token, headers: { upgrade: "websocket" } });
   expect(res.status).toBe(101);
@@ -178,7 +178,7 @@ describe("local workspace", () => {
     // A runner from before this feature is asked to update instead of being sent frames it does not know.
     const old = await connectRunner(token);
     await until(async () => (await listRunners(user)).find((r) => r.online && r.folders.length), "hello");
-    expect(await failure(await dirs())).toMatchObject({ status: 409, message: expect.stringContaining("Update altair-runner") });
+    expect(await failure(await dirs())).toMatchObject({ status: 409, message: expect.stringContaining("Update myrel-runner") });
     old.ws.close();
 
     const { ws, frames, send } = await connectRunner(token, ["folders", "from-the-future"]);
@@ -237,7 +237,7 @@ describe("local workspace", () => {
     ws.close();
   });
 
-  it("lets the person's Claude Code be the thread's agent, talking through Altair's tools over MCP", { timeout: 20_000 }, async () => {
+  it("lets the person's Claude Code be the thread's agent, talking through Myrel's tools over MCP", { timeout: 20_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
     const runnerSide = await connectRunner(token, ["cancel", "agent"]);
@@ -300,8 +300,8 @@ describe("local workspace", () => {
     // It replied itself, so its final message is not posted again.
     expect((await bodies()).filter((b) => b === "Summary posted.")).toHaveLength(0);
 
-    runnerSide.send({ type: "task.done", taskId: next.taskId, ok: true, result: "Kısa özet: Altair bir proje asistanı." });
-    await until(async () => (await bodies()).includes("Kısa özet: Altair bir proje asistanı."), "final message as reply");
+    runnerSide.send({ type: "task.done", taskId: next.taskId, ok: true, result: "Kısa özet: Myrel bir proje asistanı." });
+    await until(async () => (await bodies()).includes("Kısa özet: Myrel bir proje asistanı."), "final message as reply");
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
     runnerSide.ws.close();
   });
@@ -322,7 +322,7 @@ describe("local workspace", () => {
       async () => (await projectAgent.getThreadContext(thread.id))?.messages.find((m) => m.authorKind === "system"),
       "the notice",
     );
-    expect(notice.body).toContain("npx altair-runner@latest update");
+    expect(notice.body).toContain("npx myrel-runner@latest update");
     expect((await projectAgent.getThread(thread.id))?.status).toBe("blocked");
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
     runnerSide.ws.close();
@@ -351,7 +351,7 @@ describe("local workspace", () => {
     const cancel = await api(`/api/projects/${project.id}/threads/${thread.id}/tasks/${start.taskId}/cancel`, { method: "POST", token: user, body: "{}" });
     expect(cancel.status).toBe(200);
     await until(() => runnerSide.frames.some((f) => f.type === "task.cancel" && f.taskId === start.taskId), "task.cancel");
-    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
     await until(async () => (await threadAgent.getTasks())[0]?.status === "cancelled", "cancelled");
     expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "local", harness: "claude", title: "Claude Code" });
     await until(async () => (await bodies()).some((b) => b.startsWith('The task "Claude Code" was cancelled.')), "the report");
@@ -397,7 +397,7 @@ describe("local workspace", () => {
     const runnerAgent = await getAgentByName(env.RUNNER_AGENT, runner.id);
     const taskId = "task_01JTEST0000000000000000009";
     await runnerAgent.startTask({ taskId, projectId: "proj_x", threadId: "thr_01JTEST0000000000000000000", folder: "/x", cli: "claude", prompt: "p" });
-    expect(await runnerAgent.cancelTask(taskId)).toMatchObject({ ok: false, reason: expect.stringContaining("Update altair-runner") });
+    expect(await runnerAgent.cancelTask(taskId)).toMatchObject({ ok: false, reason: expect.stringContaining("Update myrel-runner") });
     runnerSide.ws.close();
   });
 });

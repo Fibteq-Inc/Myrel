@@ -37,7 +37,7 @@
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
       { "name": "THREAD_AGENT", "class_name": "ThreadAgent" },
-      // One per paired computer running altair-runner.
+      // One per paired computer running myrel-runner.
       { "name": "RUNNER_AGENT", "class_name": "RunnerAgent" },
       // One Linux container per thread for run_task (src/sandbox). Needs Cloudflare Containers
       // (Workers Paid plan). Remove this binding and the "containers" block to run without it:
@@ -80,7 +80,7 @@
   // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
-  // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Altair".
+  // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Myrel".
   // SIGNUP_ENABLED: "true" lets anyone create an account; otherwise only existing accounts and invited
   // people can. Admins can change it at runtime in Settings, which then takes precedence.
   //
@@ -123,7 +123,7 @@
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
-    "INSTANCE_NAME": "Altair",
+    "INSTANCE_NAME": "Myrel",
     "SIGNUP_ENABLED": "false",
     "LLM_PROVIDER": "fireworks",
     "LLM_MODEL": "",
@@ -138,7 +138,7 @@
     "RUNNER_MODEL": "",
     "RUNNER_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
-    "EMAIL_FROM": "Altair <altair@fibteq.app>",
+    "EMAIL_FROM": "Myrel <altair@fibteq.app>",
     "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
     "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
   }

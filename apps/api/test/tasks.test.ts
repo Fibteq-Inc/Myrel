@@ -33,7 +33,7 @@ async function threadSetup() {
     body: JSON.stringify({ email, password: "correct-horse-battery", name: "İsmail" }),
   });
   const token = signUp.headers.get("set-auth-token")!;
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
+  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Myrel" }) });
   const { project } = (await res.json()) as { project: Project };
   const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, {
     headers: { upgrade: "websocket" },
@@ -65,7 +65,7 @@ describe("the cloud agent", () => {
     expect(task!.summary).toContain("container is not configured");
     expect(task!.log.map((l) => l.text)).toContain("Starting OpenCode in the sandbox…");
 
-    // What the sandbox was handed: Altair's instructions and the thread, the model, and where to call back.
+    // What the sandbox was handed: Myrel's instructions and the thread, the model, and where to call back.
     const spec = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) =>
       JSON.parse(state.storage.sql.exec<{ spec: string }>("SELECT spec FROM tasks").one().spec),
     );

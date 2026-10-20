@@ -248,7 +248,7 @@ function MemoryCard({ entry, onEdit }: { entry: MemoryEntry; onEdit: () => void 
       <span className="flex items-center gap-2">
         <span className="font-mono text-[13px] font-medium">{entry.name}</span>
         <span className="ml-auto text-xs text-subtle">
-          {entry.updatedByKind === "agent" ? "Altair" : t("common.member")} · {new Date(entry.updatedAt).toLocaleDateString(locale)}
+          {entry.updatedByKind === "agent" ? "Myrel" : t("common.member")} · {new Date(entry.updatedAt).toLocaleDateString(locale)}
         </span>
       </span>
       {entry.description && <span className="text-[13px] text-muted">{entry.description}</span>}

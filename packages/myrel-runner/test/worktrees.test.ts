@@ -99,7 +99,7 @@ describe.skipIf(process.platform === "win32")("thread worktrees", () => {
     const result = await run(config);
     const [w] = await listWorktrees();
     expect(result).toContain(`in ${w!.path} on altair/thr-000000aaaa`);
-    expect(result).toContain(`(altair-runner: worked on branch altair/thr-000000aaaa in ${w!.path}, a git worktree of ${repo}.)`);
+    expect(result).toContain(`(myrel-runner: worked on branch altair/thr-000000aaaa in ${w!.path}, a git worktree of ${repo}.)`);
     // Turned off, or read-only: the shared folder itself.
     expect(await run({ ...config, worktrees: false })).toBe(`in ${repo} on main`);
     expect(await run({ ...config, access: "read" })).toBe(`in ${repo} on main`);
