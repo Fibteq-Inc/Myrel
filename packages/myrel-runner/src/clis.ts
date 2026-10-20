@@ -59,6 +59,8 @@ export type AgentMcp = {
   token: string;
   dir: string;
   connectors?: AgentServer[];
+  /** The run's skills: a Claude Code plugin folder, and the folder of skill folders inside it. */
+  skills?: { plugin: string; dir: string };
   /**
    * Claude Code asks Myrel (the approve_access tool) instead of failing when a step needs
    * permission, so a step outside the project's folders waits for the person's answer.
@@ -80,6 +82,11 @@ export type AgentServer =
 /** Env var that carries the MCP token for CLIs that read it from the environment. */
 const TOKEN_VAR = "MYREL_MCP_TOKEN";
 
+/** Windows runs the CLI through a shell, which would split a path with spaces. */
+function quotePath(path: string): string {
+  return process.platform === "win32" ? `"${path}"` : path;
+}
+
 /** Writes a config file only this user can read: it holds the run's token. */
 async function privateFile(dir: string, name: string, content: unknown): Promise<string> {
   const path = join(dir, name);
@@ -100,12 +107,12 @@ const claude: CliAdapter = {
     // Bypassing permissions would skip the question about folders outside the project, so full
     // access with Myrel asking pre-allows the rest instead (see agent()).
     { read: "plan", edit: "acceptEdits", full: asks ? "acceptEdits" : "bypassPermissions" }[access],
-    ...dirs.flatMap((d) => ["--add-dir", d]),
+    ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...(asks ? ["--permission-prompt-tool", APPROVE_TOOL] : []),
     ...(resume ? ["--resume", resume] : []),
     ...extra,
   ],
-  async agent({ url, token, dir, connectors = [], asks, access }) {
+  async agent({ url, token, dir, connectors = [], skills, asks, access }) {
     const headers = { Authorization: `Bearer ${token}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers } };
     for (const c of connectors) {
@@ -116,8 +123,10 @@ const claude: CliAdapter = {
     const allowed = [MYREL_MCP_SERVER, ...connectors.map((c) => c.name)].map((name) => `mcp__${name}`);
     // Full access: commands and the web need no question; only files outside the folders do.
     if (asks && access === "full") allowed.push("Bash", "WebFetch", "WebSearch");
+    // The skills come as a plugin (myrel:<name>); their folder may be read without asking.
+    const skillArgs = skills ? ["--plugin-dir", quotePath(skills.plugin), "--add-dir", quotePath(skills.dir)] : [];
     return {
-      args: ["--mcp-config", config, "--allowedTools", allowed.join(",")],
+      args: ["--mcp-config", config, "--allowedTools", allowed.join(","), ...skillArgs],
       ...(asks && { env: { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) } }),
     };
   },
@@ -164,7 +173,7 @@ const codex: CliAdapter = {
     "--skip-git-repo-check",
     "--sandbox",
     { read: "read-only", edit: "workspace-write", full: "danger-full-access" }[access],
-    ...dirs.flatMap((d) => ["--add-dir", d]),
+    ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...extra,
     "-",
   ],
@@ -219,11 +228,11 @@ const gemini: CliAdapter = {
     "json",
     "--approval-mode",
     { read: "default", edit: "auto_edit", full: "yolo" }[access],
-    ...(dirs.length ? ["--include-directories", dirs.join(",")] : []),
+    ...(dirs.length ? ["--include-directories", dirs.map(quotePath).join(",")] : []),
     ...extra,
   ],
   // Gemini CLI has no flag for an MCP config, so the run gets its own system settings file.
-  async agent({ url, token, dir, connectors = [] }) {
+  async agent({ url, token, dir, connectors = [], skills }) {
     const headers = { Authorization: `Bearer ${token}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { httpUrl: url, headers, trust: true } };
     for (const c of connectors) {
@@ -231,7 +240,11 @@ const gemini: CliAdapter = {
         c.transport === "http" ? { httpUrl: c.url, headers, trust: true } : { command: c.command, args: c.args, env: c.env, trust: true };
     }
     const settings = await privateFile(dir, "settings.json", { mcpServers: servers });
-    return { args: [], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") } };
+    // Its workspace takes in the skills' folder, so it may read them.
+    return {
+      args: skills ? ["--include-directories", quotePath(skills.dir)] : [],
+      env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") },
+    };
   },
   line() {},
   end(stdout, state) {

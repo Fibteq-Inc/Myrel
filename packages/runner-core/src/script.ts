@@ -12,7 +12,7 @@ import type { TaskSpec } from "./spec";
  * person or the model wrote is ever spliced into the script itself.
  * Secrets: GITHUB_TOKEN (clone and push; also read by `gh` as GH_TOKEN),
  * MYREL_WORKSPACE_TOKEN (the workspace remote), MYREL_MODEL_API_KEY and MYREL_FILES (download links of
- * the thread's attachments). Needs git, jq and, to open pull requests, gh.
+ * the thread's attachments). Needs git, jq, curl and, to open pull requests, gh.
  */
 export function taskScript(): string {
   return `set -uo pipefail
@@ -117,6 +117,40 @@ if [ -n "\${MYREL_FILES:-}" ]; then
   done < <(printf '%s' "$MYREL_FILES" | jq -r '.[] | [.path, .url] | @tsv')
 fi
 
+# Skills people added in Myrel ({skills:[{name,files:[{path,content}]}]} at MYREL_SKILLS_URL, base64
+# contents), next to the saved folder, and copied to where OpenCode and Claude Code look for their
+# own. Last turn's are removed first, so a skill turned off is gone.
+SKILLS_DIR="$MYREL_WORKDIR/skills"
+rm -rf "$SKILLS_DIR"
+if [ -n "\${MYREL_SKILLS_URL:-}" ]; then
+  mkdir -p "$SKILLS_DIR"
+  if curl -fsSL --retry 2 -H "Authorization: Bearer \${MYREL_MCP_TOKEN:-}" -o "$SKILLS_DIR/.bundle.json" "$MYREL_SKILLS_URL"; then
+    while IFS=$'\t' read -r SKILL_FILE SKILL_CONTENT; do
+      case "/$SKILL_FILE/" in */../*|*/./*|//) continue ;; esac
+      mkdir -p "$SKILLS_DIR/$(dirname "$SKILL_FILE")" && printf '%s' "$SKILL_CONTENT" | base64 -d > "$SKILLS_DIR/$SKILL_FILE"
+    done < <(jq -r '.skills[] | .name as $n | .files[] | [($n + "/" + .path), .content] | @tsv' "$SKILLS_DIR/.bundle.json")
+    # Scripts keep working however their files were made.
+    find "$SKILLS_DIR" -type f \\( -name '*.sh' -o -name '*.py' -o -path '*/scripts/*' \\) -exec chmod +x {} + 2>/dev/null
+  else
+    note "Could not download this turn's skills."
+  fi
+  rm -f "$SKILLS_DIR/.bundle.json"
+fi
+# Only the skills this script put there (listed in .myrel-skills) are replaced; others are left alone.
+for OWN in "\${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" "$HOME/.claude/skills"; do
+  if [ -f "$OWN/.myrel-skills" ]; then
+    while IFS= read -r SKILL_NAME; do [ -n "$SKILL_NAME" ] && rm -rf "\${OWN:?}/$SKILL_NAME"; done < "$OWN/.myrel-skills"
+    rm -f "$OWN/.myrel-skills"
+  fi
+  [ -d "$SKILLS_DIR" ] || continue
+  mkdir -p "$OWN"
+  for SKILL_PATH in "$SKILLS_DIR"/*/; do
+    [ -d "$SKILL_PATH" ] || continue
+    SKILL_NAME="$(basename "$SKILL_PATH")"
+    rm -rf "\${OWN:?}/$SKILL_NAME" && cp -R "$SKILL_PATH" "$OWN/$SKILL_NAME" && echo "$SKILL_NAME" >> "$OWN/.myrel-skills"
+  done
+done
+
 phase agent started
 # The harness runs in its own process group, recorded in HARNESS_PID_FILE, so the runner can end a
 # turn that is done (its reply sent, its plan finished) when the harness does not exit by itself:
@@ -206,6 +240,7 @@ export function taskEnv(
     MYREL_WORKSPACE_REMOTE: spec.workspace?.remote ?? "",
     MYREL_BRANCH: workingBranch(spec),
     MYREL_OPEN_PR: spec.openPr ? "1" : "0",
+    MYREL_SKILLS_URL: spec.skills?.url ?? "",
     MYREL_PR_BODY: `${spec.prompt.slice(0, 4000)}\n\n---\n_Opened by Myrel._`,
   };
 }

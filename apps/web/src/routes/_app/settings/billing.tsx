@@ -57,7 +57,7 @@ function BillingSettings() {
             )}
           </div>
           {!billing.owner && <p className="mt-2 text-[13px] text-subtle">{t("billing.memberNote")}</p>}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 lg:grid-cols-4">
             <Meter
               label={t("billing.projects")}
               used={billing.usage.projects}
@@ -83,7 +83,7 @@ function BillingSettings() {
               text={(n) => String(n)}
             />
           </div>
-          <p className="mt-3 text-xs text-subtle">{t("billing.meterNote")}</p>
+          {billing.plan !== "admin" && <p className="mt-5 text-xs text-subtle">{t("billing.meterNote")}</p>}
         </div>
         {portal.error && <Notice>{errorMessage(portal.error, t)}</Notice>}
       </Section>
@@ -94,20 +94,24 @@ function BillingSettings() {
   );
 }
 
+/** One allowance: what was used, out of the limit with a bar, or just the amount when unlimited. */
 function Meter({ label, used, limit, text }: { label: string; used: number; limit: number | null; text: (n: number) => string }) {
   const t = useT();
   const share = limit ? Math.min(1, used / limit) : 0;
   return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2 text-[13px]">
-        <span className="text-muted">{label}</span>
-        <span className="font-medium tabular-nums">
-          {limit === null ? t("billing.unlimited", { used: text(used) }) : `${text(used)} / ${text(limit)}`}
-        </span>
+    <div className="min-w-0">
+      <div className="truncate text-[13px] text-subtle">{label}</div>
+      <div className="mt-1 whitespace-nowrap text-lg font-semibold tabular-nums">
+        {text(used)}
+        {limit !== null && <span className="text-[13px] font-normal text-subtle"> / {text(limit)}</span>}
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-hover" aria-hidden="true">
-        <div className={cn("h-full rounded-full", share >= 1 ? "bg-bad" : "bg-accent")} style={{ width: `${share * 100}%` }} />
-      </div>
+      {limit === null ? (
+        <div className="mt-1 text-xs text-subtle">{t("billing.unlimited")}</div>
+      ) : (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-hover" aria-hidden="true">
+          <div className={cn("h-full rounded-full", share >= 1 ? "bg-bad" : "bg-accent")} style={{ width: `${share * 100}%` }} />
+        </div>
+      )}
     </div>
   );
 }

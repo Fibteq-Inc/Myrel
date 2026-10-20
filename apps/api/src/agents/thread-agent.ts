@@ -7,6 +7,7 @@ import {
   createId,
   formatPlan,
   type MessageStats,
+  type SkillBundle,
   type Task,
   type TaskStatus,
   type TerminalLine,
@@ -27,6 +28,7 @@ import { Agent, getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
+import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
@@ -362,7 +364,8 @@ export class ThreadAgent extends Agent<Env> {
       const mcpPath = `/api/agent-mcp/${threadId}`;
       const connectors = await this.turnConnectors(place, input.requester);
       const infos = connectors.map((c) => ({ name: c.name, title: c.title }));
-      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context, infos), timeoutSec: AGENT_TURN_SEC });
+      const skills = await this.turnSkills(place, input.requester);
+      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context, infos, skills), timeoutSec: AGENT_TURN_SEC });
       // The stored spec keeps only the start of the prompt; the runner gets all of it.
       const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
       if (place.kind === "local") {
@@ -374,7 +377,7 @@ export class ThreadAgent extends Agent<Env> {
               : { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env: await readSecrets(this.env, { id: c.id, secret: c.secret }) },
           ),
         );
-        const agent = { mcpPath, token, ...(local.length && { connectors: local }) };
+        const agent = { mcpPath, token, ...(local.length && { connectors: local }), ...(skills.length && { skills: { path: `${mcpPath}/skills` } }) };
         const backend = localBackend(this.env, { projectId, threadId, workspace, agent });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
@@ -390,7 +393,8 @@ export class ThreadAgent extends Agent<Env> {
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
         spec.model = model.model;
-        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context, infos);
+        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context, infos, skills);
+        if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
         // A command's variables travel as secrets, so the stored spec only names them.
         const cloud: McpConnector[] = await Promise.all(
@@ -435,6 +439,7 @@ export class ThreadAgent extends Agent<Env> {
         this.deleteMeta("agent_turn");
         this.deleteMeta("agent_connectors");
         this.clearAccess();
+        this.deleteMeta("agent_skills");
         const message = err instanceof Error ? err.message : String(err);
         await project.sendMessage({
           threadId,
@@ -478,6 +483,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("agent_turn");
     this.deleteMeta("agent_connectors");
     this.clearAccess();
+    this.deleteMeta("agent_skills");
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     let pending = turn?.pending ?? [];
@@ -553,6 +559,33 @@ export class ThreadAgent extends Agent<Env> {
     const remote = connectors.filter((c) => c.transport === "http").map((c) => c.id);
     this.ctx.waitUntil(refreshStaleTools(this.env, remote).catch((err) => console.error("connector tools", err)));
     return connectors;
+  }
+
+  /**
+   * The skills this turn's agent gets (see turnSkills), remembered so the running turn's token
+   * opens their files. None from a runner too old to put them next to its CLI.
+   */
+  private async turnSkills(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnSkill[]> {
+    const { projectId } = this.ids();
+    if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "skills"))) return [];
+    const skills = await turnSkills(this.env, { projectId, userId: requester }).catch((err) => {
+      console.error("skills", err);
+      return [];
+    });
+    this.setMeta("agent_skills", JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name }))));
+    return skills;
+  }
+
+  /**
+   * The files of the running turn's skills (GET /api/agent-mcp/:threadId/skills), for the sandbox
+   * or the runner to put next to the agent. Only the running turn's token opens them. Callable over RPC.
+   */
+  async skillBundle(token: string): Promise<SkillBundle | null> {
+    const hash = this.getMeta("agent_token");
+    if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return null;
+    const given = JSON.parse(this.getMeta("agent_skills") ?? "[]") as { id: string; name: string }[];
+    const skills = await Promise.all(given.map(async (s) => ({ name: s.name, files: await readBundle(this.env, s.id) })));
+    return { skills: skills.filter((s) => s.files.length) };
   }
 
   /**

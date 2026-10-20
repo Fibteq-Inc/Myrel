@@ -483,3 +483,30 @@ export const connectors = sqliteTable(
     uniqueIndex("connectors_project_slug_idx").on(t.projectId, t.slug),
   ],
 );
+
+/**
+ * Skills (Agent Skills: a SKILL.md and its files) the thread's agent may use (see @myrel/protocol
+ * skills.ts). A row belongs to a person (owner_id) or to a project (project_id), never both. The
+ * files live in R2 (FILES bucket) as one bundle at `skills/<id>.json`; `files` lists them.
+ */
+export const skills = sqliteTable(
+  "skills",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    source: text("source", { mode: "json" })
+      .$type<
+        { kind: "write" } | { kind: "upload" } | { kind: "github"; repo: string; path: string; ref?: string; commit: string }
+      >()
+      .notNull(),
+    files: text("files", { mode: "json" }).$type<{ path: string; size: number }[]>().notNull().default([]),
+    size: integer("size").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("skills_owner_name_idx").on(t.ownerId, t.name), uniqueIndex("skills_project_name_idx").on(t.projectId, t.name)],
+);

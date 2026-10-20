@@ -38,11 +38,12 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
  * "agent-clis": the same for Codex CLI and Gemini CLI.
  * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
+ * "skills": the runner downloads the turn's skills (task.start's `agent.skills`) into a folder of the run.
  * "project-folders": the CLI also gets the project's other folders (task.start's `folders`), reports
  * the folders it works in ("task.folders"), and Claude Code asks people through Myrel before touching
  * anything outside them (the thread's approve_access tool).
  */
-export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "project-folders"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders"]);
 
 /**
  * A connector (MCP server) for the CLI running as the thread's agent. A remote one is on this
@@ -162,6 +163,11 @@ export const ServerToRunner = z.discriminatedUnion("type", [
         token: z.string().min(20).max(200),
         /** Connectors besides Myrel's tools (feature "connectors"); older runners ignore them. */
         connectors: z.array(AgentConnector).max(30).optional(),
+        /**
+         * The turn's skills (feature "skills"): a SkillBundle on this runner's server (origin + path,
+         * with the run's token), for the CLI to find in a folder of the run.
+         */
+        skills: z.object({ path: z.string().regex(/^\/api\/[\w/-]+$/).max(300) }).optional(),
       })
       .optional(),
   }),

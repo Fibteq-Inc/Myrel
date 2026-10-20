@@ -80,6 +80,13 @@ export const connectorsQuery = (projectId?: string) =>
     queryFn: () => api.listConnectors(projectId),
   });
 
+/** A person's own skills, or a project's. */
+export const skillsQuery = (projectId?: string) =>
+  queryOptions({
+    queryKey: projectId ? ["projects", projectId, "skills"] : ["skills"],
+    queryFn: () => api.listSkills(projectId),
+  });
+
 /** The signed-in user's notifications. Polled so the bell updates on any page. */
 export const notificationsQuery = queryOptions({
   queryKey: ["notifications"],
