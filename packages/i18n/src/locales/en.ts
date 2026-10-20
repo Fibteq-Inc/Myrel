@@ -63,6 +63,8 @@ export const en = {
   "projects.yours": "Your projects",
   "projects.owner": "Owner",
   "projects.member": "Member",
+  "projects.working": { one: "1 working", other: "{count} working" },
+  "projects.waiting": { one: "1 waiting on you", other: "{count} waiting on you" },
 
   // Project sidebar
   "sidebar.searchThreads": "Search threads",

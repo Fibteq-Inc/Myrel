@@ -179,11 +179,22 @@ export type Reaction = z.infer<typeof Reaction>;
 export const ProjectRole = z.enum(["owner", "admin", "member"]);
 export type ProjectRole = z.infer<typeof ProjectRole>;
 
+/** What is going on in a project right now, for the project list. */
+export const ProjectActivity = z.object({
+  /** Agents working now: the coordinator and threads mid-turn. */
+  working: z.number().int().nonnegative(),
+  /** Open threads waiting on a person: a decision, an approval or a blocker. */
+  waiting: z.number().int().nonnegative(),
+});
+export type ProjectActivity = z.infer<typeof ProjectActivity>;
+
 export const Project = z.object({
   id: ProjectId,
   name: z.string().min(1).max(120),
   role: ProjectRole,
   createdAt: Timestamp,
+  /** Missing from servers older than this field. */
+  activity: ProjectActivity.optional(),
 });
 export type Project = z.infer<typeof Project>;
 

@@ -142,6 +142,10 @@ export class ProjectAgent extends Agent<Env> {
   /** Agents currently working (null = coordinator, otherwise a thread id) and what they are doing. In memory only. */
   private active = new Map<string | null, string | undefined>();
 
+  /** Activity counts last written to D1 for the project list, and the write in flight. */
+  private syncedActivity: string | null = null;
+  private activityWrite: Promise<void> = Promise.resolve();
+
   /** Project instructions, memory and the file index. */
   readonly knowledge: KnowledgeStore;
 
@@ -398,6 +402,7 @@ export class ProjectAgent extends Agent<Env> {
       VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
+    this.syncActivity();
     return thread;
   }
 
@@ -417,6 +422,7 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
       resolved = ${next.resolved ? 1 : 0}, label = ${next.label}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
+    this.syncActivity();
     return next;
   }
 
@@ -473,6 +479,11 @@ export class ProjectAgent extends Agent<Env> {
     await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason });
   }
 
+  override onStart(): void {
+    // Activity lives in memory, so a restart (an eviction or a crash mid-turn) clears whatever was left in D1.
+    this.syncActivity();
+  }
+
   /** Agents report when they start and stop working, and optionally what they are doing. Callable over RPC. */
   setActivity(threadId: string | null, active: boolean, label?: string): void {
     // A stop always goes out: the map lives in memory and is empty again after the object was evicted
@@ -481,6 +492,36 @@ export class ProjectAgent extends Agent<Env> {
     if (active) this.active.set(threadId, label);
     else this.active.delete(threadId);
     this.emit({ type: "agent.activity", threadId, active, label });
+    this.syncActivity();
+  }
+
+  /**
+   * Copies how many agents are working and how many threads wait on a person into the project's D1 row,
+   * so the project list can show it without waking every project. Only writes when the counts change.
+   */
+  private syncActivity(): void {
+    const working = new Set<string>();
+    for (const threadId of this.active.keys()) working.add(threadId ?? "coordinator");
+    let waiting = 0;
+    for (const row of this.sql<{ id: string; status: ThreadStatus }>`
+      SELECT id, status FROM threads WHERE resolved = 0 AND status IN ('working', 'blocked')`) {
+      if (row.status === "working") working.add(row.id);
+      else waiting++;
+    }
+    const counts = { activeCount: working.size, waitingCount: waiting };
+    const key = `${counts.activeCount}/${counts.waitingCount}`;
+    if (key === this.syncedActivity) return;
+    this.syncedActivity = key;
+    // Chained so an older count never lands after a newer one.
+    this.activityWrite = this.activityWrite.then(async () => {
+      try {
+        await createDb(this.env.DB).update(schema.projects).set(counts).where(eq(schema.projects.id, this.name));
+      } catch (err) {
+        console.error("project activity sync failed", err);
+        if (this.syncedActivity === key) this.syncedActivity = null;
+      }
+    });
+    this.ctx.waitUntil(this.activityWrite);
   }
 
   /** The project's local folder changed or its computer connected/disconnected. Callable over RPC. */
