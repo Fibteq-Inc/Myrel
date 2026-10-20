@@ -4,7 +4,7 @@
 //   node scripts/create-github-app.mjs [--origin https://myrel.example.com] [--org my-org] [--port 8765]
 //
 // It serves a page on http://localhost:<port>. You click "Create on GitHub", confirm on GitHub,
-// and GitHub sends you back here; the page then shows the six Worker secrets to add
+// and GitHub sends you back here; the page then shows the five Worker secrets to add
 // (see apps/api/src/github/README.md). No dependencies; Node 18+.
 import { createServer } from "node:http";
 
@@ -76,7 +76,6 @@ document.getElementById("f").addEventListener("submit", async (e) => {
 function secretsPage(app) {
   const secrets = {
     GITHUB_APP_ID: String(app.id),
-    GITHUB_APP_SLUG: app.slug,
     GITHUB_CLIENT_ID: app.client_id,
     GITHUB_CLIENT_SECRET: app.client_secret,
     GITHUB_WEBHOOK_SECRET: app.webhook_secret ?? "",

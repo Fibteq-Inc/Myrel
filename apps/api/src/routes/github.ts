@@ -3,6 +3,7 @@ import type { GithubRepo, GithubStatus } from "@myrel/protocol";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import {
+  appSlug,
   exchangeCode,
   type GithubApiRepo,
   githubConfigured,
@@ -43,7 +44,7 @@ export const githubRoutes = new Hono<AppEnv>()
     const configured = githubConfigured(c.env);
     return c.json({
       configured,
-      installUrl: configured ? `https://github.com/apps/${c.env.GITHUB_APP_SLUG}/installations/new` : null,
+      installUrl: configured ? `https://github.com/apps/${await appSlug(c.env)}/installations/new` : null,
       installations: configured ? await listUserInstallations(c.env.DB, c.get("user").id) : [],
     } satisfies GithubStatus);
   })
@@ -62,7 +63,7 @@ export const githubRoutes = new Hono<AppEnv>()
     const url =
       c.req.query("mode") === "authorize"
         ? `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(c.env.GITHUB_CLIENT_ID!)}&state=${encodeURIComponent(state)}`
-        : `https://github.com/apps/${c.env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(state)}`;
+        : `https://github.com/apps/${await appSlug(c.env)}/installations/new?state=${encodeURIComponent(state)}`;
     return c.redirect(url);
   })
   .get("/callback", async (c) => {

@@ -35,6 +35,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.href === "https://github.com/login/oauth/access_token") {
     return body.code === "good-code" ? Response.json({ access_token: "user-token" }) : Response.json({ error: "bad_verification_code" });
   }
+  if (url.pathname === "/app") return Response.json({ id: 1234, slug: "myrel-test" });
   if (url.pathname === "/user/installations") {
     return Response.json({ total_count: fakeGithub.installations.length, installations: fakeGithub.installations });
   }

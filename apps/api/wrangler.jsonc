@@ -107,8 +107,9 @@
   // Built-in prices cover Claude models; a model with no price is metered with no cost.
   //
   // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a
-  // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID,
-  // GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET.
+  // deploy from this file never wipes it: GITHUB_APP_ID, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET,
+  // GITHUB_APP_PRIVATE_KEY and GITHUB_WEBHOOK_SECRET. The app's URL name (slug) is read from
+  // GitHub, so renaming the app needs no change here.
   //
   // Artifacts. ARTIFACTS_URL: origin of the artifact Worker, e.g. its workers.dev address or a
   // domain of its own. It must be a different site from the app (not a subdomain of the app's
@@ -144,7 +145,6 @@
     "ARTIFACTS_URL": "https://myrel-artifacts.fibteq.workers.dev",
 
     "GITHUB_APP_ID": "5386818",
-    "GITHUB_APP_SLUG": "fibteq",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_MODEL": "",
     "RUNNER_IMAGES": "",
