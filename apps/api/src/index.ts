@@ -107,8 +107,19 @@ const app = new Hono<AppEnv>()
 
 export type AppType = typeof app;
 
+async function serveBuiltAsset(request: Request, env: Env): Promise<Response> {
+  const res = await env.ASSETS.fetch(request);
+  if (!res.headers.get("content-type")?.startsWith("text/html")) return res;
+  return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
+}
+
 export default {
-  fetch: app.fetch,
+  fetch(request, env, ctx) {
+    // Built files are hashed; one missing from this deploy (a tab opened before it) gets a 404, not
+    // the app's index.html, so the browser fails the import and the page can reload itself.
+    if (new URL(request.url).pathname.startsWith("/assets/")) return serveBuiltAsset(request, env);
+    return app.fetch(request, env, ctx);
+  },
   // Prepares the sandbox tools after a deploy changed them, before a thread has to wait for them.
   async scheduled(_controller, env) {
     await prewarmSandbox(env);
