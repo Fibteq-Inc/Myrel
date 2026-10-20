@@ -84,6 +84,12 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
     // Nobody is there to approve: the sandbox is the boundary.
     permission: { edit: "allow", bash: "allow", webfetch: "allow" },
   };
+  if (spec.mcp) {
+    // The token is read from the environment so it never lands in the config.
+    config.mcp = {
+      altair: { type: "remote", url: spec.mcp.url, enabled: true, headers: { Authorization: "Bearer {env:ALTAIR_MCP_TOKEN}" } },
+    };
+  }
   const m = spec.model;
   if (!m) return config;
   const apiKey = "{env:ALTAIR_MODEL_API_KEY}";

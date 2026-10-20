@@ -105,9 +105,8 @@
   // published and listed but cannot be opened. ARTIFACT_SIGNING_SECRET (secret): shared with
   // the artifact Worker, which only serves links signed with it.
   //
-  // Sandbox (run_task). Repository access comes from the project's GitHub connection.
+  // Sandbox (the cloud thread agent, OpenCode). Repository access comes from the project's GitHub connection.
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
-  // RUNNER_HARNESS: default coding harness, opencode (default) or claude-code.
   // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
   //
   // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
@@ -134,7 +133,6 @@
     "GITHUB_APP_ID": "5386818",
     "GITHUB_APP_SLUG": "fibteq",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
-    "RUNNER_HARNESS": "opencode",
     "RUNNER_MODEL": "",
     "DEFAULT_TIMEZONE": "UTC",
     "EMAIL_FROM": "Altair <altair@fibteq.app>",

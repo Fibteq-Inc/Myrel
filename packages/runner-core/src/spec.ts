@@ -47,13 +47,18 @@ export type WorkspaceSpec = z.infer<typeof WorkspaceSpec>;
 export const TaskSpec = z.object({
   taskId: z.string().min(1),
   title: z.string().min(1).max(120),
-  prompt: z.string().min(1).max(32_000),
+  prompt: z.string().min(1).max(100_000),
   harness: HarnessId.default("opencode"),
   repo: RepoSpec.optional(),
   workspace: WorkspaceSpec.optional(),
   /** Commit, push and open (or update) a pull request when the harness finishes with changes. */
   openPr: z.boolean().default(false),
   model: ModelConfig.optional(),
+  /**
+   * The thread's MCP endpoint, when the harness runs as the thread's agent and talks to people
+   * through Altair's tools. Its bearer token is a secret (ALTAIR_MCP_TOKEN).
+   */
+  mcp: z.object({ url: z.string().url() }).optional(),
   timeoutSec: z
     .number()
     .int()

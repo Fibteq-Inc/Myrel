@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { CliId, RunnerCli } from "@altair/protocol";
 import type { Access } from "./config";
 
@@ -21,24 +23,41 @@ export type ParseState = {
 export type CliAdapter = {
   id: CliId;
   bin: string;
+  /** extra: flags from `agent`, placed before the CLI's own trailing arguments. */
+  args(opts: { access: Access; resume?: string; extra?: string[] }): string[];
   /**
-   * mcpConfig: path of an MCP config file (Claude Code only), set when the CLI runs as the
-   * thread's agent and talks to people through Altair's tools.
+   * Connects the CLI to the thread's MCP endpoint for a run as the thread's agent, so it talks
+   * to people through Altair's tools without asking for permission. `dir` is a private folder
+   * for config files, deleted after the run.
    */
-  args(opts: { access: Access; resume?: string; mcpConfig?: string }): string[];
+  agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string> }>;
   /** Feeds one line of stdout; updates `state` in place. */
   line(line: string, state: ParseState): void;
   /** Called with all of stdout when the CLI exits, for CLIs that print one JSON document. */
   end?(stdout: string, state: ParseState): void;
 };
 
-/** Name of Altair's MCP server in the CLI's config; its tools show up as mcp__altair__<tool>. */
+/** Name of Altair's MCP server in the CLI's config; its tools show up as mcp__altair__<tool> in Claude Code. */
 export const ALTAIR_MCP_SERVER = "altair";
+
+/** The thread's MCP endpoint for one agent run. */
+export type AgentMcp = { url: string; token: string; dir: string };
+
+/** Env var that carries the MCP token for CLIs that read it from the environment. */
+const TOKEN_VAR = "ALTAIR_MCP_TOKEN";
+
+/** Writes a config file only this user can read: it holds the run's token. */
+async function privateFile(dir: string, name: string, content: unknown): Promise<string> {
+  const path = join(dir, name);
+  await writeFile(path, JSON.stringify(content), { mode: 0o600 });
+  // Windows runs the CLI through a shell, which would split a path with spaces.
+  return process.platform === "win32" ? `"${path}"` : path;
+}
 
 const claude: CliAdapter = {
   id: "claude",
   bin: "claude",
-  args: ({ access, resume, mcpConfig }) => [
+  args: ({ access, resume, extra = [] }) => [
     "-p",
     "--output-format",
     "stream-json",
@@ -46,9 +65,14 @@ const claude: CliAdapter = {
     "--permission-mode",
     { read: "plan", edit: "acceptEdits", full: "bypassPermissions" }[access],
     ...(resume ? ["--resume", resume] : []),
-    // Altair's tools are how the agent talks to people, so they never wait for a permission prompt.
-    ...(mcpConfig ? ["--mcp-config", mcpConfig, "--allowedTools", `mcp__${ALTAIR_MCP_SERVER}`] : []),
+    ...extra,
   ],
+  async agent({ url, token, dir }) {
+    const config = await privateFile(dir, "mcp.json", {
+      mcpServers: { [ALTAIR_MCP_SERVER]: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
+    });
+    return { args: ["--mcp-config", config, "--allowedTools", `mcp__${ALTAIR_MCP_SERVER}`] };
+  },
   line(line, state) {
     const event = parseJson(line);
     if (!event) return;
@@ -72,14 +96,25 @@ const claude: CliAdapter = {
 const codex: CliAdapter = {
   id: "codex",
   bin: "codex",
-  args: ({ access }) => [
+  args: ({ access, extra = [] }) => [
     "exec",
     "--json",
     "--skip-git-repo-check",
     "--sandbox",
     { read: "read-only", edit: "workspace-write", full: "danger-full-access" }[access],
+    ...extra,
     "-",
   ],
+  // Config overrides for one run; the token stays in the environment.
+  agent: async ({ url, token }) => ({
+    args: [
+      "-c",
+      `mcp_servers.${ALTAIR_MCP_SERVER}.url=${JSON.stringify(url)}`,
+      "-c",
+      `mcp_servers.${ALTAIR_MCP_SERVER}.bearer_token_env_var=${JSON.stringify(TOKEN_VAR)}`,
+    ],
+    env: { [TOKEN_VAR]: token },
+  }),
   line(line, state) {
     const event = parseJson(line);
     if (!event) return;
@@ -101,12 +136,20 @@ const codex: CliAdapter = {
 const gemini: CliAdapter = {
   id: "gemini",
   bin: "gemini",
-  args: ({ access }) => [
+  args: ({ access, extra = [] }) => [
     "--output-format",
     "json",
     "--approval-mode",
     { read: "default", edit: "auto_edit", full: "yolo" }[access],
+    ...extra,
   ],
+  // Gemini CLI has no flag for an MCP config, so the run gets its own system settings file.
+  async agent({ url, token, dir }) {
+    const settings = await privateFile(dir, "settings.json", {
+      mcpServers: { [ALTAIR_MCP_SERVER]: { httpUrl: url, headers: { Authorization: `Bearer ${token}` }, trust: true } },
+    });
+    return { args: [], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") } };
+  },
   line() {},
   end(stdout, state) {
     const doc = parseJson(stdout.trim());

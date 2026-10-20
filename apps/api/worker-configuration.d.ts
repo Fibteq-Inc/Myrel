@@ -18,7 +18,6 @@ interface __BaseEnv_Env {
 	AI_GATEWAY_URL: string;
 	ARTIFACTS_URL: string;
 	SANDBOX_INSTANCE_TYPE: string;
-	RUNNER_HARNESS: string;
 	RUNNER_MODEL: string;
 	DEFAULT_TIMEZONE: string;
 	EMAIL_FROM: string;
@@ -41,7 +40,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "BETTER_AUTH_URL" | "TRUSTED_ORIGINS" | "INSTANCE_NAME" | "SIGNUP_ENABLED" | "LLM_PROVIDER" | "LLM_MODEL" | "LLM_BASE_URL" | "LLM_PRICES" | "AI_GATEWAY_URL" | "ARTIFACTS_URL" | "SANDBOX_INSTANCE_TYPE" | "RUNNER_HARNESS" | "RUNNER_MODEL" | "DEFAULT_TIMEZONE" | "EMAIL_FROM" | "VAPID_PUBLIC_KEY" | "VAPID_SUBJECT">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "BETTER_AUTH_URL" | "TRUSTED_ORIGINS" | "INSTANCE_NAME" | "SIGNUP_ENABLED" | "LLM_PROVIDER" | "LLM_MODEL" | "LLM_BASE_URL" | "LLM_PRICES" | "AI_GATEWAY_URL" | "ARTIFACTS_URL" | "SANDBOX_INSTANCE_TYPE" | "RUNNER_MODEL" | "DEFAULT_TIMEZONE" | "EMAIL_FROM" | "VAPID_PUBLIC_KEY" | "VAPID_SUBJECT">> {}
 }
 declare module "*.txt" {
 	const value: string;

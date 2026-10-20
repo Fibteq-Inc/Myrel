@@ -173,7 +173,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BETTER_AUTH_URL` | empty | Public origin, for example `https://altair.example.com`. Inferred from the request when empty. |
+| `BETTER_AUTH_URL` | empty | Public origin, for example `https://altair.example.com`. Inferred from the request when empty. The cloud thread agent calls back on it, so set it when the server sits behind a proxy that changes the host. |
 | `TRUSTED_ORIGINS` | empty | Extra comma-separated origins allowed to call the API cross-origin. The desktop app origins are always allowed. |
 | `INSTANCE_NAME` | `Altair` | Name shown to apps that connect to this server. |
 | `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. |
@@ -182,9 +182,8 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
 | `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://altair-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
-| `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for `run_task`: `lite`, `basic`, `standard-1` … `standard-4`. |
-| `RUNNER_HARNESS` | `opencode` | Default coding agent in the sandbox: `opencode` or `claude-code` (Claude models only). |
-| `RUNNER_MODEL` | empty | Model for the coding agent; empty uses the agents' model. |
+| `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
+| `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
 | `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Altair <altair@example.com>`. Empty turns email off. |
 | `VAPID_PUBLIC_KEY` | empty | Web Push public key. |
@@ -203,7 +202,7 @@ supply the D1 id.
 | `RUNNER_AGENT` | Durable Object (`RunnerAgent`) | One per paired computer: the altair-runner connection and its tasks |
 | `ASSETS` | Static assets | The built web app (`apps/web/dist`) |
 | `ARTIFACTS` | R2 bucket `altair-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
-| `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for `run_task` (see [Code sandbox](#code-sandbox)) |
+| `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for its cloud agent (see [Code sandbox](#code-sandbox)) |
 | `WORKSPACES` | Artifacts namespace `altair` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
 | `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) |
 
@@ -268,10 +267,15 @@ on `:8788`; copy `apps/artifacts/.dev.vars.example` too.
 
 ### Code sandbox
 
-Thread agents get hands through the `run_task` tool: it starts a coding agent
-(OpenCode by default) in the thread's own Linux container, which clones the
-repository, edits code, runs commands and tests, and can open a pull request.
-Its checklist and terminal output stream into the thread.
+A thread's agent is a coding agent, not a loop of Altair's own. In a project
+with a local folder (see `altair-runner`), it is the person's own CLI on their
+computer. Otherwise it is OpenCode in the thread's own Linux container: each
+turn of the thread is one OpenCode run there, which clones repositories, edits
+code, runs commands and tests, and opens pull requests, and talks to people
+through Altair's tools over MCP (`/api/agent-mcp/<thread>`, with a token valid
+for that turn only). Its terminal output streams into the thread. The
+coordinator in the project chat stays a small loop in the Worker and never uses
+a container.
 
 - It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
   which is on the Workers Paid plan.
@@ -285,15 +289,15 @@ Its checklist and terminal output stream into the thread.
   use). `RUNNER_MODEL` picks a different model for it.
 - Cloning private repositories and opening pull requests uses the project's
   GitHub connection. Public repositories clone without it.
-- Containers sleep after 10 idle minutes; a thread's next task wakes its own.
-- Each project chooses where tasks run under **Settings → Tasks**: automatic
-  (on the computer with the project's local folder while `altair-runner` is
-  online there, otherwise in this sandbox), always on that computer, or always
-  in the cloud.
+- Containers sleep after 10 idle minutes; a thread's next turn wakes its own.
+- Each project chooses where its threads work under **Settings → Tasks**:
+  automatic (on the computer with the project's local folder while
+  `altair-runner` is online there, otherwise in this sandbox), always on that
+  computer, or always in the cloud.
 
 To run without a sandbox, remove the `SANDBOX` binding and the `containers`
-block from `apps/api/wrangler.jsonc` (keep the migrations). `run_task`
-then tells the agent there is no sandbox.
+block from `apps/api/wrangler.jsonc` (keep the migrations). Threads of projects
+without a local folder then say there is no sandbox.
 
 ### Thread workspaces
 

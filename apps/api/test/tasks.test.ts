@@ -1,11 +1,11 @@
-import { formatPlan, type Message, planChecklist, type Project, type ServerEvent, type Task } from "@altair/protocol";
+import { type Message, type Project, type ServerEvent, type Task } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { readWorkspace, threadWorkspace } from "../src/sandbox/workspace";
-import { resetFakeModel, setFakeModel } from "./fake-llm";
+import { resetFakeModel } from "./fake-llm";
 
 const BASE = "http://altair.test";
 
@@ -24,8 +24,6 @@ async function until<T>(fn: () => T | Promise<T>, what: string): Promise<NonNull
   }
   throw new Error(`Timed out waiting for ${what}`);
 }
-
-const call = (name: string, input: unknown) => ({ id: crypto.randomUUID(), name, input });
 
 /** A project with one thread whose agent is ready, and a socket listening to it. */
 async function threadSetup() {
@@ -53,53 +51,34 @@ async function threadSetup() {
 
 afterEach(resetFakeModel);
 
-describe("run_task", () => {
-  it("runs a task in the thread's sandbox and wakes the agent with its result", async () => {
-    const prompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1) return { text: "", toolCalls: [] };
-      prompts.push(req.prompt);
-      if (!req.prompt.includes("## Tasks")) {
-        return {
-          text: "",
-          toolCalls: [
-            call("update_plan", {
-              title: "Testler",
-              steps: [
-                { text: "Testleri çalıştır", state: "active" },
-                { text: "Sonucu bildir", state: "todo" },
-              ],
-            }),
-            call("run_task", { title: "Testleri çalıştır", prompt: "pnpm test", harness: "shell", language: "tr" }),
-          ],
-        };
-      }
-      return { text: "", toolCalls: [call("reply", { text: "Sandbox açılamadı." })] };
-    });
-
+describe("the cloud agent", () => {
+  it("runs the thread's agent as OpenCode in its sandbox, connected to the thread's MCP endpoint", async () => {
     const { project, token, ws, events, projectAgent, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });
 
-    // The test runtime has no container, so the sandbox reports that and the task fails.
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    await until(async () => (await bodies()).includes("Sandbox açılamadı."), "the agent's reply about the result");
-
-    const [task] = (await threadAgent.getTasks()) as (Task & { log: { text: string }[] })[];
-    expect(task).toMatchObject({ title: "Testleri çalıştır", harness: "shell", backend: "sandbox", status: "failed" });
+    // The test runtime has no container, so the sandbox reports that and the turn fails.
+    const [task] = await until(async () => {
+      const tasks = (await threadAgent.getTasks()) as (Task & { log: { text: string }[] })[];
+      return tasks[0]?.status === "failed" ? tasks : null;
+    }, "the failed turn");
+    expect(task).toMatchObject({ title: "OpenCode", harness: "opencode", backend: "sandbox" });
     expect(task!.summary).toContain("container is not configured");
-    expect(task!.log.map((l) => l.text)).toContain("Starting Shell in the sandbox…");
+    expect(task!.log.map((l) => l.text)).toContain("Starting OpenCode in the sandbox…");
 
-    // The second turn saw the result, and the checklist shows where it stopped, in the thread's language.
-    expect(prompts[1]).toContain("Testleri çalıştır (failed, NEW result)");
-    const t = (await projectAgent.getThread(thread.id))!;
-    // The task's steps sit under the agent's own plan step.
-    expect(t.statusText).toMatch(/^Testler\n\n✱ Testleri çalıştır\n {2}✗ Sandbox açılamadı: The sandbox container is not configured/);
-    expect(t.statusText).toContain("\n○ Sonucu bildir");
-    // The conversation has one plan card for it, holding the same steps.
-    const cards = (await bodies()).filter((b) => planChecklist(b) !== null);
-    expect(cards).toEqual([formatPlan(t.statusText!)]);
+    // What the sandbox was handed: Altair's instructions and the thread, the model, and where to call back.
+    const spec = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) =>
+      JSON.parse(state.storage.sql.exec<{ spec: string }>("SELECT spec FROM tasks").one().spec),
+    );
+    expect(spec).toMatchObject({ agent: true, mcp: { url: `http://altair.test/api/agent-mcp/${thread.id}` }, model: { provider: "fireworks" } });
+    expect(spec.prompt).toContain("You run as OpenCode in this thread's own Linux sandbox");
 
-    // Clients heard about the task and its output live.
+    // The person hears what happened, in the thread's language.
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    const report = await until(async () => (await bodies()).find((b) => b.startsWith('"OpenCode" görevi başarısız oldu.')), "the report");
+    expect(report).toContain("container is not configured");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "failed", "failed");
+
+    // Clients heard about the run and its output live.
     expect(events.some((e) => e.type === "task.updated" && e.task.status === "running")).toBe(true);
     await until(() => events.some((e) => e.type === "task.updated" && e.task.status === "failed"), "task.updated failed");
     expect(events.some((e) => e.type === "task.output" && e.taskId === task!.id)).toBe(true);
@@ -113,95 +92,13 @@ describe("run_task", () => {
     ws.close();
   });
 
-  it("nudges a silent agent once after a failed task, then reports it and hands it to the coordinator", async () => {
-    const prompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1) return { text: "", toolCalls: [] };
-      prompts.push(req.prompt);
-      if (prompts.length > 1) return { text: "", toolCalls: [] };
-      return {
-        text: "",
-        toolCalls: [call("run_task", { title: "Komutları çalıştır", prompt: "ls demo", harness: "shell", language: "tr" })],
-      };
-    });
-
-    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run it." });
-
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    const report = await until(
-      async () => (await bodies()).find((b) => b.startsWith('"Komutları çalıştır" görevi başarısız oldu.')),
-      "the thread's own report",
-    );
-    expect(report).toContain("container is not configured");
-    // One more turn carried the nudge, and only one: then the thread reported it itself.
-    const nudge = 'The task "Komutları çalıştır" failed and you ended your turn without telling the person.';
-    expect(prompts.filter((p) => p.includes(nudge))).toHaveLength(1);
-    await until(async () => (await projectAgent.getThread(thread.id))!.status === "blocked", "the thread to wait on the coordinator");
+  it("learns the address the sandbox calls back on when someone opens the project", async () => {
+    const { ws, projectAgent } = await threadSetup();
     ws.close();
-  });
-
-  it("puts back steps marked done with no work behind them and makes the agent do the work", async () => {
-    const prompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1 || !req.prompt.includes("Hesap makinesi")) return { text: "", toolCalls: [] };
-      prompts.push(req.prompt);
-      if (prompts.length === 1) {
-        // Claims the whole plan without doing anything.
-        return {
-          text: "",
-          toolCalls: [
-            call("reply", { text: "Hesap makinesini oluşturuyorum." }),
-            call("update_plan", {
-              title: "Hesap makinesi",
-              steps: [
-                { text: "Dosyayı oluştur", state: "done" },
-                { text: "Sonucu bildir", state: "done" },
-              ],
-            }),
-          ],
-        };
-      }
-      if (prompts.length === 2) {
-        return { text: "", toolCalls: [call("run_task", { title: "Hesap makinesi", prompt: "touch calc.html", harness: "shell" })] };
-      }
-      return { text: "", toolCalls: [call("reply", { text: "Görev çalışmadı." })] };
-    });
-
-    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Hesap makinesi yap." });
-
-    await until(async () => (await threadAgent.getTasks()).length === 1, "the task the nudge led to");
-    expect(prompts[1]).toContain('You marked "Dosyayı oluştur", "Sonucu bildir" done, but nothing was done this turn');
-    // The unearned steps went back before the agent worked on them again.
-    expect(prompts[1]).toContain("✱ Dosyayı oluştur");
-    expect(prompts[1]).toContain("○ Sonucu bildir");
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    await until(async () => (await bodies()).includes("Görev çalışmadı."), "the reply about the task");
-    ws.close();
-  });
-
-  it("gives an agent that stopped after its opening note one more turn to start the work", async () => {
-    const prompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1 || !req.prompt.includes("Hesap makinesi")) return { text: "", toolCalls: [] };
-      prompts.push(req.prompt);
-      // Says it is starting, then stops.
-      if (prompts.length === 1) return { text: "", toolCalls: [call("reply", { text: "Başlıyorum." })] };
-      if (prompts.length === 2) {
-        return { text: "", toolCalls: [call("run_task", { title: "Hesap makinesi", prompt: "touch calc.html", harness: "shell" })] };
-      }
-      return { text: "", toolCalls: [call("reply", { text: "Görev çalışmadı." })] };
-    });
-
-    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Hesap makinesi yap." });
-
-    await until(async () => (await threadAgent.getTasks()).length === 1, "the task the nudge led to");
-    expect(prompts[1]).toContain("Your last turn ended right after your reply, with no plan, no task and nothing asked.");
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    await until(async () => (await bodies()).includes("Görev çalışmadı."), "the reply about the task");
-    ws.close();
+    expect(await projectAgent.publicOrigin()).toBe("http://altair.test");
+    // A project nobody opened yet does not know it, so its cloud turns say so instead of starting.
+    const other = await getAgentByName(env.PROJECT_AGENT, `proj_${crypto.randomUUID()}`);
+    expect(await other.publicOrigin()).toBeNull();
   });
 
   it("tells clients a thread stopped even when the project forgot it was working", async () => {
@@ -209,17 +106,6 @@ describe("run_task", () => {
     // As after an eviction mid-turn: the in-memory activity is gone, but clients still show it.
     await projectAgent.setActivity(thread.id, false);
     await until(() => events.some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active), "the stop");
-    ws.close();
-  });
-
-  it("reports what it cannot do as a tool error, without starting anything", async () => {
-    const { project, ws, threadAgent, thread } = await threadSetup();
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
-    const pr = await threadAgent.startTask({ title: "PR", prompt: "fix", repo: "acme/app", openPr: true });
-    expect(pr).toMatchObject({ ok: false, error: expect.stringContaining("needs write access") });
-    const ssh = await threadAgent.startTask({ title: "x", prompt: "fix", repo: "ssh://git@example.com/x" });
-    expect(ssh).toMatchObject({ ok: false, error: expect.stringContaining("not a repository I can clone") });
-    expect(await threadAgent.getTasks()).toEqual([]);
     ws.close();
   });
 });

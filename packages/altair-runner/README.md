@@ -78,14 +78,22 @@ With `edit`, the CLI can change files in the folder but cannot run commands that
 
 Tasks in the same Altair thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
 
-### Claude Code as the thread's agent (experimental)
+### Your CLI as the thread's agent
 
-When a project's **Thread agent** setting is "Claude Code on the computer", Claude Code does not just run tasks for
-Altair's agent: it is the thread's agent. Each turn of the thread is one `claude -p` run, resumed from the thread's
-previous session, with Altair's tools (reply, plan, decisions, artifacts, memory) added over MCP (`--mcp-config`,
-allowed with `--allowedTools mcp__altair`). The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is
-valid only for that turn; the config file holding it is readable only by you and deleted when the run ends. The whole
-turn uses your own Claude Code login. Needs Claude Code as the project's CLI and altair-runner 0.4.0 or later.
+When a project works in one of your folders, your CLI does not just run tasks: it is the thread's agent. Each turn of
+a thread is one run of the CLI (Claude Code resumes the thread's previous session), with Altair's tools (reply, plan,
+decisions, artifacts, memory, routines) added over MCP:
+
+| CLI | How the MCP server is added |
+|---|---|
+| Claude Code | `--mcp-config <file>`, allowed with `--allowedTools mcp__altair` |
+| Codex CLI | `-c mcp_servers.altair.url=…` and `-c mcp_servers.altair.bearer_token_env_var="ALTAIR_MCP_TOKEN"` |
+| Gemini CLI | its own settings file, through `GEMINI_CLI_SYSTEM_SETTINGS_PATH` |
+
+The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
+it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
+uses your own CLI login. Needs altair-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex and Gemini CLI.
+Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 
 ### For apps that run it (the desktop app)
 

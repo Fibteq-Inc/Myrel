@@ -70,6 +70,19 @@ describe("opencode", () => {
     expect(config).toContain("{env:ALTAIR_MODEL_API_KEY}");
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
   });
+
+  it("connects to the thread's MCP endpoint as the thread's agent, with the token from the environment", () => {
+    expect(opencodeConfig(spec()).mcp).toBeUndefined();
+    const config = opencodeConfig(spec({ mcp: { url: "https://altair.test/api/agent-mcp/thr_1" } }));
+    expect(config.mcp).toEqual({
+      altair: {
+        type: "remote",
+        url: "https://altair.test/api/agent-mcp/thr_1",
+        enabled: true,
+        headers: { Authorization: "Bearer {env:ALTAIR_MCP_TOKEN}" },
+      },
+    });
+  });
 });
 
 describe("claude code", () => {

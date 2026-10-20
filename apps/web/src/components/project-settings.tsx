@@ -1,5 +1,5 @@
 import { useT } from "@altair/i18n/react";
-import type { InviteRole, ProjectRole, ProviderId, TaskTarget, ThreadEngine } from "@altair/protocol";
+import type { InviteRole, ProjectRole, ProviderId, TaskTarget } from "@altair/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { X } from "lucide-react";
@@ -74,14 +74,12 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
   const [model, setModel] = useState(settings.model ?? "");
   const [keyId, setKeyId] = useState(settings.keyId ?? "");
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
-  const [threadEngine, setThreadEngine] = useState<ThreadEngine>(settings.threadEngine);
   useEffect(() => {
     setName(settings.name);
     setProvider(settings.provider ?? "");
     setModel(settings.model ?? "");
     setKeyId(settings.keyId ?? "");
     setTaskTarget(settings.taskTarget);
-    setThreadEngine(settings.threadEngine);
   }, [settings]);
 
   const save = useMutation({
@@ -92,7 +90,6 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
         model: model.trim() || null,
         keyId: keyId || null,
         taskTarget,
-        threadEngine,
       }),
     onSuccess: (s) => {
       queryClient.setQueryData(projectSettingsQuery(projectId).queryKey, s);
@@ -200,16 +197,6 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
             <option value="auto">{t("projectSettings.taskTarget.auto")}</option>
             <option value="local">{t("projectSettings.taskTarget.local")}</option>
             <option value="cloud">{t("projectSettings.taskTarget.cloud")}</option>
-          </Select>
-        </Field>
-        <Field label={t("projectSettings.threadEngine")}>
-          <Select
-            value={threadEngine}
-            onChange={(e) => setThreadEngine(e.target.value as ThreadEngine)}
-            disabled={!canManage}
-          >
-            <option value="loop">{t("projectSettings.threadEngine.loop")}</option>
-            <option value="harness">{t("projectSettings.threadEngine.harness")}</option>
           </Select>
         </Field>
       </Section>

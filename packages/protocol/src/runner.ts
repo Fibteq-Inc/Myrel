@@ -36,8 +36,9 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
  * "agent": run Claude Code as the thread's agent, with Altair's tools over MCP (task.start's `agent`).
+ * "agent-clis": the same for Codex CLI and Gemini CLI.
  */
-export const RunnerFeature = z.enum(["folders", "cancel", "agent"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis"]);
 export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /** What the runner last told the server about the computer. */

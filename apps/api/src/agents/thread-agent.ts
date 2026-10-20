@@ -1,7 +1,6 @@
-import { type ArtifactRef, CLI_NAMES, createId, formatPlan, type ProjectWorkspace, type Task, type TaskStats, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type ArtifactRef, CLI_NAMES, createId, formatPlan, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
 import {
   emptyProgress,
-  HarnessId,
   reduceTask,
   renderChecklist,
   type RunnerBackend,
@@ -14,35 +13,20 @@ import { Agent, getAgentByName } from "agents";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
-import { projectProvider, projectTaskModel } from "../keys";
-import { handleMcp, runLoop, type Tool } from "../llm";
-import { getWorkspace, runnerHasFeature } from "../runners";
-import {
-  localBackend,
-  localCanceller,
-  normalizeRepoUrl,
-  repoToken,
-  sandboxBackend,
-  taskPlace,
-  threadEngine,
-} from "../sandbox/backend";
+import { projectTaskModel } from "../keys";
+import { handleMcp, type Tool } from "../llm";
+import { runnerHasFeature } from "../runners";
+import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
-import { meteredForTurn, recordTaskUsage, taskCostMicros, taskRuntime, TurnMeter } from "../usage";
-import { agentPrompt, agentTools, hashAgentToken, newAgentToken, sameHash } from "./harness-agent";
+import { recordTaskUsage } from "../usage";
+import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
 import { type Author, knowledgeTools } from "./knowledge";
-import { composeStatus, newlyDone, type Plan } from "./plan";
+import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { routineTools } from "./routine-tools";
-import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
-import {
-  type CoordinatorNote,
-  type ReplyNeeds,
-  type RoutineRun,
-  THREAD_SYSTEM,
-  threadPrompt,
-  threadTools,
-} from "./thread-worker";
+import type { TaskWithLog } from "./thread-tasks";
+import { type CoordinatorNote, type ReplyNeeds, type RoutineRun, threadPrompt, threadTools } from "./thread-worker";
 
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
@@ -65,15 +49,17 @@ type TaskRow = {
 };
 
 /**
- * A task's spec as stored. Tasks on the person's computer name their CLI (claude, codex…) as the harness.
- * agent: the CLI ran as the thread's agent for one turn (thread engine "harness"), not as a task for it.
+ * A run's spec as stored. Runs on the person's computer name their CLI (claude, codex…) as the harness.
+ * agent: the run was one turn of the thread's agent. Older runs were tasks Altair's own loop handed out.
  */
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; agent?: boolean };
 
-/** What the thread's Claude Code did through Altair's tools during its turn, kept until the turn ends. */
+/** What the thread's agent did through Altair's tools during its turn, kept until the turn ends. */
 type AgentTurn = {
   pending: ArtifactRef[];
   replied: boolean;
+  /** Its latest reply, for the notification. */
+  lastReply?: string;
   needs: ReplyNeeds | null;
   asked: boolean;
   resolved: boolean;
@@ -82,29 +68,30 @@ type AgentTurn = {
 
 /** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
 const MAX_AGENT_PROMPT = 90_000;
+/** How long one agent turn may run. */
+const AGENT_TURN_SEC = 3600;
 
 type LogRow = { stream: TerminalLine["stream"]; text: string };
 
 /** Terminal lines kept per task; older ones are dropped. */
 const MAX_LOG_LINES = 2000;
-/** A task on the person's computer has no sandbox, clone or pull request steps; its CLI just works. */
+/** A run on the person's computer has no sandbox, clone or pull request steps; its CLI just works. */
 const LOCAL_PHASES: RunnerEvent[] = [
   { type: "phase", phase: "prepare", state: "skipped" },
   { type: "phase", phase: "clone", state: "skipped" },
   { type: "phase", phase: "publish", state: "skipped" },
   { type: "phase", phase: "agent", state: "started" },
 ];
-/** Extra time after a task's own timeout before it is declared lost (its runner went away). */
+/** Extra time after a run's own timeout before it is declared lost (its runner went away). */
 const WATCHDOG_GRACE_SEC = 300;
 
 /**
- * One instance per thread (named by thread id). Runs the thread agent: each
- * wake queues a turn that reads the thread from the ProjectAgent, calls the
- * model and acts through reply / update_status / request_coordinator.
- * Messages themselves live in the ProjectAgent; this DO keeps the brief,
- * coordinator notes, a read cursor, and the tasks the agent ran (run_task, in
- * the sandbox or on the person's computer) with their progress
- * and terminal output.
+ * One instance per thread (named by thread id). Each wake queues a turn of the
+ * thread's agent: a coding harness (see harness-agent.ts) that gets the thread
+ * as its prompt and acts through Altair's tools over MCP (agentMcp). Messages
+ * themselves live in the ProjectAgent; this DO keeps the brief, coordinator
+ * notes, a read cursor, and each turn's run (on the person's computer or in
+ * the sandbox) with its progress and terminal output.
  */
 export class ThreadAgent extends Agent<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -185,8 +172,8 @@ export class ThreadAgent extends Agent<Env> {
   /** Queue callback. Turns run one at a time; wakes during a turn get their own turn after it. */
   async threadTurn(): Promise<void> {
     if (this.getMeta("dirty") !== "1") return;
-    // The thread's Claude Code is mid-turn; this wake waits for it (finishAgentTurn queues the next turn).
-    if (this.runningAgentTask()) return;
+    // The agent is mid-turn; this wake waits for it (finishAgentTurn queues the next turn).
+    if (this.runningTask()) return;
     this.setMeta("dirty", "0");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
@@ -195,27 +182,19 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
-    const artifacts = await project.listArtifacts();
 
-    const llm = await projectProvider(this.env, projectId);
-    if (!llm.ok) {
-      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
-      await project.updateThread(threadId, { status: "failed" });
-      return;
+    const place = await taskPlace(this.env, projectId);
+    if (place.kind === "error") return this.cannotWork(place.message);
+    // Runners before 0.5.0 can host only Claude Code as the agent.
+    const needs = place.kind === "local" && place.workspace.cli !== "claude" ? "agent-clis" : "agent";
+    if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, needs))) {
+      return this.cannotWork(
+        `altair-runner on "${place.workspace.runnerName}" is too old to work this thread. Update it with \`npx altair-runner@latest update\`, then write here again.`,
+      );
     }
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
-    // An agent turn's run is not a task the agent handed out, so it is not listed under "Tasks".
-    const tasks = this.taskRows().filter((row) => !(JSON.parse(row.spec) as StoredSpec).agent).map((row) => ({
-      task: this.toTask(row),
-      progress: JSON.parse(row.progress) as TaskProgress,
-      log: row.status === "running" || row.reported ? [] : this.taskLog(row.id),
-      isNew: row.status !== "running" && row.reported === 0,
-    }));
-    const workspace = await getWorkspace(this.env, projectId);
-    const place = await taskPlace(this.env, projectId);
-    const firstTurn = this.getMeta("last_seen_seq") === null;
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     // Only the last few runs matter; older ones are history the thread already acted on.
     const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
@@ -229,12 +208,7 @@ export class ThreadAgent extends Agent<Env> {
     // Only the last few events matter; the pull requests' current state is listed separately.
     const githubRows = this.sql<NoteRow>`SELECT * FROM (SELECT * FROM github_events ORDER BY id DESC LIMIT 10) ORDER BY id`;
     const githubEvents: CoordinatorNote[] = githubRows.map((g) => ({ body: g.body, createdAt: g.created_at, isNew: g.seen === 0 }));
-    const pullRequests = await listPullRequests(this.env.DB, projectId, threadId);
-    // The newest task this turn reports on for the first time.
-    const finishedTask = this.sql<TaskRow>`
-      SELECT * FROM tasks WHERE status != 'running' AND reported = 0 ORDER BY created_at DESC LIMIT 1`[0];
     this.sql`UPDATE notes SET seen = 1`;
-    this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
     this.sql`UPDATE routine_runs SET seen = 1`;
     this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
@@ -243,310 +217,113 @@ export class ThreadAgent extends Agent<Env> {
       brief: this.getMeta("brief") ?? "",
       lastSeenSeq,
       notes,
-      artifacts,
+      artifacts: await project.listArtifacts(),
       repos: await listProjectRepos(this.env.DB, projectId),
-      tasks: renderTasks(tasks),
-      workspace,
-      place,
       routineRuns,
       githubEvents,
-      pullRequests,
+      pullRequests: await listPullRequests(this.env.DB, projectId, threadId),
       now: new Date(),
     });
-
-    // Thread engine "harness": the person's Claude Code takes this turn instead of Altair's loop.
-    if (place.kind === "local" && (await this.useAgentEngine(projectId, place.workspace))) {
-      const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
-      await this.startAgentTurn({
-        prompt,
-        workspace: place.workspace,
-        timezone: ctx.defaultTimezone,
-        language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
-      });
-      return;
-    }
-
-    // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
-    let resolved: boolean = false as boolean;
-    let asked: boolean = false as boolean;
-    // Artifacts published this turn, attached to the next reply.
-    let pending: ArtifactRef[] = [];
-    let lastReply: { text: string; needs?: ReplyNeeds } | null = null as { text: string; needs?: ReplyNeeds } | null;
-    // Work the agent did this turn and since its last plan update, so a step is only marked done
-    // on the back of something real: a task result, a file or artifact written or read, a lookup.
-    let workThisTurn = finishedTask !== undefined;
-    let workSincePlan = workThisTurn;
-    // Steps marked done with no work behind them, and whether a reply followed the last plan update.
-    const unearned: string[] = [];
-    let repliedSincePlan = false;
-    const work = <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A): R => {
-      workThisTurn = workSincePlan = true;
-      return fn(...args);
-    };
-    await project.updateThread(threadId, { status: "working" });
-    await project.setActivity(threadId, true);
-    try {
-      // Bill the turn to the newest person in the thread, else whoever asked in the root message.
-      const requester = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
-      const meter = new TurnMeter(llm.provider.model);
-      // The first reply after a task finished reports on it, so its stats carry the task too.
-      let taskStats = finishedTask ? this.taskStats(finishedTask) : undefined;
-      const stats = () => {
-        const s = meter.take(taskStats);
-        taskStats = undefined;
-        return s ?? undefined;
-      };
-      await runLoop({
-        provider: meteredForTurn(
-          llm.provider,
-          this.env,
-          { projectId, threadId, userId: requester.authorKind === "user" ? requester.authorId : null, agent: "thread" },
-          meter,
-        ),
-        system: THREAD_SYSTEM,
-        prompt,
-        tools: [
-          ...threadTools({
-            reply: async (text, needs) => {
-              const artifacts = pending;
-              pending = [];
-              // A later plain reply does not cancel an earlier ask in the same turn.
-              lastReply = { text, needs: needs ?? lastReply?.needs };
-              repliedSincePlan = true;
-              const m = await project.sendMessage({
-                threadId,
-                authorKind: "agent",
-                authorId: THREAD_AGENT_ID,
-                body: text,
-                artifacts,
-                stats: stats(),
-              });
-              // Our own replies are not news on the next turn.
-              this.setMeta("last_seen_seq", String(m.seq));
-              return m;
-            },
-            publishArtifact: async (input) => {
-              workThisTurn = workSincePlan = true;
-              const result = await project.publishArtifact({ ...input, threadId });
-              if ("error" in result) throw new Error(result.error);
-              const { artifact } = result;
-              // A second publish of the same artifact in one turn replaces its card.
-              pending = [
-                ...pending.filter((p) => p.artifactId !== artifact.id),
-                { artifactId: artifact.id, version: artifact.version, title: artifact.title },
-              ];
-              return artifact;
-            },
-            setPlan: async (plan) => {
-              const prev = this.getMeta("plan");
-              const claimed = newlyDone(prev ? (JSON.parse(prev) as Plan) : null, plan);
-              // One closing step (e.g. "report the result") may follow work done earlier in the turn.
-              if (claimed.length > 0 && !workSincePlan && !(claimed.length === 1 && workThisTurn)) unearned.push(...claimed);
-              repliedSincePlan = false;
-              workSincePlan = false;
-              this.setMeta("plan", JSON.stringify(plan));
-              // A finished task's steps go once the agent moves its plan on.
-              if (!this.runningTask()) this.deleteMeta("task_checklist");
-              await this.showStatus();
-            },
-            requestCoordinator: async (kind, reason) => {
-              asked = true;
-              await project.requestCoordinator(threadId, kind, reason);
-            },
-            resolve: async () => {
-              resolved = true;
-            },
-            listRepoFiles: work((repo: string, path: string, ref?: string) => listRepoFiles(this.env, projectId, repo, path, ref)),
-            readRepoFile: work((repo: string, path: string, ref?: string) => readRepoFile(this.env, projectId, repo, path, ref)),
-            runTask: async (input) => {
-              const started = await this.startTask(input);
-              if (!started.ok) throw new Error(started.error);
-              return started.message;
-            },
-            cancelTask: () => this.cancelRunningTask(),
-            readWorkspace: work((path: string) => this.readWorkspace(path)),
-          }),
-          ...knowledgeTools({
-            memoryRead: work((name: string) => project.getMemory(name)),
-            memoryWrite: work((name: string, description: string, content: string) =>
-              project.putMemory(name, { description, content }, BY),
-            ),
-            memoryDelete: work((name: string) => project.deleteMemory(name)),
-            listFiles: work((prefix?: string) => project.listFiles(prefix)),
-            readText: work((path: string) => project.readFileText(path)),
-            writeText: work((path: string, content: string) => project.writeFileText(path, content, BY)),
-          }),
-          ...routineTools({
-            listRoutines: () => project.listRoutines(),
-            createRoutine: work((input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, "agent")),
-            setPaused: work((id: string, paused: boolean) => project.updateRoutine(id, { paused })),
-            deleteRoutine: work((id: string) => project.deleteRoutine(id)),
-            defaultTimezone: ctx.defaultTimezone,
-            threadId,
-          }),
-        ],
-        // The opening note and each plan update take a step of their own.
-        maxSteps: 24,
-      });
-      // Steps marked done although nothing was done, and the person was told nothing: the agent claimed
-      // work it never did. Put those steps back and give it one more turn to do the work for real.
-      const planNudged = this.getMeta("plan_nudged") === "1";
-      if (workThisTurn || this.runningTask()) this.deleteMeta("plan_nudged");
-      else if (unearned.length && !repliedSincePlan && !planNudged) {
-        const stored = this.getMeta("plan");
-        if (stored) {
-          const plan = JSON.parse(stored) as Plan;
-          const back = new Set(unearned);
-          let first = true;
-          for (const step of plan.steps) {
-            if (step.state !== "done" || !back.has(step.text)) continue;
-            step.state = first && !plan.steps.some((s) => s.state === "active") ? "active" : "todo";
-            first = false;
-          }
-          this.setMeta("plan", JSON.stringify(plan));
-          await this.showStatus();
-        }
-        this.setMeta("plan_nudged", "1");
-        this.sql`INSERT INTO notes (body, created_at) VALUES (${`You marked ${unearned.map((t) => `"${t}"`).join(", ")} done, but nothing was done this turn: no task ran, nothing was written or published, and the person was told nothing. Those steps are back to todo. Do the work now (for files, code or commands, run_task, and mark the step done once its result arrives), or tell the person why you cannot.`}, ${new Date().toISOString()})`;
-        await this.markDirty();
-      }
-      // The first turn ended on the opening note alone: no plan, no work, no task, nothing asked. The agent
-      // said it would start and stopped, so give it one more turn to do what it said.
-      if (
-        firstTurn &&
-        lastReply &&
-        !lastReply.needs &&
-        !workThisTurn &&
-        !asked &&
-        !resolved &&
-        !this.runningTask() &&
-        !this.getMeta("plan")
-      ) {
-        this.sql`INSERT INTO notes (body, created_at) VALUES (${"Your last turn ended right after your reply, with no plan, no task and nothing asked. If that reply said what you were going to do, do it now: update_plan, then the work (run_task for files, code or commands). If the reply already answered fully, end this turn without calling any tool."}, ${new Date().toISOString()})`;
-        await this.markDirty();
-      }
-      // A finished task always gets an answer. A failed one first gets one more turn to fix it and run it
-      // again; if the agent stays silent, the thread posts the result and hands it to the coordinator.
-      const nudged = this.getMeta("task_nudged");
-      const unreported = finishedTask ?? (nudged ? this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${nudged}`[0] : undefined);
-      if (unreported && (lastReply || this.runningTask())) this.deleteMeta("task_nudged");
-      else if (unreported) {
-        const title = this.toTask(unreported).title;
-        if (unreported.status === "failed" && nudged !== unreported.id) {
-          this.setMeta("task_nudged", unreported.id);
-          this.sql`INSERT INTO notes (body, created_at) VALUES (${`The task "${title}" failed and you ended your turn without telling the person. Find the cause in its output under "Tasks". If it is in your own command or prompt, fix it and run the task again; otherwise reply with what failed and what you need.`}, ${new Date().toISOString()})`;
-          await this.markDirty();
-        } else {
-          this.deleteMeta("task_nudged");
-          await project.sendMessage({
-            threadId,
-            authorKind: "agent",
-            authorId: THREAD_AGENT_ID,
-            body: taskReport(title, unreported, this.taskLog(unreported.id, 15)),
-            artifacts: pending,
-            stats: stats(),
-          });
-          pending = [];
-          if (unreported.status === "failed") {
-            asked = true;
-            await project.requestCoordinator(
-              threadId,
-              "handoff",
-              `The task "${title}" failed and this thread's agent could not recover: ${unreported.summary ?? "no error message"}`,
-            );
-          }
-        }
-      }
-      // Published but never mentioned in a reply: still deliver the cards.
-      if (pending.length) {
-        await project.sendMessage({
-          threadId,
-          authorKind: "agent",
-          authorId: THREAD_AGENT_ID,
-          body: "",
-          artifacts: pending,
-          stats: stats(),
-        });
-      }
-      const running = this.runningTask() !== null;
-      await project.updateThread(threadId, {
-        status: running ? "working" : resolved ? "done" : asked ? "blocked" : "review_ready",
-        resolved: resolved && !running,
-      });
-      // People hear about results and asks; a turn that only consulted the coordinator stays quiet.
-      const kind = resolved ? "done" : (lastReply?.needs ?? (lastReply && !asked ? "ready" : null));
-      if (kind) await project.notifyThread(threadId, kind, lastReply?.text ?? "");
-    } catch (err) {
-      console.error("thread turn failed", err);
-      await project.sendMessage({
-        threadId,
-        authorKind: "system",
-        authorId: SYSTEM_ID,
-        body: `This thread's turn failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-      await project.updateThread(threadId, { status: "failed" });
-      await project.notifyThread(threadId, "failed", err instanceof Error ? err.message : String(err));
-    } finally {
-      // A running task keeps the thread visibly working.
-      await project.setActivity(threadId, this.runningTask() !== null);
-    }
+    const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
+    await this.startAgentTurn({
+      prompt,
+      place,
+      timezone: ctx.defaultTimezone,
+      language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
+    });
   }
 
-  // ---- Thread engine "harness": Claude Code as the thread's agent -------------
-
-  /** Whether this turn goes to the person's Claude Code (see ThreadEngine). Old runners keep Altair's loop. */
-  private async useAgentEngine(projectId: string, workspace: ProjectWorkspace): Promise<boolean> {
-    if (workspace.cli !== "claude") return false;
-    if ((await threadEngine(this.env, projectId)) !== "harness") return false;
-    return runnerHasFeature(this.env, workspace.runnerId, "agent");
-  }
-
-  /** Hands this turn to Claude Code on the person's computer, connected to this thread's MCP endpoint. */
-  private async startAgentTurn(input: { prompt: string; workspace: ProjectWorkspace; timezone: string; language: string }) {
+  /** Nothing can work this thread right now: say why, and wait for the person. */
+  private async cannotWork(reason: string) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: reason });
+    await project.updateThread(threadId, { status: "blocked" });
+    await project.notifyThread(threadId, "blocked", reason);
+  }
+
+  /**
+   * Hands this turn to the thread's agent, connected to this thread's MCP endpoint with a token that
+   * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
+   */
+  private async startAgentTurn(input: {
+    prompt: string;
+    place: Exclude<TaskPlace, { kind: "error" }>;
+    timezone: string;
+    language: string;
+  }) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const { place, language } = input;
     const { token, hash } = await newAgentToken();
-    // A very long thread keeps its newest part; the CLI's resumed session remembers the rest.
+    const agentPlace: AgentPlace =
+      place.kind === "local"
+        ? { kind: "local", cli: place.workspace.cli, folder: place.workspace.path, computer: place.workspace.runnerName }
+        : { kind: "cloud" };
+    // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
-    const spec: StoredSpec = {
-      taskId: createId("task"),
-      title: CLI_NAMES.claude,
-      prompt: agentPrompt(context),
-      harness: input.workspace.cli,
-      runnerId: input.workspace.runnerId,
-      openPr: false,
-      timeoutSec: 3600,
-      agent: true,
-    };
+    const taskId = createId("task");
     const turn: AgentTurn = { pending: [], replied: false, needs: null, asked: false, resolved: false, timezone: input.timezone };
     this.setMeta("agent_turn", JSON.stringify(turn));
     this.setMeta("agent_token", hash);
-    const backend = localBackend(this.env, {
-      projectId,
-      threadId,
-      workspace: input.workspace,
-      agent: { mcpPath: `/api/agent-mcp/${threadId}`, token },
-    });
+    this.deleteMeta("task_checklist");
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
-      const unavailable = backend.unavailable(spec as TaskSpec);
-      if (unavailable) throw new Error(unavailable);
+      const mcpPath = `/api/agent-mcp/${threadId}`;
+      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context), timeoutSec: AGENT_TURN_SEC });
       // The stored spec keeps only the start of the prompt; the runner gets all of it.
-      await this.launch({ ...spec, prompt: spec.prompt.slice(0, 4000) }, backend.id, () => backend.start(spec as TaskSpec, {}), input.language);
-      await this.taskEvents(spec.taskId, LOCAL_PHASES);
+      const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
+      if (place.kind === "local") {
+        const { workspace } = place;
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent: { mcpPath, token } });
+        const unavailable = backend.unavailable(spec);
+        if (unavailable) throw new Error(unavailable);
+        // The person's own CLI does the work, so the run shows that CLI.
+        const local = { ...spec, title: CLI_NAMES[workspace.cli] };
+        await this.launch(stored(local, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(local, {}), language);
+        await this.taskEvents(taskId, LOCAL_PHASES);
+      } else {
+        const origin = await project.publicOrigin();
+        if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
+        const model = await projectTaskModel(this.env, projectId);
+        if (!model.ok) throw new Error(model.reason);
+        spec.model = model.model;
+        spec.mcp = { url: `${origin}${mcpPath}` };
+        const secrets: Record<string, string> = { ALTAIR_MODEL_API_KEY: model.apiKey, ALTAIR_MCP_TOKEN: token };
+        const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
+        if (github) secrets.GITHUB_TOKEN = github;
+        const backend = sandboxBackend(this.env, threadId);
+        const unavailable = backend.unavailable(spec);
+        if (unavailable) throw new Error(unavailable);
+        // The sandbox's disk does not outlive it; the thread's workspace keeps the work between turns.
+        const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
+        if (workspace) {
+          spec.workspace = { remote: workspace.remote };
+          secrets.ALTAIR_WORKSPACE_TOKEN = workspace.token;
+        }
+        await this.launch(stored(spec), backend.id, () => backend.start(spec, secrets), language);
+        if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
+          await this.taskEvents(taskId, [
+            { type: "log", stream: "system", text: "This thread's workspace could not be opened, so this turn's work will not be saved for the next one." },
+          ]);
+        }
+      }
+      await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId });
     } catch (err) {
-      // launch() already finished the run as failed when it was recorded; finishAgentTurn reported it.
-      if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${spec.taskId}`[0]) {
+      // Once recorded, launch() finished the run as failed and finishAgentTurn reported it.
+      if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
         this.deleteMeta("agent_token");
         this.deleteMeta("agent_turn");
+        const message = err instanceof Error ? err.message : String(err);
         await project.sendMessage({
           threadId,
           authorKind: "system",
           authorId: SYSTEM_ID,
-          body: `Claude Code could not start on the computer: ${err instanceof Error ? err.message : String(err)}`,
+          body: `This thread's agent could not start: ${message}`,
         });
         await project.updateThread(threadId, { status: "failed" });
+        await project.notifyThread(threadId, "failed", message);
         await project.setActivity(threadId, false);
       }
     }
@@ -575,7 +352,7 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
         authorKind: "agent",
         authorId: THREAD_AGENT_ID,
-        body: taskReport(CLI_NAMES.claude, row, this.taskLog(taskId, 15)),
+        body: taskReport(this.toTask(row).title, row, this.taskLog(taskId, 15)),
         artifacts: pending,
       });
       pending = [];
@@ -591,18 +368,18 @@ export class ThreadAgent extends Agent<Env> {
       resolved,
     });
     const kind = failed ? "failed" : resolved ? "done" : (turn?.needs ?? ((replied || lastText) && !asked ? "ready" : null));
-    if (kind) await project.notifyThread(threadId, kind, lastText ?? row.summary ?? "");
+    if (kind) await project.notifyThread(threadId, kind, lastText ?? turn?.lastReply ?? row.summary ?? "");
     await project.setActivity(threadId, false);
     if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
   }
 
   /**
-   * One MCP message from the thread's Claude Code (POST /api/agent-mcp/:threadId). Only the token of the
-   * running agent turn is accepted. Callable over RPC.
+   * One MCP message from the thread's agent (POST /api/agent-mcp/:threadId). Only the token of the
+   * running turn is accepted. Callable over RPC.
    */
   async agentMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
     const hash = this.getMeta("agent_token");
-    if (!hash || !this.runningAgentTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
+    if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
     const answer = await handleMcp(await this.agentToolset(), { name: "altair", version: "1" }, body);
     return { ok: true, answer };
   }
@@ -613,17 +390,17 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
     const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
-    const unavailable = () => {
-      throw new Error("Not available here: you are the agent on the person's computer; use your own tools.");
-    };
-    return agentTools([
+    const track = (url: string) => trackPullRequest(this.env, projectId, threadId, url);
+    return [
       ...threadTools({
         reply: async (text, needs) => {
           const t = turn();
-          save({ pending: [], replied: true, needs: needs ?? t.needs });
+          save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs });
           const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: text, artifacts: t.pending });
           // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+          // A pull request it links to is followed even when it forgot track_pull_request.
+          for (const url of pullRequestUrls(text)) await track(url).catch((err) => console.warn("tracking pull request failed", url, err));
           return m;
         },
         publishArtifact: async (input) => {
@@ -645,9 +422,11 @@ export class ThreadAgent extends Agent<Env> {
         resolve: async () => save({ resolved: true }),
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
-        runTask: unavailable,
-        cancelTask: unavailable,
-        readWorkspace: unavailable,
+        trackPullRequest: async (url) => {
+          const pr = await track(url);
+          if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
+          return `Following ${pr.repo}#${pr.number}: its state shows in the thread, and CI failures, reviews and the merge will wake you.`;
+        },
       }),
       ...knowledgeTools({
         memoryRead: (name: string) => project.getMemory(name),
@@ -665,111 +444,10 @@ export class ThreadAgent extends Agent<Env> {
         defaultTimezone: turn()?.timezone ?? "UTC",
         threadId,
       }),
-    ]);
+    ];
   }
 
-  private runningAgentTask(): TaskRow | null {
-    const row = this.runningTask();
-    return row && (JSON.parse(row.spec) as StoredSpec).agent ? row : null;
-  }
-
-  // ---- Tasks (run_task) ---------------------------------------------------
-
-  /** Starts a task for run_task, or says why it cannot. Callable over RPC. */
-  async startTask(input: RunTaskInput): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-    try {
-      const { projectId } = this.ids();
-      this.assertIdle();
-      const place = await taskPlace(this.env, projectId);
-      if (place.kind === "error") throw new Error(place.message);
-      return {
-        ok: true,
-        message: place.kind === "local" ? await this.launchLocalTask(input, place.workspace) : await this.launchTask(input),
-      };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  private async launchTask(input: RunTaskInput): Promise<string> {
-    const { projectId, threadId } = this.ids();
-    this.assertIdle();
-
-    const harness = HarnessId.catch("opencode").parse(input.harness ?? this.env.RUNNER_HARNESS);
-    const secrets: Record<string, string> = {};
-    let model: TaskSpec["model"];
-    if (harness !== "shell") {
-      const m = await projectTaskModel(this.env, projectId);
-      if (!m.ok) throw new Error(m.reason);
-      if (harness === "claude-code" && m.model.kind !== "anthropic") {
-        throw new Error("Claude Code needs an Anthropic model, and this server uses another provider. Use opencode.");
-      }
-      model = m.model;
-      secrets.ALTAIR_MODEL_API_KEY = m.apiKey;
-      if (harness === "claude-code") secrets.ANTHROPIC_API_KEY = m.apiKey;
-    }
-
-    let repo: TaskSpec["repo"];
-    if (input.repo) {
-      const url = normalizeRepoUrl(input.repo);
-      if (!url) throw new Error(`"${input.repo}" is not a repository I can clone. Use owner/name or an https URL.`);
-      repo = { url, branch: input.branch || undefined, baseBranch: input.baseBranch || undefined };
-    } else if (input.openPr) {
-      throw new Error("open_pr needs a repo.");
-    }
-
-    const spec = TaskSpec.parse({
-      taskId: createId("task"),
-      title: input.title,
-      prompt: input.prompt,
-      harness,
-      repo,
-      openPr: input.openPr ?? false,
-      model,
-    });
-    if (spec.repo) {
-      const token = await repoToken(this.env, projectId, spec.repo.url, spec.timeoutSec);
-      if (token) secrets.GITHUB_TOKEN = token;
-      else if (spec.openPr) {
-        throw new Error("Opening a pull request needs write access to the repository. Ask the person to connect it to this project in the project's GitHub settings.");
-      }
-    }
-    const backend = sandboxBackend(this.env, threadId);
-    const unavailable = backend.unavailable(spec);
-    if (unavailable) throw new Error(unavailable);
-    // The sandbox's disk does not outlive it; the thread's workspace keeps the work between tasks.
-    const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
-    if (workspace) {
-      spec.workspace = { remote: workspace.remote };
-      secrets.ALTAIR_WORKSPACE_TOKEN = workspace.token;
-    }
-    await this.launch(spec, backend.id, () => backend.start(spec, secrets), input.language);
-    if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
-      await this.taskEvents(spec.taskId, [
-        { type: "log", stream: "system", text: "This thread's workspace could not be opened, so this task's work will not be saved for the next one." },
-      ]);
-    }
-    await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId: spec.taskId });
-    return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
-  }
-
-  private async launchLocalTask(input: RunTaskInput, workspace: ProjectWorkspace): Promise<string> {
-    const { projectId, threadId } = this.ids();
-    const spec = TaskSpec.parse({ taskId: createId("task"), title: input.title, prompt: input.prompt });
-    const backend = localBackend(this.env, { projectId, threadId, workspace });
-    const unavailable = backend.unavailable(spec);
-    if (unavailable) throw new Error(unavailable);
-    // The person's own CLI does the work, so the task shows that CLI instead of an Altair harness.
-    await this.launch(
-      { ...spec, harness: workspace.cli, runnerId: workspace.runnerId },
-      backend.id,
-      () => backend.start(spec, {}),
-      input.language,
-    );
-    await this.taskEvents(spec.taskId, LOCAL_PHASES);
-    return `Started "${spec.title}" on the person's computer, with ${CLI_NAMES[workspace.cli]} in ${workspace.path}. Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
-  }
-
+  // ---- Runs -----------------------------------------------------------------
   /** Records a task, starts it on its backend and shows it. */
   private async launch(spec: StoredSpec, backend: string, start: () => Promise<void>, language?: string) {
     // Recorded before starting: a fast task can report back before start() returns.
@@ -832,8 +510,15 @@ export class ThreadAgent extends Agent<Env> {
     if (!projectId || !threadId) return;
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     if (lines.length) await project.broadcastTask({ type: "task.output", taskId, threadId, lines });
-    this.setMeta("task_checklist", renderChecklist(spec.title, progress, row.language));
-    await this.showStatus();
+    // An older loop's task nested its steps under the plan; an agent turn's plan is the agent's own,
+    // and its latest step shows as the thread's activity (the runner sets it for the person's computer).
+    if (!spec.agent) {
+      this.setMeta("task_checklist", renderChecklist(spec.title, progress, row.language));
+      await this.showStatus();
+    } else if (!finished && row.backend !== "local") {
+      const step = events.findLast((e) => e.type === "tool");
+      if (step?.type === "tool") await project.setActivity(threadId, true, step.title.slice(0, 200));
+    }
     if (finished) {
       if (spec.model) {
         const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
@@ -847,22 +532,16 @@ export class ThreadAgent extends Agent<Env> {
           console.error("tracking pull request failed", progress.prUrl, err),
         );
       }
-      // The agent reads the result and tells the person; an agent turn's run was the agent itself.
+      // A turn's run was the agent itself; an older loop's task result wakes the thread.
       if (spec.agent) await this.finishAgentTurn(taskId);
       else await this.markDirty();
     }
   }
 
-  /** Stops the running task. Returns what the model is told. */
-  async cancelRunningTask(): Promise<string> {
+  /** Stops the running turn, if any. */
+  private async cancelRunningTask(): Promise<void> {
     const row = this.runningTask();
-    if (!row) return "No task is running.";
-    try {
-      await this.backendOf(row).cancel(row.id);
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
-    return `Cancelling "${this.toTask(row).title}". Its result arrives in a later turn.`;
+    if (row) await this.backendOf(row).cancel(row.id).catch((err) => console.warn("cancel failed", err));
   }
 
   /** Every task in this thread with its recent terminal output. Callable over RPC. */
@@ -957,13 +636,6 @@ export class ThreadAgent extends Agent<Env> {
     return { projectId, threadId };
   }
 
-  private assertIdle() {
-    const running = this.runningTask();
-    if (running) {
-      throw new Error(`"${this.toTask(running).title}" is still running. Wait for its result, or cancel it with cancel_task.`);
-    }
-  }
-
   private async publishTask(taskId: string) {
     const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
     const projectId = this.getMeta("project_id");
@@ -996,23 +668,6 @@ export class ThreadAgent extends Agent<Env> {
     return this.sql<LogRow>`SELECT stream, text FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT ${limit}`
       .reverse()
       .map((r) => ({ stream: r.stream, text: r.text }));
-  }
-
-  /** What a finished task took, for the stats under the reply that reports it. */
-  private taskStats(row: TaskRow): TaskStats {
-    const spec = JSON.parse(row.spec) as StoredSpec;
-    const { usage } = JSON.parse(row.progress) as TaskProgress;
-    const model = spec.model?.id ?? null;
-    return {
-      title: spec.title,
-      harness: spec.harness,
-      runtime: taskRuntime(row.backend),
-      model,
-      durationMs: Math.max(0, Date.parse(row.finished_at ?? row.created_at) - Date.parse(row.created_at)),
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      costMicros: taskCostMicros(this.env, model, usage),
-    };
   }
 
   private toTask(row: TaskRow): Task {

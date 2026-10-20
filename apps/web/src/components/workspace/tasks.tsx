@@ -22,7 +22,7 @@ type TaskData = { projectId: string; threadId: string; tasks: Task[]; output: Re
 
 /**
  * Fills the workspace's Terminal and Changes tabs with the tasks the thread
- * agent ran (run_task): live terminal output, and what each task changed.
+ * agent ran (one per turn): live terminal output, and what each run changed.
  */
 export function withTasks(tabs: WorkspaceTab[], data: TaskData, t: Translate): WorkspaceTab[] {
   if (data.tasks.length === 0) return tabs;
