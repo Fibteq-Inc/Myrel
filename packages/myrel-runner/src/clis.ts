@@ -46,8 +46,15 @@ export type CliAdapter = {
 /** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__myrel__<tool> in Claude Code. */
 export const MYREL_MCP_SERVER = "myrel";
 
-/** The thread's MCP endpoint for one agent run. */
-export type AgentMcp = { url: string; token: string; dir: string };
+/**
+ * The thread's MCP endpoint for one agent run, and its connectors: remote ones on the same server
+ * with the same token, commands started on this computer with their own environment.
+ */
+export type AgentMcp = { url: string; token: string; dir: string; connectors?: AgentServer[] };
+
+export type AgentServer =
+  | { transport: "http"; name: string; url: string }
+  | { transport: "stdio"; name: string; command: string; args: string[]; env: Record<string, string> };
 
 /** Env var that carries the MCP token for CLIs that read it from the environment. */
 const TOKEN_VAR = "MYREL_MCP_TOKEN";
@@ -73,11 +80,16 @@ const claude: CliAdapter = {
     ...(resume ? ["--resume", resume] : []),
     ...extra,
   ],
-  async agent({ url, token, dir }) {
-    const config = await privateFile(dir, "mcp.json", {
-      mcpServers: { [MYREL_MCP_SERVER]: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
-    });
-    return { args: ["--mcp-config", config, "--allowedTools", `mcp__${MYREL_MCP_SERVER}`] };
+  async agent({ url, token, dir, connectors = [] }) {
+    const headers = { Authorization: `Bearer ${token}` };
+    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers } };
+    for (const c of connectors) {
+      servers[c.name] =
+        c.transport === "http" ? { type: "http", url: c.url, headers } : { type: "stdio", command: c.command, args: c.args, env: c.env };
+    }
+    const config = await privateFile(dir, "mcp.json", { mcpServers: servers });
+    const allowed = [MYREL_MCP_SERVER, ...connectors.map((c) => c.name)].map((name) => `mcp__${name}`).join(",");
+    return { args: ["--mcp-config", config, "--allowedTools", allowed] };
   },
   line(line, state) {
     const event = parseJson(line);
@@ -126,15 +138,26 @@ const codex: CliAdapter = {
     "-",
   ],
   // Config overrides for one run; the token stays in the environment.
-  agent: async ({ url, token }) => ({
-    args: [
+  agent: async ({ url, token, connectors = [] }) => {
+    const remote = (name: string, at: string) => [
       "-c",
-      `mcp_servers.${MYREL_MCP_SERVER}.url=${JSON.stringify(url)}`,
+      `mcp_servers.${name}.url=${JSON.stringify(at)}`,
       "-c",
-      `mcp_servers.${MYREL_MCP_SERVER}.bearer_token_env_var=${JSON.stringify(TOKEN_VAR)}`,
-    ],
-    env: { [TOKEN_VAR]: token },
-  }),
+      `mcp_servers.${name}.bearer_token_env_var=${JSON.stringify(TOKEN_VAR)}`,
+    ];
+    const args = remote(MYREL_MCP_SERVER, url);
+    for (const c of connectors) {
+      if (c.transport === "http") {
+        args.push(...remote(c.name, c.url));
+        continue;
+      }
+      // TOML: a JSON string array is a TOML array; the environment is an inline table.
+      const env = Object.entries(c.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`);
+      args.push("-c", `mcp_servers.${c.name}.command=${JSON.stringify(c.command)}`, "-c", `mcp_servers.${c.name}.args=${JSON.stringify(c.args)}`);
+      if (env.length) args.push("-c", `mcp_servers.${c.name}.env={ ${env.join(", ")} }`);
+    }
+    return { args, env: { [TOKEN_VAR]: token } };
+  },
   line(line, state) {
     const event = parseJson(line);
     if (!event) return;
@@ -168,10 +191,14 @@ const gemini: CliAdapter = {
     ...extra,
   ],
   // Gemini CLI has no flag for an MCP config, so the run gets its own system settings file.
-  async agent({ url, token, dir }) {
-    const settings = await privateFile(dir, "settings.json", {
-      mcpServers: { [MYREL_MCP_SERVER]: { httpUrl: url, headers: { Authorization: `Bearer ${token}` }, trust: true } },
-    });
+  async agent({ url, token, dir, connectors = [] }) {
+    const headers = { Authorization: `Bearer ${token}` };
+    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { httpUrl: url, headers, trust: true } };
+    for (const c of connectors) {
+      servers[c.name] =
+        c.transport === "http" ? { httpUrl: c.url, headers, trust: true } : { command: c.command, args: c.args, env: c.env, trust: true };
+    }
+    const settings = await privateFile(dir, "settings.json", { mcpServers: servers });
     return { args: [], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") } };
   },
   line() {},

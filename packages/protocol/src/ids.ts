@@ -12,6 +12,7 @@ export const ID_PREFIXES = {
   artifact: "art",
   routine: "rtn",
   notification: "ntf",
+  connector: "mcp",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

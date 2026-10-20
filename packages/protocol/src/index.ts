@@ -15,3 +15,4 @@ export * from "./notifications";
 export * from "./cron";
 export * from "./billing";
 export * from "./links";
+export * from "./connectors";

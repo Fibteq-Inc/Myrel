@@ -28,6 +28,8 @@ const PYTHON_PACKAGES = [
   "reportlab==4.4.4",
   "pillow==11.3.0",
   "matplotlib==3.10.7",
+  // uvx starts Python MCP servers people connect (see connectors).
+  "uv==0.12.24",
 ];
 
 /** The user harnesses run as: Claude Code refuses to skip permissions as root. */
