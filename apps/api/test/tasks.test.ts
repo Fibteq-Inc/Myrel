@@ -204,6 +204,14 @@ describe("run_task", () => {
     ws.close();
   });
 
+  it("tells clients a thread stopped even when the project forgot it was working", async () => {
+    const { ws, events, projectAgent, thread } = await threadSetup();
+    // As after an eviction mid-turn: the in-memory activity is gone, but clients still show it.
+    await projectAgent.setActivity(thread.id, false);
+    await until(() => events.some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active), "the stop");
+    ws.close();
+  });
+
   it("reports what it cannot do as a tool error, without starting anything", async () => {
     const { project, ws, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });

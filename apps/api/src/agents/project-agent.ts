@@ -427,7 +427,9 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Agents report when they start and stop working, and optionally what they are doing. Callable over RPC. */
   setActivity(threadId: string | null, active: boolean, label?: string): void {
-    if (active === this.active.has(threadId) && label === this.active.get(threadId)) return;
+    // A stop always goes out: the map lives in memory and is empty again after the object was evicted
+    // mid-turn, and skipping the stop then left clients showing "Thinking" for good.
+    if (active && this.active.has(threadId) && label === this.active.get(threadId)) return;
     if (active) this.active.set(threadId, label);
     else this.active.delete(threadId);
     this.emit({ type: "agent.activity", threadId, active, label });

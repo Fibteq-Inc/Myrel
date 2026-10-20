@@ -106,6 +106,13 @@ describe("project state", () => {
     expect(s.active).toEqual({ [t.id]: true });
   });
 
+  it("drops stale activity on a resync; the server sends the live ones again", () => {
+    let s = applyEvent(emptyProjectState, { type: "agent.activity", threadId: "t1", active: true, label: "Running tests" });
+    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [], reactions: [], artifacts: [], routines: [] });
+    expect(s.active).toEqual({});
+    expect(s.progress).toEqual({});
+  });
+
   it("parses a status checklist", () => {
     expect(parseChecklist("Research\n\n✓ Read docs\n**✓ Compared options**\n✱ Writing summary\n○ Reply")).toEqual({
       title: "Research",
