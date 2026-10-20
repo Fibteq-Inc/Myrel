@@ -73,6 +73,13 @@ export const projectSettingsQuery = (id: string) =>
 export const projectInvitesQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "invites"], queryFn: () => api.listProjectInvites(id) });
 
+/** A person's own connectors, or a project's. */
+export const connectorsQuery = (projectId?: string) =>
+  queryOptions({
+    queryKey: projectId ? ["projects", projectId, "connectors"] : ["connectors"],
+    queryFn: () => api.listConnectors(projectId),
+  });
+
 /** The signed-in user's notifications. Polled so the bell updates on any page. */
 export const notificationsQuery = queryOptions({
   queryKey: ["notifications"],

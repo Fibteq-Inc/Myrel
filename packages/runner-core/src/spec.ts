@@ -45,6 +45,23 @@ export const WorkspaceSpec = z.object({
 });
 export type WorkspaceSpec = z.infer<typeof WorkspaceSpec>;
 
+/**
+ * A connector (MCP server) the thread's agent gets besides Myrel's own tools. A remote one is
+ * reached through Myrel's gateway with the same token as Myrel's tools (MYREL_MCP_TOKEN). A command
+ * starts next to the harness; `env` maps each of its variables to the secret that holds the value.
+ */
+export const McpConnector = z.discriminatedUnion("transport", [
+  z.object({ transport: z.literal("http"), name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/), url: z.string().url() }),
+  z.object({
+    transport: z.literal("stdio"),
+    name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/),
+    command: z.string().min(1).max(200),
+    args: z.array(z.string().max(2000)).max(50).default([]),
+    env: z.record(z.string(), z.string().regex(/^[A-Z_][A-Z0-9_]*$/)).default({}),
+  }),
+]);
+export type McpConnector = z.infer<typeof McpConnector>;
+
 /** One unit of work handed to a runner. Stored with the task, so it holds no secrets. */
 export const TaskSpec = z.object({
   taskId: z.string().min(1),
@@ -60,7 +77,7 @@ export const TaskSpec = z.object({
    * The thread's MCP endpoint, when the harness runs as the thread's agent and talks to people
    * through Myrel's tools. Its bearer token is a secret (MYREL_MCP_TOKEN).
    */
-  mcp: z.object({ url: z.string().url() }).optional(),
+  mcp: z.object({ url: z.string().url(), connectors: z.array(McpConnector).max(30).optional() }).optional(),
   timeoutSec: z
     .number()
     .int()

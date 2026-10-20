@@ -86,9 +86,20 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
   };
   if (spec.mcp) {
     // The token is read from the environment so it never lands in the config.
-    config.mcp = {
-      myrel: { type: "remote", url: spec.mcp.url, enabled: true, headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" } },
-    };
+    const auth = { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" };
+    const servers: Record<string, unknown> = { myrel: { type: "remote", url: spec.mcp.url, enabled: true, headers: auth } };
+    for (const c of spec.mcp.connectors ?? []) {
+      servers[c.name] =
+        c.transport === "http"
+          ? { type: "remote", url: c.url, enabled: true, headers: auth }
+          : {
+              type: "local",
+              command: [c.command, ...c.args],
+              enabled: true,
+              environment: Object.fromEntries(Object.entries(c.env).map(([name, secret]) => [name, `{env:${secret}}`])),
+            };
+    }
+    config.mcp = servers;
   }
   const m = spec.model;
   if (!m) return config;

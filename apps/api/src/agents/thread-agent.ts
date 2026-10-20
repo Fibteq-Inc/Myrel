@@ -1,4 +1,5 @@
 import {
+  type AgentConnector,
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
@@ -15,12 +16,14 @@ import {
   reduceTask,
   renderChecklist,
   type RunnerBackend,
+  type McpConnector,
   type RunnerEvent,
   type TaskProgress,
   TaskSpec,
   workingBranch,
 } from "@myrel/runner-core";
 import { Agent, getAgentByName } from "agents";
+import { readSecrets, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
@@ -247,8 +250,11 @@ export class ThreadAgent extends Agent<Env> {
       now: new Date(),
     });
     const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
+    // The person the thread works for: their own connectors are on for it.
+    const requester = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null;
     await this.startAgentTurn({
       prompt,
+      requester,
       place,
       timezone: ctx.defaultTimezone,
       language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
@@ -276,6 +282,8 @@ export class ThreadAgent extends Agent<Env> {
     language: string;
     /** Files attached to the thread's messages, oldest first: a cloud turn finds them already downloaded. */
     attachments: Attachment[];
+    /** Who the thread works for, whose own connectors it may use. */
+    requester: string | null;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -304,17 +312,27 @@ export class ThreadAgent extends Agent<Env> {
     await project.setActivity(threadId, true);
     try {
       const mcpPath = `/api/agent-mcp/${threadId}`;
-      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context), timeoutSec: AGENT_TURN_SEC });
+      const connectors = await this.turnConnectors(place, input.requester);
+      const infos = connectors.map((c) => ({ name: c.name, title: c.title }));
+      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context, infos), timeoutSec: AGENT_TURN_SEC });
       // The stored spec keeps only the start of the prompt; the runner gets all of it.
       const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
       if (place.kind === "local") {
         const { workspace } = place;
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent: { mcpPath, token } });
+        const local: AgentConnector[] = await Promise.all(
+          connectors.map(async (c): Promise<AgentConnector> =>
+            c.transport === "http"
+              ? { transport: "http", name: c.name, path: `${mcpPath}/c/${c.name}` }
+              : { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env: await readSecrets(this.env, { id: c.id, secret: c.secret }) },
+          ),
+        );
+        const agent = { mcpPath, token, ...(local.length && { connectors: local }) };
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
-        const local = { ...spec, title: CLI_NAMES[workspace.cli] };
-        await this.launch(stored(local, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(local, {}), language);
+        const run = { ...spec, title: CLI_NAMES[workspace.cli] };
+        await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
       } else {
         const allowed = await canUseSandbox(this.env, projectId);
@@ -324,9 +342,22 @@ export class ThreadAgent extends Agent<Env> {
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
         spec.model = model.model;
-        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context);
-        spec.mcp = { url: `${origin}${mcpPath}` };
+        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context, infos);
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
+        // A command's variables travel as secrets, so the stored spec only names them.
+        const cloud: McpConnector[] = await Promise.all(
+          connectors.map(async (c, i): Promise<McpConnector> => {
+            if (c.transport === "http") return { transport: "http", name: c.name, url: `${origin}${mcpPath}/c/${c.name}` };
+            const vars = Object.entries(await readSecrets(this.env, { id: c.id, secret: c.secret }));
+            const env: Record<string, string> = {};
+            vars.forEach(([name, value], j) => {
+              env[name] = `MYREL_CONNECTOR_${i}_${j}`;
+              secrets[`MYREL_CONNECTOR_${i}_${j}`] = value;
+            });
+            return { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env };
+          }),
+        );
+        spec.mcp = { url: `${origin}${mcpPath}`, connectors: cloud };
         const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
         if (github) secrets.GITHUB_TOKEN = github;
         const files = await this.attachmentLinks(origin, input.attachments);
@@ -353,6 +384,7 @@ export class ThreadAgent extends Agent<Env> {
       if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
         this.deleteMeta("agent_token");
         this.deleteMeta("agent_turn");
+        this.deleteMeta("agent_connectors");
         const message = err instanceof Error ? err.message : String(err);
         await project.sendMessage({
           threadId,
@@ -394,6 +426,7 @@ export class ThreadAgent extends Agent<Env> {
     const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
     this.deleteMeta("agent_token");
     this.deleteMeta("agent_turn");
+    this.deleteMeta("agent_connectors");
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     let pending = turn?.pending ?? [];
@@ -451,6 +484,38 @@ export class ThreadAgent extends Agent<Env> {
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
     const answer = await handleMcp(await this.agentToolset(), { name: "myrel", version: "1" }, body);
     return { ok: true, answer };
+  }
+
+  /**
+   * The connectors this turn's agent gets (see turnConnectors), remembered so the gateway knows
+   * which remote ones the turn's token opens. None from a runner too old to pass them on.
+   */
+  private async turnConnectors(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnConnector[]> {
+    const { projectId } = this.ids();
+    if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "connectors"))) return [];
+    const connectors = await turnConnectors(this.env, { projectId, userId: requester, place: place.kind }).catch((err) => {
+      console.error("connectors", err);
+      return [];
+    });
+    this.setMeta("agent_connectors", JSON.stringify(connectors.map((c) => ({ id: c.id, name: c.name, transport: c.transport }))));
+    return connectors;
+  }
+
+  /**
+   * Where a remote connector's call from the running turn goes (GET/POST/DELETE
+   * /api/agent-mcp/:threadId/c/:name), with its credentials. Only the running turn's token opens
+   * it, and only for a connector that turn was given. Callable over RPC.
+   */
+  async connectorTarget(
+    token: string,
+    name: string,
+  ): Promise<{ ok: true; url: string; headers: Record<string, string> } | { ok: false; error: "unauthorized" | "not_found" }> {
+    const hash = this.getMeta("agent_token");
+    if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false, error: "unauthorized" };
+    const given = JSON.parse(this.getMeta("agent_connectors") ?? "[]") as { id: string; name: string; transport: string }[];
+    const connector = given.find((c) => c.name === name && c.transport === "http");
+    const target = connector ? await remoteTarget(this.env, connector.id) : null;
+    return target ? { ok: true, ...target } : { ok: false, error: "not_found" };
   }
 
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */

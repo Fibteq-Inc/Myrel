@@ -91,6 +91,28 @@ describe("opencode", () => {
       },
     });
   });
+
+  it("adds connectors: remote ones through Myrel with the same token, commands with their variables from secrets", () => {
+    const config = opencodeConfig(
+      spec({
+        mcp: {
+          url: "https://myrel.test/api/agent-mcp/thr_1",
+          connectors: [
+            { transport: "http", name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
+            { transport: "stdio", name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "MYREL_CONNECTOR_1_0" } },
+          ],
+        },
+      }),
+    );
+    const mcp = config.mcp as Record<string, unknown>;
+    expect(mcp.linear).toEqual({
+      type: "remote",
+      url: "https://myrel.test/api/agent-mcp/thr_1/c/linear",
+      enabled: true,
+      headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" },
+    });
+    expect(mcp.db).toEqual({ type: "local", command: ["npx", "-y", "pg-mcp"], enabled: true, environment: { DATABASE_URL: "{env:MYREL_CONNECTOR_1_0}" } });
+  });
 });
 
 describe("claude code", () => {

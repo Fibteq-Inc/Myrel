@@ -6,7 +6,9 @@ import type {
   AdminSettings,
   BillingSummary,
   ApiKey,
+  Connector,
   CreateApiKeyInput,
+  CreateConnectorInput,
   CreateInviteInput,
   CreateProjectInput,
   Instructions,
@@ -36,6 +38,7 @@ import type {
   ThreadFiles,
   TerminalLine,
   UpdateAdminSettingsInput,
+  UpdateConnectorInput,
   UpdateProjectSettingsInput,
   CreateRoutineInputRaw,
   Notification,
@@ -262,6 +265,58 @@ export class ApiClient {
 
   async declineInvite(id: string) {
     await this.request(`/api/account/invites/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  // --- connectors (MCP servers) ---
+
+  /** A person's own connectors, or a project's when `projectId` is given. */
+  private connectorsPath(projectId?: string) {
+    return projectId ? `/api/projects/${encodeURIComponent(projectId)}/connectors` : "/api/account/connectors";
+  }
+
+  async listConnectors(projectId?: string) {
+    return (await this.request<{ connectors: Connector[] }>(this.connectorsPath(projectId))).connectors;
+  }
+
+  /** Adds a connector. An OAuth one answers with `authorizeUrl`: open it so the person signs in. */
+  createConnector(input: CreateConnectorInput, projectId?: string) {
+    return this.request<{ connector: Connector; authorizeUrl?: string }>(this.connectorsPath(projectId), {
+      method: "POST",
+      body: input,
+    });
+  }
+
+  async updateConnector(id: string, input: UpdateConnectorInput, projectId?: string) {
+    return (
+      await this.request<{ connector: Connector }>(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: input,
+      })
+    ).connector;
+  }
+
+  async deleteConnector(id: string, projectId?: string) {
+    await this.request(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** Reconnects and refreshes the tool list. */
+  async checkConnector(id: string, projectId?: string) {
+    return (
+      await this.request<{ connector: Connector }>(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}/check`, {
+        method: "POST",
+        body: {},
+      })
+    ).connector;
+  }
+
+  /** A sign-in link for an OAuth connector. */
+  async authorizeConnector(id: string, projectId?: string) {
+    return (
+      await this.request<{ authorizeUrl: string }>(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}/authorize`, {
+        method: "POST",
+        body: {},
+      })
+    ).authorizeUrl;
   }
 
   // --- server administration ---

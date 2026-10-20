@@ -1,14 +1,32 @@
 import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { api, meQuery, sessionQuery } from "../../../lib/api";
 import { Button, errorMessage, Input } from "../../../lib/ui";
 
+type SettingsSearch = { section?: string; connector?: string; result?: string; project?: string };
+
 export const Route = createFileRoute("/_app/settings/")({
+  // A connector's OAuth sign-in comes back to /settings?section=connectors&connector=<id>&result=ok|error.
+  validateSearch: (search: Record<string, unknown>): SettingsSearch => {
+    const out: SettingsSearch = {};
+    for (const k of ["section", "connector", "result", "project"] as const) {
+      if (typeof search[k] === "string") out[k] = search[k];
+    }
+    return out;
+  },
+  beforeLoad: ({ search }) => {
+    if (search.section !== "connectors") return;
+    const back = { connector: search.connector, result: search.result };
+    if (search.project) {
+      throw redirect({ to: "/settings/projects/$projectId", params: { projectId: search.project }, search: back });
+    }
+    throw redirect({ to: "/settings/connectors", search: back });
+  },
   component: AccountSettings,
 });
 

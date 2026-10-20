@@ -442,3 +442,38 @@ export const stripeEvents = sqliteTable("stripe_events", {
   type: text("type").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+/**
+ * Connectors: MCP servers the thread's agent may use (see @myrel/protocol connectors.ts). A row
+ * belongs to a person (owner_id) or to a project (project_id), never both. `secret` is AES-GCM
+ * ciphertext of a JSON object (headers for http, environment variables for stdio), bound to the
+ * row id; `secret_names` lists its keys, the only part ever shown again.
+ */
+export const connectors = sqliteTable(
+  "connectors",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    transport: text("transport", { enum: ["http", "stdio"] }).notNull(),
+    url: text("url"),
+    /** How a remote server is signed in to; "oauth" keeps the client, tokens and a pending sign-in in `secret`. */
+    auth: text("auth", { enum: ["none", "headers", "oauth"] }).notNull().default("headers"),
+    command: text("command"),
+    args: text("args", { mode: "json" }).$type<string[]>().notNull().default([]),
+    runsOn: text("runs_on", { enum: ["cloud", "local", "both"] }).notNull().default("both"),
+    secret: text("secret"),
+    secretNames: text("secret_names", { mode: "json" }).$type<string[]>().notNull().default([]),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    status: text("status", { enum: ["unknown", "ok", "error", "needs_auth"] }).notNull().default("unknown"),
+    lastError: text("last_error"),
+    tools: text("tools", { mode: "json" }).$type<{ name: string; description?: string }[]>().notNull().default([]),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("connectors_owner_slug_idx").on(t.ownerId, t.slug),
+    uniqueIndex("connectors_project_slug_idx").on(t.projectId, t.slug),
+  ],
+);

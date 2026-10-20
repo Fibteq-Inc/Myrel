@@ -14,3 +14,4 @@ export * from "./routines";
 export * from "./notifications";
 export * from "./cron";
 export * from "./billing";
+export * from "./connectors";

@@ -80,8 +80,11 @@ export class TaskRunner {
     let agent: { args: string[]; env?: Record<string, string> } = { args: [] };
     if (task.agent && config.server) {
       agentDir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
-      const url = `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`;
-      agent = await adapter.agent({ url, token: task.agent.token, dir: agentDir });
+      const origin = config.server.replace(/\/$/, "");
+      const connectors = (task.agent.connectors ?? []).map((c) =>
+        c.transport === "http" ? { transport: c.transport, name: c.name, url: `${origin}${c.path}` } : c,
+      );
+      agent = await adapter.agent({ url: `${origin}${task.agent.mcpPath}`, token: task.agent.token, dir: agentDir, connectors });
     }
     const cleanup = () => (agentDir ? rm(agentDir, { recursive: true, force: true }).catch(() => {}) : Promise.resolve());
 

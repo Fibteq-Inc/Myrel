@@ -1,7 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
-import { ChevronLeft, CreditCard, Folder, KeyRound, Mail, Server, UserRound } from "lucide-react";
+import { ChevronLeft, CreditCard, Folder, KeyRound, Mail, Plug, Server, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { meQuery, myInvitesQuery, projectsQuery, serverInfoQuery } from "../../lib/api";
 
@@ -38,6 +38,9 @@ function SettingsLayout() {
           )}
           <NavItem to="/settings/keys" icon={<KeyRound size={15} />}>
             {t("settings.keys")}
+          </NavItem>
+          <NavItem to="/settings/connectors" icon={<Plug size={15} />}>
+            {t("settings.connectors")}
           </NavItem>
           <NavItem to="/settings/invites" icon={<Mail size={15} />}>
             {t("settings.invites")}
@@ -89,7 +92,7 @@ function NavItem({
   exact,
   children,
 }: {
-  to: "/settings" | "/settings/billing" | "/settings/keys" | "/settings/invites" | "/settings/server";
+  to: "/settings" | "/settings/billing" | "/settings/keys" | "/settings/connectors" | "/settings/invites" | "/settings/server";
   icon: ReactNode;
   exact?: boolean;
   children: ReactNode;
