@@ -2,6 +2,8 @@
 
 **An open-source, self-hostable workspace where AI agents do the work inside your projects.**
 
+![Asking Myrel for a landing page: the coordinator opens a thread, the thread agent plans and builds it in the cloud sandbox, and publishes it as an artifact](docs/images/demo.gif)
+
 Fibteq Myrel gives a team a project chat with a coordinator agent in it. Ask for
 something and the coordinator opens a thread for it; a thread agent takes the
 task, shows its progress as a live checklist, and answers in the thread. When
