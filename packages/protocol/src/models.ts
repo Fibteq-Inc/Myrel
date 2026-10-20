@@ -188,6 +188,14 @@ export const ProjectActivity = z.object({
 });
 export type ProjectActivity = z.infer<typeof ProjectActivity>;
 
+/** What a project's model calls have cost, for the project list. Priced calls only. */
+export const ProjectCost = z.object({
+  /** Since the start of this calendar month (UTC), the period plan limits count. */
+  monthMicros: z.number().int().nonnegative(),
+  totalMicros: z.number().int().nonnegative(),
+});
+export type ProjectCost = z.infer<typeof ProjectCost>;
+
 export const Project = z.object({
   id: ProjectId,
   name: z.string().min(1).max(120),
@@ -195,6 +203,8 @@ export const Project = z.object({
   createdAt: Timestamp,
   /** Missing from servers older than this field. */
   activity: ProjectActivity.optional(),
+  /** Missing from servers older than this field. */
+  cost: ProjectCost.optional(),
 });
 export type Project = z.infer<typeof Project>;
 

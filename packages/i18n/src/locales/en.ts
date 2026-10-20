@@ -65,6 +65,8 @@ export const en = {
   "projects.member": "Member",
   "projects.working": { one: "1 working", other: "{count} working" },
   "projects.waiting": { one: "1 waiting on you", other: "{count} waiting on you" },
+  "projects.costMonth": "This month: {cost}",
+  "projects.costTotal": "All time: {cost}",
 
   // Project sidebar
   "sidebar.searchThreads": "Search threads",

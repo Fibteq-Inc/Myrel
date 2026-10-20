@@ -7,6 +7,7 @@ import {
   type Invite,
   type Member,
   type Project,
+  type ProjectCost,
   type ProjectRole,
   type ProjectSettings,
   UpdateMemberInput,
@@ -42,13 +43,17 @@ const projectColumns = {
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get("/", async (c) => {
-    const rows = await createDb(c.env.DB)
-      .select(projectColumns)
-      .from(projectMembers)
-      .innerJoin(projects, eq(projects.id, projectMembers.projectId))
-      .where(eq(projectMembers.userId, c.get("user").id))
-      .orderBy(desc(projects.createdAt));
-    return c.json({ projects: rows.map(toProject) });
+    const userId = c.get("user").id;
+    const [rows, costs] = await Promise.all([
+      createDb(c.env.DB)
+        .select(projectColumns)
+        .from(projectMembers)
+        .innerJoin(projects, eq(projects.id, projectMembers.projectId))
+        .where(eq(projectMembers.userId, userId))
+        .orderBy(desc(projects.createdAt)),
+      projectCosts(c.env.DB, userId),
+    ]);
+    return c.json({ projects: rows.map((row) => ({ ...toProject(row), cost: costs.get(row.id) ?? emptyCost })) });
   })
   .post("/", async (c) => {
     const input = CreateProjectInput.safeParse(await c.req.json().catch(() => null));
@@ -470,6 +475,28 @@ function toProject(row: {
 }): Project {
   const { activeCount, waitingCount, ...rest } = row;
   return { ...rest, createdAt: row.createdAt.toISOString(), activity: { working: activeCount, waiting: waitingCount } };
+}
+
+const emptyCost: ProjectCost = { monthMicros: 0, totalMicros: 0 };
+
+/** This month's and all-time model cost of every project the user is in, keyed by project. */
+async function projectCosts(d1: D1Database, userId: string) {
+  const now = new Date();
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const { results } = await d1
+    .prepare(
+      `SELECT project_id AS projectId,
+         COALESCE(SUM(CASE WHEN created_at >= ?2 THEN cost_micros END), 0) AS monthMicros,
+         COALESCE(SUM(cost_micros), 0) AS totalMicros
+       FROM usage_events
+       WHERE project_id IN (SELECT project_id FROM project_members WHERE user_id = ?1)
+       GROUP BY project_id`,
+    )
+    .bind(userId, monthStart)
+    .all<{ projectId: string; monthMicros: number; totalMicros: number }>();
+  return new Map(
+    results.map((r) => [r.projectId, { monthMicros: Number(r.monthMicros), totalMicros: Number(r.totalMicros) }]),
+  );
 }
 
 function canManage(role: ProjectRole) {

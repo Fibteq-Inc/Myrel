@@ -62,6 +62,8 @@ export const tr: Catalog = {
   "projects.member": "Üye",
   "projects.working": { one: "1 iş çalışıyor", other: "{count} iş çalışıyor" },
   "projects.waiting": { one: "1 iş seni bekliyor", other: "{count} iş seni bekliyor" },
+  "projects.costMonth": "Bu ay: {cost}",
+  "projects.costTotal": "Toplam: {cost}",
 
   // Project sidebar
   "sidebar.searchThreads": "Thread'lerde ara",
