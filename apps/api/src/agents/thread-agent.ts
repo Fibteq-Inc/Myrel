@@ -39,7 +39,7 @@ import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
 import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
-import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
+import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
 import {
   ACCESS_LEVEL_DENIED,
   ACCESS_WAIT_MS,
@@ -111,6 +111,11 @@ type AgentTurn = {
   /** When it replied with its plan done; the turn ends a minute later unless it moves on. */
   doneReplyAt?: number;
 };
+
+/** The GitHub branch where a cloud turn leaves the unpushed work of the repositories it cloned. */
+function saveBranch(threadId: string): string {
+  return `myrel/saved/${threadId}`;
+}
 
 /** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
 const MAX_AGENT_PROMPT = 90_000;
@@ -342,7 +347,7 @@ export class ThreadAgent extends Agent<Env> {
             computer: place.workspace.runnerName,
             asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
           }
-        : { kind: "cloud", images: false };
+        : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
@@ -397,7 +402,8 @@ export class ThreadAgent extends Agent<Env> {
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
         spec.model = model.model;
-        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context, infos, skills);
+        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId) }, context, infos, skills);
+        spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
         // A command's variables travel as secrets, so the stored spec only names them.
@@ -414,15 +420,18 @@ export class ThreadAgent extends Agent<Env> {
           }),
         );
         spec.mcp = { url: `${origin}${mcpPath}`, connectors: cloud };
-        const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
+        // The sandbox's disk does not outlive it; the thread's workspace keeps the work outside the
+        // repositories between turns (the repositories' own work goes to GitHub, see saveRepos).
+        const [github, files, workspace] = await Promise.all([
+          projectGithubToken(this.env, projectId, spec.timeoutSec),
+          this.attachmentLinks(origin, input.attachments),
+          threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC),
+        ]);
         if (github) secrets.GITHUB_TOKEN = github;
-        const files = await this.attachmentLinks(origin, input.attachments);
         if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
         const backend = sandboxBackend(this.env, threadId);
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
-        // The sandbox's disk does not outlive it; the thread's workspace keeps the work between turns.
-        const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
         if (workspace) {
           spec.workspace = { remote: workspace.remote };
           secrets.MYREL_WORKSPACE_TOKEN = workspace.token;

@@ -16,8 +16,11 @@ export type AgentPlace =
    * through Myrel before reaching outside them (a runner with feature "project-folders").
    */
   | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean }
-  /** images: its model reads images, so it can look at screenshots itself. */
-  | { kind: "cloud"; images: boolean };
+  /**
+   * images: its model reads images, so it can look at screenshots itself. saveBranch: where unpushed
+   * work in its cloned repositories is kept on GitHub between turns.
+   */
+  | { kind: "cloud"; images: boolean; saveBranch: string };
 
 /** Where a cloud turn finds the files attached in the thread (see MYREL_FILES in runner-core's task script). */
 export const SANDBOX_FILES = "/workspace/files";
@@ -57,7 +60,7 @@ export function agentSystem(place: AgentPlace): string {
   const where =
     place.kind === "local"
       ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${localFolders(place)}`
-      : `You run as OpenCode in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead, over HTTPS (\`git clone https://github.com/<owner>/<name>.git\` or \`gh repo clone <owner>/<name>\`): git and gh already have access to the connected ones, and there is no SSH key. A repository that is not listed as connected cannot be pushed to (and a private one not even cloned): say so in a reply with needs "blocked", asking the person to connect it in the project's settings, rather than waiting. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends.`;
+      : `You run as OpenCode in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead, over HTTPS (\`git clone https://github.com/<owner>/<name>.git\` or \`gh repo clone <owner>/<name>\`): git and gh already have access to the connected ones, and there is no SSH key. A repository that is not listed as connected cannot be pushed to (and a private one not even cloned): say so in a reply with needs "blocked", asking the person to connect it in the project's settings, rather than waiting. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends. As a safety net, when a turn ends Myrel pushes whatever you left uncommitted or unpushed in each repository there to the branch ${place.saveBranch} on GitHub, as one commit on top of where you were. To pick that work up in a later turn, clone again, run \`git fetch origin ${place.saveBranch}\`, then \`git checkout -B <the branch its commit message names> FETCH_HEAD && git reset --soft HEAD~1\`.`;
   return `You are Myrel, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Myrel.
 
 ${where}

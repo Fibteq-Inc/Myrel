@@ -83,6 +83,11 @@ export const TaskSpec = z.object({
    * read with the MCP token (see MYREL_SKILLS_URL in the task script).
    */
   skills: z.object({ url: z.string().url() }).optional(),
+  /**
+   * When the harness ends, what it left uncommitted or unpushed in each GitHub repository under
+   * `dir` is pushed to `branch` there, so the work outlives the sandbox (see the task script).
+   */
+  saveRepos: z.object({ dir: z.string().min(1), branch: z.string().min(1).max(200) }).optional(),
   timeoutSec: z
     .number()
     .int()
