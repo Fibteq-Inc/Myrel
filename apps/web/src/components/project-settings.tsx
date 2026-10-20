@@ -5,6 +5,7 @@ import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { BookMarked, FolderGit2, Plug, Settings2, Sparkles, Users, X } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
+import { PersonalInProject } from "./personal-in-project";
 import { Skills } from "./skills";
 import { GithubRepos } from "./github-repos";
 import { ConfirmDialog } from "./ui/confirm-dialog";
@@ -75,9 +76,17 @@ export function ProjectSettings({
       {tab === "model" && <ModelForm projectId={projectId} canManage={canManage} />}
       {tab === "github" && <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />}
       {tab === "connectors" && (
-        <Connectors projectId={projectId} canManage={canManage} result={connectorResult} connectorId={connectorId} />
+        <>
+          <Connectors projectId={projectId} canManage={canManage} result={connectorResult} connectorId={connectorId} />
+          <PersonalInProject projectId={projectId} kind="connectors" />
+        </>
       )}
-      {tab === "skills" && <Skills projectId={projectId} canManage={canManage} />}
+      {tab === "skills" && (
+        <>
+          <Skills projectId={projectId} canManage={canManage} />
+          <PersonalInProject projectId={projectId} kind="skills" />
+        </>
+      )}
       {tab === "members" && (
         <>
           <Members projectId={projectId} myRole={project.role} />

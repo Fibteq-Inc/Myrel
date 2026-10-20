@@ -674,11 +674,11 @@ export const en = {
   // Connectors (MCP servers)
   "connectors.title": "Your connectors",
   "connectors.description":
-    "MCP servers that let the agent work in other services. They are on in the threads that work for you.",
+    "MCP servers that let the agent work in other services. Off in every project until you turn them on in its settings.",
   "connectors.empty": "You have not added a connector yet.",
   "connectors.projectTitle": "Connectors",
   "connectors.projectDescription":
-    "Shared by every thread of this project. Your personal connectors are under Settings › Connectors and work only in threads that work for you.",
+    "Shared by every thread of this project. Your own connectors are turned on for this project below.",
   "connectors.projectEmpty": "This project has no connectors yet.",
   "connectors.presets": "Ready to connect",
   "connectors.presetsDescription": "Add a service in one click, then sign in.",
@@ -799,10 +799,10 @@ export const en = {
   // Skills (Agent Skills)
   "skills.title": "Your skills",
   "skills.description":
-    "Instructions, scripts and references the agent follows for particular kinds of work. On in the threads that work for you.",
+    "Instructions, scripts and references the agent follows for particular kinds of work. Off in every project until you turn them on in its settings.",
   "skills.projectTitle": "Skills",
   "skills.projectDescription":
-    "Shared by every thread in this project. Your own skills are under Settings › Skills and are used only in threads that work for you.",
+    "Shared by every thread in this project. Your own skills are turned on for this project below.",
   "skills.empty": "You have not added a skill yet.",
   "skills.projectEmpty": "This project has no skills yet.",
   "skills.browse": "Find skills on skills.sh",
@@ -843,4 +843,17 @@ export const en = {
   "skills.source.write": "Written here",
   "skills.source.upload": "Uploaded",
   "skills.files": { one: "{count} file · {size}", other: "{count} files · {size}" },
+
+  // A person's own skills and connectors, turned on per project
+  "personalInProject.skillsTitle": "Your skills in this project",
+  "personalInProject.skillsDescription":
+    "Your own skills start off in every project. Turn on the ones this project needs; they work only in threads that work for you.",
+  "personalInProject.connectorsTitle": "Your connectors in this project",
+  "personalInProject.connectorsDescription":
+    "Your own connectors start off in every project. Turn on the ones this project needs; they work only in threads that work for you.",
+  "personalInProject.noSkills": "You have no skills of your own.",
+  "personalInProject.noConnectors": "You have no connectors of your own.",
+  "personalInProject.addInSettings": "Add one in Settings",
+  "personalInProject.offEverywhere": "Turned off everywhere in your settings",
+  "personalInProject.useHere": "Use {name} in this project",
 } satisfies Record<string, string | PluralMessage>;

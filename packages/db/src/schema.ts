@@ -508,3 +508,35 @@ export const skills = sqliteTable(
   },
   (t) => [uniqueIndex("skills_owner_name_idx").on(t.ownerId, t.name), uniqueIndex("skills_project_name_idx").on(t.projectId, t.name)],
 );
+
+/**
+ * A person's own skill or connector turned on in one project. Personal ones work only in the
+ * projects listed here (and only in threads that work for that person); new ones start off.
+ */
+export const projectSkills = sqliteTable(
+  "project_skills",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.skillId] }), index("project_skills_skill_idx").on(t.skillId)],
+);
+
+export const projectConnectors = sqliteTable(
+  "project_connectors",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => connectors.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.connectorId] }), index("project_connectors_connector_idx").on(t.connectorId)],
+);

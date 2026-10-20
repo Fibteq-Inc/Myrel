@@ -2,7 +2,7 @@ import { createDb, schema } from "@myrel/db";
 import { MAX_TURN_SKILLS, parseSkillMd, type Skill, SKILL_LIMITS, SkillName, SkillPath, type SkillScope } from "@myrel/protocol";
 import { and, asc, eq } from "drizzle-orm";
 
-const { skills } = schema;
+const { projectSkills, skills } = schema;
 
 export type SkillRow = typeof skills.$inferSelect;
 
@@ -108,7 +108,7 @@ export type TurnSkill = { id: string; name: string; description: string };
 
 /**
  * The skills a thread's agent gets this turn: the project's, then those of the person the thread
- * works for. A person's skill with the same name as a project's is left out (the project's wins).
+ * works for that they turned on in this project. A person's skill with the same name as a project's is left out (the project's wins).
  */
 export async function turnSkills(env: Env, where: { projectId: string; userId: string | null }): Promise<TurnSkill[]> {
   const db = createDb(env.DB);
@@ -117,12 +117,16 @@ export async function turnSkills(env: Env, where: { projectId: string; userId: s
     .from(skills)
     .where(and(eq(skills.projectId, where.projectId), eq(skills.enabled, true)))
     .orderBy(asc(skills.name));
+  // A person's own skills only where they turned them on for this project.
   const own = where.userId
-    ? await db
-        .select()
-        .from(skills)
-        .where(and(eq(skills.ownerId, where.userId), eq(skills.enabled, true)))
-        .orderBy(asc(skills.name))
+    ? (
+        await db
+          .select({ skill: skills })
+          .from(skills)
+          .innerJoin(projectSkills, and(eq(projectSkills.skillId, skills.id), eq(projectSkills.projectId, where.projectId)))
+          .where(and(eq(skills.ownerId, where.userId), eq(skills.enabled, true)))
+          .orderBy(asc(skills.name))
+      ).map((r) => r.skill)
     : [];
   const seen = new Set<string>();
   const out: TurnSkill[] = [];

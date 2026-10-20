@@ -163,3 +163,7 @@ function unquote(value: string): string {
 export function formatSkillMd(skill: { name: string; description: string; instructions: string }): string {
   return `---\nname: ${skill.name}\ndescription: ${JSON.stringify(skill.description)}\n---\n\n${skill.instructions.trim()}\n`;
 }
+
+/** Turns one of a person's own skills or connectors on or off in a project (they start off). */
+export const SetPersonalInProjectInput = z.object({ on: z.boolean() });
+export type SetPersonalInProjectInput = z.infer<typeof SetPersonalInProjectInput>;
