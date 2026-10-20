@@ -82,30 +82,19 @@ export function openAiCompatible(opts: OpenAiCompatibleOptions): ModelProvider {
 
 /** Where OpenAI-compatible APIs put a call's price: OpenRouter's usage.cost and its look-alikes. */
 const USAGE_COST_KEYS = ["cost", "cost_usd", "total_cost", "total_cost_usd"];
-let loggedShape = false;
 
 /**
- * The call's cost when the response carries one, in the usage object or a header
- * named like "x-…-cost". Routers such as Fireworks' FireRouter pick a model per call,
- * so their own figure beats any price table. Logs the response's shape once per
- * isolate, so an operator can see what a provider actually sends.
+ * The call's cost when the response carries one, in the usage object or a header.
+ * Fireworks' FireRouter runs on LiteLLM and sends x-litellm-response-cost in US
+ * dollars; it picks a model per call, so its own figure beats any price table.
  */
 function costField(usage: Record<string, unknown> | undefined, headers: Headers = new Headers()): { costUsd?: number } {
-  if (!loggedShape) {
-    loggedShape = true;
-    const costHeaders = [...headers].filter(([k]) => /cost|price|billing|charge/i.test(k));
-    console.log("llm response shape", { usageKeys: Object.keys(usage ?? {}), costHeaders });
-  }
   for (const key of USAGE_COST_KEYS) {
     const v = toUsd(usage?.[key]);
     if (v !== null) return { costUsd: v };
   }
-  for (const [name, value] of headers) {
-    if (!/(^|-)cost(-usd)?$/i.test(name)) continue;
-    const v = toUsd(value);
-    if (v !== null) return { costUsd: v };
-  }
-  return {};
+  const v = toUsd(headers.get("x-litellm-response-cost"));
+  return v === null ? {} : { costUsd: v };
 }
 
 function toUsd(v: unknown): number | null {

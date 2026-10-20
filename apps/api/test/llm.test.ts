@@ -78,10 +78,10 @@ describe("createProvider", () => {
     expect((await p1.provider.chat(request)).costUsd).toBe(0.0042);
 
     const inHeader: typeof fetch = async () =>
-      new Response(JSON.stringify(reply), { headers: { "content-type": "application/json", "x-request-cost": "0.01" } });
+      new Response(JSON.stringify(reply), { headers: { "content-type": "application/json", "x-litellm-response-cost": "1.175e-05", "x-litellm-key-spend": "9" } });
     const p2 = createProvider({ FIREWORKS_API_KEY: "fw" }, inHeader);
     if (!p2.ok) throw new Error(p2.reason);
-    expect((await p2.provider.chat(request)).costUsd).toBe(0.01);
+    expect((await p2.provider.chat(request)).costUsd).toBe(0.00001175);
   });
 
   it("speaks the Messages API to Anthropic and routes through AI Gateway", async () => {
