@@ -175,6 +175,76 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("passes what one thread delivers on to another open thread it affects", async () => {
+    const coordinator: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      coordinator.push(req.prompt);
+      const id = newMessageId(req.prompt);
+      if (id) {
+        const title = req.prompt.includes(' "MCP" ') ? "Plans" : "MCP";
+        return { text: "", toolCalls: [call("start_thread", { message_id: id, title, instructions: title, project_ack: "On it." })] };
+      }
+      const updates = req.prompt.slice(req.prompt.indexOf("## Thread updates"));
+      if (req.prompt.includes("## Thread updates") && updates.includes("MCP connector support is ready")) {
+        const thread = (title: string) => new RegExp(`\\[(thr_[0-9A-Z]{26})\\] "${title}"`).exec(req.prompt)![1];
+        return {
+          text: "",
+          toolCalls: [
+            call("relay_to_thread", {
+              from_thread_id: thread("MCP"),
+              to_thread_id: thread("Plans"),
+              note: "MCP connectors are a new feature; count them in the plan limits.",
+            }),
+          ],
+        };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const play: Play = async (turn) => {
+      const latest = turn.prompt.slice(turn.prompt.lastIndexOf("## Thread so far"));
+      if (turn.prompt.includes('Thread: "MCP"')) {
+        await turn.call("reply", { text: latest.includes("finish it") ? "MCP connector support is ready." : "Working on MCP." });
+      } else if (turn.prompt.includes('From the "MCP" thread: MCP connectors are a new feature')) {
+        await turn.call("reply", { text: "Counting MCP connectors in the plan limits too." });
+      } else {
+        await turn.call("reply", { text: "Drafting the plans." });
+      }
+    };
+
+    const { ws, agent } = await setup(play);
+    const replies = async (threadId: string) =>
+      ((await agent.getThreadContext(threadId))?.messages ?? []).filter((m: Message) => m.authorId === "thread-agent").map((m: Message) => m.body);
+    const byTitle = async (title: string) => ((await agent.listThreads()) as Thread[]).find((t) => t.title === title) ?? null;
+
+    ws.send(JSON.stringify({ type: "message.send", body: "Add MCP connectors" }));
+    const mcpThread = await until(() => byTitle("MCP"), "MCP thread");
+    await until(async () => (await replies(mcpThread.id)).includes("Working on MCP.") || null, "MCP reply");
+    ws.send(JSON.stringify({ type: "message.send", body: "Set up the membership plans" }));
+    const plans = await until(() => byTitle("Plans"), "Plans thread");
+    await until(async () => (await replies(plans.id)).includes("Drafting the plans.") || null, "Plans reply");
+
+    // The MCP thread delivers; the coordinator looks at thread updates (normally after a short delay).
+    ws.send(JSON.stringify({ type: "message.send", threadId: mcpThread.id, body: "finish it" }));
+    await until(async () => (await replies(mcpThread.id)).includes("MCP connector support is ready.") || null, "MCP done");
+    await agent.coordinatorTurn();
+    await until(
+      async () => (await replies(plans.id)).includes("Counting MCP connectors in the plan limits too.") || null,
+      "plans thread picks up the relay",
+    );
+    const look = coordinator.find((p) => p.includes("MCP connector support is ready."))!;
+    expect(look).toContain("Nothing new in the project chat.");
+    // Thread updates never land in the project chat.
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+    expect(chat.map((m: Message) => m.body)).toEqual(["Add MCP connectors", "On it.", "Set up the membership plans", "On it."]);
+
+    // The Plans thread's answer is not bounced back to the MCP thread.
+    await agent.coordinatorTurn();
+    expect(coordinator.at(-1)).toContain("Notes already relayed between threads");
+    expect(await replies(mcpThread.id)).toEqual(["Working on MCP.", "MCP connector support is ready."]);
+    ws.close();
+   }, 20_000);
+
   it("reports a failed coordinator turn in the project chat", async () => {
     setFakeModel(() => {
       throw new Error("should not be called");

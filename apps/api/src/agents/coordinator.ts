@@ -2,7 +2,7 @@ import type { Message, Routine, Thread } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
-import { renderMessage, renderThread } from "./render";
+import { authorLabel, renderMessage, renderThread } from "./render";
 import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
 
 /** Something the coordinator has not seen yet. */
@@ -10,7 +10,12 @@ export type InboxItem =
   | { kind: "message"; messageId: string }
   | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string }
   /** A routine ran and posted its prompt in the project chat as messageId. */
-  | { kind: "routine"; messageId: string; routineId: string; name: string };
+  | { kind: "routine"; messageId: string; routineId: string; name: string }
+  /** Someone wrote in a thread (a person's decision, or the thread agent's reply) while other threads are open. */
+  | { kind: "thread"; threadId: string; messageId: string };
+
+/** A note the coordinator passed from one thread's work to another thread. */
+export type Relay = { fromThreadId: string; toThreadId: string; note: string; createdAt: string };
 
 /** The project operations the coordinator's tools act through. */
 export type CoordinatorHost = {
@@ -27,6 +32,8 @@ export type CoordinatorHost = {
     projectAck?: string;
   }): Promise<Thread>;
   messageThread(threadId: string, note: string): Promise<void>;
+  /** Tell an open thread what another thread's work means for it. Throws when the relay would repeat or bounce. */
+  relay(fromThreadId: string, toThreadId: string, note: string): Promise<void>;
 };
 
 export const COORDINATOR_SYSTEM = `You are Myrel, the coordinator of a shared project chat. People post requests here; focused work happens in threads, each handled by its own thread agent. To people, you and every thread agent are one assistant called Myrel.
@@ -50,6 +57,8 @@ ${ROUTINE_GUIDE} A routine that targets the project chat posts its prompt there 
 
 Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. You never approve irreversible steps on a person's behalf.
 
+Keeping threads in step: threads work in parallel, and what one thread starts, decides or delivers can change another thread's work. Examples: a new feature that another thread has to account for (a thread for a new kind of connector means the thread on plan limits must count it), a rename or a new server address, a renamed shared package, a decision a person made in one thread that another thread is waiting for, two threads about to change the same file. When you see such a link, call relay_to_thread to tell the affected thread in one or two sentences what changed and what it means for its work; when two threads would change the same file, say which thread owns it. Check for links whenever you start a thread (does an open thread need to know about this new work?) and whenever "Thread updates" lists new messages from inside threads. Relay only when it changes the recipient's work: most updates need nothing, and then you call no tools. Never send a note listed under "Notes already relayed" again, and never pass a thread's answer to your note back to the thread it came from. A decision people made in a thread that the whole project should keep (a name, a price, a rule) also goes in memory. Thread updates never get a post in the project chat: people already saw them in the thread.
+
 ${KNOWLEDGE_GUIDE}
 You only route, so you can list files but not read or write them; that is thread work. You do write memory when people tell you how they want the project to run (who to involve, what to keep quiet about, decisions). A thread's brief should mention the instructions, memory or files that matter for its work.
 
@@ -64,11 +73,14 @@ export function coordinatorPrompt(input: {
   threads: Thread[];
   routines: Routine[];
   inbox: InboxItem[];
+  /** New messages inside threads, for the thread items in the inbox. */
+  threadUpdates?: { thread: Thread; message: Message }[];
+  relays?: Relay[];
   knowledge: KnowledgeSnapshot;
   now: Date;
   defaultTimezone: string;
 }): string {
-  const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "request" ? [] : [i.messageId])));
+  const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "message" || i.kind === "routine" ? [i.messageId] : [])));
   const threadByRoot = new Map(input.threads.map((t) => [t.rootMessageId, t]));
   const chat = input.chat.map((m) => {
     const line = renderMessage(m, input.names, { isNew: newIds.has(m.id) });
@@ -81,25 +93,89 @@ export function coordinatorPrompt(input: {
   const ran = input.inbox.flatMap((i) =>
     i.kind === "routine" ? [`- Routine [${i.routineId}] "${i.name}" ran and posted [${i.messageId}]`] : [],
   );
+  const titles = new Map(input.threads.map((t) => [t.id, t.title]));
+  const updates = (input.threadUpdates ?? []).map(
+    ({ thread, message }) =>
+      `- Thread [${thread.id}] "${thread.title}" · ${authorLabel(message, input.names)} · ${message.createdAt}\n${indent(clip(message.body, UPDATE_MAX))}`,
+  );
+  const relays = (input.relays ?? []).map(
+    (r) => `- ${r.createdAt}: "${titles.get(r.fromThreadId) ?? r.fromThreadId}" → "${titles.get(r.toThreadId) ?? r.toThreadId}": ${r.note}`,
+  );
+  const onlyThreadUpdates = input.inbox.length > 0 && input.inbox.every((i) => i.kind === "thread");
 
   return [
     `Project: ${input.projectName}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
     renderKnowledge(input.knowledge),
-    `## Threads\n${input.threads.map(renderThread).join("\n") || "(none yet)"}`,
+    `## Threads (open ones with their current plan)\n${input.threads.map(renderThreadWithPlan).join("\n") || "(none yet)"}`,
     `## Routines\n${input.routines.map(renderRoutine).join("\n") || "(none)"}`,
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
     requests.length ? `## Requests from thread agents\n${requests.join("\n")}` : "",
     ran.length ? `## Routines that just ran (start a thread on each post)\n${ran.join("\n")}` : "",
-    "Handle everything new now with your tools.",
+    updates.length ? `## Thread updates (NEW messages inside threads; people saw them there)\n${updates.join("\n\n")}` : "",
+    relays.length ? `## Notes already relayed between threads, newest last\n${relays.join("\n")}` : "",
+    onlyThreadUpdates
+      ? "Nothing new in the project chat. Relay only what changes another open thread's work; otherwise call no tools."
+      : "Handle everything new now with your tools.",
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-export function coordinatorTools(host: CoordinatorHost, knowledge: KnowledgeHost): Tool[] {
+/** How much of a thread message the coordinator reads; enough to spot a decision or a result. */
+const UPDATE_MAX = 1200;
+/** How much of an open thread's plan the coordinator reads. */
+const PLAN_MAX = 300;
+
+function renderThreadWithPlan(t: Thread): string {
+  const line = renderThread(t);
+  return !t.resolved && t.statusText ? `${line}\n${indent(clip(t.statusText, PLAN_MAX))}` : line;
+}
+
+function clip(text: string, max: number): string {
+  const trimmed = text.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max - 1).trimEnd()}…` : trimmed;
+}
+
+function indent(text: string) {
+  return text
+    .split("\n")
+    .map((l) => `    ${l}`)
+    .join("\n");
+}
+
+/**
+ * The coordinator's tools. A turn that only has thread updates to look at gets just
+ * relay_to_thread and memory: it must not post in the project chat or start threads.
+ */
+export function coordinatorTools(
+  host: CoordinatorHost,
+  knowledge: KnowledgeHost,
+  opts: { onlyThreadUpdates?: boolean } = {},
+): Tool[] {
+  const relay = tool({
+    name: "relay_to_thread",
+    description:
+      "Tell an open thread's agent (not shown to people) what another thread's new work, result or decision means for it. Only when it changes the recipient's work.",
+    input: z.object({
+      from_thread_id: z.string().describe("The thread whose work or decision this is about."),
+      to_thread_id: z.string().describe("The open thread whose work it changes."),
+      note: z
+        .string()
+        .min(1)
+        .max(2000)
+        .describe("One or two sentences: what changed and what it means for the recipient's work."),
+    }),
+    run: async ({ from_thread_id, to_thread_id, note }) => {
+      await host.relay(from_thread_id, to_thread_id, note);
+      return "Relayed.";
+    },
+  });
+  // Routing needs memory and a view of the files, not file contents.
+  const memory = knowledgeTools(knowledge).filter((t) => t.name.startsWith("memory_") || t.name === "list_files");
+  if (opts.onlyThreadUpdates) return [...memory, relay];
   return [
-    // Routing needs memory and a view of the files, not file contents.
-    ...knowledgeTools(knowledge).filter((t) => t.name.startsWith("memory_") || t.name === "list_files"),
+    ...memory,
+    relay,
     tool({
       name: "post_message",
       description: "Post a short message in the project chat, visible to every member.",
