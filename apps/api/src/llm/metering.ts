@@ -1,7 +1,15 @@
 import type { ModelProvider, Usage } from "./types";
 
 /** What one completed model call cost, as reported by the provider. */
-export type CallRecord = { provider: string; model: string; servedModel: string | null; usage: Usage; latencyMs: number };
+export type CallRecord = {
+  provider: string;
+  model: string;
+  servedModel: string | null;
+  usage: Usage;
+  latencyMs: number;
+  /** The provider's own price for the call, in US dollars, when it sends one. */
+  costUsd?: number;
+};
 
 /**
  * Wraps a provider so every call that returns is reported to `onCall`. A failure to
@@ -22,6 +30,7 @@ export function metered(provider: ModelProvider, onCall: (call: CallRecord) => P
           servedModel: res.model && res.model !== provider.model ? res.model : null,
           usage,
           latencyMs: Date.now() - started,
+          ...(res.costUsd !== undefined && { costUsd: res.costUsd }),
         });
       } catch (err) {
         console.error("usage metering failed", err);

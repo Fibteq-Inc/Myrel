@@ -4,8 +4,8 @@ import type { Usage } from "./types";
 export type Price = { input: number; output: number; cachedInput?: number };
 
 /**
- * Published list prices for the defaults each provider ships with. A model not
- * listed here is recorded with no cost; operators add or override prices with the
+ * Published list prices for the defaults each provider ships with, used when a
+ * response does not carry its own cost. A model not listed here is recorded with no cost; operators add or override prices with the
  * LLM_PRICES var, e.g. {"firerouter/opus": {"input": 4, "output": 20}}.
  */
 export const DEFAULT_PRICES: Record<string, Price> = {

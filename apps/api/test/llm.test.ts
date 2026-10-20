@@ -70,6 +70,20 @@ describe("createProvider", () => {
     });
   });
 
+  it("takes the call's cost from the response when the provider sends one", async () => {
+    const reply = { choices: [{ message: { content: "hi" } }], usage: { prompt_tokens: 3, completion_tokens: 2 } };
+    const inUsage = recordingFetch({ ...reply, usage: { ...reply.usage, cost: 0.0042 } });
+    const p1 = createProvider({ FIREWORKS_API_KEY: "fw" }, inUsage.fetchImpl);
+    if (!p1.ok) throw new Error(p1.reason);
+    expect((await p1.provider.chat(request)).costUsd).toBe(0.0042);
+
+    const inHeader: typeof fetch = async () =>
+      new Response(JSON.stringify(reply), { headers: { "content-type": "application/json", "x-request-cost": "0.01" } });
+    const p2 = createProvider({ FIREWORKS_API_KEY: "fw" }, inHeader);
+    if (!p2.ok) throw new Error(p2.reason);
+    expect((await p2.provider.chat(request)).costUsd).toBe(0.01);
+  });
+
   it("speaks the Messages API to Anthropic and routes through AI Gateway", async () => {
     const f = recordingFetch({
       content: [
@@ -220,6 +234,16 @@ describe("metered", () => {
       ["routed-model", 5],
       [null, 0],
     ]);
+  });
+});
+
+describe("callCostMicros", () => {
+  it("prefers the provider's own figure over the price table", async () => {
+    const { callCostMicros } = await import("../src/usage");
+    const call = { provider: "fireworks", model: "firerouter/opus", servedModel: "glm-5p3", usage: { inputTokens: 1000, outputTokens: 100 }, latencyMs: 1 };
+    expect(callCostMicros({ ...call, costUsd: 0.0123 }, DEFAULT_PRICES)).toBe(12_300);
+    expect(callCostMicros(call, DEFAULT_PRICES)).toBeNull();
+    expect(callCostMicros(call, { "glm-5p3": { input: 1, output: 2 } })).toBe(1200);
   });
 });
 
