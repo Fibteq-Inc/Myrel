@@ -181,6 +181,29 @@ describe("run_task", () => {
     ws.close();
   });
 
+  it("gives an agent that stopped after its opening note one more turn to start the work", async () => {
+    const prompts: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1 || !req.prompt.includes("Hesap makinesi")) return { text: "", toolCalls: [] };
+      prompts.push(req.prompt);
+      // Says it is starting, then stops.
+      if (prompts.length === 1) return { text: "", toolCalls: [call("reply", { text: "Başlıyorum." })] };
+      if (prompts.length === 2) {
+        return { text: "", toolCalls: [call("run_task", { title: "Hesap makinesi", prompt: "touch calc.html", harness: "shell" })] };
+      }
+      return { text: "", toolCalls: [call("reply", { text: "Görev çalışmadı." })] };
+    });
+
+    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Hesap makinesi yap." });
+
+    await until(async () => (await threadAgent.getTasks()).length === 1, "the task the nudge led to");
+    expect(prompts[1]).toContain("Your last turn ended right after your reply, with no plan, no task and nothing asked.");
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    await until(async () => (await bodies()).includes("Görev çalışmadı."), "the reply about the task");
+    ws.close();
+  });
+
   it("reports what it cannot do as a tool error, without starting anything", async () => {
     const { project, ws, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
