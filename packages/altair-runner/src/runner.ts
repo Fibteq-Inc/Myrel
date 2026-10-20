@@ -10,8 +10,9 @@ import { detectClis } from "./clis";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
+import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.3.0";
+export const RUNNER_VERSION = "0.3.1";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -117,9 +118,18 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   watchFile(configPath(), { interval: 2000 }, onConfigChange);
 
   const ping = setInterval(() => send({ type: "ping" }), 25_000);
+  // Removes the worktrees of threads whose work is merged (see pruneWorktrees).
+  const prune = () =>
+    void pruneWorktrees((w) => tasks.inUse(w))
+      .then((removed) => removed.forEach((w) => log(`Removed the finished worktree ${w.path} (${w.branch})`)))
+      .catch(() => {});
+  prune();
+  const pruning = setInterval(prune, 6 * 60 * 60 * 1000);
+  pruning.unref?.();
   const stop = () => {
     stopped = true;
     clearInterval(ping);
+    clearInterval(pruning);
     unwatchFile(configPath(), onConfigChange);
     tasks.stopAll();
     socket?.close(1000);

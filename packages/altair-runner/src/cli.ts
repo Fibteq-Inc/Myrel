@@ -7,6 +7,7 @@ import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFo
 import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
 import { isNewer, latestVersion, runVersion } from "./update";
+import { listWorktrees, pruneWorktrees, removeWorktree, worktreeState } from "./worktrees";
 
 const HELP = `altair-runner ${RUNNER_VERSION}
 Connects this computer to Altair, so projects can work in folders you share
@@ -25,12 +26,19 @@ Usage:
   altair-runner service status   Show whether the background runner is installed and running
   altair-runner start [--access read|edit|full] [--json]
                                  Connect and run tasks in this terminal until stopped (Ctrl+C)
+  altair-runner worktrees [on|off|prune|remove <path> [--force]]
+                                 List, turn on or off, or clean up the threads' git worktrees
   altair-runner update           Update to the newest version and restart the background runner
   altair-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
 edit (change files; the default) or full (also run any command). It is saved,
 so the background runner uses it too.
+
+In a git repository, each thread works in its own git worktree on its own
+branch (altair/thr-…), so threads working at the same time never touch each
+other's files. Worktrees live in ~/.altair-runner/worktrees; ones whose branch
+is merged and that were not used for a day are removed automatically.
 --json prints one JSON status object per line instead of messages.
 
 Environment: ALTAIR_SERVER and ALTAIR_RUNNER_TOKEN override the saved pairing;
@@ -46,6 +54,7 @@ async function main(argv: string[]) {
       name: { type: "string" },
       access: { type: "string" },
       json: { type: "boolean" },
+      force: { type: "boolean" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -142,6 +151,45 @@ async function main(argv: string[]) {
       const info = await installService(fileURLToPath(import.meta.url));
       console.log(`Restarted the background runner on ${RUNNER_VERSION}.`);
       printService(info, values.json);
+      return;
+    }
+    case "worktrees": {
+      if (arg === "on" || arg === "off") {
+        const config = await loadConfig();
+        config.worktrees = arg === "on";
+        await saveConfig(config);
+        console.log(
+          arg === "on"
+            ? "Each thread now works in its own git worktree."
+            : "Threads now work in the shared folder itself. Two threads at once can change the same files.",
+        );
+        return;
+      }
+      if (arg === "prune") {
+        const removed = await pruneWorktrees();
+        console.log(removed.length ? removed.map((w) => `Removed ${w.path} (${w.branch})`).join("\n") : "Nothing to clean up.");
+        return;
+      }
+      const all = await listWorktrees();
+      if (arg === "remove") {
+        const target = positionals[2];
+        const w = all.find((x) => x.path === target || x.branch === target);
+        if (!w) throw new Error("Usage: altair-runner worktrees remove <path or branch> [--force] (see altair-runner worktrees)");
+        await removeWorktree(w, { force: values.force });
+        console.log(`Removed ${w.path}. The branch ${w.branch} is kept unless it was merged.`);
+        return;
+      }
+      if (arg) throw new Error("Usage: altair-runner worktrees [on|off|prune|remove <path>]");
+      const states = await Promise.all(all.map((w) => worktreeState(w).catch(() => null)));
+      if (values.json) return console.log(JSON.stringify(all.map((w, i) => ({ ...w, ...states[i] }))));
+      const on = (await loadConfig()).worktrees !== false;
+      console.log(`Worktrees: ${on ? "on" : "off (threads share the folder)"}`);
+      for (const [i, w] of all.entries()) {
+        const s = states[i];
+        const flags = [s?.missing && "missing", s?.dirty && "uncommitted changes", s?.merged && "merged"].filter(Boolean).join(", ");
+        console.log(`\n${w.branch}${flags ? ` (${flags})` : ""}\n  ${w.path}\n  from ${w.repo}, last used ${new Date(w.lastUsed).toLocaleString()}`);
+      }
+      if (!all.length) console.log("No worktrees yet.");
       return;
     }
     case "logout": {

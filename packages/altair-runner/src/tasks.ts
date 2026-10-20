@@ -3,6 +3,7 @@ import { realpath } from "node:fs/promises";
 import type { RunnerToServer, ServerToRunner } from "@altair/protocol";
 import { ADAPTERS, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
+import { threadWorktree, type Worktree } from "./worktrees";
 
 type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
@@ -25,6 +26,8 @@ export type TaskRunnerOptions = {
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
 export class TaskRunner {
   private readonly running = new Map<string, ChildProcess>();
+  /** The worktree each running task works in. */
+  private readonly worktrees = new Map<string, string>();
   /** Tasks the server asked to stop. */
   private readonly cancelled = new Set<string>();
   private send: Send = () => {};
@@ -40,25 +43,49 @@ export class TaskRunner {
     return [...this.running.keys()];
   }
 
+  /** Whether a task is running in this worktree right now. */
+  inUse(w: Worktree): boolean {
+    return [...this.worktrees.values()].includes(w.path);
+  }
+
   async start(task: TaskStart): Promise<void> {
     const fail = (result: string) => this.send({ type: "task.done", taskId: task.taskId, ok: false, result });
     const config = this.opts.config();
     const folder = await sharedFolder(config, task.folder);
     if (!folder) return fail(`The folder ${task.folder} is not shared on this computer. Run \`altair-runner share\` in it.`);
 
+    // Read-only tasks change nothing, so they can share the folder.
+    let isolated: Awaited<ReturnType<typeof threadWorktree>> = null;
+    if (config.worktrees !== false && config.access !== "read") {
+      try {
+        isolated = await threadWorktree(folder, task.threadId);
+      } catch (err) {
+        return fail(
+          `Could not make a git worktree for this thread in ${folder}: ${errorLine(err)}\nTo run tasks in the folder itself instead, run \`altair-runner worktrees off\`.`,
+        );
+      }
+    }
+    const cwd = isolated?.cwd ?? folder;
+
     const adapter = ADAPTERS[task.cli];
-    const resume = task.cli === "claude" ? await this.opts.sessions.get(task.threadId) : undefined;
+    // A Claude Code session belongs to the folder it ran in, so a new worktree starts a new one.
+    const resume = task.cli === "claude" && !isolated?.created ? await this.opts.sessions.get(task.threadId) : undefined;
     const log = this.opts.log ?? (() => {});
-    log(`▶ ${adapter.id} in ${folder}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
+    log(`▶ ${adapter.id} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
 
     const child = (this.opts.spawn ?? spawn)(adapter.bin, adapter.args({ access: config.access, resume }), {
-      cwd: folder,
+      cwd,
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
       // Windows CLIs are .cmd shims. Only fixed flags are on the command line; the prompt goes on stdin.
       shell: process.platform === "win32",
     });
     this.running.set(task.taskId, child);
+    if (isolated) this.worktrees.set(task.taskId, isolated.worktree.path);
+    // Tells Altair where the work is, since it is not in the shared folder itself.
+    const where = isolated
+      ? `\n\n(altair-runner: worked on branch ${isolated.worktree.branch} in ${isolated.cwd}, a git worktree of ${folder}.)`
+      : "";
 
     const state: ParseState = {};
     let stdout = "";
@@ -98,13 +125,14 @@ export class TaskRunner {
         done = true;
         clearTimeout(timer);
         this.running.delete(task.taskId);
+        this.worktrees.delete(task.taskId);
         if (this.cancelled.delete(task.taskId)) {
           log(`■ ${adapter.id} task stopped`);
           this.send({ type: "task.done", taskId: task.taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
           return resolve();
         }
         log(`${ok ? "✓" : "✗"} ${adapter.id} task finished`);
-        this.send({ type: "task.done", taskId: task.taskId, ok, result: result.slice(0, MAX_RESULT) });
+        this.send({ type: "task.done", taskId: task.taskId, ok, result: result.slice(0, MAX_RESULT - where.length) + where });
         resolve();
       };
       child.on("error", (err: NodeJS.ErrnoException) => {
@@ -156,3 +184,6 @@ export async function sharedFolder(config: RunnerConfig, requested: string): Pro
   }
   return null;
 }
+
+const errorLine = (err: unknown) =>
+  ((err as { stderr?: string }).stderr || (err as Error).message || String(err)).trim().split("\n").at(-1);

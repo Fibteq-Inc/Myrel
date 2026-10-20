@@ -48,6 +48,21 @@ from npm and restarts the background runner on it (`service install` again also 
 `service uninstall` removes it. On Linux it starts when you log in; to start at boot without logging in, run
 `loginctl enable-linger`.
 
+### Threads working at the same time
+
+When a shared folder is a git repository, each thread works in its own
+[git worktree](https://git-scm.com/docs/git-worktree) on its own branch, `altair/thr-…`, made from the repository's
+current commit on the thread's first task. Two threads can then work in the same project at once without changing
+each other's files or switching each other's branch, and your own checkout is left alone. Each task's result says
+which branch and folder the work is in; merge or open a PR from that branch as usual.
+
+Worktrees live in `~/.altair-runner/worktrees`. They start without your uncommitted changes and without ignored files
+such as `node_modules` or `.env`, so a task may need to install dependencies first. A worktree that has not been used
+for a day, has no uncommitted changes and whose branch is merged into your checkout's branch is removed
+automatically, with its branch. `altair-runner worktrees` lists them, `worktrees prune` cleans up now,
+`worktrees remove <path or branch>` removes one, and `worktrees off` makes threads work in the folder itself again.
+Read-only tasks (`--access read`) always run in the folder itself.
+
 ### What the CLI may do
 
 `altair-runner start --access <level>` or `altair-runner service install --access <level>` (saved for next time):
