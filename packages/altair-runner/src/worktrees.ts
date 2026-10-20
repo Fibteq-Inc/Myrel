@@ -62,9 +62,11 @@ export async function threadWorktree(
   let created = false;
   if (!worktree || !(await stat(worktree.path).catch(() => null))) {
     const id = createHash("sha256").update(root).digest("hex").slice(0, 8);
-    const path = join(runnerHome(), "worktrees", `${basename(root)}-${id}`, threadId.slice(-10).toLowerCase());
+    const parent = join(runnerHome(), "worktrees", `${basename(root)}-${id}`);
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    // The real path, as the CLI sees its folder (on macOS the temp folder /var is /private/var).
+    const path = join(await realpath(parent), threadId.slice(-10).toLowerCase());
     const branch = branchFor(threadId);
-    await mkdir(join(path, ".."), { recursive: true, mode: 0o700 });
     await git(root, ["worktree", "prune"]).catch(() => {});
     const exists = await git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).catch(() => null);
     // Continues the thread's branch if a removed worktree left it behind.

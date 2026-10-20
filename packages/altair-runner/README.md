@@ -107,13 +107,16 @@ node packages/altair-runner/dist/cli.js --help
 
 ## Releasing
 
-Needs an npm account that is a member of the `fibteq` npm organization.
-
 1. Bump `version` in `package.json` here and in `packages/altair-runner-alias/package.json`, and `RUNNER_VERSION`
    in `src/runner.ts` (a test checks they match). Bump `RUNNER_PROTOCOL_VERSION` in `@altair/protocol` only when the
    wire format changes; the server refuses runners on another protocol version and tells them to update.
-2. Publish the runner first, then the short name, with `pnpm` (it replaces `workspace:` versions and uses the
-   built files from `publishConfig`):
+2. Merge it. The [Release altair-runner](../../.github/workflows/release-runner.yml) workflow then tests, builds and
+   publishes both packages whose version is not on npm yet (it can also be run by hand from the Actions tab).
+   It uses npm trusted publishing: once, on npmjs.com, open each package's **Settings > Trusted publishing**, choose
+   GitHub Actions and enter `Fibteq-Inc`, `altair` and `release-runner.yml`.
+
+By hand instead (needs an npm account in the `fibteq` npm organization), runner first, then the short name, with
+`pnpm` (it replaces `workspace:` versions and uses the built files from `publishConfig`):
 
 ```sh
 npm login

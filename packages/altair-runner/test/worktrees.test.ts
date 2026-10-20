@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@altair/protocol";
@@ -17,6 +17,9 @@ let home: string;
 let repo: string;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "altair-wt-"));
+  // Behind a symlink, like the temp folder on macOS (/var is /private/var).
+  await mkdir(join(home, "real-runner"));
+  await symlink(join(home, "real-runner"), join(home, ".runner"));
   process.env.ALTAIR_RUNNER_HOME = join(home, ".runner");
   repo = join(home, "repo");
   await mkdir(join(repo, "web"), { recursive: true });
