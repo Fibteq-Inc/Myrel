@@ -4,7 +4,7 @@
 // APP_REVIEW_DEMO_EMAIL, APP_REVIEW_DEMO_PASSWORD.
 
 // The store name; change it here (and in app.config.ts) if the product is renamed.
-const NAME = "Fibteq Altair";
+const NAME = "Myrel";
 const SITE = "https://altair.fibteq.io";
 
 const urls = {
@@ -36,11 +36,11 @@ TELEFONUNDAN NELER YAPABİLİRSİN
 • Ekibini projeye davet eder, birlikte çalışırsın.
 
 AÇIK KAYNAK
-Altair açık kaynaklı. altair.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Altair sunucusuna bağlayabilirsin.
+Myrel açık kaynaklı. altair.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Myrel sunucusuna bağlayabilirsin.
 
 Gizlilik: ${urls.privacyPolicyUrl}
 Kullanım şartları: ${SITE}/terms/`,
-  releaseNotes: "Altair'in ilk sürümü.",
+  releaseNotes: "Myrel'in ilk sürümü.",
   ...urls,
   screenshots: shots("tr"),
 };
@@ -63,11 +63,11 @@ FROM YOUR PHONE YOU CAN
 • Invite your team to a project and work together.
 
 OPEN SOURCE
-Altair is open source. Use altair.fibteq.io, or connect the app to an Altair server you run yourself.
+Myrel is open source. Use altair.fibteq.io, or connect the app to a Myrel server you run yourself.
 
 Privacy: ${urls.privacyPolicyUrl}
 Terms: ${SITE}/terms/`,
-  releaseNotes: "The first release of Altair.",
+  releaseNotes: "The first release of Myrel.",
   ...urls,
   screenshots: shots("en"),
 };
@@ -124,7 +124,7 @@ module.exports = {
         "Open the project \"Demo\" to see the coordinator conversation, threads, artifacts, files and usage.",
         "Send a message to the coordinator to start a task; the agents reply within a minute.",
         "Account deletion: Projects screen > gear icon (Settings) > Delete account.",
-        "Altair is open source and can also connect to self-hosted servers (\"Change\" next to the server address).",
+        "Myrel is open source and can also connect to self-hosted servers (\"Change\" next to the server address).",
       ].join("\n"),
     },
   },

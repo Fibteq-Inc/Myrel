@@ -18,7 +18,7 @@ export default function LoginScreen() {
         <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
             <AltairMark size={44} />
-            <Text style={styles.brandName}>Altair</Text>
+            <Text style={styles.brandName}>Myrel</Text>
           </View>
           {session.offline && !editingServer ? (
             <Offline />

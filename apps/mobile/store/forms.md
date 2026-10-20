@@ -9,7 +9,7 @@ Shared values:
 
 | | |
 |---|---|
-| App name | Fibteq Altair |
+| App name | Myrel |
 | Website | https://altair.fibteq.io |
 | Support | https://altair.fibteq.io/support/ · altair@fibteq.app |
 | Privacy policy | https://altair.fibteq.io/privacy/ |
@@ -27,14 +27,14 @@ phone screenshots `screenshots/android-phone/<lang>/`.
 
 ### Türkçe (tr-TR)
 
-**Uygulama adı:** Fibteq Altair
+**Uygulama adı:** Myrel
 
 **Kısa açıklama:** Yapay zekâ ajanlarıyla proje yürüt, ilerlemeyi ve kararları telefondan izle.
 
 **Tam açıklama:**
 
 ```text
-Fibteq Altair, projelerinde yapay zekâ ajanlarıyla birlikte çalıştığın bir çalışma alanı.
+Myrel, projelerinde yapay zekâ ajanlarıyla birlikte çalıştığın bir çalışma alanı.
 
 Projene ne istediğini yaz; koordinatör işi parçalara ayırır ve her parça için bir thread açar. Her thread'de bir ajan araştırır, kod yazar, pull request açar, belge ve artifact üretir. Sen de nerede olursan ol ilerlemeyi takip edersin.
 
@@ -47,7 +47,7 @@ TELEFONUNDAN NELER YAPABİLİRSİN
 • Ekibini projeye davet eder, birlikte çalışırsın.
 
 AÇIK KAYNAK
-Altair açık kaynaklı. altair.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Altair sunucusuna bağlayabilirsin.
+Myrel açık kaynaklı. altair.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Myrel sunucusuna bağlayabilirsin.
 
 Gizlilik: https://altair.fibteq.io/privacy/
 Kullanım şartları: https://altair.fibteq.io/terms/
@@ -55,14 +55,14 @@ Kullanım şartları: https://altair.fibteq.io/terms/
 
 ### English (en-US)
 
-**App name:** Fibteq Altair
+**App name:** Myrel
 
 **Short description:** Run projects with AI agents; follow progress and decisions from your phone.
 
 **Full description:**
 
 ```text
-Fibteq Altair is a workspace where you work on projects together with AI agents.
+Myrel is a workspace where you work on projects together with AI agents.
 
 Tell your project what you need; the coordinator breaks the work down and opens a thread for each part. In every thread an agent researches, writes code, opens pull requests and produces documents and artifacts, while you follow along from wherever you are.
 
@@ -75,7 +75,7 @@ FROM YOUR PHONE YOU CAN
 • Invite your team to a project and work together.
 
 OPEN SOURCE
-Altair is open source. Use altair.fibteq.io, or connect the app to an Altair server you run yourself.
+Myrel is open source. Use altair.fibteq.io, or connect the app to a Myrel server you run yourself.
 
 Privacy: https://altair.fibteq.io/privacy/
 Terms: https://altair.fibteq.io/terms/
@@ -134,10 +134,10 @@ release notes:
 
 ```text
 <tr-TR>
-Altair'in ilk sürümü.
+Myrel'in ilk sürümü.
 </tr-TR>
 <en-US>
-The first release of Altair.
+The first release of Myrel.
 </en-US>
 ```
 
