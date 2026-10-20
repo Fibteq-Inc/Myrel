@@ -123,7 +123,8 @@ export class Sandbox extends DurableObject<Env> {
       );
       // Which kind of start it was, so a slow one can be told apart: a fresh container (the image
       // still has to reach the machine), one a warm-up was starting, or one already running.
-      const state = this.ctx.container?.running ? "already running" : this.starting ? "warming up" : "new";
+      // A warm-up in flight counts as running as soon as it called start(), so ask about it first.
+      const state = this.starting ? "warming up" : this.ctx.container?.running ? "already running" : "new";
       const container = await this.container(signal);
       const start = state !== "already running" && this.lastStart ? `, first command after ${clock(this.lastStart.ms)} and ${this.lastStart.tries} tries` : "";
       push({ type: "log", stream: "system", text: `Sandbox ready (${state}${start})`, ms: Date.now() - opening });
