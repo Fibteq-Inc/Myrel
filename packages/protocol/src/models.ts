@@ -155,7 +155,16 @@ export const ThreadFiles = z.object({
 });
 export type ThreadFiles = z.infer<typeof ThreadFiles>;
 
-export const TerminalLine = z.object({ stream: z.enum(["stdout", "stderr", "system"]), text: z.string() });
+export const TerminalLine = z.object({
+  stream: z.enum(["stdout", "stderr", "system"]),
+  text: z.string(),
+  /** When the line arrived (epoch ms). Absent on lines from before it was recorded. */
+  at: z.number().optional(),
+  /** How long the step on this line took (a tool call, opening the sandbox), when known. */
+  ms: z.number().nonnegative().optional(),
+  /** The line is a tool call (a command, a file edit). */
+  tool: z.boolean().optional(),
+});
 export type TerminalLine = z.infer<typeof TerminalLine>;
 
 export const Reaction = z.object({

@@ -19,6 +19,7 @@ import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
 import { accountConnectorRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
 import { proxyMcp } from "./connectors/gateway";
+import { prewarmSandbox } from "./sandbox/sandbox";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -94,4 +95,10 @@ const app = new Hono<AppEnv>()
 
 export type AppType = typeof app;
 
-export default app satisfies ExportedHandler<Env>;
+export default {
+  fetch: app.fetch,
+  // Prepares the sandbox tools after a deploy changed them, before a thread has to wait for them.
+  async scheduled(_controller, env) {
+    await prewarmSandbox(env);
+  },
+} satisfies ExportedHandler<Env>;

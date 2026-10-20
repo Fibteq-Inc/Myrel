@@ -112,9 +112,18 @@ export const RunnerEvent = z.discriminatedUnion("type", [
     items: z.array(z.object({ text: z.string().max(300), status: TodoStatus })).max(50),
   }),
   /** Terminal output. */
-  z.object({ type: z.literal("log"), stream: z.enum(["stdout", "stderr", "system"]), text: z.string() }),
-  /** The harness used a tool (edited a file, ran a command). */
-  z.object({ type: z.literal("tool"), name: z.string().max(100), title: z.string().max(500) }),
+  z.object({
+    type: z.literal("log"),
+    stream: z.enum(["stdout", "stderr", "system"]),
+    text: z.string(),
+    /** How long the step this line reports took (opening the sandbox, starting the harness). */
+    ms: z.number().nonnegative().optional(),
+  }),
+  /**
+   * The harness used a tool (edited a file, ran a command). `ms` is how long it ran, when the
+   * harness reports the tool once it finished; without it the tool ran until the next one started.
+   */
+  z.object({ type: z.literal("tool"), name: z.string().max(100), title: z.string().max(500), ms: z.number().nonnegative().optional() }),
   /** Prose the harness wrote. The last one is the task's summary. */
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("pr"), url: z.string().url() }),
