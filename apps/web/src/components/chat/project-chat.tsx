@@ -1,4 +1,4 @@
-import { projectChat, threadByRoot, threadMessages } from "@altair/client";
+import { projectChat, threadByCard, threadMessages } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import { MessagesSquare } from "lucide-react";
 import { api } from "../../lib/api";
@@ -15,7 +15,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   const t = useT();
   const { project, names, state, send } = useProjectContext();
   const chat = projectChat(state);
-  const roots = threadByRoot(state);
+  const roots = threadByCard(state);
   const answers = decisionAnswers(chat);
   const thinking = !!state.active[""];
 

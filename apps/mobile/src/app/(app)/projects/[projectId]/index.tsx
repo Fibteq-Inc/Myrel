@@ -1,4 +1,4 @@
-import { projectChat, threadByRoot, threadMessages } from "@altair/client";
+import { projectChat, threadByCard, threadMessages } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
@@ -77,7 +77,7 @@ function ChatTab() {
   const { projectId, state, status, send } = useProject();
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
-  const threads = useMemo(() => threadByRoot(state), [state]);
+  const threads = useMemo(() => threadByCard(state), [state]);
   const onSend = useCallback((body: string) => send(body, null), [send]);
 
   return (

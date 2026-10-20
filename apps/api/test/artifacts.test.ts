@@ -58,7 +58,7 @@ describe("artifacts", () => {
       if (isCoordinator(req)) {
         const id = newMessageId(req.prompt);
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Report", instructions: "Make a report." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Report", instructions: "Make a report.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       prompts.push(req.prompt);
@@ -140,7 +140,7 @@ describe("artifacts", () => {
       if (isCoordinator(req)) {
         const id = req.turns === 1 && newMessageId(req.prompt);
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Chart", instructions: "Chart it." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Chart", instructions: "Chart it.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       if (req.turns > 1) {

@@ -64,6 +64,7 @@ describe("coordinator and thread agent", () => {
               title: "Durable Objects",
               instructions: "Explain Durable Objects briefly.",
               ack: "Durable Objects'i araştırıyorum.",
+              project_ack: "Aldım, başlıyorum.",
             }),
           ],
         };
@@ -95,6 +96,14 @@ describe("coordinator and thread agent", () => {
       resolved: false,
     });
 
+    // The project chat reads: the ask, the coordinator's "on it" line, then the thread card under it.
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m) => m.threadId === null);
+    expect(chat.map((m) => [m.authorId === "coordinator" ? "coordinator" : "person", m.body])).toEqual([
+      ["person", "Durable Objects'i araştır"],
+      ["coordinator", "Aldım, başlıyorum."],
+    ]);
+    expect(thread.ackMessageId).toBe(chat[1]!.id);
+
     const ctx = (await agent.getThreadContext(thread.id))!;
     expect(ctx.root.body).toBe("Durable Objects'i araştır");
     expect(ctx.messages.map((m) => [m.authorKind, m.authorId, m.body])).toEqual([
@@ -115,6 +124,30 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("refuses to open a thread on a person's message without an acknowledgement line", async () => {
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      const message_id = newMessageId(req.prompt);
+      // First try without project_ack; after the tool error (two more messages), try again with it.
+      if (req.turns === 1) return { text: "", toolCalls: [call("start_thread", { message_id, title: "X", instructions: "Do X." })] };
+      if (req.turns === 3) {
+        return {
+          text: "",
+          toolCalls: [call("start_thread", { message_id, title: "X", instructions: "Do X.", project_ack: "Tamamdır." })],
+        };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "X'i yap" }));
+
+    const thread = await until(async () => (await agent.listThreads())[0] ?? null, "thread");
+    const ack = (await agent.getMessage(thread.ackMessageId!))!;
+    expect(ack).toMatchObject({ threadId: null, authorId: "coordinator", body: "Tamamdır." });
+    expect(await agent.listThreads()).toHaveLength(1);
+    ws.close();
+  });
+
   it("wakes the thread agent on a reply in the thread, and lets it ask the coordinator", async () => {
     const requests: string[] = [];
     setFakeModel((req) => {
@@ -127,7 +160,7 @@ describe("coordinator and thread agent", () => {
         }
         const id = newMessageId(req.prompt);
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Deploy", instructions: "Deploy it." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Deploy", instructions: "Deploy it.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       if (req.prompt.includes("thanks")) {
@@ -181,7 +214,7 @@ describe("coordinator and thread agent", () => {
       if (isCoordinator(req)) {
         const id = newMessageId(req.prompt);
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Pricing", instructions: "Look into it." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Pricing", instructions: "Look into it.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       return { text: "", toolCalls: [call("reply", { text: "Here it is." })] };

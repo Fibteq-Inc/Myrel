@@ -103,6 +103,11 @@ export const Thread = z.object({
   projectId: ProjectId,
   /** The project-chat message the thread hangs under. */
   rootMessageId: MessageId,
+  /**
+   * The coordinator's one-line acknowledgement in the project chat ("On it"), posted right under the
+   * person's message. Clients show the thread card under this line when it is set.
+   */
+  ackMessageId: MessageId.nullable().default(null),
   title: z.string(),
   status: ThreadStatus,
   /** The thread agent's progress checklist (`update_status`), shown while it works. */
