@@ -2,7 +2,7 @@ import type { ExpoConfig } from "expo/config";
 
 // The hosted Myrel EAS project (@fibteqs-organization/myrel). Self-hosters who build their
 // own app point these at their Expo project; setting EAS_PROJECT_ID to "" unlinks it.
-const easProjectId = process.env.EAS_PROJECT_ID ?? "c4c8d3bc-48ec-4c79-b7c3-982877904746";
+const easProjectId = process.env.EAS_PROJECT_ID ?? "e078b447-75b4-45d5-afa5-413a7c079de1";
 const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
