@@ -1,0 +1,73 @@
+name: Release altair-runner
+
+# Publishes @fibteq/altair-runner and the short name altair-runner to npm when
+# their version on main is not on npm yet: bump the versions in a PR, merge it,
+# and this does the rest. Also runs by hand from the Actions tab.
+#
+# Uses npm trusted publishing (no token): on npmjs.com, each package's
+# Settings > Trusted publishing must name this repository and this workflow file.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/altair-runner/package.json
+      - packages/altair-runner-alias/package.json
+  workflow_dispatch:
+
+concurrency:
+  group: release-runner
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      # Trusted publishing needs npm 11.5.1 or newer, which Node 24 ships with.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check which versions are new
+        id: versions
+        run: |
+          set -euo pipefail
+          for dir in altair-runner altair-runner-alias; do
+            name=$(node -p "require('./packages/$dir/package.json').name")
+            version=$(node -p "require('./packages/$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm"
+              echo "$dir=" >> "$GITHUB_OUTPUT"
+            else
+              echo "$name@$version will be published"
+              echo "$dir=$version" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - name: Test and build
+        if: steps.versions.outputs.altair-runner || steps.versions.outputs.altair-runner-alias
+        run: |
+          pnpm --filter @fibteq/altair-runner test
+          pnpm --filter @fibteq/altair-runner build
+
+      # pnpm pack swaps workspace: versions for real ones; npm publish does the trusted-publishing login.
+      - name: Publish @fibteq/altair-runner
+        if: steps.versions.outputs.altair-runner
+        run: |
+          pnpm --filter @fibteq/altair-runner pack --pack-destination "$RUNNER_TEMP/pkg"
+          npm publish "$RUNNER_TEMP"/pkg/fibteq-altair-runner-*.tgz --access public
+
+      - name: Publish altair-runner
+        if: steps.versions.outputs.altair-runner-alias
+        run: |
+          pnpm --filter altair-runner pack --pack-destination "$RUNNER_TEMP/alias"
+          npm publish "$RUNNER_TEMP"/alias/altair-runner-*.tgz --access public
