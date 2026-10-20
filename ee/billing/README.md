@@ -52,8 +52,9 @@ and coordinator turns over the Free limits are refused.
    It prints the webhook signing secret: `wrangler secret put STRIPE_WEBHOOK_SECRET`.
    (The products, prices and webhook can also be created in the Stripe dashboard; the price
    lookup keys in `src/plans.ts` are what matter.)
-3. In Stripe: Settings > Billing > Subscriptions and emails, retry failed payments for 14 days,
-   then cancel the subscription. The billing portal uses the configuration with metadata
+3. Nothing to change in the Stripe account's retry settings, which other products may share: a
+   past_due subscription keeps its plan for 14 days, then counts as Free, and the next failed
+   payment (`invoice.payment_failed`) cancels it. The billing portal uses the configuration with metadata
    `app=myrel`, so other products in the same Stripe account keep their default portal.
 4. Stripe Tax: the head office address is set; add a registration for every place Fibteq must
    collect tax (ask the accountant about the EU and Turkey). Without registrations, Stripe Tax

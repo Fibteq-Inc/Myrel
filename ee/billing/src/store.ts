@@ -1,4 +1,4 @@
-import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId } from "./plans";
+import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId, paidSql } from "./plans";
 
 /** The plan a person works under: their own, or the Team plan of the owner who added them. */
 export type Standing = {
@@ -20,6 +20,7 @@ export type SubscriptionRow = {
   current_period_end: number | null;
   trial_end: number | null;
   cancel_at_period_end: number;
+  past_due_since: number | null;
 };
 
 export type Usage = { projects: number; sandboxSeconds: number; modelMicros: number };
@@ -41,7 +42,7 @@ async function paidSubscription(db: D1Database, userId: string): Promise<Subscri
     .prepare("SELECT * FROM billing_subscriptions WHERE user_id = ? ORDER BY updated_at DESC")
     .bind(userId)
     .all<SubscriptionRow>();
-  return results.find((s) => isPaid(s.status)) ?? null;
+  return results.find((s) => isPaid(s.status, s.past_due_since)) ?? null;
 }
 
 export async function standingOf(db: D1Database, userId: string): Promise<Standing> {
@@ -111,9 +112,9 @@ export const SANDBOX_MICROS_PER_SECOND = 14;
 export async function freeSpendMicros(env: Env, now = new Date()): Promise<number> {
   const from = monthStart(now).getTime();
   // People with a paid plan of their own, or on a paying owner's team.
-  const paid = `SELECT user_id FROM billing_subscriptions WHERE status IN ('trialing', 'active', 'past_due')
+  const paid = `SELECT b.user_id FROM billing_subscriptions b WHERE ${paidSql("b", now.getTime())}
     UNION SELECT m.user_id FROM billing_team_members m JOIN billing_subscriptions s ON s.user_id = m.owner_id
-      WHERE s.plan = 'team' AND s.status IN ('trialing', 'active', 'past_due')`;
+      WHERE s.plan = 'team' AND ${paidSql("s", now.getTime())}`;
   const [model, sandbox] = await env.DB.batch<{ n: number }>([
     env.DB.prepare(
       `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?2)), 0) AS n FROM usage_events u JOIN projects p ON p.id = u.project_id

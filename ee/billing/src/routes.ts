@@ -4,7 +4,7 @@ import { z } from "zod";
 import { type AppEnv, requireUser } from "../../../apps/api/src/middleware";
 import { isPaid, PRICE_KEYS, planOfPrice, TEAM_MIN_SEATS, TRIAL_DAYS } from "./plans";
 import { standingOf, usageOf } from "./store";
-import { type StripeEnv, StripeError, type StripeEvent, type StripeSubscription, stripe, verifyWebhook } from "./stripe";
+import { type StripeEnv, StripeError, type StripeEvent, type StripeInvoice, type StripeSubscription, stripe, verifyWebhook } from "./stripe";
 
 type BillingEnv = { Bindings: Env & StripeEnv; Variables: AppEnv["Variables"] };
 
@@ -33,7 +33,15 @@ export const billingRoutes = new Hono<BillingEnv>()
         const sub = event.data.object as StripeSubscription;
         const owner = await saveSubscription(c.env, sub);
         // A plan change in the billing portal keeps the old quantity: Pro is one seat, Team follows its members.
-        if (owner && isPaid(sub.status) && event.type !== "customer.subscription.deleted") await fitSeats(c.env, owner, sub);
+        if (owner && sub.status !== "past_due" && isPaid(sub.status) && event.type !== "customer.subscription.deleted") {
+          await fitSeats(c.env, owner, sub);
+        }
+        if (sub.status === "past_due") await endAfterGrace(c.env, sub.id);
+      } else if (event.type === "invoice.payment_failed") {
+        // Each failed retry: end the subscription once Myrel's grace period is over.
+        const invoice = event.data.object as StripeInvoice;
+        const subscriptionId = invoice.parent?.subscription_details?.subscription ?? invoice.subscription;
+        if (typeof subscriptionId === "string") await endAfterGrace(c.env, subscriptionId);
       }
     } catch (err) {
       // Let Stripe retry: forget the event so the redelivery is handled.
@@ -200,6 +208,19 @@ async function fitSeats(env: Env & StripeEnv, ownerId: string, sub: StripeSubscr
   await saveSubscription(env, updated);
 }
 
+/**
+ * Cancels a subscription that has been past_due longer than the grace period, whatever the Stripe
+ * account's own retry settings say. Its plan already stopped counting when the grace period ran out.
+ */
+async function endAfterGrace(env: Env & StripeEnv, subscriptionId: string) {
+  const row = await env.DB.prepare("SELECT status, past_due_since FROM billing_subscriptions WHERE id = ?")
+    .bind(subscriptionId)
+    .first<{ status: string; past_due_since: number | null }>();
+  if (row?.status !== "past_due" || isPaid(row.status, row.past_due_since)) return;
+  const ended = await stripe<StripeSubscription>(env, "DELETE", `/subscriptions/${subscriptionId}`);
+  await saveSubscription(env, ended);
+}
+
 let portalConfigurationId: string | null | undefined;
 
 /**
@@ -237,10 +258,11 @@ export async function saveSubscription(env: Env, sub: StripeSubscription): Promi
   const ms = (s: number | null | undefined) => (s ? s * 1000 : null);
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO billing_subscriptions (id, user_id, plan, interval, status, seats, current_period_end, trial_end, cancel_at_period_end, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+      `INSERT INTO billing_subscriptions (id, user_id, plan, interval, status, seats, current_period_end, trial_end, cancel_at_period_end, past_due_since, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CASE WHEN ?5 = 'past_due' THEN ?10 END, ?10)
        ON CONFLICT (id) DO UPDATE SET plan = ?3, interval = ?4, status = ?5, seats = ?6, current_period_end = ?7,
-         trial_end = ?8, cancel_at_period_end = ?9, updated_at = ?10`,
+         trial_end = ?8, cancel_at_period_end = ?9, updated_at = ?10,
+         past_due_since = CASE WHEN ?5 = 'past_due' THEN COALESCE(past_due_since, ?10) END`,
     ).bind(sub.id, userId, plan.plan, plan.interval, sub.status, item.quantity ?? 1, ms(periodEnd), ms(sub.trial_end), sub.cancel_at_period_end ? 1 : 0, Date.now()),
     // One trial per person.
     env.DB.prepare("UPDATE billing_customers SET trial_used = 1 WHERE user_id = ? AND ?").bind(userId, sub.trial_end ? 1 : 0),

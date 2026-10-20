@@ -414,6 +414,8 @@ export const billingSubscriptions = sqliteTable(
     currentPeriodEnd: integer("current_period_end", { mode: "timestamp_ms" }),
     trialEnd: integer("trial_end", { mode: "timestamp_ms" }),
     cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" }).notNull().default(false),
+    /** When the subscription last became past_due; the plan holds for a grace period from then. */
+    pastDueSince: integer("past_due_since", { mode: "timestamp_ms" }),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [index("billing_subscriptions_user_idx").on(t.userId)],

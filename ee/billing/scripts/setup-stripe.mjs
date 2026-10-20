@@ -109,7 +109,12 @@ console.log("billing portal configuration", portal.id);
 
 const hook = await api("POST", "/webhook_endpoints", {
   url: `${origin}/api/billing/webhook`,
-  enabled_events: ["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"],
+  enabled_events: [
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+    "invoice.payment_failed",
+  ],
   description: "Myrel billing",
 });
 console.log("webhook endpoint", hook.id);

@@ -1,0 +1,1 @@
+ALTER TABLE `billing_subscriptions` ADD `past_due_since` integer;
