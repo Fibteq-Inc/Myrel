@@ -12,6 +12,7 @@ import {
   type ArtifactRef,
   nextCronRun,
   normalizeFilePath,
+  planChecklist,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -31,10 +32,17 @@ import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
 import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
 import { deliverNotification, excerpt } from "../notifications/deliver";
-import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
+import {
+  type CoordinatorHost,
+  coordinatorPrompt,
+  coordinatorTools,
+  COORDINATOR_SYSTEM,
+  type InboxItem,
+  type Relay,
+} from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
-import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID } from "./names";
+import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
@@ -109,6 +117,16 @@ export type ThreadContext = {
 
 export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
 
+/**
+ * How long the coordinator waits after a message inside a thread before looking at thread updates,
+ * so a burst of replies costs one turn. A project-chat message runs it right away and takes them too.
+ */
+const OBSERVE_DELAY_SEC = 60;
+/** Relays the coordinator sees each turn, so it does not repeat one. */
+const RELAY_HISTORY = 20;
+/** A relay between the same two threads (either way) within this window is refused, so notes cannot bounce. */
+const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+
 /** Most recent project-chat messages the coordinator sees each turn. */
 const COORDINATOR_HISTORY = 40;
 
@@ -173,6 +191,14 @@ export class ProjectAgent extends Agent<Env> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       kind TEXT NOT NULL,
       payload TEXT NOT NULL
+    )`;
+    // Notes the coordinator passed from one thread to another.
+    this.sql`CREATE TABLE IF NOT EXISTS coordinator_relays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_thread_id TEXT NOT NULL,
+      to_thread_id TEXT NOT NULL,
+      note TEXT NOT NULL,
+      created_at TEXT NOT NULL
     )`;
     this.knowledge = new KnowledgeStore(
       (strings, ...values) => this.sql(strings, ...values),
@@ -308,6 +334,7 @@ export class ProjectAgent extends Agent<Env> {
       createdAt,
     };
     this.emit({ type: "message.created", message });
+    if (this.observable(message)) this.ctx.waitUntil(this.observeThread(message));
     return message;
   }
 
@@ -654,6 +681,34 @@ export class ProjectAgent extends Agent<Env> {
 
   // ---- Coordinator -------------------------------------------------------
 
+  /**
+   * Whether the coordinator should see a thread message: what a person writes there and the thread
+   * agent's replies, while another thread is open that it could matter to. Plan cards and
+   * attachment-only messages carry nothing to relay.
+   */
+  private observable(m: Message): m is Message & { threadId: string } {
+    if (!m.threadId || !m.body.trim() || planChecklist(m.body) !== null) return false;
+    if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
+    return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
+  }
+
+  private async observeThread(m: Message & { threadId: string }) {
+    const item: InboxItem = { kind: "thread", threadId: m.threadId, messageId: m.id };
+    this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${item.kind}, ${JSON.stringify(item)})`;
+    // One pending look at a time; any coordinator turn before it takes these items too.
+    await this.schedule(OBSERVE_DELAY_SEC, "coordinatorTurn", "observe", { idempotent: true });
+  }
+
+  private recentRelays(): Relay[] {
+    return this.sql<{ from_thread_id: string; to_thread_id: string; note: string; created_at: string }>`
+      SELECT * FROM (SELECT * FROM coordinator_relays ORDER BY id DESC LIMIT ${RELAY_HISTORY}) ORDER BY id`.map((r) => ({
+      fromThreadId: r.from_thread_id,
+      toThreadId: r.to_thread_id,
+      note: r.note,
+      createdAt: r.created_at,
+    }));
+  }
+
   private async notifyCoordinator(item: InboxItem) {
     this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${item.kind}, ${JSON.stringify(item)})`;
     await this.queue("coordinatorTurn", null);
@@ -684,6 +739,13 @@ export class ProjectAgent extends Agent<Env> {
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
       const meter = new TurnMeter(llm.provider.model);
+      const threadUpdates = inbox.flatMap((item) => {
+        if (item.kind !== "thread") return [];
+        const thread = this.getThread(item.threadId);
+        const message = this.getMessage(item.messageId);
+        return thread && message ? [{ thread, message }] : [];
+      });
+      const onlyThreadUpdates = inbox.every((i) => i.kind === "thread");
       await runLoop({
         provider: meteredForTurn(
           llm.provider,
@@ -699,13 +761,17 @@ export class ProjectAgent extends Agent<Env> {
           threads: this.listThreads(),
           routines: this.listRoutines(),
           inbox,
+          threadUpdates,
+          relays: this.recentRelays(),
           knowledge: this.knowledge.snapshot(),
           now: new Date(),
           defaultTimezone: this.defaultTimezone(),
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID })),
-          ...routineTools(this.routineHost(null)),
+          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+            onlyThreadUpdates,
+          }),
+          ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
         ],
         maxSteps: 8,
       });
@@ -759,6 +825,24 @@ export class ProjectAgent extends Agent<Env> {
         const thread = this.getThread(threadId);
         if (thread?.resolved) this.updateThread(threadId, { resolved: false });
         await this.wakeThread(threadId, { kind: "coordinator", note });
+      },
+      relay: async (fromThreadId, toThreadId, note) => {
+        const from = this.getThread(fromThreadId);
+        const to = this.getThread(toThreadId);
+        if (!from) throw new Error(`No thread ${fromThreadId}.`);
+        if (!to) throw new Error(`No thread ${toThreadId}.`);
+        if (from.id === to.id) throw new Error("A thread already knows its own work; relay only to another thread.");
+        // A finished thread is not woken for news; redoing its work is a new ask from a person.
+        if (to.resolved) throw new Error(`"${to.title}" is resolved; do not relay to it.`);
+        const since = new Date(Date.now() - RELAY_COOLDOWN_MS).toISOString();
+        const [recent] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM coordinator_relays WHERE created_at > ${since}
+          AND ((from_thread_id = ${from.id} AND to_thread_id = ${to.id}) OR (from_thread_id = ${to.id} AND to_thread_id = ${from.id}))`;
+        if (recent!.n > 0) {
+          throw new Error(`You already relayed between "${from.title}" and "${to.title}" in the last few minutes; do not relay again.`);
+        }
+        this.sql`INSERT INTO coordinator_relays (from_thread_id, to_thread_id, note, created_at)
+          VALUES (${from.id}, ${to.id}, ${note}, ${new Date().toISOString()})`;
+        await this.wakeThread(to.id, { kind: "coordinator", note: `From the "${from.title}" thread: ${note}` });
       },
     };
   }
