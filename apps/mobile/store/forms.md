@@ -10,17 +10,17 @@ Shared values:
 | | |
 |---|---|
 | App name | Myrel |
-| Website | https://altair.fibteq.io |
-| Support | https://altair.fibteq.io/support/ · myrel@fibteq.app |
-| Privacy policy | https://altair.fibteq.io/privacy/ |
-| Terms | https://altair.fibteq.io/terms/ |
-| Account deletion | https://altair.fibteq.io/delete-account/ |
+| Website | https://myrel.fibteq.io |
+| Support | https://myrel.fibteq.io/support/ · myrel@fibteq.app |
+| Privacy policy | https://myrel.fibteq.io/privacy/ |
+| Terms | https://myrel.fibteq.io/terms/ |
+| Account deletion | https://myrel.fibteq.io/delete-account/ |
 | Package / bundle id | io.fibteq.altair (fixed after the first upload) |
 
 ## Google Play: main store listing
 
 Category **Productivity**, tags: AI assistant, Productivity, Developer tools. Contact email myrel@fibteq.app,
-website https://altair.fibteq.io.
+website https://myrel.fibteq.io.
 
 Graphics: icon `../assets/icon.png` scaled to 512x512, feature graphic `screenshots/feature-graphic-<lang>.png`,
 phone screenshots `screenshots/android-phone/<lang>/`.
@@ -47,10 +47,10 @@ TELEFONUNDAN NELER YAPABİLİRSİN
 • Ekibini projeye davet eder, birlikte çalışırsın.
 
 AÇIK KAYNAK
-Myrel açık kaynaklı. altair.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Myrel sunucusuna bağlayabilirsin.
+Myrel açık kaynaklı. myrel.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Myrel sunucusuna bağlayabilirsin.
 
-Gizlilik: https://altair.fibteq.io/privacy/
-Kullanım şartları: https://altair.fibteq.io/terms/
+Gizlilik: https://myrel.fibteq.io/privacy/
+Kullanım şartları: https://myrel.fibteq.io/terms/
 ```
 
 ### English (en-US)
@@ -75,22 +75,22 @@ FROM YOUR PHONE YOU CAN
 • Invite your team to a project and work together.
 
 OPEN SOURCE
-Myrel is open source. Use altair.fibteq.io, or connect the app to a Myrel server you run yourself.
+Myrel is open source. Use myrel.fibteq.io, or connect the app to a Myrel server you run yourself.
 
-Privacy: https://altair.fibteq.io/privacy/
-Terms: https://altair.fibteq.io/terms/
+Privacy: https://myrel.fibteq.io/privacy/
+Terms: https://myrel.fibteq.io/terms/
 ```
 
 ## Google Play: App content (Policy > App content)
 
-**Privacy policy:** https://altair.fibteq.io/privacy/
+**Privacy policy:** https://myrel.fibteq.io/privacy/
 
 **Ads:** No, the app does not contain ads.
 
 **App access:** All or some functionality is restricted. Add instructions:
 - Name: Demo account
 - Username / password: the demo account (same one as in the App Store review)
-- Notes: "Server altair.fibteq.io is preselected. Sign in, open the Demo project."
+- Notes: "Server myrel.fibteq.io is preselected. Sign in, open the Demo project."
 
 **Content rating (IARC questionnaire):** category *All Other App Types*. Answer No to violence, fear,
 sexuality, gambling, language, controlled substances and crude humor. *Users can interact or exchange
@@ -108,7 +108,7 @@ content:* Yes (project members chat with each other and with AI agents). *Shares
   providers, Expo, Apple and Google act as service providers, which Google does not count as sharing).
 - Is all data encrypted in transit? **Yes.**
 - Can users request that their data be deleted? **Yes**, in the app and at
-  https://altair.fibteq.io/delete-account/
+  https://myrel.fibteq.io/delete-account/
 - Data types (all *collected*, *not shared*, *processed ephemerally: No*, *required*):
 
 | Category | Data type | Purposes |
@@ -124,7 +124,7 @@ content:* Yes (project members chat with each other and with AI agents). *Shares
 Not collected: location, financial info, health, contacts, calendar, photos/videos, audio, web
 history, installed apps, crash logs, diagnostics.
 
-**Account deletion:** URL https://altair.fibteq.io/delete-account/ . In-app path: Projects > gear icon >
+**Account deletion:** URL https://myrel.fibteq.io/delete-account/ . In-app path: Projects > gear icon >
 Delete account.
 
 ## Google Play: first release

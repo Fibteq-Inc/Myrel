@@ -5,7 +5,7 @@
 
 // The store name; change it here (and in app.config.ts) if the product is renamed.
 const NAME = "Myrel";
-const SITE = "https://altair.fibteq.io";
+const SITE = "https://myrel.fibteq.io";
 
 const urls = {
   marketingUrl: SITE,
@@ -36,7 +36,7 @@ TELEFONUNDAN NELER YAPABİLİRSİN
 • Ekibini projeye davet eder, birlikte çalışırsın.
 
 AÇIK KAYNAK
-Myrel açık kaynaklı. altair.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Myrel sunucusuna bağlayabilirsin.
+Myrel açık kaynaklı. myrel.fibteq.io'yu kullanabilir ya da uygulamayı kendi kurduğun Myrel sunucusuna bağlayabilirsin.
 
 Gizlilik: ${urls.privacyPolicyUrl}
 Kullanım şartları: ${SITE}/terms/`,
@@ -63,7 +63,7 @@ FROM YOUR PHONE YOU CAN
 • Invite your team to a project and work together.
 
 OPEN SOURCE
-Myrel is open source. Use altair.fibteq.io, or connect the app to a Myrel server you run yourself.
+Myrel is open source. Use myrel.fibteq.io, or connect the app to a Myrel server you run yourself.
 
 Privacy: ${urls.privacyPolicyUrl}
 Terms: ${SITE}/terms/`,
@@ -120,7 +120,7 @@ module.exports = {
       demoUsername: env.APP_REVIEW_DEMO_EMAIL ?? "",
       demoPassword: env.APP_REVIEW_DEMO_PASSWORD ?? "",
       notes: [
-        "Sign in on the first screen with the demo account above (server: altair.fibteq.io, already selected).",
+        "Sign in on the first screen with the demo account above (server: myrel.fibteq.io, already selected).",
         "Open the project \"Demo\" to see the coordinator conversation, threads, artifacts, files and usage.",
         "Send a message to the coordinator to start a task; the agents reply within a minute.",
         "Account deletion: Projects screen > gear icon (Settings) > Delete account.",
