@@ -163,7 +163,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | Secret | Needed for | Required |
 |---|---|---|
 | `BETTER_AUTH_SECRET` | Signing sessions and tokens | Always |
-| `KEY_ENCRYPTION_SECRET` | Encrypting model API keys people save in Myrel. Falls back to `BETTER_AUTH_SECRET`; set it once and never change it, or saved keys can no longer be read | Recommended |
+| `KEY_ENCRYPTION_SECRET` | Encrypting model API keys and connector credentials people save in Myrel. Falls back to `BETTER_AUTH_SECRET`; set it once and never change it, or saved keys can no longer be read | Recommended |
 | `FIREWORKS_API_KEY` | Agents, when `LLM_PROVIDER` is `fireworks` | For that provider |
 | `ANTHROPIC_API_KEY` | Agents, when `LLM_PROVIDER` is `anthropic` | For that provider |
 | `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
@@ -194,6 +194,8 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | Fibteq's GitHub App | Your GitHub App's id and URL name. GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
+| `TERMS_URL`, `PRIVACY_URL` | empty | Links to your terms and privacy policy. When both are set, signing up requires accepting them. |
+| `LEGAL_VERSION` | `"1"` | Recorded with each acceptance, e.g. the documents' effective date. Change it when the documents change. |
 
 ### Bindings
 
@@ -336,6 +338,37 @@ the project chat's header, or by asking Myrel ("every weekday at 9, summarize op
 threads"). Each run either posts in the project chat, where the coordinator
 opens a thread for it, or wakes an existing thread. They run on Durable Object
 alarms, so they need no setup. Set `DEFAULT_TIMEZONE` to your team's zone.
+
+### Skills
+
+Skills are instructions with optional files (a `SKILL.md` plus scripts or
+references) that thread agents load when a task fits. A person adds them for
+themselves, or for a project, under Settings: written in the app, or taken from
+a GitHub repository or a skills.sh link. A GitHub skill remembers its commit, so
+updating it is a choice. They live in D1 and need no setup; up to 40 reach one
+turn, project skills first.
+
+### Connectors
+
+Connectors are MCP servers people add so thread agents can use other services.
+There are two kinds:
+
+- **Remote** (`https://…`, with OAuth or headers): the Worker proxies each call
+  and adds the stored credentials, so the agent never holds them. Private and
+  local addresses are refused. The OAuth redirect is
+  `<your origin>/api/connectors/oauth/callback`.
+- **Command** (stdio): runs next to the agent, in the cloud sandbox or on the
+  person's own computer through the runner.
+
+The settings offer ready-made ones (Fibteq Flow, Linear, Notion, Sentry,
+PostgreSQL); the list is `CONNECTOR_PRESETS` in `packages/protocol/src/connectors.ts`.
+Connector credentials are encrypted with `KEY_ENCRYPTION_SECRET`.
+
+### Hosted plans
+
+`ee/billing` holds the plans and Stripe billing of the hosted service at
+myrel.fibteq.io, under a separate license. A self-hosted server does not use it
+and has no limits.
 
 ### Notifications
 
