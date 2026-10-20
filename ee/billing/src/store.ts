@@ -23,7 +23,7 @@ export type SubscriptionRow = {
   past_due_since: number | null;
 };
 
-export type Usage = { projects: number; sandboxSeconds: number; modelMicros: number };
+export type Usage = { projects: number; sandboxSeconds: number; modelMicros: number; connectors: number };
 
 /** Optional vars that tune the hosted plans (set in the Workers dashboard). */
 type BillingVars = Env & { BILLING_UNPRICED_CALL_MICROS?: string; BILLING_FREE_MONTHLY_BUDGET_USD?: string };
@@ -82,7 +82,7 @@ const GROUP = `SELECT ?1 UNION SELECT user_id FROM billing_team_members WHERE ow
 export async function usageOf(env: Env, standing: Standing, userId: string, now = new Date()): Promise<Usage> {
   const from = monthStart(now).getTime();
   const args = [standing.ownerId, standing.plan];
-  const [projects, sandbox, model] = await env.DB.batch<{ n: number }>([
+  const [projects, sandbox, model, connectors] = await env.DB.batch<{ n: number }>([
     env.DB.prepare("SELECT COUNT(*) AS n FROM projects WHERE created_by = ?").bind(userId),
     env.DB.prepare(
       `SELECT COALESCE(SUM(r.seconds), 0) AS n FROM sandbox_runs r JOIN projects p ON p.id = r.project_id
@@ -94,11 +94,16 @@ export async function usageOf(env: Env, standing: Standing, userId: string, now 
       `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?4)), 0) AS n FROM usage_events u JOIN projects p ON p.id = u.project_id
        WHERE ${ON_SERVICE_KEY} AND p.created_by IN (${GROUP}) AND u.created_at >= ?3`,
     ).bind(...args, from, unpricedCallMicros(env)),
+    // A person's own connectors and those on the projects they own.
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM connectors WHERE owner_id = ?1 OR project_id IN (SELECT id FROM projects WHERE created_by = ?1)",
+    ).bind(userId),
   ]);
   return {
     projects: Number(projects!.results[0]?.n ?? 0),
     sandboxSeconds: Number(sandbox!.results[0]?.n ?? 0),
     modelMicros: Number(model!.results[0]?.n ?? 0),
+    connectors: Number(connectors!.results[0]?.n ?? 0),
   };
 }
 

@@ -7,7 +7,7 @@ directory and have no limits.
 ## How it plugs in
 
 The core defines optional hooks in `apps/api/src/extensions.ts`: `canCreateProject`,
-`canUseSandbox`, `canUseCoordinator`, and `billing` (shown to clients in `/api/info`). This
+`canUseSandbox`, `canUseCoordinator`, `canAddConnector`, `legal` and `billing` (shown to clients in `/api/info`). This
 package's `src/worker.ts` is the hosted Worker's entry: it sets the hooks, adds `/api/billing`,
 and hands everything else to the core Worker. The core never imports this package.
 
@@ -28,6 +28,7 @@ and hands everything else to the core Worker. The core never imports this packag
 | Projects owned | 3 | Unlimited | Unlimited |
 | Cloud sandbox | 2 h/month | 100 h/month | 150 h/person/month, pooled |
 | Included model usage | $1/month | $5/month | $5/person/month, pooled |
+| Connectors (own + on owned projects) | 2 | Unlimited | Unlimited |
 
 Monthly allowances reset on the 1st (UTC). Included model usage is what the coordinator and the
 cloud thread agent spend on the service's model keys, for projects without a key of their own

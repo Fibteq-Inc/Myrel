@@ -55,7 +55,7 @@ function BillingSettings() {
             )}
           </div>
           {!billing.owner && <p className="mt-2 text-[13px] text-subtle">{t("billing.memberNote")}</p>}
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Meter
               label={t("billing.projects")}
               used={billing.usage.projects}
@@ -73,6 +73,12 @@ function BillingSettings() {
               used={billing.usage.modelMicros}
               limit={billing.limits.modelMicros}
               text={(m) => fmt.cost(m)}
+            />
+            <Meter
+              label={t("billing.connectors")}
+              used={billing.usage.connectors}
+              limit={billing.limits.connectors}
+              text={(n) => String(n)}
             />
           </div>
           <p className="mt-3 text-xs text-subtle">{t("billing.meterNote")}</p>

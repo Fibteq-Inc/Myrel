@@ -23,6 +23,18 @@ export const billingExtensions: Extensions = {
       : refuse(`Your plan includes ${max} projects. ${UPGRADE}, or delete a project you no longer need.`);
   },
 
+  async canAddConnector(env, owner) {
+    const userId = "userId" in owner ? owner.userId : (await projectOwner(env.DB, owner.projectId))?.owner;
+    if (!userId) return OK;
+    const standing = await standingOf(env.DB, userId);
+    const max = standing.limits.connectors;
+    if (max === null) return OK;
+    const usage = await usageOf(env, standing, userId);
+    return usage.connectors < max
+      ? OK
+      : refuse(`Your plan includes ${max} connectors. ${UPGRADE}, or remove a connector you no longer use.`);
+  },
+
   async canUseSandbox(env, projectId) {
     const project = await projectOwner(env.DB, projectId);
     if (!project) return OK;
