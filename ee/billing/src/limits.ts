@@ -14,7 +14,7 @@ export const billingExtensions: Extensions = {
   legal: { terms: "/terms/", privacy: "/privacy/", version: "2026-10-20" },
 
   async canCreateProject(env, userId) {
-    const standing = await standingOf(env.DB, userId);
+    const standing = await standingOf(env, userId);
     const max = standing.limits.projects;
     if (max === null) return OK;
     const usage = await usageOf(env, standing, userId);
@@ -26,7 +26,7 @@ export const billingExtensions: Extensions = {
   async canAddConnector(env, owner) {
     const userId = "userId" in owner ? owner.userId : (await projectOwner(env.DB, owner.projectId))?.owner;
     if (!userId) return OK;
-    const standing = await standingOf(env.DB, userId);
+    const standing = await standingOf(env, userId);
     const max = standing.limits.connectors;
     if (max === null) return OK;
     const usage = await usageOf(env, standing, userId);
@@ -38,14 +38,16 @@ export const billingExtensions: Extensions = {
   async canUseSandbox(env, projectId) {
     const project = await projectOwner(env.DB, projectId);
     if (!project) return OK;
-    const standing = await standingOf(env.DB, project.owner);
+    const standing = await standingOf(env, project.owner);
+    if (standing.plan === "admin") return OK;
     const usage = await usageOf(env, standing, project.owner);
+    const { modelMicros, sandboxSeconds } = standing.limits;
     // The cloud agent runs on the service's model key unless the project has its own.
-    if (!project.ownKey && usage.modelMicros >= standing.limits.modelMicros) {
+    if (!project.ownKey && modelMicros !== null && usage.modelMicros >= modelMicros) {
       return refuse(`This project's plan has used its included model usage this month. ${UPGRADE}, or ${KEY_HINT}.`);
     }
-    if (usage.sandboxSeconds >= standing.limits.sandboxSeconds) {
-      const hours = Math.round(standing.limits.sandboxSeconds / 360) / 10;
+    if (sandboxSeconds !== null && usage.sandboxSeconds >= sandboxSeconds) {
+      const hours = Math.round(sandboxSeconds / 360) / 10;
       return refuse(
         `This project's plan has used its ${hours} hours of cloud sandbox time this month. ` +
           `${UPGRADE}, or connect a folder on your computer to keep working there.`,
@@ -61,9 +63,11 @@ export const billingExtensions: Extensions = {
     const project = await projectOwner(env.DB, projectId);
     // A project with its own model key pays for its own coordinator.
     if (!project || project.ownKey) return OK;
-    const standing = await standingOf(env.DB, project.owner);
+    const standing = await standingOf(env, project.owner);
+    if (standing.plan === "admin") return OK;
     const usage = await usageOf(env, standing, project.owner);
-    if (usage.modelMicros >= standing.limits.modelMicros) {
+    const max = standing.limits.modelMicros;
+    if (max !== null && usage.modelMicros >= max) {
       return refuse(`This project's plan has used its included model usage this month. ${UPGRADE}, or ${KEY_HINT}.`);
     }
     if (standing.plan === "free" && (await freeSpendMicros(env)) >= freeBudgetMicros(env)) {

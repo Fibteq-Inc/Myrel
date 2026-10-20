@@ -21,6 +21,12 @@ interface Env {
   VAPID_PRIVATE_KEY?: string;
   /** Only needed when Expo enhanced push security is enabled. */
   EXPO_ACCESS_TOKEN?: string;
+  /**
+   * Comma-separated addresses of the server's admins. They may sign up while sign-ups are closed and
+   * are admins whatever their stored role. Unset = the first account becomes the admin. A secret, not
+   * a var, so a deploy from wrangler.jsonc never wipes it and forks never inherit it.
+   */
+  ADMIN_EMAILS?: string;
   // Optional vars. TERMS_URL and PRIVACY_URL: when both are set, signing up requires accepting them.
   // LEGAL_VERSION: recorded with each acceptance, e.g. the documents' effective date (default "1").
   TERMS_URL?: string;

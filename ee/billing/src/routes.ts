@@ -58,7 +58,7 @@ export const billingRoutes = new Hono<BillingEnv>()
   .get("/", async (c) => {
     const user = c.get("user");
     const db = c.env.DB;
-    const standing = await standingOf(db, user.id);
+    const standing = await standingOf(c.env, user.id);
     const usage = await usageOf(c.env, standing, user.id);
     const sub = standing.subscription;
     const owner = standing.ownerId === user.id;
@@ -94,7 +94,7 @@ export const billingRoutes = new Hono<BillingEnv>()
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     const { plan, interval } = input.data;
     const user = c.get("user");
-    const standing = await standingOf(c.env.DB, user.id);
+    const standing = await standingOf(c.env, user.id);
     if (standing.plan !== "free") {
       return c.json({ error: "already_subscribed", message: "You already have a plan. Change it from the billing portal." }, 409);
     }
@@ -142,7 +142,7 @@ export const billingRoutes = new Hono<BillingEnv>()
     const email = z.string().email().safeParse((await c.req.json().catch(() => null))?.email);
     if (!email.success) return c.json({ error: "invalid_input" }, 400);
     const owner = c.get("user");
-    const sub = await ownTeam(c.env.DB, owner.id);
+    const sub = await ownTeam(c.env, owner.id);
     if (!sub) return c.json({ error: "forbidden", message: "Only the owner of a Team plan can add people." }, 403);
     const person = await c.env.DB.prepare("SELECT id FROM user WHERE email = ?").bind(email.data.toLowerCase()).first<{ id: string }>();
     if (!person) return c.json({ error: "not_found", message: "No Myrel account uses that email. Ask them to sign up first." }, 404);
@@ -156,7 +156,7 @@ export const billingRoutes = new Hono<BillingEnv>()
   })
   .delete("/team/members/:userId", async (c) => {
     const owner = c.get("user");
-    const sub = await ownTeam(c.env.DB, owner.id);
+    const sub = await ownTeam(c.env, owner.id);
     if (!sub) return c.json({ error: "forbidden" }, 403);
     await c.env.DB.prepare("DELETE FROM billing_team_members WHERE owner_id = ? AND user_id = ?").bind(owner.id, c.req.param("userId")).run();
     await syncSeats(c.env, owner.id, sub.id);
@@ -180,8 +180,8 @@ async function customerFor(env: Env & StripeEnv, user: { id: string; email: stri
   return { id: created.id, trialUsed: false };
 }
 
-async function ownTeam(db: D1Database, userId: string) {
-  const standing = await standingOf(db, userId);
+async function ownTeam(env: Env, userId: string) {
+  const standing = await standingOf(env, userId);
   return standing.plan === "team" && standing.ownerId === userId ? standing.subscription : null;
 }
 

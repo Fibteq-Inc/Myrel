@@ -3,6 +3,7 @@ import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { billingExtensions } from "../src/limits";
+import { freeSpendMicros } from "../src/store";
 import { encodeForm, hmacHex, verifyWebhook } from "../src/stripe";
 
 const BASE = "http://myrel.test";
@@ -16,8 +17,7 @@ function api(path: string, init: RequestInit & { token?: string } = {}) {
   return exports.default.fetch(new Request(`${BASE}${path}`, { ...init, headers }));
 }
 
-async function signUp() {
-  const email = `u${crypto.randomUUID()}@example.com`;
+async function signUp(email = `u${crypto.randomUUID()}@example.com`) {
   const res = await api("/api/auth/sign-up/email", {
     method: "POST",
     body: JSON.stringify({ email, password: "correct-horse-battery", name: "Test", acceptTerms: true }),
@@ -110,6 +110,37 @@ describe("hosted billing", () => {
     await webhook(subscriptionEvent(userId, "myrel_pro_monthly", "canceled"));
     expect(((await (await api("/api/billing", { token })).json()) as BillingSummary).plan).toBe("free");
     expect((await createProject(token, "e")).status).toBe(402);
+  });
+
+  it("never limits the server's admins and leaves their use out of the Free budget", async () => {
+    const { token } = await signUp("admin@example.com");
+    const summary = (await (await api("/api/billing", { token })).json()) as BillingSummary;
+    expect(summary).toMatchObject({
+      plan: "admin",
+      limits: { projects: null, sandboxSeconds: null, modelMicros: null, connectors: null },
+    });
+
+    for (const name of ["A", "B", "C", "D"]) expect((await createProject(token, name)).status).toBe(201);
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    const before = await freeSpendMicros(workerEnv);
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds) VALUES (?, ?, ?, ?, ?, ?)").bind(
+        `task_${crypto.randomUUID()}`,
+        project.id,
+        "thread_1",
+        now - 360_000_000,
+        now,
+        360_000,
+      ),
+      env.DB.prepare(
+        `INSERT INTO usage_events (id, created_at, project_id, agent, turn_id, provider, model, input_tokens, output_tokens, cost_micros, latency_ms)
+         VALUES (?, ?, ?, 'thread', 't', 'fireworks', 'm', 1, 1, 100000000, 1)`,
+      ).bind(`usage_${crypto.randomUUID()}`, now, project.id),
+    ]);
+    expect(await billingExtensions.canUseSandbox!(workerEnv, project.id)).toEqual({ ok: true });
+    expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
+    expect(await freeSpendMicros(workerEnv)).toBe(before);
   });
 
   it("rejects webhooks without a valid signature", async () => {

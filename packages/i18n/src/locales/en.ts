@@ -181,6 +181,8 @@ export const en = {
   "billing.plan.free": "Free",
   "billing.plan.pro": "Pro",
   "billing.plan.team": "Team",
+  "billing.plan.admin": "Admin",
+  "billing.adminNote": "Server admin, no limits",
   "billing.seats": { one: "1 seat", other: "{count} seats" },
   "billing.freeForever": "No card needed",
   "billing.renewsOn": "Renews on {date}",

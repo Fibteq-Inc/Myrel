@@ -30,7 +30,9 @@ function BillingSettings() {
   if (error) return <Notice>{errorMessage(error, t)}</Notice>;
   if (!billing) return null;
 
-  const status = billing.cancelAtPeriodEnd
+  const status = billing.plan === "admin"
+    ? t("billing.adminNote")
+    : billing.cancelAtPeriodEnd
     ? t("billing.endsOn", { date: date(billing.periodEnd) })
     : billing.status === "trialing"
       ? t("billing.trialEnds", { date: date(billing.trialEnd) })
@@ -48,7 +50,7 @@ function BillingSettings() {
             <span className="text-base font-semibold">{t(`billing.plan.${billing.plan}`)}</span>
             {billing.plan === "team" && <Badge>{t("billing.seats", { count: billing.seats })}</Badge>}
             <span className="text-[13px] text-subtle">{status}</span>
-            {billing.owner && billing.plan !== "free" && (
+            {billing.owner && (billing.plan === "pro" || billing.plan === "team") && (
               <GhostButton type="button" className="ml-auto" disabled={portal.isPending} onClick={() => portal.mutate()}>
                 {t("billing.manage")}
               </GhostButton>
