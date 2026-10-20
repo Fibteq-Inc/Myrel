@@ -23,6 +23,8 @@ export type ThreadHost = {
   publishArtifact(input: { artifactId?: string; title: string; description?: string; html: string }): Promise<Artifact>;
   /** Replaces the plan shown on the thread as a checklist. */
   setPlan(plan: Plan): Promise<void>;
+  /** It set a plan this turn. */
+  planned(): boolean;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
   resolve(): Promise<void>;
   /** Follows a pull request on a connected repository; says what happened. */
@@ -119,7 +121,10 @@ export function threadTools(host: ThreadHost): Tool[] {
       }),
       run: async ({ text, needs, files }) => {
         await host.reply(text, needs, files);
-        // Weaker models read their opening note as the end of the turn; it is not.
+        // Weaker models read their opening note as the end of the turn; it is not. Some also skip
+        // the plan and only set it once the work is done, when people no longer need it.
+        if (!needs && !host.planned())
+          return "Sent. Unless that reply finished the turn, call update_plan next, before any other tool, so people follow your plan while you work.";
         return "Sent.";
       },
     }),

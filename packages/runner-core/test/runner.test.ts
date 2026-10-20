@@ -58,6 +58,13 @@ describe("opencode", () => {
       { type: "tool", name: "bash", title: "pnpm test" },
       { type: "log", stream: "stdout", text: "ok" },
     ]);
+    // git redraws its progress with carriage returns: only the last state of each line is kept.
+    const clone = "Cloning into 'flow'...\nUpdating files:  15% (665/4323)\rUpdating files: 100% (4323/4323), done.\r\n";
+    expect(line({ type: "tool_use", part: { tool: "bash", state: { title: "git clone", output: clone } } })[1]).toEqual({
+      type: "log",
+      stream: "stdout",
+      text: "Cloning into 'flow'...\nUpdating files: 100% (4323/4323), done.",
+    });
     expect(line({ type: "step_finish", part: { tokens: { input: 10, output: 5 }, cost: 0.01 } })).toEqual([
       { type: "usage", inputTokens: 10, outputTokens: 5, costUsd: 0.01 },
     ]);
