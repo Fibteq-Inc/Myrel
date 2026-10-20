@@ -31,6 +31,8 @@ const config: ExpoConfig = {
     ["expo-notifications", { color: "#8b9bff" }],
   ],
   experiments: { typedRoutes: true },
+  // OTA updates only reach builds of the same app version (bump `version` for native changes).
+  runtimeVersion: { policy: "appVersion" },
   extra: easProjectId ? { eas: { projectId: easProjectId } } : {},
   ...(easProjectId && { owner: easOwner, updates: { url: `https://u.expo.dev/${easProjectId}` } }),
 };
