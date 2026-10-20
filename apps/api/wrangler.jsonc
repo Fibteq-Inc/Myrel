@@ -53,9 +53,11 @@
 
   // Sandbox containers. No image is built on deploy: they run Cloudflare's managed Debian image, set up
   // once and snapshotted (src/sandbox/setup.ts).
+  // The name stays altair-sandbox: a Durable Object namespace attaches to one Container application,
+  // and a new name makes wrangler try to create a second one, which fails the deploy.
   "containers": [
     {
-      "name": "myrel-sandbox",
+      "name": "altair-sandbox",
       "class_name": "Sandbox",
       "scheduling_policy": "durable_object"
     }
