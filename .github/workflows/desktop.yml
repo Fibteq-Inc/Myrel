@@ -49,10 +49,10 @@ jobs:
           - os: ubuntu-22.04
             args: ""
             rust-targets: ""
-    # Releases and manual runs build macOS on the org's self-hosted Mac, because GitHub's hosted macOS
-    # runners often never pick up the job. Pull requests stay on hosted runners so code from a PR never
-    # runs on that Mac.
-    runs-on: ${{ matrix.os == 'macos-latest' && github.event_name != 'pull_request' && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
+    # While the repository is private, releases and manual runs build macOS on the org's self-hosted Mac,
+    # because GitHub's hosted macOS runners often never pick up the job there. Pull requests, and every run
+    # once the repository is public, use hosted runners so outside code never runs on that Mac.
+    runs-on: ${{ matrix.os == 'macos-latest' && github.event_name != 'pull_request' && github.event.repository.private && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
