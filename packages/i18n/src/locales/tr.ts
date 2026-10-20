@@ -60,6 +60,8 @@ export const tr: Catalog = {
   "projects.yours": "Projelerin",
   "projects.owner": "Sahip",
   "projects.member": "Üye",
+  "projects.working": { one: "1 iş çalışıyor", other: "{count} iş çalışıyor" },
+  "projects.waiting": { one: "1 iş seni bekliyor", other: "{count} iş seni bekliyor" },
 
   // Project sidebar
   "sidebar.searchThreads": "Thread'lerde ara",

@@ -111,6 +111,10 @@ export const projects = sqliteTable("projects", {
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
   /** Where tasks run: auto, local or cloud (see TaskTarget in @myrel/protocol). */
   taskTarget: text("task_target").notNull().default("auto"),
+  /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
+  activeCount: integer("active_count").notNull().default(0),
+  /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */
+  waitingCount: integer("waiting_count").notNull().default(0),
   ...timestamps,
 });
 

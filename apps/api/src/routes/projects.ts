@@ -28,11 +28,20 @@ import { getWorkspace, notifyProject, parseInfo } from "../runners";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
 
+const projectColumns = {
+  id: projects.id,
+  name: projects.name,
+  role: projectMembers.role,
+  createdAt: projects.createdAt,
+  activeCount: projects.activeCount,
+  waitingCount: projects.waitingCount,
+};
+
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get("/", async (c) => {
     const rows = await createDb(c.env.DB)
-      .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
+      .select(projectColumns)
       .from(projectMembers)
       .innerJoin(projects, eq(projects.id, projectMembers.projectId))
       .where(eq(projectMembers.userId, c.get("user").id))
@@ -53,7 +62,7 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projects).values({ id, name: input.data.name, createdBy: userId, createdAt, updatedAt: createdAt }),
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
-    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", createdAt }) }, 201);
+    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", createdAt, activeCount: 0, waitingCount: 0 }) }, 201);
   })
   .get("/:id", async (c) => {
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
@@ -396,7 +405,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
 export async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
   const [row] = await createDb(env.DB)
-    .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
+    .select(projectColumns)
     .from(projectMembers)
     .innerJoin(projects, eq(projects.id, projectMembers.projectId))
     .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
@@ -411,8 +420,16 @@ async function findThread(env: Env, projectId: string, threadId: string, userId:
   return (await project.getThread(threadId)) ? threadId : null;
 }
 
-function toProject(row: { id: string; name: string; role: Project["role"]; createdAt: Date }): Project {
-  return { ...row, createdAt: row.createdAt.toISOString() };
+function toProject(row: {
+  id: string;
+  name: string;
+  role: Project["role"];
+  createdAt: Date;
+  activeCount: number;
+  waitingCount: number;
+}): Project {
+  const { activeCount, waitingCount, ...rest } = row;
+  return { ...rest, createdAt: row.createdAt.toISOString(), activity: { working: activeCount, waiting: waitingCount } };
 }
 
 function canManage(role: ProjectRole) {
