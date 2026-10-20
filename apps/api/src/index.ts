@@ -8,7 +8,7 @@ import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
 import { accountRoutes } from "./routes/account";
 import { adminRoutes } from "./routes/admin";
-import { knowledgeRoutes } from "./routes/knowledge";
+import { fileLinkRoutes, knowledgeRoutes } from "./routes/knowledge";
 import { githubRoutes } from "./routes/github";
 import { artifactRoutes } from "./routes/artifacts";
 import { projectRoutes } from "./routes/projects";
@@ -58,6 +58,7 @@ const app = new Hono<AppEnv>()
     if (!result.ok) return c.json({ error: "unauthorized" }, 401);
     return result.answer === null ? c.body(null, 202) : c.json(result.answer);
   })
+  .route("/file-links", fileLinkRoutes)
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
   .route("/projects/:id/artifacts", artifactRoutes)
