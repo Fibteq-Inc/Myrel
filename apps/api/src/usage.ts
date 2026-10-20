@@ -126,6 +126,18 @@ export async function recordTaskUsage(
     });
 }
 
+/** One row for a finished agent turn that ran in a cloud sandbox: how long it ran. */
+export async function recordSandboxRun(
+  d1: D1Database,
+  run: { taskId: string; projectId: string; threadId: string; startedAt: Date; endedAt: Date },
+) {
+  const seconds = Math.max(0, Math.round((run.endedAt.getTime() - run.startedAt.getTime()) / 1000));
+  await createDb(d1)
+    .insert(schema.sandboxRuns)
+    .values({ id: run.taskId, projectId: run.projectId, threadId: run.threadId, startedAt: run.startedAt, endedAt: run.endedAt, seconds })
+    .onConflictDoNothing();
+}
+
 /** A task's cost: the harness's own figure when it gives one, else an estimate from the price table. */
 export function taskCostMicros(
   env: LlmEnv,
