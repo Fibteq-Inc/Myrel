@@ -1,7 +1,9 @@
 import type { ExpoConfig } from "expo/config";
 
-// EAS fills these in once the project is linked (`eas init`); local dev works without them.
-const easProjectId = process.env.EAS_PROJECT_ID;
+// The hosted Altair's EAS project (@fibteqs-organization/altair). Self-hosters who build their
+// own app point these at their Expo project; setting EAS_PROJECT_ID to "" unlinks it.
+const easProjectId = process.env.EAS_PROJECT_ID ?? "c4c8d3bc-48ec-4c79-b7c3-982877904746";
+const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 
 const config: ExpoConfig = {
   name: "Altair",
@@ -25,7 +27,7 @@ const config: ExpoConfig = {
   ],
   experiments: { typedRoutes: true },
   extra: easProjectId ? { eas: { projectId: easProjectId } } : {},
-  ...(easProjectId && { owner: process.env.EAS_OWNER, updates: { url: `https://u.expo.dev/${easProjectId}` } }),
+  ...(easProjectId && { owner: easOwner, updates: { url: `https://u.expo.dev/${easProjectId}` } }),
 };
 
 export default config;
