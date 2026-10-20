@@ -1,4 +1,5 @@
 import { createDb, schema } from "@myrel/db";
+import { APIError } from "better-auth/api";
 import { eq } from "drizzle-orm";
 import { emailEnabled, sendEmail } from "./notifications/channels";
 
@@ -42,7 +43,17 @@ export async function sendVerificationEmail(env: Env, to: string, url: string): 
 <p><a href="${href}" style="display:inline-block;background:#5b6cff;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none">Confirm email · E-postayı doğrula</a></p>
 <p style="color:#71717a;font-size:13px">If you did not create an account, ignore this email.</p>
 </div>`;
-  await sendEmail(env, { to, subject: "Confirm your email for Myrel", text, html });
+  try {
+    await sendEmail(env, { to, subject: "Confirm your email for Myrel", text, html });
+  } catch (err) {
+    // Email Service throws errors with a string code (E_SENDER_NOT_VERIFIED and so on) that names the cause.
+    const code = (err as { code?: unknown }).code;
+    console.error("verification email failed", code, err);
+    throw new APIError("INTERNAL_SERVER_ERROR", {
+      message: `The verification email could not be sent${typeof code === "string" ? ` (${code})` : ""}.`,
+      code: "VERIFICATION_EMAIL_FAILED",
+    });
+  }
 }
 
 function esc(s: string) {

@@ -43,6 +43,7 @@ export const tr: Catalog = {
   "verify.banner": "E-posta adresini doğrula. {email} adresine bir bağlantı gönderdik. Doğrulayana kadar davetleri kabul edemez ve bulut sandbox'ı kullanamazsın.",
   "verify.resend": "Tekrar gönder",
   "verify.sent": "Gönderildi. Gelen kutunu kontrol et.",
+  "verify.failed": "E-posta gönderilemedi. Biraz sonra tekrar dene.",
   "rail.main": "Ana menü",
   "rail.home": "Myrel ana sayfa",
   "rail.projects": "Projeler",
