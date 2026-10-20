@@ -216,7 +216,8 @@ describe("connectors API", () => {
       ["database", "stdio"],
       ["linear", "http"],
     ]);
-    // On someone else's computer, none of the person's own: their commands, variables and turn token stay off it.
+    // On someone else's computer, none of the person's own (their commands, variables and turn token stay
+    // off it), and no project command they set: only the computer's owner starts commands there.
     const db = createDb(env.DB);
     const someone = await signUp();
     const [adaMac, myMac] = ["runner_01JZZZZZZZZZZZZZZZZZZZZZZA", "runner_01JZZZZZZZZZZZZZZZZZZZZZZB"];
@@ -224,7 +225,7 @@ describe("connectors API", () => {
       { id: adaMac, userId: someone.id, name: "Ada's Mac", tokenHash: crypto.randomUUID(), info: null },
       { id: myMac, userId: me.id, name: "My Mac", tokenHash: crypto.randomUUID(), info: null },
     ]);
-    expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "local", runnerId: adaMac })).map((c) => c.name)).toEqual(["database"]);
+    expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "local", runnerId: adaMac })).map((c) => c.name)).toEqual([]);
     expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "local", runnerId: myMac })).map((c) => c.name)).toEqual([
       "database",
       "linear",

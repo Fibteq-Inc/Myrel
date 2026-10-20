@@ -77,8 +77,12 @@ export type TaskPlace =
  * Where the project's next task runs, by its task target setting: on the
  * person's computer when the project has a local folder there and the
  * computer is online (auto), or always one place (local, cloud).
+ *
+ * Only for the computer's owner (`requester`, the person the thread works for): a turn runs
+ * there as its owner, with their CLI, login and files, so another member of the project, or a
+ * thread nobody asked for, works in the cloud instead.
  */
-export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace> {
+export async function taskPlace(env: Env, projectId: string, requester: string | null): Promise<TaskPlace> {
   const [row] = await createDb(env.DB)
     .select({ taskTarget: schema.projects.taskTarget })
     .from(schema.projects)
@@ -86,6 +90,14 @@ export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace>
   const target = TaskTarget.catch("auto").parse(row?.taskTarget);
   if (target === "cloud") return { kind: "cloud" };
   const workspace = await getWorkspace(env, projectId);
+  const own = workspace && requester ? await ownsComputer(env, workspace.runnerId, requester) : false;
+  if (workspace && !own) {
+    if (target === "auto") return { kind: "cloud" };
+    return {
+      kind: "error",
+      message: `This project runs tasks on ${workspace.runnerName}, and only the person whose computer that is can start work there. Ask them, or switch the project to the cloud.`,
+    };
+  }
   if (workspace?.online) return { kind: "local", workspace };
   if (target === "auto") return { kind: "cloud" };
   return {
@@ -115,4 +127,13 @@ export async function projectGithubToken(env: Env, projectId: string, runSec: nu
     console.warn("no GitHub token for the project", projectId, err);
     return null;
   }
+}
+
+/** Whether the paired computer is `userId`'s. */
+export async function ownsComputer(env: Env, runnerId: string, userId: string): Promise<boolean> {
+  const [row] = await createDb(env.DB)
+    .select({ userId: schema.runners.userId })
+    .from(schema.runners)
+    .where(eq(schema.runners.id, runnerId));
+  return row?.userId === userId;
 }

@@ -120,6 +120,10 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
         ...(row.transport === "stdio" && fields.runsOn !== undefined && { runsOn: fields.runsOn }),
         updatedAt: new Date(),
       };
+      // Whoever sets a command (or its variables) answers for it: it then starts only on their own computer.
+      if (row.transport === "stdio" && (fields.command !== undefined || fields.args !== undefined || newSecrets || fields.runsOn !== undefined)) {
+        next.createdBy = c.get("user").id;
+      }
       if (newSecrets) {
         // An empty value keeps what is stored under that name; a name left out is removed.
         const stored = await readSecrets(c.env, row);
