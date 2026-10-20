@@ -36,6 +36,9 @@ if [ -n "\${GITHUB_TOKEN:-}" ]; then
   git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
   export GH_TOKEN="$GITHUB_TOKEN"
 fi
+# There is no SSH key here: GitHub's SSH addresses go over HTTPS, where the token above works.
+git config --global --replace-all url.https://github.com/.insteadOf git@github.com:
+git config --global --add url.https://github.com/.insteadOf ssh://git@github.com/
 phase prepare done
 
 WS="\${MYREL_WORKSPACE_REMOTE:-}"

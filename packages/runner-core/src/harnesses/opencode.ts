@@ -27,7 +27,12 @@ export const opencode: Harness = {
 
   parse(line) {
     const ev = jsonLine(line);
-    if (!ev) return [log(line)];
+    if (!ev) {
+      // `opencode run` rejects whatever asks for approval, since nobody can answer it there.
+      const rejected = line.replace(/\x1b\[[0-9;]*m/g, "").match(/permission requested: (.+?); auto-rejecting/);
+      if (rejected) return [log(`OpenCode was not allowed to use ${rejected[1]}: it needed approval, which nobody can give in the sandbox.`, "stderr")];
+      return [log(line)];
+    }
     const part = obj(ev.part);
     switch (ev.type) {
       case "text": {
@@ -84,8 +89,9 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
     $schema: "https://opencode.ai/config.json",
     autoupdate: false,
     share: "disabled",
-    // Nobody is there to approve: the sandbox is the boundary.
-    permission: { edit: "allow", bash: "allow", webfetch: "allow" },
+    // Nobody is there to approve, so anything that asks is rejected: the sandbox is the boundary.
+    // external_directory covers the folders next to the saved one (repos, files, skills).
+    permission: { edit: "allow", bash: "allow", webfetch: "allow", external_directory: "allow" },
   };
   if (spec.mcp) {
     // The token is read from the environment so it never lands in the config.

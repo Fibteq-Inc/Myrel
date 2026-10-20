@@ -249,6 +249,10 @@ export class ThreadAgent extends Agent<Env> {
 
     const place = await taskPlace(this.env, projectId);
     if (place.kind === "error") return this.cannotWork(place.message);
+    // The container takes the longest to be ready, so it starts while the turn is put together.
+    if (place.kind === "cloud" && this.env.SANDBOX && (await canUseSandbox(this.env, projectId)).ok) {
+      this.ctx.waitUntil(this.env.SANDBOX.getByName(threadId).warm().catch((err) => console.warn("sandbox warm-up failed", err)));
+    }
     // Runners before 0.5.0 can host only Claude Code as the agent.
     const needs = place.kind === "local" && place.workspace.cli !== "claude" ? "agent-clis" : "agent";
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, needs))) {
@@ -523,7 +527,8 @@ export class ThreadAgent extends Agent<Env> {
     const asked = turn?.asked ?? false;
     const failed = row.status === "failed" && !replied;
     await project.updateThread(threadId, {
-      status: resolved ? "done" : asked ? "blocked" : failed ? "failed" : "review_ready",
+      // A question to the coordinator is answered by the coordinator, so the thread is not waiting on a person.
+      status: resolved ? "done" : asked ? "working" : failed ? "failed" : "review_ready",
       resolved,
     });
     const kind = failed ? "failed" : resolved ? "done" : (turn?.needs ?? ((replied || lastText) && !asked ? "ready" : null));
@@ -793,6 +798,10 @@ export class ThreadAgent extends Agent<Env> {
         requestCoordinator: async (kind, reason) => {
           save({ asked: true });
           await project.requestCoordinator(threadId, kind, reason);
+          // People see what the thread waits on, instead of a thread that went quiet.
+          const body = `${turn()?.language === "tr" ? "Koordinatörün yanıtı bekleniyor" : "Waiting for the coordinator"}: ${reason.length > 300 ? `${reason.slice(0, 300)}…` : reason}`;
+          const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
+          if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
         },
         resolve: async () => save({ resolved: true }),
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
