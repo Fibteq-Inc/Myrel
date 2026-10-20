@@ -1,5 +1,6 @@
 import { threadMessages, threadPullRequests, threadTasks } from "@altair/client";
 import { useT } from "@altair/i18n/react";
+import { planChecklist } from "@altair/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CircleCheck, LoaderCircle, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
@@ -8,11 +9,12 @@ import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import {
-  Checklist,
   Composer,
   decisionAnswers,
   mentionedPullRequests,
   MessageView,
+  PlanCard,
+  PlanProgress,
   PullRequestCards,
   ScrollToEnd,
   Thinking,
@@ -290,37 +292,62 @@ function Conversation({
   const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
   const active = !!state.active[thread.id];
   const working = thread.status === "working" && !thread.resolved;
+  // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
+  const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
+  const planAnchor = (id: string) => `plan-${id}`;
   return (
     <section aria-label={t("thread.messages")} className="flex min-w-0 flex-1 flex-col">
       {thread.statusText && !thread.resolved && (
-        <div className="max-h-[40%] flex-none overflow-y-auto border-b border-line bg-[#111114] px-5 py-3.5">
-          <Checklist text={thread.statusText} live={working} />
+        <div className="flex-none border-b border-line bg-[#111114] px-5 py-2.5">
+          <PlanProgress
+            text={thread.statusText}
+            live={working}
+            onOpen={
+              currentPlan
+                ? () => document.getElementById(planAnchor(currentPlan.id))?.scrollIntoView({ behavior: "smooth", block: "start" })
+                : undefined
+            }
+          />
         </div>
       )}
       <ScrollToEnd dep={messages.length + (active ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
           {root && <MessageView message={root} me={me} names={names} />}
-          {messages.map((m) => (
-            <MessageView
-              key={m.id}
-              message={m}
-              me={me}
-              names={names}
-              reactions={state.reactions[m.id]}
-              decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
-            >
-              {m.artifacts?.length ? (
-                <ArtifactCards
-                  projectId={project.id}
-                  threadId={thread.id}
-                  refs={m.artifacts}
-                  artifacts={state.artifacts}
-                  openId={openArtifact}
+          {messages.map((m) => {
+            const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
+            if (plan !== null) {
+              const current = m.id === currentPlan?.id;
+              return (
+                <PlanCard
+                  key={m.id}
+                  id={planAnchor(m.id)}
+                  text={current && thread.statusText ? thread.statusText : plan}
+                  live={current && working}
                 />
-              ) : null}
-              {m.authorKind === "agent" && <PullRequestCards pullRequests={mentionedPullRequests(m.body, pullRequests)} />}
-            </MessageView>
-          ))}
+              );
+            }
+            return (
+              <MessageView
+                key={m.id}
+                message={m}
+                me={me}
+                names={names}
+                reactions={state.reactions[m.id]}
+                decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
+              >
+                {m.artifacts?.length ? (
+                  <ArtifactCards
+                    projectId={project.id}
+                    threadId={thread.id}
+                    refs={m.artifacts}
+                    artifacts={state.artifacts}
+                    openId={openArtifact}
+                  />
+                ) : null}
+                {m.authorKind === "agent" && <PullRequestCards pullRequests={mentionedPullRequests(m.body, pullRequests)} />}
+              </MessageView>
+            );
+          })}
           <PullRequestCards pullRequests={unmentioned} />
           {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
         </div>

@@ -321,6 +321,14 @@ export class ProjectAgent extends Agent<Env> {
     return row ? this.toMessage(row) : null;
   }
 
+  /** Replaces a message's body and tells every client. Callable over RPC. */
+  editMessage(id: string, body: string): Message | null {
+    this.sql`UPDATE messages SET body = ${body} WHERE id = ${id}`;
+    const message = this.getMessage(id);
+    if (message) this.emit({ type: "message.updated", message });
+    return message;
+  }
+
   addReaction(reaction: Reaction): void {
     this.sql`INSERT OR IGNORE INTO reactions (message_id, emoji, author_kind, author_id)
       VALUES (${reaction.messageId}, ${reaction.emoji}, ${reaction.authorKind}, ${reaction.authorId})`;

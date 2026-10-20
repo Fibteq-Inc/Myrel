@@ -1,4 +1,4 @@
-import { projectChat, threadByCard, threadMessages } from "@altair/client";
+import { projectChat, threadByCard, threadReplyCount } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
@@ -94,7 +94,7 @@ function ChatTab() {
       footerFor={(m) => {
         const thread = threads.get(m.id);
         if (!thread) return null;
-        return <ThreadCard projectId={projectId} thread={thread} replies={threadMessages(state, thread.id).length} />;
+        return <ThreadCard projectId={projectId} thread={thread} replies={threadReplyCount(state, thread.id)} />;
       }}
       empty={
         status === "open" ? (

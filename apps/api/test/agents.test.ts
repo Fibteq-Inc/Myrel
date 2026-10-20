@@ -1,4 +1,4 @@
-import type { Message, Project, ServerEvent, Thread, UsageSummary } from "@altair/protocol";
+import { formatPlan, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@altair/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -76,6 +76,13 @@ describe("coordinator and thread agent", () => {
           call("update_plan", {
             title: "Durable Objects",
             steps: [
+              { text: "Researched", state: "active" },
+              { text: "Benchmarks", state: "todo" },
+            ],
+          }),
+          call("update_plan", {
+            title: "Durable Objects",
+            steps: [
               { text: "Researched", state: "done" },
               { text: "Benchmarks", state: "skipped" },
             ],
@@ -109,8 +116,15 @@ describe("coordinator and thread agent", () => {
     expect(ctx.messages.map((m) => [m.authorKind, m.authorId, m.body])).toEqual([
       ["agent", "coordinator", "Durable Objects'i araştırıyorum."],
       ["agent", "thread-agent", "Durable Objects'i kısaca açıklayacağım."],
+      // One plan card right after the note, updated in place to the plan's last state.
+      ["agent", "thread-agent", formatPlan("Durable Objects\n\n✓ Researched\n– Benchmarks")],
       ["agent", "thread-agent", "Durable Objects are single-instance actors with storage."],
     ]);
+    const card = ctx.messages[2]!;
+    expect(
+      events.some((e) => e.type === "message.created" && e.message.id === card.id && e.message.body.includes("✱ Researched")),
+    ).toBe(true);
+    expect(events.some((e) => e.type === "message.updated" && e.message.id === card.id && e.message.seq === card.seq)).toBe(true);
 
     // The thread agent saw the brief and the member's name.
     const threadReq = seen.find((r) => !isCoordinator(r))!;

@@ -31,6 +31,8 @@ export type ClientEventInput = z.input<typeof ClientEvent>;
 /** Events the server sends over the project WebSocket. */
 export const ServerEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("message.created"), message: Message }),
+  /** A message's body changed in place (an agent's plan card moving along). Keeps its seq. */
+  z.object({ type: z.literal("message.updated"), message: Message }),
   z.object({
     type: z.literal("message.ack"),
     clientId: z.string(),

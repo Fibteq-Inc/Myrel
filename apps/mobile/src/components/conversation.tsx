@@ -1,9 +1,10 @@
-import type { Artifact, Message, Reaction } from "@altair/protocol";
+import { type Artifact, type Message, planChecklist, type Reaction } from "@altair/protocol";
 import { type ReactNode, useMemo } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
+import { PlanCard } from "./checklist";
 import { Composer } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
 
@@ -23,6 +24,7 @@ export function Conversation({
   placeholder,
   onSend,
   header,
+  plan,
   footerFor,
   empty,
 }: {
@@ -38,6 +40,8 @@ export function Conversation({
   onSend: (body: string) => void;
   /** Pinned above the list (e.g. a thread's checklist). */
   header?: ReactNode;
+  /** The plan card the agent is moving along, drawn from the thread's fresh checklist. */
+  plan?: { messageId: string; text: string; live: boolean };
   /** Rendered under a message, e.g. the card of the thread it opened. */
   footerFor?: (message: Message) => ReactNode;
   empty?: ReactNode;
@@ -61,22 +65,29 @@ export function Conversation({
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
         ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
-        renderItem={({ item }) => (
-          <MessageView
-            message={item}
-            me={me}
-            names={names}
-            reactions={reactions[item.id]}
-            artifacts={artifacts}
-            onLink={openLink}
-            onOpenArtifact={openArtifact}
-            decision={
-              item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
-            }
-          >
-            {footerFor?.(item)}
-          </MessageView>
-        )}
+        renderItem={({ item }) => {
+          const checklist = item.authorKind === "agent" ? planChecklist(item.body) : null;
+          if (checklist !== null) {
+            const current = plan && item.id === plan.messageId ? plan : null;
+            return <PlanCard text={current?.text ?? checklist} live={current?.live ?? false} />;
+          }
+          return (
+            <MessageView
+              message={item}
+              me={me}
+              names={names}
+              reactions={reactions[item.id]}
+              artifacts={artifacts}
+              onLink={openLink}
+              onOpenArtifact={openArtifact}
+              decision={
+                item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
+              }
+            >
+              {footerFor?.(item)}
+            </MessageView>
+          );
+        }}
       />
       <View style={{ paddingBottom: Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
         <Composer placeholder={placeholder} onSend={onSend} />

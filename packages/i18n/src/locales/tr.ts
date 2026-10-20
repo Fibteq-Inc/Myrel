@@ -608,8 +608,6 @@ export const tr: Catalog = {
   "mobile.signOutConfirm": "{email} hesabından çıkılsın mı?",
   "mobile.openInBrowser": "Tarayıcıda aç",
   "mobile.badLink": "Bu bağlantı açılamıyor.",
-  "mobile.showProgress": "İlerlemeyi göster",
-  "mobile.hideProgress": "İlerlemeyi gizle",
   "mobile.noPreview": "Bu dosya türü için önizleme yok.",
   "mobile.newProject": "Yeni proje",
 };

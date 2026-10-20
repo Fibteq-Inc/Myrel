@@ -1,4 +1,4 @@
-import { type ArtifactRef, CLI_NAMES, createId, type ProjectWorkspace, type Task, type TaskStats, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type ArtifactRef, CLI_NAMES, createId, formatPlan, type ProjectWorkspace, type Task, type TaskStats, type TaskStatus, type TerminalLine } from "@altair/protocol";
 import {
   emptyProgress,
   HarnessId,
@@ -625,8 +625,22 @@ export class ThreadAgent extends Agent<Env> {
     return sandboxBackend(this.env, this.getMeta("thread_id")!);
   }
 
-  /** Shows the agent's plan, with the current task's steps nested in it, as the thread's checklist. */
-  private async showStatus() {
+  /** Status updates in order, so two at once cannot both open a plan card. */
+  private statusQueue: Promise<void> = Promise.resolve();
+
+  /**
+   * Shows the agent's plan, with the current task's steps nested in it: as the
+   * thread's checklist (the progress line on top) and as the plan card in the
+   * conversation. A plan with a new title opens a new card; the old one keeps
+   * its last state.
+   */
+  private showStatus(): Promise<void> {
+    const run = this.statusQueue.then(() => this.writeStatus());
+    this.statusQueue = run.catch((err) => console.error("plan status", err));
+    return run;
+  }
+
+  private async writeStatus() {
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) return;
@@ -635,6 +649,23 @@ export class ThreadAgent extends Agent<Env> {
     if (statusText === null) return;
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     await project.updateThread(threadId, { statusText });
+
+    const cardId = this.getMeta("plan_card_id");
+    const shown = this.getMeta("plan_card_text");
+    if (shown === statusText) return;
+    const titleOf = (text: string) => text.split("\n", 1)[0];
+    if (cardId && shown !== null && titleOf(shown) === titleOf(statusText)) {
+      await project.editMessage(cardId, formatPlan(statusText));
+    } else {
+      const card = await project.sendMessage({
+        threadId,
+        authorKind: "agent",
+        authorId: THREAD_AGENT_ID,
+        body: formatPlan(statusText),
+      });
+      this.setMeta("plan_card_id", card.id);
+    }
+    this.setMeta("plan_card_text", statusText);
   }
 
   private ids() {
