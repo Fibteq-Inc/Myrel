@@ -11,7 +11,7 @@ Shared values:
 |---|---|
 | App name | Myrel |
 | Website | https://altair.fibteq.io |
-| Support | https://altair.fibteq.io/support/ · altair@fibteq.app |
+| Support | https://altair.fibteq.io/support/ · myrel@fibteq.app |
 | Privacy policy | https://altair.fibteq.io/privacy/ |
 | Terms | https://altair.fibteq.io/terms/ |
 | Account deletion | https://altair.fibteq.io/delete-account/ |
@@ -19,7 +19,7 @@ Shared values:
 
 ## Google Play: main store listing
 
-Category **Productivity**, tags: AI assistant, Productivity, Developer tools. Contact email altair@fibteq.app,
+Category **Productivity**, tags: AI assistant, Productivity, Developer tools. Contact email myrel@fibteq.app,
 website https://altair.fibteq.io.
 
 Graphics: icon `../assets/icon.png` scaled to 512x512, feature graphic `screenshots/feature-graphic-<lang>.png`,
