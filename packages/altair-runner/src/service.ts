@@ -45,9 +45,7 @@ export async function installService(script: string): Promise<ServiceInfo> {
   if (manager === "launchd") {
     await mkdir(join(homedir(), "Library", "LaunchAgents"), { recursive: true });
     await writeFile(info.file, launchdPlist(args, env, info.log));
-    const domain = `gui/${process.getuid?.()}`;
-    await run("launchctl", ["bootout", `${domain}/${SERVICE_NAME}`]).catch(() => {});
-    await run("launchctl", ["bootstrap", domain, info.file]);
+    await restartLaunchd(info.file);
   } else if (manager === "systemd") {
     await mkdir(join(homedir(), ".config", "systemd", "user"), { recursive: true });
     await writeFile(info.file, systemdUnit(args, env));
@@ -69,6 +67,35 @@ export async function installService(script: string): Promise<ServiceInfo> {
 }
 
 /** Stops the background runner and removes it from login. */
+/**
+ * Replaces the loaded launchd agent with the one in `file`. `bootout` returns before launchd has
+ * finished unloading the old one, and bootstrapping meanwhile fails with "5: Input/output error",
+ * so this waits for it to go and retries a few times.
+ */
+async function restartLaunchd(file: string) {
+  const domain = `gui/${process.getuid?.()}`;
+  const loaded = () => run("launchctl", ["print", `${domain}/${SERVICE_NAME}`]).then(() => true, () => false);
+  await run("launchctl", ["bootout", `${domain}/${SERVICE_NAME}`]).catch(() => {});
+  for (let i = 0; i < 50 && (await loaded()); i++) await sleep(100);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run("launchctl", ["bootstrap", domain, file]);
+      break;
+    } catch (err) {
+      if (attempt >= 5) throw err;
+      await sleep(500 * attempt);
+    }
+  }
+  // Reported as running only once launchd has started it.
+  for (let i = 0; i < 30; i++) {
+    const out = await run("launchctl", ["print", `${domain}/${SERVICE_NAME}`]).catch(() => null);
+    if (out?.stdout.includes("state = running")) return;
+    await sleep(100);
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function uninstallService(): Promise<ServiceInfo> {
   const manager = serviceManager();
   const info = await describe(manager);
