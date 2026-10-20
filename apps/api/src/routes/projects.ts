@@ -397,8 +397,12 @@ export const projectRoutes = new Hono<AppEnv>()
     if (workspace.folders.length >= MAX_WORKSPACE_FOLDERS) {
       return c.json({ error: "invalid_input", message: `A project can have at most ${MAX_WORKSPACE_FOLDERS} other folders.` }, 400);
     }
-    // Like the main folder, only one shared on that computer (the folder picker shares it first).
+    // Like the main folder, only one shared on that computer (the folder picker shares it first), and
+    // only by the computer's owner: its other shared folders may belong to their other projects.
     const [runner] = await createDb(c.env.DB).select().from(runners).where(eq(runners.id, workspace.runnerId));
+    if (runner?.userId !== c.get("user").id) {
+      return c.json({ error: "forbidden", message: "Only the person whose computer this is can add its folders." }, 403);
+    }
     if (!parseInfo(runner?.info ?? null)?.folders.some((f) => f.path === input.data.path)) {
       return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
     }

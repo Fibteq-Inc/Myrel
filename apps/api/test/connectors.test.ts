@@ -216,6 +216,19 @@ describe("connectors API", () => {
       ["database", "stdio"],
       ["linear", "http"],
     ]);
+    // On someone else's computer, none of the person's own: their commands, variables and turn token stay off it.
+    const db = createDb(env.DB);
+    const someone = await signUp();
+    const [adaMac, myMac] = ["runner_01JZZZZZZZZZZZZZZZZZZZZZZA", "runner_01JZZZZZZZZZZZZZZZZZZZZZZB"];
+    await db.insert(schema.runners).values([
+      { id: adaMac, userId: someone.id, name: "Ada's Mac", tokenHash: crypto.randomUUID(), info: null },
+      { id: myMac, userId: me.id, name: "My Mac", tokenHash: crypto.randomUUID(), info: null },
+    ]);
+    expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "local", runnerId: adaMac })).map((c) => c.name)).toEqual(["database"]);
+    expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "local", runnerId: myMac })).map((c) => c.name)).toEqual([
+      "database",
+      "linear",
+    ]);
     // A thread that works for nobody in particular gets only the project's.
     expect((await turnConnectors(env, { projectId: project.id, userId: null, place: "local" })).map((c) => c.name)).toEqual(["database"]);
 

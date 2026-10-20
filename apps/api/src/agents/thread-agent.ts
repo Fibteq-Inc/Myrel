@@ -597,7 +597,8 @@ export class ThreadAgent extends Agent<Env> {
   private async turnConnectors(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnConnector[]> {
     const { projectId } = this.ids();
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "connectors"))) return [];
-    const connectors = await turnConnectors(this.env, { projectId, userId: requester, place: place.kind }).catch((err) => {
+    const runnerId = place.kind === "local" ? place.workspace.runnerId : undefined;
+    const connectors = await turnConnectors(this.env, { projectId, userId: requester, place: place.kind, runnerId }).catch((err) => {
       console.error("connectors", err);
       return [];
     });

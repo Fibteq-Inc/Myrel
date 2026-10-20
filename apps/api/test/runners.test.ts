@@ -366,6 +366,19 @@ describe("local workspace", () => {
     expect((await api(`/api/runners/${runner.id}/folders`, { method: "POST", token: user, body: JSON.stringify({ path: "/Users/ismail/docs" }) })).status).toBe(200);
     expect((await addFolder("/Users/ismail/docs")).status).toBe(200);
     expect((await workspace()).folders).toEqual(["/Users/ismail/docs"]);
+    // A project admin who does not own the computer cannot add its other shared folders.
+    const otherEmail = `u${crypto.randomUUID()}@example.com`;
+    const other = (
+      await api("/api/auth/sign-up/email", {
+        method: "POST",
+        body: JSON.stringify({ email: otherEmail, password: "correct-horse-battery", name: "Ada" }),
+      })
+    ).headers.get("set-auth-token")!;
+    const invited = await api(`/api/projects/${project.id}/invites`, { method: "POST", token: user, body: JSON.stringify({ email: otherEmail, role: "admin" }) });
+    const { invite } = (await invited.json()) as { invite: { id: string } };
+    expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: other })).status).toBe(200);
+    const byAdmin = await api(`/api/projects/${project.id}/workspace/folders`, { method: "POST", token: other, body: JSON.stringify({ path: "/Users/ismail/code/myrel" }) });
+    expect(byAdmin.status).toBe(403);
 
     const { projectAgent, thread } = await startThread(project.id);
     type Start = Extract<ServerToRunner, { type: "task.start" }>;

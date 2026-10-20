@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret } from "../crypto";
 import { probeConnector } from "./client";
 import { accessToken } from "./oauth";
 
-const { connectors, projectConnectors } = schema;
+const { connectors, projectConnectors, runners } = schema;
 
 export type ConnectorRow = typeof connectors.$inferSelect;
 
@@ -92,19 +92,25 @@ export type TurnConnector = {
 /**
  * The connectors a thread's agent gets this turn: the project's, then those of the person the
  * thread works for that they turned on in this project. A person's own connectors never work for someone else's thread. stdio servers
- * only where they may start.
+ * only where they may start. On a computer (runnerId) that is not the person's own, none of theirs: their commands and
+ * variables would go to someone else's computer, and its CLI would hold the turn token that opens their remote ones.
  */
 export async function turnConnectors(
   env: Env,
-  where: { projectId: string; userId: string | null; place: "cloud" | "local" },
+  where: { projectId: string; userId: string | null; place: "cloud" | "local"; runnerId?: string },
 ): Promise<TurnConnector[]> {
   const db = createDb(env.DB);
+  const [computer] =
+    where.place === "local" && where.runnerId
+      ? await db.select({ userId: runners.userId }).from(runners).where(eq(runners.id, where.runnerId))
+      : [];
+  const ownComputer = where.place === "cloud" || !where.runnerId || computer?.userId === where.userId;
   const project = await db
     .select()
     .from(connectors)
     .where(and(eq(connectors.projectId, where.projectId), eq(connectors.enabled, true)));
   // A person's own connectors only where they turned them on for this project.
-  const own = where.userId
+  const own = where.userId && ownComputer
     ? (
         await db
           .select({ connector: connectors })
