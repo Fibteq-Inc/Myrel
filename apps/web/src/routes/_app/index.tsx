@@ -7,6 +7,7 @@ import { type FormEvent, useState } from "react";
 import { ProjectBadge } from "../../components/shell/project-header";
 import { NavToggle, PaneHeader } from "../../components/shell/shell";
 import { api, projectsQuery } from "../../lib/api";
+import { useFormat } from "../../lib/format";
 import { MyrelMark, Button, errorMessage, Input } from "../../lib/ui";
 
 export const Route = createFileRoute("/_app/")({
@@ -89,6 +90,7 @@ function ProjectsPage() {
                         <span className="truncate font-medium">{p.name}</span>
                         <ProjectActivity project={p} />
                       </span>
+                      <ProjectCost project={p} />
                       <ArrowRight
                         size={15}
                         className="flex-none text-subtle transition-transform group-hover:translate-x-0.5"
@@ -130,6 +132,20 @@ function ProjectActivity({ project }: { project: Project }) {
           <span className="truncate">{t("projects.waiting", { count: waiting })}</span>
         </span>
       )}
+    </span>
+  );
+}
+
+/** This month's model cost, quiet beside the arrow; the all-time figure on hover. Nothing until a call is priced. */
+function ProjectCost({ project }: { project: Project }) {
+  const t = useT();
+  const { cost } = useFormat();
+  if (!project.cost?.totalMicros) return null;
+  const month = t("projects.costMonth", { cost: cost(project.cost.monthMicros) });
+  const total = t("projects.costTotal", { cost: cost(project.cost.totalMicros) });
+  return (
+    <span className="flex-none text-xs tabular-nums text-subtle" title={`${month}\n${total}`} aria-label={`${month}, ${total}`}>
+      {cost(project.cost.monthMicros)}
     </span>
   );
 }

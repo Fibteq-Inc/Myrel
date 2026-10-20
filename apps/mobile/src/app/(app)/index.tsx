@@ -1,4 +1,4 @@
-import { useT } from "@myrel/i18n/react";
+import { useI18n, useT } from "@myrel/i18n/react";
 import type { Project } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
@@ -6,6 +6,7 @@ import { ChevronRight, FolderClosed, Plus, Settings } from "lucide-react-native"
 import { useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Button, errorMessage, Input, Spinner, useRelativeTime } from "../../components/ui";
+import { formatCost } from "../../lib/format";
 import { useSession } from "../../lib/session";
 import { colors, radius } from "../../theme";
 
@@ -115,6 +116,7 @@ export default function ProjectsScreen() {
               </Text>
               <ProjectActivity project={item} />
             </View>
+            <ProjectCost project={item} />
             <ChevronRight size={16} color={colors.subtle} />
           </Pressable>
         )}
@@ -151,6 +153,22 @@ function ProjectActivity({ project }: { project: Project }) {
   );
 }
 
+/** This month's model cost, quiet beside the chevron; nothing until a call is priced. */
+function ProjectCost({ project }: { project: Project }) {
+  const t = useT();
+  const { locale } = useI18n();
+  if (!project.cost?.totalMicros) return null;
+  const month = formatCost(project.cost.monthMicros, locale);
+  return (
+    <Text
+      style={styles.cost}
+      accessibilityLabel={`${t("projects.costMonth", { cost: month })}, ${t("projects.costTotal", { cost: formatCost(project.cost.totalMicros, locale) })}`}
+    >
+      {month}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   list: { padding: 16, gap: 8, flexGrow: 1 },
   create: { gap: 10, marginBottom: 12 },
@@ -178,6 +196,7 @@ const styles = StyleSheet.create({
   activityItem: { flexDirection: "row", alignItems: "center", gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   activityText: { fontSize: 13, fontWeight: "500" },
+  cost: { color: colors.subtle, fontSize: 13, fontVariant: ["tabular-nums"] },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
   emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600" },
   emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center", paddingHorizontal: 24 },
