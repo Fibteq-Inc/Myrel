@@ -53,6 +53,10 @@ export type ApiClientOptions = {
   /** Bearer token storage. Omit to use cookies only (same-origin web). */
   tokens?: TokenStore;
   fetch?: typeof fetch;
+  /** Sent with every request, e.g. the mobile app's `origin: altair://`. */
+  headers?: Record<string, string>;
+  /** Native apps use "omit": they authenticate with the bearer token, never with cookies. */
+  credentials?: RequestCredentials;
 };
 
 export type SessionUser = { id: string; name: string; email: string; image?: string | null };
@@ -73,11 +77,15 @@ export class ApiClient {
   readonly baseUrl: string;
   readonly tokens?: TokenStore;
   private readonly fetchImpl: typeof fetch;
+  private readonly headers: Record<string, string>;
+  private readonly credentials: RequestCredentials;
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.tokens = options.tokens;
     this.fetchImpl = options.fetch ?? ((...args) => fetch(...args));
+    this.headers = options.headers ?? {};
+    this.credentials = options.credentials ?? "include";
   }
 
   async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -94,7 +102,7 @@ export class ApiClient {
 
   /** Raw fetch with auth applied. Use `request` for JSON endpoints. */
   async send(path: string, init: { method?: string; body?: BodyInit; contentType?: string } = {}): Promise<Response> {
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = { ...this.headers, accept: "application/json" };
     if (init.contentType) headers["content-type"] = init.contentType;
     const token = await this.tokens?.get();
     if (token) headers.authorization = `Bearer ${token}`;
@@ -103,7 +111,7 @@ export class ApiClient {
       method: init.method ?? "GET",
       headers,
       body: init.body,
-      credentials: "include",
+      credentials: this.credentials,
     });
     // Better Auth's bearer plugin returns the session token in this header.
     const issued = res.headers.get("set-auth-token");
@@ -466,12 +474,12 @@ export class ApiClient {
 
   /** One version's HTML source, as text. */
   async artifactSource(projectId: string, artifactId: string, version: number): Promise<string> {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...this.headers };
     const token = await this.tokens?.get();
     if (token) headers.authorization = `Bearer ${token}`;
     const res = await this.fetchImpl(`${this.baseUrl}${this.artifactsPath(projectId, artifactId)}/versions/${version}/source`, {
       headers,
-      credentials: "include",
+      credentials: this.credentials,
     });
     if (!res.ok) throw new ApiError(res.status, null);
     return res.text();

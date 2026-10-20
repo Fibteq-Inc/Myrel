@@ -609,4 +609,18 @@ export const en = {
   "notifications.failed": "Failed",
   "notifications.email": "Email me when a thread finishes or needs me",
   "notifications.browser": "Browser notifications on this device",
+  // Mobile app
+  "mobile.serverTitle": "Connect to a server",
+  "mobile.serverHint": "Enter the address of your Altair server, hosted or self-hosted.",
+  "mobile.cancel": "Cancel",
+  "mobile.offlineTitle": "Can't reach {host}",
+  "mobile.offlineBody": "Check your connection and try again.",
+  "mobile.retry": "Try again",
+  "mobile.signOutConfirm": "Sign out of {email}?",
+  "mobile.openInBrowser": "Open in browser",
+  "mobile.badLink": "This link can't be opened.",
+  "mobile.showProgress": "Show progress",
+  "mobile.hideProgress": "Hide progress",
+  "mobile.noPreview": "No preview for this kind of file.",
+  "mobile.newProject": "New project",
 } satisfies Record<string, string | PluralMessage>;
