@@ -8,6 +8,44 @@ export interface KeyValueStore {
 
 export type PickedFile = { name: string; type: string; size: number; blob: Blob };
 
+/** What the bundled myrel-runner is doing (its `start --json` states, plus `error` when it crashed). */
+export type ComputerStatus =
+  | { state: "connecting" }
+  | { state: "online"; name: string }
+  | { state: "offline"; reason: string; retryInMs: number }
+  | { state: "stopped"; reason: string }
+  | { state: "error"; message: string };
+
+export type ComputerAccess = "read" | "edit" | "full";
+
+export type ComputerInfo = {
+  paired: boolean;
+  /** The Myrel server this computer is paired with. */
+  server?: string;
+  runnerId?: string;
+  access: ComputerAccess;
+  clis: { id: string; version: string | null }[];
+  status: ComputerStatus;
+  hostname: string;
+  platform: string;
+};
+
+/**
+ * The computer the app runs on, as an Myrel runner (desktop only): pair it with one click and
+ * keep the bundled myrel-runner running while the app is open. Folders are shared from the
+ * Devices page like any other runner.
+ */
+export interface LocalComputer {
+  info(): Promise<ComputerInfo>;
+  /** Saves the runner login from `POST /api/runner/pair` (in the OS keychain) and starts the runner. */
+  connect(login: { server: string; runnerId: string; token: string }): Promise<void>;
+  setAccess(access: ComputerAccess): Promise<void>;
+  start(): Promise<void>;
+  /** Stops the runner and forgets the pairing on this computer. */
+  disconnect(): Promise<void>;
+  onStatus(listener: (status: ComputerStatus) => void): () => void;
+}
+
 /**
  * Everything the UI needs from its host. apps/web uses `webPlatform()`; the
  * desktop shell (Tauri) and mobile app (Expo) provide their own, backed by the
@@ -21,6 +59,8 @@ export interface Platform {
   notify(input: { title: string; body?: string }): void | Promise<void>;
   openExternal(url: string): void | Promise<void>;
   pickFiles(options?: { multiple?: boolean; accept?: string[] }): Promise<PickedFile[]>;
+  /** Desktop only: this computer as a runner for local folders. */
+  computer?: LocalComputer;
 }
 
 /** Key/value store over Web Storage; falls back to memory when storage is blocked. */

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { FolderPicker, folderPickerBlocker } from "../../components/folder-picker";
 import { NavToggle } from "../../components/shell/shell";
 import { CliChips, lastSeen, OnlineDot, PairingSteps, RunnerIcon } from "../../components/runners";
+import { ThisComputer } from "../../components/this-computer";
 import { api, runnersQuery, server } from "../../lib/api";
 import { Button, errorMessage, GhostButton, IconButton } from "../../lib/ui";
 
@@ -82,6 +83,8 @@ function DevicesPage() {
               )}
             </section>
           )}
+
+          <ThisComputer />
 
           <section className="flex flex-col gap-3" aria-label={t("devices.yours")}>
             <h2 className="text-xs text-subtle">{t("devices.yours")}</h2>

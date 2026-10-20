@@ -1,0 +1,70 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Myrel",
+  "identifier": "io.fibteq.myrel",
+  "build": {
+    "beforeDevCommand": "node scripts/build-runner.mjs && pnpm exec vite",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "node scripts/build-runner.mjs && pnpm exec vite build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Myrel",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 520,
+        "backgroundColor": "#0e0e10",
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Projects with AI teammates",
+    "copyright": "© Fibteq",
+    "publisher": "Fibteq",
+    "license": "AGPL-3.0-only",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "externalBin": [
+      "binaries/myrel-runner"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "myrel"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/Fibteq-Inc/myrel/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}
