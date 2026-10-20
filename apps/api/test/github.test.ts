@@ -307,6 +307,22 @@ describe("pull requests", () => {
     expect(woken[2]).toContain("was merged.");
   });
 
+  it("settles a merge with nothing left to do without starting the agent", async () => {
+    const { project, thread } = await setup();
+    const agent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await agent.start({ projectId: project.id, threadId: thread.id, brief: "Fix login" });
+    const n = number + 2;
+    fakeGithub.pulls[`acme/app#${n}`] = pull({ number: n, html_url: `https://github.com/acme/app/pull/${n}` });
+    await trackPullRequest(env, project.id, thread.id, `https://github.com/acme/app/pull/${n}`);
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const before = (await projectAgent.getThreadContext(thread.id))!.messages.length;
+
+    await hook("pull_request", { action: "closed", pull_request: pull({ number: n, state: "closed", merged: true }) });
+    const after = (await projectAgent.getThreadContext(thread.id))!.messages;
+    expect(after.slice(before).map((m) => m.body)).toEqual([`acme/app#${n} was merged.`]);
+    expect(await projectAgent.getThread(thread.id)).toMatchObject({ resolved: true, status: "done" });
+  });
+
   it("ignores events about pull requests no thread opened", async () => {
     const { project, thread } = await setup();
     await hook("pull_request", { action: "closed", pull_request: pull({ number: number + 1, state: "closed" }) });
