@@ -3,7 +3,10 @@
   "name": "myrel",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: fetch() goes out like a request from the Internet, so connectors
+  // on other Workers of this zone (Fibteq Flow at astral.fibteq.io) are reachable; without it a
+  // same-zone fetch skips their Worker and fails.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
 
   // The web app (apps/web) is built into ../web/dist and served from the same Worker.
