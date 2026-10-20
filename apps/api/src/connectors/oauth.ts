@@ -176,7 +176,13 @@ async function register(resource: string, redirectUri: string, fetcher: typeof f
     (await getJson(await resourceMetadataFromChallenge(resource, fetcher), fetcher));
   const issuer = firstString(metadata?.authorization_servers) ?? base.origin;
   const server = await authorizationServer(issuer, fetcher);
-  if (!server) throw new Error("This server does not say how to sign in to it. Add it with a header (an API key) instead.");
+  if (!server) {
+    throw new Error(
+      metadata
+        ? "This server's sign-in settings could not be read. Check the address, or add it with a header (an API key) instead."
+        : "This server does not say how to sign in to it, or could not be reached. Check the address, or add it with a header (an API key) instead.",
+    );
+  }
   const authorizationEndpoint = String(server.authorization_endpoint ?? "");
   const tokenEndpoint = String(server.token_endpoint ?? "");
   const registration = typeof server.registration_endpoint === "string" ? server.registration_endpoint : null;

@@ -1,9 +1,11 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../../lib/ui";
 
 /**
- * A button that opens a floating panel below it. Closes on outside click,
- * Escape, or when `children` calls `close`.
+ * A button that opens a floating panel below it. The panel is rendered in a portal with fixed
+ * positioning, so a card or list with overflow hidden cannot clip it; it opens upward when there
+ * is no room below. Closes on outside click, Escape, scrolling, or when `children` calls `close`.
  */
 export function Menu({
   trigger,
@@ -24,28 +26,46 @@ export function Menu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
   const id = useId();
 
   useEffect(() => {
     if (!open) return;
     const onPointer = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !panel.current?.contains(target)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // A fixed panel would drift from its button on scroll, so scrolling anything outside it closes it.
+    const onScroll = (e: Event) => !panel.current?.contains(e.target as Node) && setOpen(false);
+    const onResize = () => setOpen(false);
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
+    addEventListener("scroll", onScroll, true);
+    addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
+      removeEventListener("scroll", onScroll, true);
+      removeEventListener("resize", onResize);
     };
   }, [open]);
 
-  const position =
-    side === "right"
-      ? "left-full bottom-0 ml-2"
-      : side === "top"
-        ? cn("bottom-full mb-1.5", align === "end" ? "right-0" : "left-0")
-        : cn("top-full mt-1.5", align === "end" ? "right-0" : "left-0");
+  useLayoutEffect(() => {
+    if (!open || !ref.current || !panel.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const height = panel.current.offsetHeight;
+    const gap = 6;
+    const horizontal = align === "end" ? { right: Math.max(8, innerWidth - r.right) } : { left: Math.max(8, r.left) };
+    if (side === "right") {
+      setStyle({ left: r.right + 8, bottom: Math.max(8, innerHeight - r.bottom) });
+      return;
+    }
+    // Open upward when asked to, or when there is no room below but there is above.
+    const up = side === "top" || (r.bottom + gap + height > innerHeight - 8 && r.top - gap - height >= 8);
+    setStyle(up ? { ...horizontal, bottom: innerHeight - r.top + gap } : { ...horizontal, top: r.bottom + gap });
+  }, [open, align, side]);
 
   return (
     <div ref={ref} className="relative">
@@ -60,20 +80,23 @@ export function Menu({
       >
         {trigger}
       </button>
-      {open && (
-        <div
-          id={id}
-          role="menu"
-          aria-label={label}
-          className={cn(
-            "absolute z-50 min-w-56 rounded-xl border border-edge bg-[#17171b] p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.5)]",
-            position,
-            panelClassName,
-          )}
-        >
-          {children(() => setOpen(false))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={panel}
+            id={id}
+            role="menu"
+            aria-label={label}
+            style={style}
+            className={cn(
+              "fixed z-[100] min-w-56 rounded-xl border border-edge bg-[#17171b] p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.5)]",
+              panelClassName,
+            )}
+          >
+            {children(() => setOpen(false))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
