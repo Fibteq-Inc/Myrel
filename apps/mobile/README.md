@@ -59,3 +59,12 @@ npx eas-cli submit --platform ios                        # TestFlight / App Stor
 
 The bundle id / package is `io.fibteq.altair` and the deep link scheme is `altair://`.
 The API trusts the `altair://` origin the app sends (see `apps/api/src/origins.ts`).
+
+## Store listing
+
+The App Store listing (name, texts, keywords, age rating, review notes and screenshots) lives in
+`store.config.js` and goes up with `npx eas-cli metadata:push`. The review contact and demo account
+come from `APP_REVIEW_*` environment variables listed at the top of that file, so they stay out of git.
+Screenshots are in `store/screenshots/`; the Google Play texts and the privacy and content forms of both
+stores are in `store/forms.md`. Store builds open on `https://altair.fibteq.io` (`EXPO_PUBLIC_ALTAIR_SERVER`
+in `eas.json`).
