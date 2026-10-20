@@ -69,11 +69,21 @@ export class TaskRunner {
       }
     }
     const cwd = isolated?.cwd ?? folder;
+    const log = this.opts.log ?? (() => {});
+
+    // The project's other folders, each only when it is shared too; the main one when a worktree is the cwd.
+    const dirs: string[] = cwd === folder ? [] : [folder];
+    for (const requested of task.folders ?? []) {
+      const other = await sharedFolder(config, requested);
+      if (!other) log(`  skipping ${requested}: not shared on this computer`);
+      else if (other !== cwd && !dirs.includes(other)) dirs.push(other);
+    }
 
     const adapter = ADAPTERS[task.cli];
+    // Claude Code asks the person through Myrel before stepping outside those folders.
+    const asks = !!task.agent && task.cli === "claude";
     // A Claude Code session belongs to the folder it ran in, so a new worktree starts a new one.
     const resume = task.cli === "claude" && !isolated?.created ? await this.opts.sessions.get(task.threadId) : undefined;
-    const log = this.opts.log ?? (() => {});
     log(`▶ ${adapter.id} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
 
     // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
@@ -92,12 +102,15 @@ export class TaskRunner {
         token: task.agent.token,
         dir: agentDir,
         connectors,
+        asks,
+        access: config.access,
         ...(skills && { skills: { plugin: skills.plugin, dir: skills.skills } }),
       });
     }
     const cleanup = () => (agentDir ? rm(agentDir, { recursive: true, force: true }).catch(() => {}) : Promise.resolve());
 
-    const child = (this.opts.spawn ?? spawn)(adapter.bin, adapter.args({ access: config.access, resume, extra: agent.args }), {
+    const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: asks && !!agentDir });
+    const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: { ...process.env, ...agent.env },
       stdio: ["pipe", "pipe", "pipe"],
@@ -106,6 +119,8 @@ export class TaskRunner {
     });
     this.running.set(task.taskId, child);
     if (isolated) this.worktrees.set(task.taskId, isolated.worktree.path);
+    // Where the CLI works without asking, so Myrel only asks about what is really outside.
+    if (task.agent) this.send({ type: "task.folders", taskId: task.taskId, folders: [cwd, ...dirs] });
     // Tells Myrel where the work is, since it is not in the shared folder itself.
     const where = isolated
       ? `\n\n(myrel-runner: worked on branch ${isolated.worktree.branch} in ${isolated.cwd}, a git worktree of ${folder}.)`

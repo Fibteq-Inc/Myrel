@@ -127,6 +127,13 @@
       "when": 1792505479369,
       "tag": "0017_personal_per_project",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792506018332,
+      "tag": "0018_project_folders",
+      "breakpoints": true
     }
   ]
 }

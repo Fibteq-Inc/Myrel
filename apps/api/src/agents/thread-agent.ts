@@ -23,7 +23,10 @@ import {
   TaskSpec,
   workingBranch,
 } from "@myrel/runner-core";
+import { createDb, schema } from "@myrel/db";
 import { Agent, getAgentByName } from "agents";
+import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
@@ -31,12 +34,25 @@ import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
-import { handleMcp, type Tool } from "../llm";
-import { runnerHasFeature } from "../runners";
+import { handleMcp, type Tool, tool } from "../llm";
+import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
 import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
+import {
+  ACCESS_LEVEL_DENIED,
+  ACCESS_WAIT_MS,
+  type AccessAnswer,
+  accessAnswer,
+  accessMessage,
+  type AccessRequest,
+  accessTargets,
+  allowAnswer,
+  denyAnswer,
+  describeRequest,
+  insideAny,
+} from "./folder-access";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
@@ -84,6 +100,8 @@ type AgentTurn = {
   asked: boolean;
   resolved: boolean;
   timezone: string;
+  /** The language of the person's latest message, for cards Myrel posts on the agent's behalf. */
+  language?: string;
   /** Where the last stats line stopped counting; the next message's line starts here. Absent on older turns. */
   mark?: StatsMark;
   /** Its latest reply and where that reply's line started, so the usage after it can join it when the turn ends. */
@@ -195,6 +213,8 @@ export class ThreadAgent extends Agent<Env> {
    * thread's pull requests changed on GitHub. Task results come through taskEvents.
    */
   async wake(reason: ThreadWake): Promise<void> {
+    // An answer to a folder card the running turn waits on goes to that turn, not to a new one.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
     }
@@ -310,7 +330,14 @@ export class ThreadAgent extends Agent<Env> {
     const { token, hash } = await newAgentToken();
     const agentPlace: AgentPlace =
       place.kind === "local"
-        ? { kind: "local", cli: place.workspace.cli, folder: place.workspace.path, computer: place.workspace.runnerName }
+        ? {
+            kind: "local",
+            cli: place.workspace.cli,
+            folder: place.workspace.path,
+            folders: place.workspace.folders,
+            computer: place.workspace.runnerName,
+            asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
+          }
         : { kind: "cloud", images: false };
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
@@ -322,9 +349,13 @@ export class ThreadAgent extends Agent<Env> {
       asked: false,
       resolved: false,
       timezone: input.timezone,
+      language,
       mark: { at: Date.now(), inputTokens: 0, outputTokens: 0, costUsd: 0 },
     };
     this.setMeta("agent_turn", JSON.stringify(turn));
+    this.clearAccess();
+    // Until the runner says where the CLI really works (a worktree, say), the project's folders.
+    if (place.kind === "local") this.setMeta("access_folders", JSON.stringify([place.workspace.path, ...place.workspace.folders]));
     this.setMeta("agent_token", hash);
     this.deleteMeta("task_checklist");
     await project.updateThread(threadId, { status: "working" });
@@ -407,6 +438,7 @@ export class ThreadAgent extends Agent<Env> {
         this.deleteMeta("agent_token");
         this.deleteMeta("agent_turn");
         this.deleteMeta("agent_connectors");
+        this.clearAccess();
         this.deleteMeta("agent_skills");
         const message = err instanceof Error ? err.message : String(err);
         await project.sendMessage({
@@ -450,6 +482,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("agent_token");
     this.deleteMeta("agent_turn");
     this.deleteMeta("agent_connectors");
+    this.clearAccess();
     this.deleteMeta("agent_skills");
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -572,6 +605,138 @@ export class ThreadAgent extends Agent<Env> {
     return target ? { ok: true, ...target } : { ok: false, error: "not_found" };
   }
 
+  /**
+   * The folders the running turn's CLI works in, as its runner reports them when the run starts
+   * (feature "project-folders"). Callable over RPC by the RunnerAgent.
+   */
+  agentFolders(taskId: string, folders: string[]): void {
+    if (this.runningTask()?.id === taskId) this.setMeta("access_folders", JSON.stringify(folders));
+  }
+
+  /**
+   * Claude Code's permission prompt tool (`--permission-prompt-tool mcp__myrel__approve_access`).
+   * A path inside the project's folders that still needs permission is about the runner's access
+   * level, which Myrel does not widen. A path outside them is put to the person as a card, and the
+   * run waits for the answer.
+   */
+  private approveAccessTool(): Tool {
+    return tool({
+      name: "approve_access",
+      description:
+        "Claude Code calls this when a step needs permission; it asks the person when the step reaches outside the project's folders. Do not call it yourself.",
+      input: z.object({ tool_name: z.string().max(200), input: z.record(z.string(), z.unknown()).default({}), tool_use_id: z.string().optional() }),
+      run: async ({ tool_name, input }) => {
+        const started = JSON.parse(this.getMeta("access_folders") ?? "[]") as string[];
+        const targets = accessTargets(input, started[0]);
+        const outside = targets.filter((t) => !insideAny(t.path, started));
+        if (!outside.length) return denyAnswer(ACCESS_LEVEL_DENIED);
+        // Folders the person allowed this turn, or added to the project since it started.
+        const { projectId } = this.ids();
+        const workspace = await getWorkspace(this.env, projectId);
+        const allowed = () => [
+          ...(JSON.parse(this.getMeta("access_grants") ?? "[]") as string[]),
+          ...(workspace ? [workspace.path, ...workspace.folders] : []),
+        ];
+        for (const target of outside) {
+          if (insideAny(target.path, allowed())) continue;
+          const answer = await this.askAccess(target.folder, describeRequest(tool_name, target));
+          if (answer === null) return denyAnswer(`The person did not answer about ${target.folder} in time. Carry on without it, and say in your reply what you could not reach.`);
+          if (answer === "deny") return denyAnswer(`The person did not allow ${target.folder}. Carry on without it; if the work cannot be done without it, say so in a reply.`);
+        }
+        return allowAnswer(input);
+      },
+    });
+  }
+
+  /**
+   * Puts one folder to the person as a card (or joins a card already asking about it) and waits for
+   * the answer: null when none came in time or the turn ended.
+   */
+  private async askAccess(folder: string, what: string): Promise<AccessAnswer | null> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    let request = this.accessRequests().find((r) => r.folder === folder && !r.answer);
+    if (!request) {
+      request = { id: crypto.randomUUID(), folder };
+      this.setMeta("access_requests", JSON.stringify([...this.accessRequests(), request]));
+      const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+      const body = accessMessage(folder, what, turn?.language ?? "en");
+      const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+      // Not news for the next turn, unless someone wrote in between.
+      if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      await project.updateThread(threadId, { status: "blocked" });
+      await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
+    }
+    const id = request.id;
+    const until = Date.now() + ACCESS_WAIT_MS;
+    while (Date.now() < until && this.runningTask()) {
+      const answer = this.accessRequests().find((r) => r.id === id)?.answer;
+      if (answer) {
+        await project.updateThread(threadId, { status: "working" });
+        return answer;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return null;
+  }
+
+  /** A person answered the running turn's folder cards. Returns false when the message is not such an answer. */
+  private async answerAccess(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const answer = accessAnswer(reason.body ?? "");
+    const open = this.accessRequests().filter((r) => !r.answer);
+    if (!answer || !open.length || !this.runningTask()) return false;
+    const { projectId } = this.ids();
+    let given = answer;
+    // Only owners and admins change the project's folders; anyone else's yes counts for this turn.
+    if (answer === "always" && !(reason.authorId && (await this.canManage(reason.authorId)))) given = "once";
+    const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
+    for (const r of open) {
+      let mine = given;
+      if (mine === "always" && !(await this.addProjectFolder(projectId, r.folder))) mine = "once";
+      if (mine !== "deny") grants.push(r.folder);
+      r.answer = mine;
+    }
+    this.setMeta("access_grants", JSON.stringify(grants));
+    this.setMeta("access_requests", JSON.stringify(this.accessRequests().map((r) => open.find((o) => o.id === r.id) ?? r)));
+    // The answer was for this turn: it is not news for the next one.
+    if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(reason.seq));
+    return true;
+  }
+
+  /** Shares the folder on the project's computer and adds it to the project's folders. */
+  private async addProjectFolder(projectId: string, folder: string): Promise<boolean> {
+    const workspace = await getWorkspace(this.env, projectId);
+    if (!workspace) return false;
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, workspace.runnerId);
+    const shared = await runner.setShared(folder, true);
+    if (!shared.ok) {
+      console.warn("folder not shared", folder, shared.reason);
+      return false;
+    }
+    // The runner keeps the folder's real path; that is the one it accepts later.
+    const path = shared.folders.find((f) => f.path === folder)?.path ?? shared.folders.at(-1)?.path ?? folder;
+    return setWorkspaceFolder(this.env, projectId, path, true);
+  }
+
+  private async canManage(userId: string): Promise<boolean> {
+    const { projectId } = this.ids();
+    const [row] = await createDb(this.env.DB)
+      .select({ role: schema.projectMembers.role })
+      .from(schema.projectMembers)
+      .where(and(eq(schema.projectMembers.projectId, projectId), eq(schema.projectMembers.userId, userId)));
+    return row?.role === "owner" || row?.role === "admin";
+  }
+
+  private accessRequests(): AccessRequest[] {
+    return JSON.parse(this.getMeta("access_requests") ?? "[]") as AccessRequest[];
+  }
+
+  private clearAccess() {
+    this.deleteMeta("access_folders");
+    this.deleteMeta("access_grants");
+    this.deleteMeta("access_requests");
+  }
+
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
   private async agentToolset(): Promise<Tool[]> {
     const { projectId, threadId } = this.ids();
@@ -579,7 +744,9 @@ export class ThreadAgent extends Agent<Env> {
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
     const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
     const track = (url: string) => trackPullRequest(this.env, projectId, threadId, url);
+    const local = this.runningTask()?.backend === "local";
     return [
+      ...(local ? [this.approveAccessTool()] : []),
       ...threadTools({
         reply: async (text, needs, files) => {
           // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.

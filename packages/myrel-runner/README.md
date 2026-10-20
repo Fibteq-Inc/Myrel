@@ -76,6 +76,18 @@ Read-only tasks (`--access read`) always run in the folder itself.
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 
+### Project folders and asking first
+
+A project can list other folders besides its main one (Project settings > Folders). They must be shared on this
+computer too; the CLI gets them with `--add-dir` (Claude Code, Codex) or `--include-directories` (Gemini CLI).
+
+When Claude Code runs as a thread's agent, its permission prompts go to Myrel (`--permission-prompt-tool
+mcp__myrel__approve_access`). If a step reaches a file outside the project's folders, Myrel asks you in the thread
+(Allow once, Add to project, Don't allow) and the step waits for your answer. A prompt about something inside the
+folders is about the access level above and is declined as before. With `full`, Claude Code then runs with
+`acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
+are asked about. Codex and Gemini CLI cannot ask mid-run, so they stay inside the folders.
+
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
 
 ### Your CLI as the thread's agent

@@ -2,12 +2,13 @@ import { useT } from "@myrel/i18n/react";
 import type { InviteRole, ProjectRole, ProviderId, TaskTarget, UpdateProjectSettingsInput } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { BookMarked, FolderGit2, Plug, Settings2, Sparkles, Users, X } from "lucide-react";
+import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, Users, X } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
 import { PersonalInProject } from "./personal-in-project";
 import { Skills } from "./skills";
 import { GithubRepos } from "./github-repos";
+import { ProjectFolders } from "./project-folders";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
@@ -25,7 +26,7 @@ import { useConfirm } from "./ui/confirm";
 
 export const roleKey = (role: ProjectRole) => `role.${role}` as const;
 
-export type ProjectSettingsTab = "general" | "model" | "github" | "connectors" | "skills" | "members";
+export type ProjectSettingsTab = "general" | "model" | "folders" | "github" | "connectors" | "skills" | "members";
 
 /**
  * Everything about one project, split into tabs: general (name, where tasks run, delete),
@@ -59,6 +60,7 @@ export function ProjectSettings({
   const tabs: { id: ProjectSettingsTab; label: string; icon: ReactNode }[] = [
     { id: "general", label: t("projectSettings.tab.general"), icon: <Settings2 size={15} /> },
     { id: "model", label: t("projectSettings.tab.model"), icon: <Sparkles size={15} /> },
+    { id: "folders", label: t("projectSettings.tab.folders"), icon: <Folder size={15} /> },
     { id: "github", label: t("projectSettings.tab.github"), icon: <FolderGit2 size={15} /> },
     { id: "connectors", label: t("projectSettings.tab.connectors"), icon: <Plug size={15} /> },
     { id: "skills", label: t("settings.skills"), icon: <BookMarked size={15} /> },
@@ -74,6 +76,7 @@ export function ProjectSettings({
         </>
       )}
       {tab === "model" && <ModelForm projectId={projectId} canManage={canManage} />}
+      {tab === "folders" && <ProjectFolders project={project} canManage={canManage} />}
       {tab === "github" && <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />}
       {tab === "connectors" && (
         <>

@@ -286,7 +286,13 @@ export class ProjectAgent extends Agent<Env> {
           if (this.getThread(message.threadId)?.resolved) {
             this.updateThread(message.threadId, { resolved: false, status: "working" });
           }
-          await this.wakeThread(message.threadId, { kind: "message", messageId: message.id });
+          await this.wakeThread(message.threadId, {
+            kind: "message",
+            messageId: message.id,
+            body: message.body,
+            authorId: userId,
+            seq: message.seq,
+          });
         }
         else await this.notifyCoordinator({ kind: "message", messageId: message.id });
         return;
@@ -1044,7 +1050,8 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 
 /** Why a thread agent is woken. */
 export type ThreadWake =
-  | { kind: "message"; messageId: string }
+  /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
+  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number }
   | { kind: "coordinator"; note: string }
   | { kind: "routine"; name: string; prompt: string }
   /** Something happened on a pull request the thread opened (github/pulls.ts). */
