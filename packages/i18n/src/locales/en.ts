@@ -145,8 +145,6 @@ export const en = {
   "thread.placeholder": "Reply in this thread",
 
   // Workspace
-  "workspace.label": "Workspace",
-  "workspace.tabs": "Workspace tabs",
   "workspace.changes": "Changes",
   "workspace.changesEmpty": "No changes yet",
   "workspace.changesEmptyBody": "When this thread edits code, the diff and its pull request show up here.",
@@ -355,7 +353,6 @@ export const en = {
   "rail.filesNoProjectTitle": "Open a project to see its files",
   "sidebar.files": "Files and memory",
   "sidebar.artifacts": "Artifacts",
-  "workspace.close": "Close workspace",
 
   // Devices, runners and the thread panel
   "runners.online": "Online",
@@ -392,16 +389,19 @@ export const en = {
   "devices.noFolders": "None yet. Add the folders projects may work in.",
   "devices.stopSharing": "Stop sharing",
   "devices.stopSharingLabel": "Stop sharing {path}",
+  "workspace.pr": "Pull request",
+  "workspace.prEmpty": "No pull request yet",
+  "workspace.prEmptyBody": "When this thread opens a pull request, its status and checks show up here.",
+  "threadPanel.conversation": "Conversation",
   "threadPanel.label": "Thread: {title}",
   "threadPanel.labelEmpty": "Thread",
   "threadPanel.resize": "Resize thread panel",
-  "threadPanel.tools": "Workspace tools",
+  "threadPanel.tools": "Thread sections",
   "threadPanel.reopen": "Reopen thread",
   "threadPanel.resolve": "Mark resolved",
   "threadPanel.restore": "Restore panel size",
   "threadPanel.maximize": "Maximize panel",
   "threadPanel.close": "Close thread",
-  "threadPanel.backToConversation": "Back to the conversation",
 
   // Files, memory and local folders
   "knowledge.label": "Project knowledge",

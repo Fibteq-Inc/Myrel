@@ -2,7 +2,7 @@ import { threadMessages, threadPullRequests, threadTasks } from "@altair/client"
 import { useT } from "@altair/i18n/react";
 import { planChecklist } from "@altair/protocol";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, LoaderCircle, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
+import { CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -21,17 +21,16 @@ import {
 } from "../chat";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
-import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
-import { CHAT_MIN, PANEL_MIN, PANEL_SPLIT, useThreadPanel } from "./panel-state";
+import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
+import { CHAT_MIN, PANEL_MIN, useThreadPanel } from "./panel-state";
 
-/** Below this panel width a workspace tab takes the conversation's place instead of sitting beside it. */
-const SIDE_BY_SIDE = 700;
+const CONVERSATION = "conversation";
 
 /**
  * A thread as a panel on the right of the project chat. Drag its left edge
  * to resize, maximize it to take the whole area, close it to go back to the
- * chat. Its header opens the workspace tools (changes, terminal, outputs)
- * beside the conversation. On phones it covers the screen.
+ * chat. Tabs under its header switch between the conversation and what the
+ * thread changed, opened, ran and produced. On phones it covers the screen.
  */
 export function ThreadPanel({
   threadId,
@@ -101,19 +100,38 @@ export function ThreadPanel({
           : tab,
       )
     : [];
+  if (thread) {
+    const prs = threadPullRequests(state, thread.id);
+    const pr: WorkspaceTab = {
+      id: "pr",
+      label: t("workspace.pr"),
+      icon: GitPullRequest,
+      count: prs.length || undefined,
+      content: prs.length ? (
+        <div className="p-4">
+          <PullRequestCards pullRequests={prs} />
+        </div>
+      ) : (
+        <EmptyTab icon={GitPullRequest} title={t("workspace.prEmpty")}>
+          {t("workspace.prEmptyBody")}
+        </EmptyTab>
+      ),
+    };
+    const at = tabs.findIndex((tab) => tab.id === "changes") + 1;
+    tabs.splice(at, 0, pr);
+  }
   const tool = tabs.some((tab) => tab.id === panel.tool) ? panel.tool : null;
-  const sideBySide = measured >= SIDE_BY_SIDE;
+  const current = tabs.find((tab) => tab.id === tool);
+  const sections = [{ id: CONVERSATION, label: t("threadPanel.conversation"), icon: MessageSquareText, count: undefined }, ...tabs];
 
   // Opening an artifact brings the Outputs tab into view.
   useEffect(() => {
-    if (artifact) openTool("outputs", true);
+    if (artifact) openTool("outputs");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artifact]);
 
-  function openTool(id: string, keepOpen = false) {
-    if (tool === id && !keepOpen) return panel.update({ tool: null });
-    // Make room for the conversation and the tool side by side.
-    panel.update({ tool: id, ...(!panel.maximized && panel.width < PANEL_SPLIT ? { width: PANEL_SPLIT } : {}) });
+  function openTool(id: string) {
+    panel.update({ tool: id === CONVERSATION ? null : id });
   }
 
   function startResize(e: ReactPointerEvent<HTMLDivElement>) {
@@ -185,29 +203,6 @@ export function ThreadPanel({
               </span>
             </div>
 
-            <div
-              role="group"
-              aria-label={t("threadPanel.tools")}
-              className="flex items-center gap-0.5 rounded-lg border border-line p-0.5"
-            >
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => openTool(tab.id)}
-                  aria-pressed={tool === tab.id}
-                  aria-label={tab.label}
-                  title={tab.label}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-md transition-colors",
-                    tool === tab.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg",
-                  )}
-                >
-                  <tab.icon size={15} />
-                </button>
-              ))}
-            </div>
-
             <IconButton
               type="button"
               onClick={() => emit({ type: "thread.resolve", threadId: thread.id, resolved: !thread.resolved })}
@@ -237,32 +232,55 @@ export function ThreadPanel({
             </IconButton>
           </header>
 
-          <div className="flex min-h-0 flex-1">
-            {(!tool || sideBySide) && (
-              <Conversation threadId={thread.id} me={me} wide={!tool && measured > 900} openArtifact={artifact} />
-            )}
-            {tool && (
-              <div className={cn("flex min-w-0 flex-col", sideBySide ? "w-[52%] flex-none border-l border-line" : "flex-1")}>
-                {!sideBySide && (
-                  <button
-                    type="button"
-                    onClick={() => panel.update({ tool: null })}
-                    className="flex h-9 flex-none items-center gap-1.5 border-b border-line px-4 text-[13px] text-muted hover:text-fg"
-                  >
-                    <ArrowLeft size={14} aria-hidden="true" />
-                    {t("threadPanel.backToConversation")}
-                  </button>
-                )}
-                <WorkspacePanel
-                  key={thread.id}
-                  tabs={tabs}
-                  active={tool}
-                  onActiveChange={(id) => panel.update({ tool: id })}
-                  onClose={() => panel.update({ tool: null })}
-                  className="flex min-h-0 flex-1"
-                />
-              </div>
-            )}
+          <div
+            role="tablist"
+            aria-label={t("threadPanel.tools")}
+            className="@container flex h-11 flex-none items-center gap-0.5 overflow-x-auto border-b border-line px-2.5"
+          >
+            {sections.map((tab, i) => {
+              const selected = (tool ?? CONVERSATION) === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  id={`thread-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-controls="thread-tabpanel"
+                  tabIndex={selected ? 0 : -1}
+                  title={tab.label}
+                  onClick={() => openTool(tab.id)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+                    e.preventDefault();
+                    const next = sections[(i + (e.key === "ArrowRight" ? 1 : -1) + sections.length) % sections.length]!;
+                    openTool(next.id);
+                    document.getElementById(`thread-tab-${next.id}`)?.focus();
+                  }}
+                  className={cn(
+                    "flex h-8 flex-none items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                    selected ? "bg-hover font-medium text-fg" : "text-muted hover:text-fg",
+                  )}
+                >
+                  <tab.icon size={14} aria-hidden="true" />
+                  {/* On a narrow panel only the open tab keeps its name. */}
+                  <span className={selected ? "" : "@max-[600px]:sr-only"}>{tab.label}</span>
+                  {tab.count ? <span className="font-mono text-[11px] text-subtle">{tab.count}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+
+          <div id="thread-tabpanel" role="tabpanel" aria-labelledby={`thread-tab-${tool ?? CONVERSATION}`} className="flex min-h-0 flex-1">
+            {/* The conversation stays mounted so a half-written reply survives a look at another tab. */}
+            <Conversation
+              threadId={thread.id}
+              me={me}
+              wide={measured > 900}
+              openArtifact={artifact}
+              className={current ? "hidden" : "flex"}
+            />
+            {current && <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[#0b0b0d]">{current.content}</div>}
           </div>
         </>
       )}
@@ -275,11 +293,13 @@ function Conversation({
   me,
   wide,
   openArtifact,
+  className = "",
 }: {
   threadId: string;
   me: string;
   wide: boolean;
   openArtifact?: string;
+  className?: string;
 }) {
   const t = useT();
   const { project, names, state, send } = useProjectContext();
@@ -296,7 +316,7 @@ function Conversation({
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
   const planAnchor = (id: string) => `plan-${id}`;
   return (
-    <section aria-label={t("thread.messages")} className="flex min-w-0 flex-1 flex-col">
+    <section aria-label={t("thread.messages")} className={cn("min-w-0 flex-1 flex-col", className)}>
       {thread.statusText && !thread.resolved && (
         <div className="flex-none border-b border-line bg-[#111114] px-5 py-2.5">
           <PlanProgress
