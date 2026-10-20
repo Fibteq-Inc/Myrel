@@ -12,6 +12,7 @@ import {
   opencodeConfig,
   parseLine,
   parseMarker,
+  PLAN_PLUGIN,
   reduceTask,
   renderChecklist,
   type RunnerEvent,
@@ -65,6 +66,8 @@ describe("opencode", () => {
       stream: "stdout",
       text: "Cloning into 'flow'...\nUpdating files: 100% (4323/4323), done.",
     });
+    const reminded = 'run3\n\n\n[Myrel] Your plan still shows "Clone" as the active step. If its work is done, call myrel_update_plan now.';
+    expect(line({ type: "tool_use", part: { tool: "bash", state: { title: "x", output: reminded } } })[1]).toEqual({ type: "log", stream: "stdout", text: "run3" });
     expect(line({ type: "step_finish", part: { tokens: { input: 10, output: 5 }, cost: 0.01 } })).toEqual([
       { type: "usage", inputTokens: 10, outputTokens: 5, costUsd: 0.01 },
     ]);
@@ -384,5 +387,36 @@ describe("task script", () => {
     const { code, events } = runScript(taskEnv(spec({ harness: "shell", prompt: "exit 3" }), shell, { workdir }));
     expect(code).toBe(3);
     expect(events.at(-1)).toEqual({ type: "phase", phase: "agent", state: "failed", detail: "Shell exited with code 3" });
+  });
+});
+
+describe("OpenCode plan plugin", () => {
+  it("reminds the agent of its active step after a few tool calls, until it updates the plan", async () => {
+    const mod = await import(`data:text/javascript,${encodeURIComponent(PLAN_PLUGIN)}`);
+    const hooks = await mod.MyrelPlan({});
+    const after = hooks["tool.execute.after"];
+    const call = async (tool: string, args: unknown = {}) => {
+      const output = { title: tool, output: "ok", metadata: {} };
+      await after({ tool, sessionID: "s", callID: "c", args }, output);
+      return output.output;
+    };
+    expect(await call("bash")).toBe("ok"); // no plan yet
+    await call("myrel_update_plan", { title: "Bump", steps: [{ text: "Find the version", state: "done" }, { text: "Open the PR", state: "active" }] });
+    expect(await call("bash")).toBe("ok");
+    const reminded = await call("bash");
+    expect(reminded).toContain('[Myrel] Your plan still shows "Open the PR" as the active step.');
+    expect(await call("read")).toBe("ok");
+    await call("myrel_update_plan", { title: "Bump", steps: [{ text: "Open the PR", state: "done" }] });
+    expect(await call("bash")).toBe("ok");
+    expect(await call("bash")).toBe("ok"); // nothing active any more
+  });
+
+  it("is written and loaded only when the task has Myrel's tools", () => {
+    const withTools = spec({ harness: "opencode", mcp: { url: "https://myrel.example/mcp" } });
+    expect(opencode.command(withTools)).toContain('printf \'%s\' "$MYREL_PLAN_PLUGIN" > "$HOME/.cache/myrel/opencode-plan.js" && opencode run');
+    expect(opencodeConfig(withTools).plugin).toEqual(["file://{env:HOME}/.cache/myrel/opencode-plan.js"]);
+    const bare = spec({ harness: "opencode" });
+    expect(opencode.command(bare)).toMatch(/^opencode run/);
+    expect(opencode.env(bare).MYREL_PLAN_PLUGIN).toBeUndefined();
   });
 });
