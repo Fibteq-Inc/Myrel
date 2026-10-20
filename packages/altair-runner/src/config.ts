@@ -17,6 +17,11 @@ export type RunnerConfig = {
   token?: string;
   folders: RunnerFolder[];
   access: Access;
+  /**
+   * Run each thread's tasks in its own git worktree and branch when the folder is a git
+   * repository, so threads working at the same time never touch each other's files. Default on.
+   */
+  worktrees?: boolean;
 };
 
 /** ~/.altair-runner, or ALTAIR_RUNNER_HOME. Holds config.json (mode 600) and sessions.json. */
@@ -77,7 +82,7 @@ export class SessionStore {
   }
 }
 
-async function readJson<T>(path: string): Promise<T | undefined> {
+export async function readJson<T>(path: string): Promise<T | undefined> {
   try {
     return JSON.parse(await readFile(path, "utf8")) as T;
   } catch (err) {
@@ -87,7 +92,7 @@ async function readJson<T>(path: string): Promise<T | undefined> {
 }
 
 /** Written to a temp file and renamed, readable by the owner only: it can hold the runner token. */
-async function writeJson(path: string, value: unknown): Promise<void> {
+export async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(runnerHome(), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.tmp`;
   await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });

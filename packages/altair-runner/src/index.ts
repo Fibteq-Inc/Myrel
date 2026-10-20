@@ -5,3 +5,4 @@ export * from "./runner";
 export * from "./service";
 export * from "./tasks";
 export * from "./update";
+export * from "./worktrees";
