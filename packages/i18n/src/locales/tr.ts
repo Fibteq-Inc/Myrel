@@ -179,6 +179,8 @@ export const tr: Catalog = {
   "billing.plan.free": "Free",
   "billing.plan.pro": "Pro",
   "billing.plan.team": "Team",
+  "billing.plan.admin": "Yönetici",
+  "billing.adminNote": "Sunucu yöneticisi, limit yok",
   "billing.seats": { other: "{count} kişi" },
   "billing.freeForever": "Kart gerekmez",
   "billing.renewsOn": "{date} tarihinde yenilenir",

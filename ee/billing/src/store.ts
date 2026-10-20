@@ -1,3 +1,4 @@
+import { adminEmails, isListedAdmin } from "../../../apps/api/src/instance";
 import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId, paidSql } from "./plans";
 
 /** The plan a person works under: their own, or the Team plan of the owner who added them. */
@@ -45,7 +46,16 @@ async function paidSubscription(db: D1Database, userId: string): Promise<Subscri
   return results.find((s) => isPaid(s.status, s.past_due_since)) ?? null;
 }
 
-export async function standingOf(db: D1Database, userId: string): Promise<Standing> {
+/** Whether the person is one of the server's admins: stored role admin, or named in ADMIN_EMAILS. */
+async function isAdmin(env: Env, userId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT role, email FROM user WHERE id = ?").bind(userId).first<{ role: string | null; email: string }>();
+  return Boolean(row && (row.role === "admin" || isListedAdmin(env, row.email)));
+}
+
+/** The plan a person works under. The server's admins are never limited. */
+export async function standingOf(env: Env, userId: string): Promise<Standing> {
+  if (await isAdmin(env, userId)) return standing("admin", userId, null);
+  const db = env.DB;
   const member = await db.prepare("SELECT owner_id FROM billing_team_members WHERE user_id = ?").bind(userId).first<{ owner_id: string }>();
   if (member) {
     const sub = await paidSubscription(db, member.owner_id);
@@ -116,19 +126,21 @@ export const SANDBOX_MICROS_PER_SECOND = 14;
  */
 export async function freeSpendMicros(env: Env, now = new Date()): Promise<number> {
   const from = monthStart(now).getTime();
-  // People with a paid plan of their own, or on a paying owner's team.
-  const paid = `SELECT b.user_id FROM billing_subscriptions b WHERE ${paidSql("b", now.getTime())}
+  const admins = JSON.stringify(adminEmails(env));
+  // People with a paid plan of their own, or on a paying owner's team, and the server's admins.
+  const paid = (emails: string) => `SELECT b.user_id FROM billing_subscriptions b WHERE ${paidSql("b", now.getTime())}
     UNION SELECT m.user_id FROM billing_team_members m JOIN billing_subscriptions s ON s.user_id = m.owner_id
-      WHERE s.plan = 'team' AND ${paidSql("s", now.getTime())}`;
+      WHERE s.plan = 'team' AND ${paidSql("s", now.getTime())}
+    UNION SELECT id FROM user WHERE role = 'admin' OR lower(email) IN (SELECT value FROM json_each(${emails}))`;
   const [model, sandbox] = await env.DB.batch<{ n: number }>([
     env.DB.prepare(
       `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?2)), 0) AS n FROM usage_events u JOIN projects p ON p.id = u.project_id
-       WHERE ${ON_SERVICE_KEY} AND u.created_at >= ?1 AND p.created_by NOT IN (${paid})`,
-    ).bind(from, unpricedCallMicros(env)),
+       WHERE ${ON_SERVICE_KEY} AND u.created_at >= ?1 AND p.created_by NOT IN (${paid("?3")})`,
+    ).bind(from, unpricedCallMicros(env), admins),
     env.DB.prepare(
       `SELECT COALESCE(SUM(r.seconds), 0) AS n FROM sandbox_runs r JOIN projects p ON p.id = r.project_id
-       WHERE r.ended_at >= ?1 AND p.created_by NOT IN (${paid})`,
-    ).bind(from),
+       WHERE r.ended_at >= ?1 AND p.created_by NOT IN (${paid("?2")})`,
+    ).bind(from, admins),
   ]);
   return Number(model!.results[0]?.n ?? 0) + Number(sandbox!.results[0]?.n ?? 0) * SANDBOX_MICROS_PER_SECOND;
 }

@@ -25,6 +25,7 @@ export default defineConfig(async () => ({
           BETTER_AUTH_SECRET: "test-secret-at-least-32-characters-long",
           FIREWORKS_API_KEY: "test-fireworks-key",
           SIGNUP_ENABLED: "true",
+          ADMIN_EMAILS: "Admin@Example.com",
           STRIPE_SECRET_KEY: "sk_test_fake",
           STRIPE_WEBHOOK_SECRET: "whsec_test",
         },

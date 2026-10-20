@@ -138,7 +138,9 @@ project chat says which secret to set instead of answering.
 ## 6. Create the first account
 
 Sign-ups are off by default, so nobody can register on a fresh public server.
-To create your own account:
+The simplest way in is to set the `ADMIN_EMAILS` secret to your address, then
+open your Myrel URL and create your account with it: that address may sign up
+while sign-ups are closed and is always an admin. Without `ADMIN_EMAILS`:
 
 1. Set `SIGNUP_ENABLED` to `"true"` in `apps/api/wrangler.jsonc` and push (or
    set it as a plain-text variable in the dashboard).
@@ -170,6 +172,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `VAPID_PRIVATE_KEY` | Browser push notifications (with `VAPID_PUBLIC_KEY`) | No |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` | GitHub integration (see [GitHub App](#github-app)) | No |
 | `EXPO_ACCESS_TOKEN` | Mobile push, only if Expo enhanced push security is on | No |
+| `ADMIN_EMAILS` | Comma-separated addresses of the server's admins. They may sign up while sign-ups are closed and are always admins. Unset: the first account becomes the admin | Recommended on a public server |
 
 ### Variables
 

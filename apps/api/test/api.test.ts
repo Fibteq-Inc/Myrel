@@ -186,6 +186,25 @@ describe("sign-up switch", () => {
     const signedIn = await req("sign-in/email", { email, password: "correct-horse-battery" });
     expect(signedIn.status).toBe(200);
   });
+
+  it("lets ADMIN_EMAILS sign up while closed as admins, and makes no one else an admin", async () => {
+    const admin = `a${crypto.randomUUID()}@example.com`;
+    const closed = createAuth({ ...env, SIGNUP_ENABLED: "false", ADMIN_EMAILS: ` other@example.com, ${admin.toUpperCase()} ` } as Env);
+    const res = await closed.handler(
+      new Request(`${BASE}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ email: admin, password: "correct-horse-battery", name: "Admin" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { user } = (await res.json()) as { user: { role: string } };
+    expect(user.role).toBe("admin");
+
+    // A regular account is not an admin, and its admin routes stay closed.
+    const token = await signUp();
+    expect((await api("/api/admin/settings", { token })).status).toBe(403);
+  });
 });
 
 describe("extensions", () => {
