@@ -10,80 +10,114 @@ direction, much like a teammate would. Projects keep their artifacts, files and
 memory in one place. The idea is close to Claude Projects, but open, multi-model
 and running on your own Cloudflare account.
 
-> **Status: early (phase 1).** The project chat, coordinator and thread agents
-> work end to end, but agents only talk for now: no tools, sandbox, file
-> storage or web access yet. Expect breaking changes. See the [roadmap](#roadmap).
+> **Status: early.** Projects, the coordinator and thread agents that do real
+> work (in a cloud sandbox or on your own computer) are running in production
+> at [myrel.fibteq.io](https://myrel.fibteq.io). Expect breaking changes. See
+> the [roadmap](#roadmap).
 
 ## Why Myrel
 
 - **Coordinator and threads.** One agent routes, many agents work. The
-  coordinator never does the work itself; each thread agent owns its task and
-  asks for permission or direction when it needs it.
+  coordinator never does the work itself; each thread agent owns its task,
+  shows a live checklist and asks for permission or a decision when it needs one.
+- **Real agents, your choice of where.** A thread's agent is a coding harness:
+  OpenCode in a per-thread Cloudflare Sandbox, or your own Claude Code, Codex
+  or Gemini CLI on your computer through `myrel-runner`. Your CLI logins never
+  leave your computer.
 - **Any model.** Fireworks, Anthropic and OpenAI out of the box, optionally
   through Cloudflare AI Gateway. Bring your own key.
-- **Yours to run.** One Cloudflare Worker, Durable Objects and a D1 database.
-  No servers to manage, and the free tier is enough to try it.
-- **Apps that follow you.** The web app is served by the same Worker. The
-  desktop and mobile apps (planned) connect to any Myrel server you point them at.
+- **Yours to run.** One Cloudflare Worker with Durable Objects, D1, R2 and
+  Containers. No servers to manage.
+- **Apps that follow you.** Web, iOS and Android apps, and a desktop app on the
+  way, all connect to any Myrel server you point them at.
+
+## What it does
+
+- **Project chat and threads** with decision cards, reactions and a progress
+  checklist per thread.
+- **Artifacts:** pages and apps an agent publishes, versioned and served from a
+  separate origin.
+- **Project memory and files:** instructions, memory notes and uploads every
+  thread can use.
+- **GitHub:** connect repositories through a GitHub App; agents clone, branch
+  and open pull requests, and CI or review events wake the thread.
+- **Your computer:** pair a computer with `myrel-runner`, give a project one or
+  more folders, and approve access to anything outside them from the thread.
+- **Skills and connectors:** Agent Skills (written in the app or taken from
+  GitHub) and your own MCP servers, for yourself or per project.
+- **Routines and notifications:** scheduled prompts, plus in-app, email and
+  push notifications.
+- **Usage:** every model call and sandbox minute metered per project and thread.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  clients["Web, desktop and mobile apps"]
+  clients["Web, mobile and desktop apps"]
   subgraph worker["Cloudflare Worker: myrel"]
     assets["Static assets<br/>(apps/web)"]
     api["Hono API /api/*<br/>Better Auth"]
     pa["ProjectAgent DO<br/>coordinator, project chat"]
-    ta["ThreadAgent DO<br/>one per thread"]
+    ta["ThreadAgent DO<br/>one per thread, MCP tools"]
     ra["RunnerAgent DO<br/>one per paired computer"]
+    sb["Sandbox DO + Container<br/>OpenCode per thread"]
   end
   runner["myrel-runner<br/>your computer, your CLI"]
-  d1[("D1<br/>users, projects")]
-  llm["LLM provider<br/>Fireworks, Anthropic, OpenAI<br/>optionally via AI Gateway"]
+  d1[("D1<br/>users, projects, skills")]
+  r2[("R2<br/>files, artifacts")]
+  llm["LLM provider<br/>Fireworks, Anthropic, OpenAI"]
   clients --> assets
   clients --> api
   clients -- WebSocket --> pa
   api --> d1
   pa -- start_thread, message_thread --> ta
   ta -- request_coordinator --> pa
-  ta -- run_local_task --> ra
+  ta -- cloud turn --> sb
+  ta -- local turn --> ra
   runner -- outbound WebSocket --> ra
+  sb -- MCP --> ta
+  runner -- MCP --> ta
+  pa --> r2
   pa --> llm
-  ta --> llm
+  sb --> llm
 ```
 
 - **API**: [Hono](https://hono.dev) on Cloudflare Workers, [Better Auth](https://better-auth.com)
   (email and password, bearer tokens for apps), D1 through [Drizzle](https://orm.drizzle.team).
-- **Agents**: one `ProjectAgent` Durable Object per project runs the coordinator
-  (`post_message`, `start_thread`, `message_thread`, `react`). Each thread has a
-  `ThreadAgent` that does the work (`reply`, `update_status`, `request_coordinator`,
-  `resolve_thread`, and `run_local_task` when the project has a local folder). Both
-  use a small provider-neutral loop in `apps/api/src/llm`.
-- **Local runner**: `myrel-runner` (`packages/myrel-runner`) runs on your computer, keeps an
-  outbound WebSocket to a `RunnerAgent` Durable Object and runs tasks with your own
-  Claude Code, Codex or Gemini CLI in folders you shared. Your CLI logins never leave
-  your computer. See [packages/myrel-runner/README.md](packages/myrel-runner/README.md).
+- **Coordinator**: one `ProjectAgent` Durable Object per project runs a small
+  provider-neutral loop (`apps/api/src/llm`) that only routes.
+- **Thread agents**: each turn is one harness run, OpenCode in the thread's
+  [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) or the
+  person's CLI through the runner. It talks to people through Myrel's tools over
+  MCP (`reply`, `update_plan`, `ask_decision`, `publish_artifact`,
+  `request_coordinator`, `resolve_thread` and more), and the `ThreadAgent`
+  Durable Object keeps the thread's state between turns.
+- **Local runner**: `myrel-runner` (`packages/myrel-runner`) keeps an outbound
+  WebSocket to a `RunnerAgent` Durable Object. See
+  [packages/myrel-runner/README.md](packages/myrel-runner/README.md).
 - **Realtime**: messages live in the project's Durable Object SQLite with a
   monotonically increasing `seq`, so clients resync after reconnecting.
-- **Web**: Vite, React 19, TanStack Router and Query, Tailwind CSS 4.
-- **Shared**: `packages/protocol` (zod schemas), `packages/client` (fetch and
-  WebSocket client for web, desktop and React Native) and `packages/i18n` (UI
-  strings in English and Turkish; read [its README](packages/i18n/README.md)
-  before adding UI text).
+- **Clients**: web (Vite, React 19, TanStack Router and Query, Tailwind CSS 4),
+  mobile (Expo) and desktop (Tauri 2), sharing `packages/protocol`,
+  `packages/client` and `packages/i18n` (English and Turkish; read
+  [its README](packages/i18n/README.md) before adding UI text).
 
 More detail is in [docs/architecture.md](docs/architecture.md).
 
 ```
-apps/api           Hono Worker, Durable Objects (ProjectAgent, ThreadAgent, RunnerAgent)
+apps/api           Hono Worker, Durable Objects (ProjectAgent, ThreadAgent, RunnerAgent, Sandbox)
+apps/artifacts     Worker that serves artifacts from their own origin
 apps/web           Vite + React SPA
-packages/protocol  message/thread/project types, WebSocket events
+apps/mobile        Expo app for iOS and Android
+apps/desktop       Tauri 2 desktop app with the runner built in
+packages/protocol  shared types and zod schemas
 packages/client    typed API client + reconnecting project socket
 packages/i18n      UI strings (en, tr) for web and mobile
 packages/db        Drizzle schema and D1 migrations
-packages/myrel-runner    @fibteq/myrel-runner, the local daemon for your own coding CLI (myrel-runner-alias: its short npm name)
+packages/runner-core     harness adapters shared by the sandbox and the runner
+packages/myrel-runner    @fibteq/myrel-runner, the local daemon (myrel-runner-alias: its short npm name)
 docs/              self-hosting, architecture, maintainer notes
-ee/                enterprise features under a commercial license (empty for now)
+ee/                commercial features: hosted plans and billing (ee/billing)
 ```
 
 ## Quick start (local)
@@ -118,12 +152,12 @@ connecting the apps.
 | Phase | What it adds | State |
 |---|---|---|
 | 0 | Monorepo, auth, D1, deploy pipeline | Done |
-| 1 | Talking coordinator and thread agents | Done |
-| 1.5 | Local `myrel-runner`: work in a folder on your computer with your own Claude Code, Codex or Gemini CLI | Done |
-| 2 | Threads that do work: sandboxed runners (OpenCode first), project files on R2, GitHub (clone, branch, PR) | Next |
-| 3 | Artifacts, project memory, decision cards, mobile app (Expo) | Planned |
-| 4 | Events and routines (webhooks, schedules), MCP connectors, desktop app (Tauri) | Planned |
-| 5 | Members and roles, billing for the hosted service, enterprise features, one-click deploy | Planned |
+| 1 | Coordinator and thread agents, project chat | Done |
+| 1.5 | Local `myrel-runner` with your own Claude Code, Codex or Gemini CLI | Done |
+| 2 | Cloud sandbox (OpenCode), project files on R2, GitHub (clone, branch, PR) | Done |
+| 3 | Artifacts, project memory, decision cards, mobile app | Done |
+| 4 | Routines, notifications, MCP connectors, skills, desktop app | Done except the desktop app (in review) |
+| 5 | Members and roles, hosted plans and billing, one-click deploy | Done except one-click deploy |
 
 ## Contributing
 
