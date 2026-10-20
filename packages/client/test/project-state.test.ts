@@ -14,6 +14,7 @@ import {
   threadMessages,
   threadReplyCount,
   threadTasks,
+  threadUsage,
 } from "../src/project-state";
 
 const projectId = createId("project");
@@ -147,6 +148,20 @@ describe("project state", () => {
     ]);
     // Only the plan's own steps count, and a skipped step is not work left.
     expect(checklistProgress(items)).toEqual({ done: 1, total: 3 });
+  });
+});
+
+describe("thread usage", () => {
+  it("sums the stats under a thread's messages, leaving the person's own CLI unpriced but not unknown", () => {
+    const root = msg(1);
+    const th = thread(root.id);
+    const base = { calls: 0, cachedInputTokens: 0, model: "m" };
+    const cloud = { ...msg(2, th.id), stats: { ...base, durationMs: 1000, inputTokens: 100, outputTokens: 10, costMicros: 500, runtime: "cloud" as const, harness: "opencode" } };
+    const local = { ...msg(3, th.id), stats: { ...base, durationMs: 2000, inputTokens: 50, outputTokens: 5, costMicros: null, runtime: "local" as const, harness: "claude" } };
+    let s = emptyProjectState;
+    for (const m of [root, cloud, local]) s = applyMessage(s, m);
+    expect(threadUsage(s, th.id)).toEqual({ tokens: 165, durationMs: 3000, costMicros: 500 });
+    expect(threadUsage(s, createId("thread"))).toBeNull();
   });
 });
 

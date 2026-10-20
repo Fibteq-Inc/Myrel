@@ -248,7 +248,7 @@ function sandboxTime(t: ReturnType<typeof useT>, seconds: number) {
   return minutes < 60 ? t("usage.minutes", { count: minutes }) : t("usage.hours", { count: Math.round(minutes / 6) / 10 });
 }
 
-function Stat({ icon, label, value, children }: { icon: ReactNode; label: string; value: string; children: ReactNode }) {
+export function Stat({ icon, label, value, children }: { icon: ReactNode; label: string; value: string; children: ReactNode }) {
   return (
     <div className="rounded-xl border border-line bg-raised px-4 py-3.5">
       <div className="flex items-center gap-1.5 text-xs text-subtle">
@@ -261,7 +261,7 @@ function Stat({ icon, label, value, children }: { icon: ReactNode; label: string
   );
 }
 
-function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+export function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="rounded-xl border border-line bg-raised p-4">
       <div className="mb-3 flex min-h-8 items-center gap-2">

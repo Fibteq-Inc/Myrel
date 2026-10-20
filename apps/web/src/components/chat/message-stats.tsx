@@ -125,7 +125,8 @@ function totalCost(stats: MessageStats): number | null {
   return stats.task.costMicros === null ? null : stats.costMicros + stats.task.costMicros;
 }
 
-function duration(ms: number, t: ReturnType<typeof useT>, locale: Locale) {
+/** "6.1 s", "2 min 5 s", "1 h 3 min" in the viewer's language. */
+export function duration(ms: number, t: ReturnType<typeof useT>, locale: Locale) {
   const s = ms / 1000;
   if (s < 60) {
     const value = new Intl.NumberFormat(locale, { maximumFractionDigits: s < 10 ? 1 : 0 }).format(s);
