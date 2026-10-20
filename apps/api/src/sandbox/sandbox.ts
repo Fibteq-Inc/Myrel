@@ -159,14 +159,17 @@ export class Sandbox extends DurableObject<Env> {
           }
         }
       };
+      // What the run prints is kept and shown in the thread; a token it echoes (`env`, a failed git
+      // command) is not. This does not stop an agent that means to show one, only accidents.
+      const scrub = secretScrubber(secrets);
       const lines = new LineSplitter();
       const reader = proc.stdout!.getReader();
       for (;;) {
         const { value, done: ended } = await reader.read();
         if (ended) break;
-        for (const line of lines.push(value as Uint8Array)) take(line);
+        for (const line of lines.push(value as Uint8Array)) take(scrub(line));
       }
-      for (const line of lines.end()) take(line);
+      for (const line of lines.end()) take(scrub(line));
       const exitCode = await proc.exitCode;
       done = signal.aborted
         ? { type: "done", ok: false, exitCode, error: "Cancelled." }
@@ -227,6 +230,19 @@ export class Sandbox extends DurableObject<Env> {
     this.lastStart = { ms: Date.now() - started, tries: tries + 1 };
     console.log(`sandbox: started in ${clock(this.lastStart.ms)} after ${this.lastStart.tries} tries`);
   }
+}
+
+/** Values shorter than this are left alone: they would match ordinary output. */
+const MIN_SCRUBBED = 12;
+
+/** Replaces the run's secret values in a line of its output. MYREL_FILES is a list of links, not one secret. */
+export function secretScrubber(secrets: Record<string, string>): (line: string) => string {
+  const values = Object.entries(secrets)
+    .filter(([name, value]) => name !== "MYREL_FILES" && value.length >= MIN_SCRUBBED)
+    .map(([, value]) => value)
+    .sort((a, b) => b.length - a.length);
+  if (!values.length) return (line) => line;
+  return (line) => values.reduce((out, value) => (out.includes(value) ? out.split(value).join("[hidden]") : out), line);
 }
 
 /** Settles like `promise`, or rejects as soon as `signal` aborts. */
