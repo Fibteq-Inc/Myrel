@@ -226,7 +226,7 @@ describe("coordinator and thread agent", () => {
     });
     expect(summary.daily).toHaveLength(7);
     expect(summary.daily.at(-1)!.calls).toBe(2);
-    expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Altair", calls: 2 })]);
+    expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Myrel", calls: 2 })]);
     expect(summary.byModel).toEqual([expect.objectContaining({ provider: "fireworks", model: "firerouter/opus" })]);
     expect(Object.fromEntries(summary.byAgent.map((a) => [a.agent, a.calls]))).toEqual({ coordinator: 2 });
 

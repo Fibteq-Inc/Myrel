@@ -1,7 +1,7 @@
 # Architecture
 
-This page describes how Fibteq Altair is put together today and where it is
-heading. It is meant for contributors; for running Altair, see
+This page describes how Fibteq Myrel is put together today and where it is
+heading. It is meant for contributors; for running Myrel, see
 [self-hosting.md](self-hosting.md).
 
 ## The model
@@ -31,7 +31,7 @@ Everything runs in one Cloudflare Worker (`apps/api`):
 | Project chat | `ProjectAgent` Durable Object | One per project; messages in its SQLite with a `seq`; WebSocket fan-out |
 | Coordinator | `apps/api/src/agents/coordinator.ts` | Tools: `post_message`, `start_thread`, `message_thread`, `react` |
 | Thread | `ThreadAgent` Durable Object | One per thread; tools: `reply`, `update_status`, `request_coordinator`, `resolve_thread`, `run_local_task` |
-| Local runner | `RunnerAgent` Durable Object, `packages/altair-runner` | One per paired computer; holds the runner's outbound WebSocket, sends tasks, wakes the thread with each result |
+| Local runner | `RunnerAgent` Durable Object, `packages/myrel-runner` | One per paired computer; holds the runner's outbound WebSocket, sends tasks, wakes the thread with each result |
 | Model calls | `apps/api/src/llm` | Small provider-neutral loop; Fireworks, Anthropic, OpenAI; optional AI Gateway |
 | Web app | `apps/web`, served as static assets | Vite, React 19, TanStack Router and Query, Tailwind CSS 4 |
 
@@ -45,21 +45,21 @@ The plan, phase by phase, is in the [README roadmap](../README.md#roadmap). The
 main additions:
 
 - **Harnesses as thread agents (shipped).** A thread's agent is a coding
-  harness, not Altair's own loop: each turn is one run of the person's CLI on
+  harness, not Myrel's own loop: each turn is one run of the person's CLI on
   their computer (projects with a local folder) or of OpenCode in the thread's
   [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/). It talks to
-  people through Altair's tools over MCP (`ThreadAgent.agentMcp`), and the
+  people through Myrel's tools over MCP (`ThreadAgent.agentMcp`), and the
   `ThreadAgent` Durable Object keeps the thread's state between turns. The
   coordinator stays a small loop in the Worker.
 - **Project files and artifacts (phases 2 and 3)** on R2.
-- **Local runner (shipped).** `altair-runner` pairs with an account through a
+- **Local runner (shipped).** `myrel-runner` pairs with an account through a
   one-time code from the Devices page, then keeps an outbound WebSocket to a
   `RunnerAgent`. A project picks one of the folders shared on that computer and a
   CLI (Claude Code, Codex or Gemini CLI), which then works that project's
   threads with the user's own login. Subscription credentials never leave the computer;
   the server stores only a hash of the runner's own token.
 - **Mobile (Expo) and desktop (Tauri 2) apps** reuse `packages/client` and can
-  connect to any Altair server.
+  connect to any Myrel server.
 
 ## Conventions worth knowing
 

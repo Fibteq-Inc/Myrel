@@ -17,9 +17,13 @@ off in the pull request that flips visibility, or keep this file updated.
 
 ## Before flipping to public
 
-- [ ] Trademark: check "Altair" against Altair Engineering (software class 9
-      and 42) and decide whether "Fibteq Altair" is enough. The docs use
-      "Fibteq Altair" everywhere a name is shown.
+- [ ] Trademark: the project was renamed from Altair to Myrel (2026-10-20)
+      because of Altair Engineering. Clear "Myrel" in software classes 9 and
+      42; similar-sounding AI companies to ask about are Myrl Tech and
+      Miriel AI. The docs use "Fibteq Myrel" everywhere a name is shown.
+- [ ] Publish the runner under its new npm names (`@fibteq/myrel-runner`,
+      `myrel-runner`) and set up trusted publishing for both; deprecate
+      `altair-runner` and `@fibteq/altair-runner` with a pointer to the new names.
 - [ ] Confirm the contact addresses exist and are monitored:
       `security@fibteq.com` (SECURITY.md) and `conduct@fibteq.com`
       (CODE_OF_CONDUCT.md).

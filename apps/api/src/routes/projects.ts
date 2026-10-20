@@ -346,7 +346,7 @@ export const projectRoutes = new Hono<AppEnv>()
     const input = SetWorkspaceInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
 
-    // Only your own computers, and only a folder you shared on it with `altair-runner share`.
+    // Only your own computers, and only a folder you shared on it with `myrel-runner share`.
     const db = createDb(c.env.DB);
     const [runner] = await db
       .select()

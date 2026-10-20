@@ -1,19 +1,19 @@
 {
-  "name": "altair-runner",
+  "name": "myrel-runner",
   "version": "0.5.1",
-  "description": "Short name for @fibteq/altair-runner, so `npx altair-runner` works.",
+  "description": "Short name for @fibteq/myrel-runner, so `npx myrel-runner` works.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",
-  "homepage": "https://github.com/Fibteq-Inc/altair/tree/main/packages/altair-runner#readme",
+  "homepage": "https://github.com/Fibteq-Inc/altair/tree/main/packages/myrel-runner#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Fibteq-Inc/altair.git",
-    "directory": "packages/altair-runner-alias"
+    "directory": "packages/myrel-runner-alias"
   },
   "bugs": "https://github.com/Fibteq-Inc/altair/issues",
   "type": "module",
   "bin": {
-    "altair-runner": "cli.js"
+    "myrel-runner": "cli.js"
   },
   "files": [
     "cli.js",
@@ -31,6 +31,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@fibteq/altair-runner": "workspace:^"
+    "@fibteq/myrel-runner": "workspace:^"
   }
 }

@@ -25,7 +25,7 @@ export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
 }
 
 /**
- * The person's own computer, through altair-runner (see RunnerAgent): its CLI
+ * The person's own computer, through myrel-runner (see RunnerAgent): its CLI
  * works in the project's local folder with the person's own login. The runner
  * reports back through `ThreadAgent.taskEvents` like the sandbox does.
  */
@@ -37,7 +37,7 @@ export function localBackend(
   return {
     id: "local",
     unavailable: () =>
-      workspace.online ? null : "The computer is offline. Ask the person to run `altair-runner start` on it.",
+      workspace.online ? null : "The computer is offline. Ask the person to run `myrel-runner start` on it.",
     start: async (spec: TaskSpec) => {
       const runner = await getAgentByName(env.RUNNER_AGENT, workspace.runnerId);
       const started = await runner.startTask({
@@ -90,7 +90,7 @@ export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace>
   return {
     kind: "error",
     message: workspace
-      ? "This project runs tasks on the person's computer, and it is offline. Ask them to start altair-runner on it."
+      ? "This project runs tasks on the person's computer, and it is offline. Ask them to start myrel-runner on it."
       : "This project runs tasks on the person's computer, but no local folder is connected. They can connect one from the project header.",
   };
 }

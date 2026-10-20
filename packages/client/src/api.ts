@@ -402,13 +402,13 @@ export class ApiClient {
     return this.request<UsageSummary>(`/api/usage?${query}`);
   }
 
-  // --- local computers (altair-runner) ---
+  // --- local computers (myrel-runner) ---
 
   async listRunners() {
     return (await this.request<{ runners: Runner[] }>("/api/runners")).runners;
   }
 
-  /** A short-lived code for `altair-runner pair`. */
+  /** A short-lived code for `myrel-runner pair`. */
   createPairingCode() {
     return this.request<RunnerPairingCode>("/api/runners/pairing", { method: "POST", body: {} });
   }

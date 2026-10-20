@@ -1,7 +1,7 @@
 import { type Harness, jsonLine, log, num, obj, shellQuote, str, todoStatus } from "../harness";
 import type { RunnerEvent, TaskSpec } from "../spec";
 
-/** Provider name Altair registers in OpenCode's config for OpenAI-compatible models. */
+/** Provider name Myrel registers in OpenCode's config for OpenAI-compatible models. */
 const CUSTOM_PROVIDER = "altair";
 
 /**
@@ -99,7 +99,7 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
       : {
           [CUSTOM_PROVIDER]: {
             npm: "@ai-sdk/openai-compatible",
-            name: `Altair (${m.provider})`,
+            name: `Myrel (${m.provider})`,
             options: { baseURL: m.baseUrl, apiKey },
             // OpenCode passes an image file it reads to the model only when the model says it takes images.
             models: {

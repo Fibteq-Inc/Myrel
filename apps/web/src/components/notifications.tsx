@@ -32,7 +32,7 @@ export function NotificationBell({ side = "right" }: { side?: "right" | "below" 
   const unread = data?.unread ?? 0;
 
   useEffect(() => {
-    document.title = unread ? `(${unread}) Altair` : "Altair";
+    document.title = unread ? `(${unread}) Myrel` : "Myrel";
   }, [unread]);
 
   const markRead = useMutation({

@@ -83,7 +83,7 @@ export async function getWorkspace(env: Env, projectId: string): Promise<Project
   return { projectId, ...row, cli: row.cli as CliId, online: await isRunnerOnline(env, row.runnerId) };
 }
 
-/** Whether a paired computer's altair-runner announced a feature in its last hello. */
+/** Whether a paired computer's myrel-runner announced a feature in its last hello. */
 export async function runnerHasFeature(env: Env, runnerId: string, feature: RunnerFeature): Promise<boolean> {
   const [row] = await createDb(env.DB).select({ info: runners.info }).from(runners).where(eq(runners.id, runnerId));
   return parseInfo(row?.info ?? null)?.features.includes(feature) ?? false;

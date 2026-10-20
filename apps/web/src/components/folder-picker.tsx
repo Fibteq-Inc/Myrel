@@ -11,7 +11,7 @@ import { Button, cn, errorMessage, GhostButton, IconButton } from "../lib/ui";
 export function folderPickerBlocker(runner: Runner, t: Translate): string | null {
   if (!runner.online) return t("folderPicker.offline", { computer: runner.name });
   if (!runner.features.includes("folders")) {
-    return t("folderPicker.updateRunner", { command: "npx altair-runner@latest update" });
+    return t("folderPicker.updateRunner", { command: "npx myrel-runner@latest update" });
   }
   return null;
 }

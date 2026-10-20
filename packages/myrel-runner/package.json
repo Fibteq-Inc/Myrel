@@ -1,14 +1,14 @@
 {
-  "name": "@fibteq/altair-runner",
+  "name": "@fibteq/myrel-runner",
   "version": "0.5.1",
-  "description": "Connects your computer to Altair so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
+  "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",
-  "homepage": "https://github.com/Fibteq-Inc/altair/tree/main/packages/altair-runner#readme",
+  "homepage": "https://github.com/Fibteq-Inc/altair/tree/main/packages/myrel-runner#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Fibteq-Inc/altair.git",
-    "directory": "packages/altair-runner"
+    "directory": "packages/myrel-runner"
   },
   "bugs": "https://github.com/Fibteq-Inc/altair/issues",
   "keywords": [
@@ -21,7 +21,7 @@
   ],
   "type": "module",
   "bin": {
-    "altair-runner": "dist/cli.js"
+    "myrel-runner": "dist/cli.js"
   },
   "exports": {
     ".": "./src/index.ts",

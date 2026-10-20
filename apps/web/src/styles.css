@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Altair is dark-first (see the design canvas); `dark:` variants always apply. */
+/* Myrel is dark-first (see the design canvas); `dark:` variants always apply. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {

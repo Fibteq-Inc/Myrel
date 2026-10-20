@@ -1,9 +1,9 @@
-# Fibteq Altair Enterprise
+# Fibteq Myrel Enterprise
 
 This directory holds features for larger organizations, such as SSO/SAML,
 audit logs, advanced roles and data residency. None are here yet.
 
-Code in `ee/` is licensed under the [Fibteq Altair Enterprise License](LICENSE),
+Code in `ee/` is licensed under the [Fibteq Myrel Enterprise License](LICENSE),
 not the AGPL. You can read it, run it for development and testing, and
 contribute to it, but production use needs a commercial license from Fibteq.
 

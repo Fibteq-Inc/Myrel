@@ -4,7 +4,7 @@ import { type Message, planChecklist, type Thread } from "@altair/protocol";
 export function authorLabel(m: Message, names: Record<string, string>): string {
   if (m.authorKind === "user") return `${names[m.authorId] ?? "Member"} (member)`;
   if (m.authorKind === "system") return m.authorId === "routine" ? "Routine run" : "System notice";
-  return "You (Altair)";
+  return "You (Myrel)";
 }
 
 export function renderMessage(m: Message, names: Record<string, string>, opts: { isNew?: boolean } = {}): string {

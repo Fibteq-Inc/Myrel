@@ -4,7 +4,7 @@ import { type FormEvent, useState } from "react";
 import { server, switchServer } from "./api";
 import { Button, errorMessage, Input } from "./ui";
 
-/** Shows which Altair server the app talks to and lets the user switch to another (e.g. self-hosted). */
+/** Shows which Myrel server the app talks to and lets the user switch to another (e.g. self-hosted). */
 export function ServerPicker() {
   const t = useT();
   const [editing, setEditing] = useState(server === "");

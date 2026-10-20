@@ -29,7 +29,7 @@ export async function threadWorkspace(env: Env, threadId: string, ttlSec: number
       repo = await artifacts.get(name);
     } catch (err) {
       if (errorCode(err) !== "NOT_FOUND") throw err;
-      await artifacts.create(name, { description: `Altair thread ${threadId}` });
+      await artifacts.create(name, { description: `Myrel thread ${threadId}` });
       repo = await artifacts.get(name);
     }
     try {

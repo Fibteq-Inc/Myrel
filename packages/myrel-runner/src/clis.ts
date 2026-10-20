@@ -27,7 +27,7 @@ export type CliAdapter = {
   args(opts: { access: Access; resume?: string; extra?: string[] }): string[];
   /**
    * Connects the CLI to the thread's MCP endpoint for a run as the thread's agent, so it talks
-   * to people through Altair's tools without asking for permission. `dir` is a private folder
+   * to people through Myrel's tools without asking for permission. `dir` is a private folder
    * for config files, deleted after the run.
    */
   agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string> }>;
@@ -37,7 +37,7 @@ export type CliAdapter = {
   end?(stdout: string, state: ParseState): void;
 };
 
-/** Name of Altair's MCP server in the CLI's config; its tools show up as mcp__altair__<tool> in Claude Code. */
+/** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__altair__<tool> in Claude Code. */
 export const ALTAIR_MCP_SERVER = "altair";
 
 /** The thread's MCP endpoint for one agent run. */

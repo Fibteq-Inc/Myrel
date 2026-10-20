@@ -47,7 +47,7 @@ export default defineConfig(async () => {
             ARTIFACTS_URL: "https://usercontent.test",
             ARTIFACT_SIGNING_SECRET: "test-signing-secret",
             // Notification channels; outbound calls are captured by test/fake-llm.ts.
-            EMAIL_FROM: "Altair <altair@example.com>",
+            EMAIL_FROM: "Myrel <altair@example.com>",
             // A fresh Web Push key pair per run, so no key lives in the repo.
             ...(await vapidKeys()),
             VAPID_SUBJECT: "mailto:test@example.com",

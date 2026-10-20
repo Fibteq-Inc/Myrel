@@ -85,7 +85,7 @@ export type RepoPermissions = Partial<
 
 type AccessToken = { token: string; expires_at: string; repositories?: GithubApiRepo[] };
 
-/** The subset of GitHub's repository object Altair uses. */
+/** The subset of GitHub's repository object Myrel uses. */
 export type GithubApiRepo = {
   id: number;
   full_name: string;

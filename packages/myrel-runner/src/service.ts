@@ -25,13 +25,13 @@ export type ServiceInfo = {
 };
 
 /**
- * Runs `altair-runner start` in the background now and at every login: a
+ * Runs `myrel-runner start` in the background now and at every login: a
  * launchd agent on macOS, a systemd user service on Linux and a Startup
  * folder entry on Windows. The runner is copied into ~/.altair-runner/bin
  * first, so the service keeps working after npx clears its cache. Running it
- * again replaces the copy, e.g. after updating altair-runner.
+ * again replaces the copy, e.g. after updating myrel-runner.
  *
- * `script` is the running altair-runner CLI file (a single bundled file).
+ * `script` is the running myrel-runner CLI file (a single bundled file).
  */
 export async function installService(script: string): Promise<ServiceInfo> {
   const manager = serviceManager();
@@ -56,7 +56,7 @@ export async function installService(script: string): Promise<ServiceInfo> {
     } catch (err) {
       await rm(info.file, { force: true });
       throw new Error(
-        `Could not register with systemd (${(err as Error).message.split("\n").filter(Boolean).at(-1)}). Use \`altair-runner start\` instead.`,
+        `Could not register with systemd (${(err as Error).message.split("\n").filter(Boolean).at(-1)}). Use \`myrel-runner start\` instead.`,
       );
     }
   } else {
@@ -128,7 +128,7 @@ function serviceManager(): ServiceManager {
   if (os === "darwin") return "launchd";
   if (os === "linux") return "systemd";
   if (os === "win32") return "startup";
-  throw new Error(`Running in the background is not supported on ${os} yet. Use \`altair-runner start\`.`);
+  throw new Error(`Running in the background is not supported on ${os} yet. Use \`myrel-runner start\`.`);
 }
 
 async function describe(manager: ServiceManager): Promise<Omit<ServiceInfo, "running">> {
@@ -192,7 +192,7 @@ const systemdQuote = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '
 
 export function systemdUnit(args: string[], env: Record<string, string>): string {
   return `[Unit]
-Description=Altair runner (connects this computer to Altair)
+Description=Myrel runner (connects this computer to Myrel)
 After=network-online.target
 
 [Service]
@@ -211,7 +211,7 @@ WantedBy=default.target
 /** Starts the runner hidden, with its output appended to the log. */
 export function startupScript(args: string[], log: string): string {
   const command = `cmd.exe /c "${args.map((a) => `"${a}"`).join(" ")} >> "${log}" 2>&1"`;
-  return `' Starts altair-runner at login. Remove with: altair-runner service uninstall\r
+  return `' Starts myrel-runner at login. Remove with: myrel-runner service uninstall\r
 CreateObject("WScript.Shell").Run "${command.replace(/"/g, '""')}", 0, False\r
 `;
 }

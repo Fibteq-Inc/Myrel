@@ -1,5 +1,5 @@
 /**
- * Origins the Altair desktop app (Tauri 2) serves its UI from. Web pages
+ * Origins the Myrel desktop app (Tauri 2) serves its UI from. Web pages
  * cannot claim these, so they are always trusted alongside TRUSTED_ORIGINS.
  */
 export const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];

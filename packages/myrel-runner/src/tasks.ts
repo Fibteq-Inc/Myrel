@@ -54,7 +54,7 @@ export class TaskRunner {
     const fail = (result: string) => this.send({ type: "task.done", taskId: task.taskId, ok: false, result });
     const config = this.opts.config();
     const folder = await sharedFolder(config, task.folder);
-    if (!folder) return fail(`The folder ${task.folder} is not shared on this computer. Run \`altair-runner share\` in it.`);
+    if (!folder) return fail(`The folder ${task.folder} is not shared on this computer. Run \`myrel-runner share\` in it.`);
 
     // Read-only tasks change nothing, so they can share the folder.
     let isolated: Awaited<ReturnType<typeof threadWorktree>> = null;
@@ -63,7 +63,7 @@ export class TaskRunner {
         isolated = await threadWorktree(folder, task.threadId);
       } catch (err) {
         return fail(
-          `Could not make a git worktree for this thread in ${folder}: ${errorLine(err)}\nTo run tasks in the folder itself instead, run \`altair-runner worktrees off\`.`,
+          `Could not make a git worktree for this thread in ${folder}: ${errorLine(err)}\nTo run tasks in the folder itself instead, run \`myrel-runner worktrees off\`.`,
         );
       }
     }
@@ -94,9 +94,9 @@ export class TaskRunner {
     });
     this.running.set(task.taskId, child);
     if (isolated) this.worktrees.set(task.taskId, isolated.worktree.path);
-    // Tells Altair where the work is, since it is not in the shared folder itself.
+    // Tells Myrel where the work is, since it is not in the shared folder itself.
     const where = isolated
-      ? `\n\n(altair-runner: worked on branch ${isolated.worktree.branch} in ${isolated.cwd}, a git worktree of ${folder}.)`
+      ? `\n\n(myrel-runner: worked on branch ${isolated.worktree.branch} in ${isolated.cwd}, a git worktree of ${folder}.)`
       : "";
 
     const state: ParseState = {};
@@ -141,7 +141,7 @@ export class TaskRunner {
         this.worktrees.delete(task.taskId);
         if (this.cancelled.delete(task.taskId)) {
           log(`■ ${adapter.id} task stopped`);
-          this.send({ type: "task.done", taskId: task.taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
+          this.send({ type: "task.done", taskId: task.taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
           return resolve();
         }
         log(`${ok ? "✓" : "✗"} ${adapter.id} task finished`);
@@ -152,7 +152,7 @@ export class TaskRunner {
         finish(
           false,
           err.code === "ENOENT"
-            ? `${adapter.bin} is not installed on this computer, or not on PATH for altair-runner.`
+            ? `${adapter.bin} is not installed on this computer, or not on PATH for myrel-runner.`
             : `Could not start ${adapter.bin}: ${err.message}`,
         );
       });
@@ -173,7 +173,7 @@ export class TaskRunner {
     });
   }
 
-  /** Stops one task, as asked from Altair. Its "task.done" says it was cancelled. */
+  /** Stops one task, as asked from Myrel. Its "task.done" says it was cancelled. */
   cancel(taskId: string) {
     const child = this.running.get(taskId);
     if (!child) return;

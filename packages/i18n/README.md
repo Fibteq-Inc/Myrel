@@ -1,6 +1,6 @@
 # @altair/i18n
 
-UI strings for Altair, shared by the web app and the mobile app. No
+UI strings for Myrel, shared by the web app and the mobile app. No
 dependencies: a typed catalog per language, `{name}` parameters, plural forms
 through `Intl.PluralRules`, and small React bindings.
 
@@ -33,7 +33,7 @@ Settings → Account, the account menu or the sign-in page.
 Rules of thumb:
 
 - Every visible string goes through `t`, including `aria-label`, `title` and
-  `placeholder`. Product names (Altair), code and examples like
+  `placeholder`. Product names (Myrel), code and examples like
   `altair.example.com` stay as they are.
 - Write whole sentences as one message with parameters; never glue pieces
   together, since word order differs between languages.

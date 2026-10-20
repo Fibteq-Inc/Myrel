@@ -3,9 +3,9 @@ import { KNOWLEDGE_GUIDE } from "./knowledge";
 import { ROUTINE_GUIDE } from "./routine-tools";
 
 /**
- * A thread's agent is a coding harness, not a loop of Altair's: the person's own CLI on their
+ * A thread's agent is a coding harness, not a loop of Myrel's: the person's own CLI on their
  * computer when the project has a local folder there, otherwise OpenCode in the thread's cloud
- * sandbox. It works with its own tools and talks to people through Altair's tools over MCP (see
+ * sandbox. It works with its own tools and talks to people through Myrel's tools over MCP (see
  * ThreadAgent.agentMcp). One turn is one harness run.
  */
 
@@ -42,11 +42,11 @@ export function agentSystem(place: AgentPlace): string {
     place.kind === "local"
       ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: work in this folder only, and never change git history you did not make.`
       : `You run as OpenCode in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead: git and gh already have access to the connected ones. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends.`;
-  return `You are Altair, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Altair.
+  return `You are Myrel, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Myrel.
 
 ${where}
 
-People never see your terminal output or your final message. They only see what you send through Altair's tools (the "altair" MCP server):
+People never see your terminal output or your final message. They only see what you send through Myrel's tools (the "altair" MCP server):
 - reply: a message in the thread. Use it to say what you will do, to deliver results and to answer questions. Set needs to "blocked" when the work is stuck on something only they can change.
 - update_plan: your plan as a checklist people see. Send the whole plan each time; keep one step active; mark a step done only once its work really happened, skipped when you decide against it, failed when it failed.
 - ask_decision: put a choice to the person as a card with 2 to 4 options, one recommended. Their pick arrives in a later turn; carry on with the recommended option when you can.
