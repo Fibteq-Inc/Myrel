@@ -130,11 +130,24 @@ export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch, override: 
  * the sandbox as a secret, never into the stored task.
  */
 export function taskModel(
-  env: LlmEnv & { RUNNER_MODEL?: string },
+  env: LlmEnv & { RUNNER_MODEL?: string; RUNNER_IMAGES?: string },
   override: ProviderOverride = {},
 ): { ok: true; model: ModelConfig; apiKey: string } | { ok: false; reason: string } {
   const r = resolveProvider(env, override);
   if (!r.ok) return r;
   const { id, def, apiKey, baseUrl, model } = r.value;
-  return { ok: true, model: { kind: def.kind, provider: id, id: env.RUNNER_MODEL || model, baseUrl }, apiKey };
+  const modelId = env.RUNNER_MODEL || model;
+  const images = env.RUNNER_IMAGES === "true" ? true : env.RUNNER_IMAGES === "false" ? false : readsImages(def.kind, modelId);
+  return { ok: true, model: { kind: def.kind, provider: id, id: modelId, baseUrl, images }, apiKey };
+}
+
+/**
+ * Whether a model takes images, guessed from its name (RUNNER_IMAGES overrides it). A wrong yes
+ * fails the turn the agent opens an image, so routers, which may pick a text-only model, are no.
+ */
+export function readsImages(kind: ModelConfig["kind"], modelId: string): boolean {
+  if (kind === "anthropic") return true;
+  const name = modelId.toLowerCase();
+  if (/router/.test(name)) return false;
+  return /claude|gpt-4o|gpt-4\.1|gpt-5|\bo[34]\b|gemini|gemma-?3|kimi-k2[p.][5-9]|qwen[\d.p]*-?vl|-vl\b|vision|llama-?v?4|llama4|pixtral|glm-?4[p.]\dv|minicpm-v|internvl/.test(name);
 }

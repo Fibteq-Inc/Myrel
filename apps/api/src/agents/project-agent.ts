@@ -11,6 +11,7 @@ import {
   type MessageStats,
   type ArtifactRef,
   nextCronRun,
+  normalizeFilePath,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -789,6 +790,11 @@ export class ProjectAgent extends Agent<Env> {
 
   forgetFile(path: string) {
     return this.knowledge.forgetFile(path);
+  }
+
+  /** Attachments for a message, from project file paths; throws on a path with no file. */
+  attachmentsFor(paths: string[]) {
+    return this.knowledge.attachmentsFor(paths.map(normalizeFilePath));
   }
 
   async readFileText(path: string): Promise<{ found: boolean; text: string | null; size: number }> {
