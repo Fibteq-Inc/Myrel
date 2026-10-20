@@ -40,6 +40,9 @@ export const tr: Catalog = {
   // Shell
   "shell.openMenu": "Menüyü aç",
   "shell.closeMenu": "Menüyü kapat",
+  "verify.banner": "E-posta adresini doğrula. {email} adresine bir bağlantı gönderdik. Doğrulayana kadar davetleri kabul edemez ve bulut sandbox'ı kullanamazsın.",
+  "verify.resend": "Tekrar gönder",
+  "verify.sent": "Gönderildi. Gelen kutunu kontrol et.",
   "rail.main": "Ana menü",
   "rail.home": "Myrel ana sayfa",
   "rail.projects": "Projeler",

@@ -6,6 +6,7 @@ interface __BaseEnv_Env {
 	DB: D1Database;
 	EMAIL: SendEmail;
 	WORKSPACES: Artifacts;
+	AUTH_LIMIT: RateLimit;
 	ASSETS: Fetcher;
 	BETTER_AUTH_URL: string;
 	TRUSTED_ORIGINS: string;

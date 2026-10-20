@@ -2,8 +2,10 @@ import type { InstanceRole } from "@myrel/protocol";
 import { createMiddleware } from "hono/factory";
 import { createAuth } from "./auth";
 import { isListedAdmin } from "./instance";
+import { isVerified } from "./verification";
 
-export type SessionUser = { id: string; name: string; email: string; role: InstanceRole };
+/** `verified`: the address is the person's (see verification.ts). */
+export type SessionUser = { id: string; name: string; email: string; role: InstanceRole; verified: boolean };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
 
 /**
@@ -18,9 +20,9 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const session = await createAuth(c.env).api.getSession({ headers });
   if (!session) return c.json({ error: "unauthorized" }, 401);
 
-  const { id, name, email, role } = session.user;
-  const admin = role === "admin" || isListedAdmin(c.env, email);
-  c.set("user", { id, name, email, role: admin ? "admin" : "user" });
+  const { id, name, email, role, emailVerified } = session.user;
+  const admin = role === "admin" || isListedAdmin(c.env, email, emailVerified);
+  c.set("user", { id, name, email, role: admin ? "admin" : "user", verified: isVerified(c.env, emailVerified) });
   await next();
 });
 

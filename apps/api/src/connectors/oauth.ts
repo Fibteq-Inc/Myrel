@@ -20,8 +20,8 @@ export type OAuthState = {
   resource: string;
   scope?: string;
   redirectUri: string;
-  /** A sign-in in progress. */
-  pending?: { state: string; verifier: string };
+  /** A sign-in in progress, and who started it (sign-ins from before that was kept have none). */
+  pending?: { state: string; verifier: string; by?: string };
   accessToken?: string;
   refreshToken?: string;
   /** Epoch ms; absent when the server did not say. */
@@ -51,9 +51,10 @@ async function saveOAuth(env: Env, id: string, state: OAuthState, extra: Partial
 
 /**
  * Starts a sign-in: discovers and registers on first use, then returns the link that sends the
- * person to the server's sign-in page. `origin` is this server's public address.
+ * person to the server's sign-in page. `origin` is this server's public address; `by` is the person
+ * signing in, whose account the answer must come back to (see pendingSignIn).
  */
-export async function startAuthorization(env: Env, row: ConnectorRow, origin: string, fetcher: typeof fetch = fetch): Promise<string> {
+export async function startAuthorization(env: Env, row: ConnectorRow, origin: string, by: string, fetcher: typeof fetch = fetch): Promise<string> {
   if (!row.url) throw new Error("This connector has no address.");
   const redirectUri = `${origin}${CALLBACK_PATH}`;
   let state = await readOAuth(env, row);
@@ -61,7 +62,7 @@ export async function startAuthorization(env: Env, row: ConnectorRow, origin: st
     state = await register(row.url, redirectUri, fetcher);
   }
   const verifier = randomToken();
-  const pending = { state: `${row.id}.${randomToken()}`, verifier };
+  const pending = { state: `${row.id}.${randomToken()}`, verifier, by };
   await saveOAuth(env, row.id, { ...state, pending });
   const url = new URL(state.authorizationEndpoint);
   url.searchParams.set("response_type", "code");
@@ -73,6 +74,19 @@ export async function startAuthorization(env: Env, row: ConnectorRow, origin: st
   url.searchParams.set("resource", state.resource);
   if (state.scope) url.searchParams.set("scope", state.scope);
   return url.toString();
+}
+
+/**
+ * The sign-in a callback's state names, while it is in progress: its connector and who started it.
+ * The callback finishes it only for that person, so a link someone else started cannot put the
+ * clicker's account into the starter's connector.
+ */
+export async function pendingSignIn(env: Env, stateParam: string | undefined): Promise<{ id: string; by: string | null } | null> {
+  const id = stateParam?.split(".")[0] ?? "";
+  const [row] = id ? await createDb(env.DB).select().from(connectors).where(eq(connectors.id, id)) : [];
+  const state = row ? await readOAuth(env, row) : null;
+  if (!state?.pending || state.pending.state !== stateParam) return null;
+  return { id, by: state.pending.by ?? null };
 }
 
 /**

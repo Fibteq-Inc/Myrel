@@ -2,6 +2,7 @@ import type { BillingSummary } from "@myrel/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AppEnv, requireUser } from "../../../apps/api/src/middleware";
+import { UNVERIFIED_MESSAGE } from "../../../apps/api/src/verification";
 import { isPaid, PRICE_KEYS, planOfPrice, TEAM_MIN_SEATS, TRIAL_DAYS } from "./plans";
 import { standingOf, usageOf } from "./store";
 import { type StripeEnv, StripeError, type StripeEvent, type StripeInvoice, type StripeSubscription, stripe, verifyWebhook } from "./stripe";
@@ -94,6 +95,8 @@ export const billingRoutes = new Hono<BillingEnv>()
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     const { plan, interval } = input.data;
     const user = c.get("user");
+    // A trial asks for no card: one per address someone has shown is theirs.
+    if (!user.verified) return c.json({ error: "email_not_verified", message: UNVERIFIED_MESSAGE }, 403);
     const standing = await standingOf(c.env, user.id);
     if (standing.plan !== "free") {
       return c.json({ error: "already_subscribed", message: "You already have a plan. Change it from the billing portal." }, 409);

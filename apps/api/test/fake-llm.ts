@@ -41,9 +41,12 @@ export const emails: SentEmail[] = [];
  * Captures sends on the Email Service binding. Bindings share one prototype in
  * the test isolate, so patching it covers the Durable Objects' bindings too.
  */
+/** Sign-up's verification emails, kept apart so tests about notifications see only theirs. */
+export const verificationEmails: SentEmail[] = [];
+
 export function captureEmail(binding: SendEmail) {
   Object.getPrototypeOf(binding).send = async (message: SentEmail) => {
-    emails.push(message);
+    (String(message.subject).startsWith("Confirm your email") ? verificationEmails : emails).push(message);
     return { messageId: `test-${emails.length}` };
   };
 }

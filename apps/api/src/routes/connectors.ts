@@ -2,8 +2,9 @@ import { createDb, schema } from "@myrel/db";
 import { createId, CreateConnectorInput, UpdateConnectorInput } from "@myrel/protocol";
 import { and, asc, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
+import { createAuth } from "../auth";
 import { blockedUrl } from "../connectors/client";
-import { finishAuthorization, startAuthorization } from "../connectors/oauth";
+import { finishAuthorization, pendingSignIn, startAuthorization } from "../connectors/oauth";
 import {
   type ConnectorOwner,
   checkConnector,
@@ -81,7 +82,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
         row.status = "needs_auth";
         await createDb(c.env.DB).insert(connectors).values(row);
         try {
-          const authorizeUrl = await startAuthorization(c.env, row, publicOrigin(c));
+          const authorizeUrl = await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id);
           return c.json({ connector: toConnector(row, true), authorizeUrl }, 201);
         } catch (err) {
           const lastError = err instanceof Error ? err.message : String(err);
@@ -120,6 +121,10 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
         ...(row.transport === "stdio" && fields.runsOn !== undefined && { runsOn: fields.runsOn }),
         updatedAt: new Date(),
       };
+      // Whoever sets a command (or its variables) answers for it: it then starts only on their own computer.
+      if (row.transport === "stdio" && (fields.command !== undefined || fields.args !== undefined || newSecrets || fields.runsOn !== undefined)) {
+        next.createdBy = c.get("user").id;
+      }
       if (newSecrets) {
         // An empty value keeps what is stored under that name; a name left out is removed.
         const stored = await readSecrets(c.env, row);
@@ -166,7 +171,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       if (!row || row.auth !== "oauth") return c.json({ error: "not_found" }, 404);
       if (!s.canEdit) return c.json({ error: "forbidden" }, 403);
       try {
-        return c.json({ authorizeUrl: await startAuthorization(c.env, row, publicOrigin(c)) });
+        return c.json({ authorizeUrl: await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id) });
       } catch (err) {
         return c.json({ error: "sign_in_failed", message: err instanceof Error ? err.message : String(err) }, 502);
       }
@@ -179,12 +184,33 @@ export function publicOrigin(c: Context<AppEnv>): string {
 }
 
 /**
- * Mounted at /api/connectors/oauth: where a connector's sign-in comes back to. No session needed:
- * the state names the sign-in Myrel started. Ends on the settings page with the result.
+ * Mounted at /api/connectors/oauth: where a connector's sign-in comes back to. The state names the
+ * sign-in Myrel started; it finishes only for the person who started it. A browser signed in to
+ * Myrel as them finishes at once; one signed in as someone else is refused; one not signed in (the
+ * desktop and mobile apps open the system browser) is asked to confirm whose connector it is.
+ * Ends on the settings page with the result.
  */
-export const connectorOAuthRoutes = new Hono<AppEnv>().get("/callback", async (c) => {
-  const { code, state, error } = c.req.query();
-  const result = await finishAuthorization(c.env, { code, state, error });
+export const connectorOAuthRoutes = new Hono<AppEnv>()
+  .get("/callback", async (c) => {
+    const { code, state, error } = c.req.query();
+    const started = await pendingSignIn(c.env, state);
+    if (started?.by && code && !error) {
+      const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+      if (session && session.user.id !== started.by) {
+        return finish(c, { state, error: "This sign-in was started from another Myrel account." });
+      }
+      if (!session) return confirmPage(c, { code, state: state!, connectorId: started.id, by: started.by });
+    }
+    return finish(c, { code, state, error });
+  })
+  // The confirmation page's button.
+  .post("/callback", async (c) => {
+    const form = await c.req.parseBody();
+    return finish(c, { code: String(form.code ?? ""), state: String(form.state ?? "") });
+  });
+
+async function finish(c: Context<AppEnv>, params: { code?: string; state?: string; error?: string }) {
+  const result = await finishAuthorization(c.env, params);
   const [row] = result.id ? await createDb(c.env.DB).select().from(connectors).where(eq(connectors.id, result.id)) : [];
   if (result.ok) {
     if (row) {
@@ -199,7 +225,30 @@ export const connectorOAuthRoutes = new Hono<AppEnv>().get("/callback", async (c
   if (row?.projectId) back.searchParams.set("project", row.projectId);
   back.searchParams.set("result", result.ok ? "ok" : "error");
   return c.redirect(back.toString(), 302);
-});
+}
+
+/** Asks the person to confirm the connector and the Myrel account the sign-in will go to. */
+async function confirmPage(c: Context<AppEnv>, p: { code: string; state: string; connectorId: string; by: string }) {
+  const db = createDb(c.env.DB);
+  const [row] = await db.select({ name: connectors.name }).from(connectors).where(eq(connectors.id, p.connectorId));
+  const [owner] = await db.select({ email: schema.user.email }).from(schema.user).where(eq(schema.user.id, p.by));
+  const name = esc(row?.name ?? "connector");
+  const email = esc(owner?.email ?? "unknown");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Myrel</title></head><body style="font-family:system-ui,sans-serif;max-width:480px;margin:64px auto;padding:0 16px;color:#18181b">
+<h1 style="font-size:20px">Finish connecting ${name}?</h1>
+<p style="line-height:1.5">This sign-in goes to the Myrel account <b>${email}</b>. Its agents will act with the account you just signed in with.
+Continue only if <b>${email}</b> is you and you started this from Myrel.</p>
+<p style="line-height:1.5;color:#52525b">Bu oturum <b>${email}</b> Myrel hesabına bağlanacak. Bu hesap senin değilse ve bağlantıyı Myrel'den sen başlatmadıysan devam etme.</p>
+<form method="post"><input type="hidden" name="code" value="${esc(p.code)}"><input type="hidden" name="state" value="${esc(p.state)}">
+<button type="submit" style="background:#5b6cff;color:#fff;border:0;padding:10px 16px;border-radius:8px;font-size:15px">Connect · Bağla</button></form>
+</body></html>`;
+  return c.html(html, 200, { "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'", "referrer-policy": "no-referrer" });
+}
+
+function esc(s: string) {
+  return s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+}
 
 /** Mounted at /api/account/connectors: the signed-in person's own connectors. */
 export const accountConnectorRoutes = connectorRoutes(async (c) => ({ owner: { userId: c.get("user").id }, canEdit: true }));

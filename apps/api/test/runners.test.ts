@@ -84,13 +84,20 @@ async function openChat(projectId: string, user: string) {
 }
 
 /** Opens a thread in the project and starts its agent. */
-async function startThread(projectId: string) {
+/** The account behind a session token. */
+async function idOf(token: string): Promise<string> {
+  return ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+}
+
+/** A thread asked for by `token`'s person: a local turn runs only for the computer's owner. */
+async function startThread(projectId: string, token: string) {
   const projectAgent = await getAgentByName(env.PROJECT_AGENT, projectId);
-  const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
+  const author = await idOf(token);
+  const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "x" });
   const thread = await projectAgent.createThread(root.id, "Testler");
   const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
   await threadAgent.start({ projectId, threadId: thread.id, brief: "x" });
-  return { projectAgent, threadAgent, thread };
+  return { projectAgent, threadAgent, thread, author };
 }
 
 const listRunners = async (token: string) =>
@@ -249,7 +256,8 @@ describe("local workspace", () => {
       body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
     });
     const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
-    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "README'yi özetle" });
+    const author = await idOf(user);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "README'yi özetle" });
     const thread = await projectAgent.createThread(root.id, "README özeti");
     const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Summarize the README." });
@@ -300,7 +308,7 @@ describe("local workspace", () => {
     });
 
     // A message during the turn waits for it instead of starting a second agent.
-    const followUp = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "kısa tut" });
+    const followUp = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "kısa tut" });
     await threadAgent.wake({ kind: "message", messageId: followUp.id });
     await new Promise((r) => setTimeout(r, 200));
     expect(starts()).toHaveLength(1);
@@ -380,7 +388,7 @@ describe("local workspace", () => {
     const byAdmin = await api(`/api/projects/${project.id}/workspace/folders`, { method: "POST", token: other, body: JSON.stringify({ path: "/Users/ismail/code/myrel" }) });
     expect(byAdmin.status).toBe(403);
 
-    const { projectAgent, thread } = await startThread(project.id);
+    const { projectAgent, thread } = await startThread(project.id, user);
     type Start = Extract<ServerToRunner, { type: "task.start" }>;
     const start = await until(() => runnerSide.frames.find((f): f is Start => f.type === "task.start"), "task.start");
     expect(start.folders).toEqual(["/Users/ismail/docs"]);
@@ -418,6 +426,13 @@ describe("local workspace", () => {
     const [card] = await until(async () => ((await cards()).length ? cards() : null), "folder card");
     expect(card!.body).toContain("/Users/ismail/notes");
     expect((await projectAgent.getThread(thread.id))?.status).toBe("blocked");
+    // Ada, an admin of the project, does not answer for İsmail's computer.
+    const ada = await idOf(other);
+    const agent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    const byAda = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: ada, body: "Bu sefer izin ver" });
+    await agent.wake({ kind: "message", messageId: byAda.id, body: byAda.body, authorId: ada, seq: byAda.seq });
+    const pending = await Promise.race([once.then(() => "answered"), new Promise((r) => setTimeout(() => r("waiting"), 300))]);
+    expect(pending).toBe("waiting");
     await answer("Bu sefer izin ver");
     expect((await once).behavior).toBe("allow");
     // Allowed once: the rest of this turn uses it without asking again.
@@ -436,11 +451,11 @@ describe("local workspace", () => {
     expect((await always).behavior).toBe("allow");
     expect((await workspace()).folders).toEqual(["/Users/ismail/docs", "/Users/ismail/code/site"]);
     expect(shared.map((f) => f.path)).toContain("/Users/ismail/code/site");
-    // Answers to the cards did not queue another turn.
+    // Answers to the cards did not queue another turn; Ada's message, an ordinary one, queued one.
     runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
     await new Promise((r) => setTimeout(r, 200));
-    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(1);
+    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(2);
     runnerSide.ws.close();
   });
 
@@ -455,13 +470,51 @@ describe("local workspace", () => {
       token: user,
       body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
     });
-    const { projectAgent, thread } = await startThread(project.id);
+    const { projectAgent, thread } = await startThread(project.id, user);
     const notice = await until(
       async () => (await projectAgent.getThreadContext(thread.id))?.messages.find((m) => m.authorKind === "system"),
       "the notice",
     );
     expect(notice.body).toContain("npx myrel-runner@latest update");
     expect((await projectAgent.getThread(thread.id))?.status).toBe("blocked");
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    runnerSide.ws.close();
+  });
+
+  it("runs another member's thread in the cloud, never on the folder owner's computer", { timeout: 20_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const email = `m${crypto.randomUUID()}@example.com`;
+    const member = (
+      await api("/api/auth/sign-up/email", {
+        method: "POST",
+        body: JSON.stringify({ email, password: "correct-horse-battery", name: "Ada" }),
+      })
+    ).headers.get("set-auth-token")!;
+    const invited = await api(`/api/projects/${project.id}/invites`, { method: "POST", token: user, body: JSON.stringify({ email }) });
+    const { invite } = (await invited.json()) as { invite: { id: string } };
+    expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: member })).status).toBe(200);
+
+    // Auto: the member's thread goes to the sandbox, which this test runtime does not have.
+    await openChat(project.id, user);
+    const { threadAgent } = await startThread(project.id, member);
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "failed", "the cloud turn");
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+
+    // Local only: the member's thread says why it cannot run, and still nothing reaches the computer.
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "local" }) });
+    const second = await startThread(project.id, member);
+    const bodies = async () => ((await second.projectAgent.getThreadContext(second.thread.id))?.messages ?? []).map((m) => m.body);
+    await until(async () => (await bodies()).some((b) => b.includes("only the person whose computer that is")), "the refusal");
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
     runnerSide.ws.close();
   });
@@ -478,7 +531,7 @@ describe("local workspace", () => {
       body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
     });
     const chat = await openChat(project.id, user);
-    const { projectAgent, threadAgent, thread } = await startThread(project.id);
+    const { projectAgent, threadAgent, thread, author } = await startThread(project.id, user);
     const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
 
     // Auto: the computer is online, so the turn goes there.
@@ -496,7 +549,7 @@ describe("local workspace", () => {
 
     // Cloud: the same project sends the next turn to the sandbox, which this test runtime does not have.
     await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "cloud" }) });
-    const next = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "again" });
+    const next = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "again" });
     await threadAgent.wake({ kind: "message", messageId: next.id });
     await until(async () => (await threadAgent.getTasks())[1]?.status === "failed", "cloud turn");
     expect((await threadAgent.getTasks())[1]).toMatchObject({ backend: "sandbox", harness: "opencode" });
@@ -505,7 +558,7 @@ describe("local workspace", () => {
     await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "local" }) });
     runnerSide.ws.close();
     await until(async () => !(await listRunners(user))[0]?.online, "offline");
-    const last = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "once more" });
+    const last = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "once more" });
     await threadAgent.wake({ kind: "message", messageId: last.id });
     await until(async () => (await bodies()).some((b) => b.includes("it is offline")), "offline notice");
     chat.close();
@@ -519,7 +572,7 @@ describe("local workspace", () => {
     const project = await createProject(user);
     expect(((await (await api(`/api/projects/${project.id}/workspace`, { token: user })).json()) as { workspace: unknown }).workspace).toBeNull();
     const chat = await openChat(project.id, user);
-    const { threadAgent } = await startThread(project.id);
+    const { threadAgent } = await startThread(project.id, user);
     await until(async () => (await threadAgent.getTasks())[0]?.status === "failed", "cloud turn");
     expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);

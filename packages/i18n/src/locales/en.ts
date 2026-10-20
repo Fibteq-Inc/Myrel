@@ -44,6 +44,9 @@ export const en = {
   // Shell
   "shell.openMenu": "Open menu",
   "shell.closeMenu": "Close menu",
+  "verify.banner": "Verify your email address. We sent a link to {email}. Until then you cannot accept invitations or use the cloud sandbox.",
+  "verify.resend": "Send again",
+  "verify.sent": "Sent. Check your inbox.",
   "rail.main": "Main",
   "rail.home": "Myrel home",
   "rail.projects": "Projects",

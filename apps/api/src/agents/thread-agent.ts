@@ -25,7 +25,7 @@ import {
 } from "@myrel/runner-core";
 import { createDb, schema } from "@myrel/db";
 import { Agent, getAgentByName } from "agents";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
@@ -36,9 +36,10 @@ import { listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
-import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
+import { localBackend, localCanceller, ownsComputer, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
+import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
 import {
   ACCESS_LEVEL_DENIED,
@@ -283,7 +284,9 @@ export class ThreadAgent extends Agent<Env> {
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
 
-    const place = await taskPlace(this.env, projectId);
+    // The person the thread works for: their own connectors are on for it, and only their own computer.
+    const requester = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null;
+    const place = await taskPlace(this.env, projectId, requester);
     if (place.kind === "error") return this.cannotWork(place.message);
     // The container takes the longest to be ready, so it starts while the turn is put together.
     if (place.kind === "cloud" && this.env.SANDBOX && (await canUseSandbox(this.env, projectId)).ok) {
@@ -329,8 +332,6 @@ export class ThreadAgent extends Agent<Env> {
       now: new Date(),
     });
     const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
-    // The person the thread works for: their own connectors are on for it.
-    const requester = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null;
     await this.startAgentTurn({
       prompt,
       requester,
@@ -428,6 +429,8 @@ export class ThreadAgent extends Agent<Env> {
         await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
       } else {
+        // The sandbox costs the service and holds the project's tokens: not for an address nobody has shown is theirs.
+        if (input.requester && !(await userVerified(this.env, input.requester))) throw new Error(UNVERIFIED_MESSAGE);
         const allowed = await canUseSandbox(this.env, projectId);
         if (!allowed.ok) throw new Error(allowed.reason);
         const origin = await project.publicOrigin();
@@ -752,9 +755,11 @@ export class ThreadAgent extends Agent<Env> {
     const open = this.accessRequests().filter((r) => !r.answer);
     if (!answer || !open.length || !this.runningTask()) return false;
     const { projectId } = this.ids();
-    let given = answer;
-    // Only owners and admins change the project's folders; anyone else's yes counts for this turn.
-    if (answer === "always" && !(reason.authorId && (await this.canManage(reason.authorId)))) given = "once";
+    // The folders are on someone's own computer: only they answer for it. Anyone else's
+    // "yes" is an ordinary message.
+    const workspace = await getWorkspace(this.env, projectId);
+    if (!workspace || !reason.authorId || !(await ownsComputer(this.env, workspace.runnerId, reason.authorId))) return false;
+    const given = answer;
     const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
     for (const r of open) {
       let mine = given;
@@ -782,15 +787,6 @@ export class ThreadAgent extends Agent<Env> {
     // The runner keeps the folder's real path; that is the one it accepts later.
     const path = shared.folders.find((f) => f.path === folder)?.path ?? shared.folders.at(-1)?.path ?? folder;
     return setWorkspaceFolder(this.env, projectId, path, true);
-  }
-
-  private async canManage(userId: string): Promise<boolean> {
-    const { projectId } = this.ids();
-    const [row] = await createDb(this.env.DB)
-      .select({ role: schema.projectMembers.role })
-      .from(schema.projectMembers)
-      .where(and(eq(schema.projectMembers.projectId, projectId), eq(schema.projectMembers.userId, userId)));
-    return row?.role === "owner" || row?.role === "admin";
   }
 
   private accessRequests(): AccessRequest[] {

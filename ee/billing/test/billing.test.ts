@@ -242,6 +242,14 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canAddConnector!(workerEnv, { userId })).toEqual({ ok: true });
   });
 
+  it("offers a trial only to a verified address", async () => {
+    const { token, userId } = await signUp();
+    await env.DB.prepare("UPDATE user SET email_verified = 0 WHERE id = ?").bind(userId).run();
+    const res = await api("/api/billing/checkout", { method: "POST", token, body: JSON.stringify({ plan: "pro" }) });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "email_not_verified" });
+  });
+
   it("opens a Checkout with a seven-day trial and tax for a first subscription", async () => {
     const { token } = await signUp();
     const calls: { url: string; body: string }[] = [];

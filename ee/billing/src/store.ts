@@ -1,5 +1,6 @@
 import { adminEmails, isListedAdmin } from "../../../apps/api/src/instance";
-import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId, paidSql } from "./plans";
+import { verificationRequired } from "../../../apps/api/src/verification";
+import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId, payingSql } from "./plans";
 
 /** The plan a person works under: their own, or the Team plan of the owner who added them. */
 export type Standing = {
@@ -48,8 +49,10 @@ async function paidSubscription(db: D1Database, userId: string): Promise<Subscri
 
 /** Whether the person is one of the server's admins: stored role admin, or named in ADMIN_EMAILS. */
 async function isAdmin(env: Env, userId: string): Promise<boolean> {
-  const row = await env.DB.prepare("SELECT role, email FROM user WHERE id = ?").bind(userId).first<{ role: string | null; email: string }>();
-  return Boolean(row && (row.role === "admin" || isListedAdmin(env, row.email)));
+  const row = await env.DB.prepare("SELECT role, email, email_verified FROM user WHERE id = ?")
+    .bind(userId)
+    .first<{ role: string | null; email: string; email_verified: number }>();
+  return Boolean(row && (row.role === "admin" || isListedAdmin(env, row.email, Boolean(row.email_verified))));
 }
 
 /** The plan a person works under. The server's admins are never limited. */
@@ -121,17 +124,19 @@ export async function usageOf(env: Env, standing: Standing, userId: string, now 
 export const SANDBOX_MICROS_PER_SECOND = 14;
 
 /**
- * What everyone on the Free plan cost the service this month: model spend on its keys plus
+ * What everyone on the Free plan or a trial cost the service this month: model spend on its keys plus
  * sandbox time. Checked against BILLING_FREE_MONTHLY_BUDGET_USD so free use can never run away.
  */
 export async function freeSpendMicros(env: Env, now = new Date()): Promise<number> {
   const from = monthStart(now).getTime();
   const admins = JSON.stringify(adminEmails(env));
-  // People with a paid plan of their own, or on a paying owner's team, and the server's admins.
-  const paid = (emails: string) => `SELECT b.user_id FROM billing_subscriptions b WHERE ${paidSql("b", now.getTime())}
+  // People who pay for a plan of their own, or are on a paying owner's team, and the server's admins
+  // (a listed address only once verified, see isListedAdmin).
+  const verified = verificationRequired(env) ? " AND email_verified = 1" : "";
+  const paid = (emails: string) => `SELECT b.user_id FROM billing_subscriptions b WHERE ${payingSql("b", now.getTime())}
     UNION SELECT m.user_id FROM billing_team_members m JOIN billing_subscriptions s ON s.user_id = m.owner_id
-      WHERE s.plan = 'team' AND ${paidSql("s", now.getTime())}
-    UNION SELECT id FROM user WHERE role = 'admin' OR lower(email) IN (SELECT value FROM json_each(${emails}))`;
+      WHERE s.plan = 'team' AND ${payingSql("s", now.getTime())}
+    UNION SELECT id FROM user WHERE role = 'admin' OR (lower(email) IN (SELECT value FROM json_each(${emails}))${verified})`;
   const [model, sandbox] = await env.DB.batch<{ n: number }>([
     env.DB.prepare(
       `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?2)), 0) AS n FROM usage_events u JOIN projects p ON p.id = u.project_id

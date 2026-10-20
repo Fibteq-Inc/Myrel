@@ -72,6 +72,11 @@ export function paidSql(alias: string, now = Date.now()): string {
   return `(${alias}.status IN ('trialing', 'active') OR (${alias}.status = 'past_due' AND COALESCE(${alias}.past_due_since, ${now}) > ${now - PAST_DUE_GRACE_MS}))`;
 }
 
+/** Like paidSql, without trials: what someone pays for, rather than tries without a card. */
+export function payingSql(alias: string, now = Date.now()): string {
+  return `(${alias}.status = 'active' OR (${alias}.status = 'past_due' AND COALESCE(${alias}.past_due_since, ${now}) > ${now - PAST_DUE_GRACE_MS}))`;
+}
+
 /** First moment of the current calendar month, UTC. Monthly allowances reset then. */
 export function monthStart(now = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
