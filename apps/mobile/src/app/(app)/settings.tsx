@@ -1,9 +1,11 @@
 import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
 import { useI18n } from "@myrel/i18n/react";
 import { Check, ExternalLink } from "lucide-react-native";
-import type { ReactNode } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Constants from "expo-constants";
+import * as Updates from "expo-updates";
 import * as WebBrowser from "expo-web-browser";
+import { type ReactNode, useState } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button, errorMessage } from "../../components/ui";
 import { useSession } from "../../lib/session";
 import { colors, radius } from "../../theme";
@@ -67,6 +69,8 @@ export default function SettingsScreen() {
         <LegalLink label={t("legal.terms")} url={`${LEGAL_SITE}/terms/`} />
       </Section>
 
+      <AppVersion />
+
       <Button variant="ghost" onPress={confirmSignOut}>
         {t("rail.signOut")}
       </Button>
@@ -77,6 +81,59 @@ export default function SettingsScreen() {
         </Pressable>
       </Section>
     </ScrollView>
+  );
+}
+
+/** Which code is running (the build's own, or an EAS Update) and a way to fetch a newer update now. */
+function AppVersion() {
+  const { t } = useI18n();
+  const [checking, setChecking] = useState(false);
+  const version = Constants.expoConfig?.version ?? "";
+  const running =
+    Updates.isEmbeddedLaunch || !Updates.updateId
+      ? t("mobile.versionBuiltIn")
+      : t("mobile.versionUpdate", {
+          id: Updates.updateId.slice(0, 8),
+          date: Updates.createdAt?.toISOString().slice(0, 16).replace("T", " ") ?? "",
+        });
+
+  async function check() {
+    if (!Updates.isEnabled) {
+      Alert.alert(t("mobile.updatesOff"));
+      return;
+    }
+    setChecking(true);
+    try {
+      const { isAvailable } = await Updates.checkForUpdateAsync();
+      if (!isAvailable) {
+        Alert.alert(t("mobile.upToDate"));
+        return;
+      }
+      await Updates.fetchUpdateAsync();
+      Alert.alert(t("mobile.updateReady"), t("mobile.updateReadyBody"), [
+        { text: t("mobile.later"), style: "cancel" },
+        { text: t("mobile.restart"), onPress: () => void Updates.reloadAsync() },
+      ]);
+    } catch (err) {
+      Alert.alert(errorMessage(err, t("common.error")));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <Section title={t("mobile.version")}>
+      <Text style={styles.value}>
+        Myrel {version}
+        {Updates.channel ? ` · ${Updates.channel}` : ""}
+      </Text>
+      <Text style={styles.hint}>{running}</Text>
+      <Pressable onPress={() => void check()} disabled={checking} accessibilityRole="button" style={styles.option}>
+        <Text style={[styles.value, { color: colors.accent }]}>
+          {checking ? t("mobile.checkingUpdates") : t("mobile.checkUpdates")}
+        </Text>
+      </Pressable>
+    </Section>
   );
 }
 
