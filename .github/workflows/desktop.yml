@@ -1,7 +1,7 @@
 name: Desktop
 
 # Builds the Tauri app for macOS, Windows and Linux.
-# Pull requests: unsigned builds, uploaded as workflow artifacts for testing.
+# Pull requests touching the desktop app or runner: unsigned builds, uploaded as workflow artifacts for testing.
 # Tags `desktop-v*`: signed builds (when the secrets below exist) attached to a draft GitHub release,
 # plus `latest.json` for the in-app updater.
 #
@@ -16,15 +16,12 @@ name: Desktop
 #   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
 
 on:
+  # Only changes to the desktop shell or its bundled runner. Web changes are already checked by CI and
+  # reach the app on the next release, so they don't pay for three native builds on every PR.
   pull_request:
     paths:
       - apps/desktop/**
-      - apps/web/**
       - packages/myrel-runner/**
-      - packages/client/**
-      - packages/i18n/**
-      - packages/protocol/**
-      - pnpm-lock.yaml
       - .github/workflows/desktop.yml
   push:
     tags: ["desktop-v*"]
