@@ -78,13 +78,13 @@ async function json<T>(res: Response | Promise<Response>, status = 200): Promise
   return (text ? JSON.parse(text) : null) as T;
 }
 
-async function signUp(): Promise<{ token: string; id: string }> {
+async function signUp(): Promise<{ token: string; id: string; email: string }> {
   const res = await api("/api/auth/sign-up/email", {
     method: "POST",
     body: { email: `u${crypto.randomUUID()}@example.org`, password: "correct-horse-battery", name: "Test" },
   });
-  const { user } = (await res.json()) as { user: { id: string } };
-  return { token: res.headers.get("set-auth-token")!, id: user.id };
+  const { user } = (await res.json()) as { user: { id: string; email: string } };
+  return { token: res.headers.get("set-auth-token")!, id: user.id, email: user.email };
 }
 
 describe("connector addresses", () => {
@@ -260,7 +260,24 @@ describe("connectors API", () => {
     const forged = await api(`/api/connectors/oauth/callback?code=good-code&state=${created.connector.id}.forged`);
     expect(forged.headers.get("location")).toContain("result=error");
 
-    const back = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state)}`);
+    const callback = `/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state)}`;
+    // Someone else's Myrel session cannot finish it: their account would go into this connector.
+    const stranger = await signUp();
+    const refused = await api(callback, { token: stranger.token });
+    expect(refused.headers.get("location")).toContain("result=error");
+    // The refusal used up the sign-in; start another.
+    const again = await json<{ authorizeUrl: string }>(
+      api(`/api/account/connectors/${created.connector.id}/authorize`, { method: "POST", token: me.token }),
+    );
+    const state2 = new URL(again.authorizeUrl).searchParams.get("state")!;
+    // A browser not signed in to Myrel (the desktop app's sign-in) is asked whose connector this is.
+    const ask = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state2)}`);
+    expect(ask.status).toBe(200);
+    const page = await ask.text();
+    expect(page).toContain(me.email);
+    expect(page).toContain('method="post"');
+
+    const back = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state2)}`, { token: me.token });
     expect(back.status).toBe(302);
     expect(back.headers.get("location")).toBe(`${BASE}/settings?section=connectors&connector=${created.connector.id}&result=ok`);
     const { connectors } = await json<{ connectors: Connector[] }>(api("/api/account/connectors", { token: me.token }));
@@ -269,7 +286,25 @@ describe("connectors API", () => {
     expect(await remoteTarget(env, created.connector.id)).toEqual({ url: "https://oauth.example.com/mcp", headers: { Authorization: "Bearer oauth-token" } });
 
     // The same sign-in cannot be used twice.
-    const replay = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state)}`);
+    const replay = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state2)}`, { token: me.token });
     expect(replay.headers.get("location")).toContain("result=error");
+  });
+
+  it("finishes a sign-in from the confirmation page", async () => {
+    const me = await signUp();
+    const created = await json<{ connector: Connector; authorizeUrl: string }>(
+      api("/api/account/connectors", { method: "POST", token: me.token, body: { transport: "http", name: "Flow", url: "https://oauth.example.com/mcp", auth: "oauth" } }),
+      201,
+    );
+    const state = new URL(created.authorizeUrl).searchParams.get("state")!;
+    const confirmed = await exports.default.fetch(
+      new Request(`${BASE}/api/connectors/oauth/callback`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ code: "good-code", state }),
+        redirect: "manual",
+      }),
+    );
+    expect(confirmed.headers.get("location")).toContain("result=ok");
   });
 });
