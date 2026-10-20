@@ -5,7 +5,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const enc = new TextEncoder();
 
-function run(upstream: Response, body: object) {
+function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "openai") {
   const seen: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     seen.push({ url, init });
@@ -18,7 +18,7 @@ function run(upstream: Response, body: object) {
     headers: { authorization: "Bearer turn-token", "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const res = proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "real-key" }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
+  const res = proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "real-key", kind }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
   return { res, seen, costs, settle: () => Promise.all(waits) };
 }
 
@@ -54,6 +54,18 @@ describe("proxyModel", () => {
     await settle();
     expect(JSON.parse(seen[0]!.init.body as string).stream_options).toEqual({ include_usage: true });
     expect(costs).toEqual([0.00002725]);
+  });
+
+  it("gives Anthropic its key as x-api-key, leaves the body alone and reports no cost", async () => {
+    const upstream = Response.json({ usage: { input_tokens: 1, cost: 9 } }, { headers: { "x-litellm-response-cost": "9" } });
+    const { res, seen, costs, settle } = run(upstream, { model: "claude", stream: true }, "anthropic");
+    await res;
+    await settle();
+    const headers = new Headers(seen[0]!.init.headers);
+    expect(headers.get("x-api-key")).toBe("real-key");
+    expect(headers.get("authorization")).toBeNull();
+    expect(JSON.parse(seen[0]!.init.body as string)).toEqual({ model: "claude", stream: true });
+    expect(costs).toEqual([]);
   });
 
   it("reports nothing when the provider sends no cost", async () => {

@@ -434,14 +434,13 @@ export class ThreadAgent extends Agent<Env> {
         if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
-        // An OpenAI-compatible model is reached through Myrel (see modelCaller): the key stays here
-        // and each call's cost is counted. OpenCode prices Anthropic models itself.
-        const proxied = model.model.kind === "openai";
-        spec.model = proxied ? { ...model.model, baseUrl: `${origin}${mcpPath}/model` } : model.model;
+        // The model is reached through Myrel (see modelCaller), so no key, the server's or a member's
+        // own, ever enters the sandbox, and an OpenAI-compatible call's cost is counted.
+        spec.model = { ...model.model, baseUrl: `${origin}${mcpPath}/model` };
         spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId) }, context, infos, skills);
         spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
-        const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: proxied ? token : model.apiKey, MYREL_MCP_TOKEN: token };
+        const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: token, MYREL_MCP_TOKEN: token };
         // A command's variables travel as secrets, so the stored spec only names them.
         const cloud: McpConnector[] = await Promise.all(
           connectors.map(async (c, i): Promise<McpConnector> => {

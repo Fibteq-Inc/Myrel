@@ -81,17 +81,18 @@ const app = new Hono<AppEnv>()
   // The model of a cloud turn's harness, through Myrel: the turn's token in, the project's key added
   // here, and each call's cost counted on the turn (see proxyModel).
   .all("/agent-mcp/:threadId/model/*", async (c) => {
-    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+    // OpenCode sends the turn's token where the provider expects its key: a bearer token, or Anthropic's x-api-key.
+    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? c.req.header("x-api-key");
     const threadId = ThreadId.safeParse(c.req.param("threadId"));
     if (!token || !threadId.success) return c.json({ error: "unauthorized" }, 401);
     const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
     const caller = await thread.modelCaller(token);
     if (!caller) return c.json({ error: "unauthorized" }, 401);
     const model = await projectTaskModel(c.env, caller.projectId);
-    if (!model.ok || model.model.kind !== "openai" || !model.model.baseUrl) return c.json({ error: { message: model.ok ? "This model is not proxied" : model.reason } }, 502);
+    if (!model.ok || !model.model.baseUrl) return c.json({ error: { message: model.ok ? "The project's model has no address" : model.reason } }, 502);
     const rest = new URL(c.req.url).pathname.split("/model/").slice(1).join("/model/");
     const url = `${model.model.baseUrl.replace(/\/+$/, "")}/${rest}`;
-    return proxyModel(c.req.raw, { url, apiKey: model.apiKey }, (usd) => thread.modelCost(caller.taskId, usd), (p) => c.executionCtx.waitUntil(p));
+    return proxyModel(c.req.raw, { url, apiKey: model.apiKey, kind: model.model.kind }, (usd) => thread.modelCost(caller.taskId, usd), (p) => c.executionCtx.waitUntil(p));
   })
   // The skills of the running turn (see turnSkills), for the sandbox or the runner to put next to the agent.
   .get("/agent-mcp/:threadId/skills", async (c) => {
