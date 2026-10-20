@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "altair",
+  "name": "myrel",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -130,7 +130,7 @@
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
-    "ARTIFACTS_URL": "https://altair-artifacts.fibteq.workers.dev",
+    "ARTIFACTS_URL": "https://myrel-artifacts.fibteq.workers.dev",
 
     "GITHUB_APP_ID": "5386818",
     "GITHUB_APP_SLUG": "fibteq",
@@ -138,7 +138,7 @@
     "RUNNER_MODEL": "",
     "RUNNER_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
-    "EMAIL_FROM": "Myrel <altair@fibteq.app>",
+    "EMAIL_FROM": "Myrel <myrel@fibteq.app>",
     "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
     "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
   }
