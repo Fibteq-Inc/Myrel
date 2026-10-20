@@ -7,6 +7,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
 import { Skills } from "./skills";
 import { GithubRepos } from "./github-repos";
+import { ProjectFolders } from "./project-folders";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
@@ -61,6 +62,7 @@ export function ProjectSettings({
         </div>
       )}
       <GeneralAndModel projectId={projectId} canManage={canManage} />
+      <ProjectFolders project={project} canManage={canManage} />
       <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />
       <Connectors projectId={projectId} canManage={canManage} result={connectorResult} connectorId={connectorId} />
       <Skills projectId={projectId} canManage={canManage} />

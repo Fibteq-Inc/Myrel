@@ -580,6 +580,21 @@ export class ApiClient {
     ).workspace;
   }
 
+  /** Adds one of the computer's shared folders to the project's other folders. */
+  async addWorkspaceFolder(projectId: string, path: string) {
+    return (
+      await this.request<{ workspace: ProjectWorkspace }>(`/api/projects/${encodeURIComponent(projectId)}/workspace/folders`, {
+        method: "POST",
+        body: { path },
+      })
+    ).workspace;
+  }
+
+  async removeWorkspaceFolder(projectId: string, path: string) {
+    const url = `/api/projects/${encodeURIComponent(projectId)}/workspace/folders?path=${encodeURIComponent(path)}`;
+    return (await this.request<{ workspace: ProjectWorkspace }>(url, { method: "DELETE" })).workspace;
+  }
+
   async clearWorkspace(projectId: string) {
     await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace`, { method: "DELETE" });
   }

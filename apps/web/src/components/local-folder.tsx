@@ -84,6 +84,11 @@ function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
   return (
     <div className="flex flex-col gap-1.5 text-[13px]">
       <span className="font-mono text-[12.5px]">{workspace.path}</span>
+      {workspace.folders.map((f) => (
+        <span key={f} className="font-mono text-[12.5px] text-muted">
+          {f}
+        </span>
+      ))}
       <span className="flex items-center gap-1.5 text-subtle">
         <OnlineDot online={workspace.online} />
         {workspace.runnerName} · {CLI_NAMES[workspace.cli]} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
@@ -92,7 +97,7 @@ function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
   );
 }
 
-function WorkspaceForm({
+export function WorkspaceForm({
   project,
   workspace,
   onDone,

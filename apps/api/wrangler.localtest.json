@@ -1,0 +1,87 @@
+{
+ "$schema": "node_modules/wrangler/config-schema.json",
+ "name": "myrel",
+ "main": "src/index.ts",
+ "compatibility_date": "2026-10-01",
+ "compatibility_flags": [
+  "nodejs_compat",
+  "global_fetch_strictly_public"
+ ],
+ "observability": {
+  "enabled": true
+ },
+ "assets": {
+  "directory": "../web/dist",
+  "binding": "ASSETS",
+  "not_found_handling": "single-page-application",
+  "run_worker_first": [
+   "/api/*"
+  ]
+ },
+ "d1_databases": [
+  {
+   "binding": "DB",
+   "database_name": "myrel",
+   "database_id": "99b4a472-b3d3-42b2-a94f-ffef351634a5",
+   "migrations_dir": "../../packages/db/migrations"
+  }
+ ],
+ "r2_buckets": [
+  {
+   "binding": "FILES",
+   "bucket_name": "myrel-files"
+  },
+  {
+   "binding": "ARTIFACTS",
+   "bucket_name": "myrel-artifacts"
+  }
+ ],
+ "durable_objects": {
+  "bindings": [
+   {
+    "name": "PROJECT_AGENT",
+    "class_name": "ProjectAgent"
+   },
+   {
+    "name": "THREAD_AGENT",
+    "class_name": "ThreadAgent"
+   },
+   {
+    "name": "RUNNER_AGENT",
+    "class_name": "RunnerAgent"
+   }
+  ]
+ },
+ "migrations": [
+  {
+   "tag": "v1",
+   "new_sqlite_classes": [
+    "ProjectAgent",
+    "ThreadAgent",
+    "RunnerAgent",
+    "Sandbox"
+   ]
+  }
+ ],
+ "vars": {
+  "BETTER_AUTH_URL": "",
+  "TRUSTED_ORIGINS": "",
+  "INSTANCE_NAME": "Myrel",
+  "SIGNUP_ENABLED": "false",
+  "LLM_PROVIDER": "fireworks",
+  "LLM_MODEL": "",
+  "LLM_BASE_URL": "",
+  "LLM_PRICES": "",
+  "AI_GATEWAY_URL": "",
+  "ARTIFACTS_URL": "https://myrel-artifacts.fibteq.workers.dev",
+  "GITHUB_APP_ID": "5386818",
+  "GITHUB_APP_SLUG": "fibteq",
+  "SANDBOX_INSTANCE_TYPE": "standard-1",
+  "RUNNER_MODEL": "",
+  "RUNNER_IMAGES": "",
+  "DEFAULT_TIMEZONE": "UTC",
+  "EMAIL_FROM": "Myrel <myrel@fibteq.app>",
+  "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
+  "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
+ }
+}
