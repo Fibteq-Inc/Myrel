@@ -50,7 +50,14 @@ export const MYREL_MCP_SERVER = "myrel";
  * The thread's MCP endpoint for one agent run, and its connectors: remote ones on the same server
  * with the same token, commands started on this computer with their own environment.
  */
-export type AgentMcp = { url: string; token: string; dir: string; connectors?: AgentServer[] };
+export type AgentMcp = {
+  url: string;
+  token: string;
+  dir: string;
+  connectors?: AgentServer[];
+  /** The run's skills: a Claude Code plugin folder, and the folder of skill folders inside it. */
+  skills?: { plugin: string; dir: string };
+};
 
 export type AgentServer =
   | { transport: "http"; name: string; url: string }
@@ -58,6 +65,11 @@ export type AgentServer =
 
 /** Env var that carries the MCP token for CLIs that read it from the environment. */
 const TOKEN_VAR = "MYREL_MCP_TOKEN";
+
+/** Windows runs the CLI through a shell, which would split a path with spaces. */
+function quotePath(path: string): string {
+  return process.platform === "win32" ? `"${path}"` : path;
+}
 
 /** Writes a config file only this user can read: it holds the run's token. */
 async function privateFile(dir: string, name: string, content: unknown): Promise<string> {
@@ -80,7 +92,7 @@ const claude: CliAdapter = {
     ...(resume ? ["--resume", resume] : []),
     ...extra,
   ],
-  async agent({ url, token, dir, connectors = [] }) {
+  async agent({ url, token, dir, connectors = [], skills }) {
     const headers = { Authorization: `Bearer ${token}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers } };
     for (const c of connectors) {
@@ -89,7 +101,9 @@ const claude: CliAdapter = {
     }
     const config = await privateFile(dir, "mcp.json", { mcpServers: servers });
     const allowed = [MYREL_MCP_SERVER, ...connectors.map((c) => c.name)].map((name) => `mcp__${name}`).join(",");
-    return { args: ["--mcp-config", config, "--allowedTools", allowed] };
+    // The skills come as a plugin (myrel:<name>); their folder may be read without asking.
+    const skillArgs = skills ? ["--plugin-dir", quotePath(skills.plugin), "--add-dir", quotePath(skills.dir)] : [];
+    return { args: ["--mcp-config", config, "--allowedTools", allowed, ...skillArgs] };
   },
   line(line, state) {
     const event = parseJson(line);
@@ -191,7 +205,7 @@ const gemini: CliAdapter = {
     ...extra,
   ],
   // Gemini CLI has no flag for an MCP config, so the run gets its own system settings file.
-  async agent({ url, token, dir, connectors = [] }) {
+  async agent({ url, token, dir, connectors = [], skills }) {
     const headers = { Authorization: `Bearer ${token}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { httpUrl: url, headers, trust: true } };
     for (const c of connectors) {
@@ -199,7 +213,11 @@ const gemini: CliAdapter = {
         c.transport === "http" ? { httpUrl: c.url, headers, trust: true } : { command: c.command, args: c.args, env: c.env, trust: true };
     }
     const settings = await privateFile(dir, "settings.json", { mcpServers: servers });
-    return { args: [], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") } };
+    // Its workspace takes in the skills' folder, so it may read them.
+    return {
+      args: skills ? ["--include-directories", quotePath(skills.dir)] : [],
+      env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") },
+    };
   },
   line() {},
   end(stdout, state) {

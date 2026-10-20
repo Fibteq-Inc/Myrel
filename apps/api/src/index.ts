@@ -18,6 +18,7 @@ import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
 import { accountConnectorRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
+import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
 import { prewarmSandbox } from "./sandbox/sandbox";
 
@@ -75,14 +76,25 @@ const app = new Hono<AppEnv>()
     if (!target.ok) return c.json({ error: target.error }, target.error === "unauthorized" ? 401 : 404);
     return proxyMcp(c.req.raw, target);
   })
+  // The skills of the running turn (see turnSkills), for the sandbox or the runner to put next to the agent.
+  .get("/agent-mcp/:threadId/skills", async (c) => {
+    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const threadId = ThreadId.safeParse(c.req.param("threadId"));
+    if (!token || !threadId.success) return c.json({ error: "unauthorized" }, 401);
+    const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
+    const bundle = await thread.skillBundle(token);
+    return bundle ? c.json(bundle) : c.json({ error: "unauthorized" }, 401);
+  })
   .route("/file-links", fileLinkRoutes)
   .route("/connectors/oauth", connectorOAuthRoutes)
   .route("/account/connectors", accountConnectorRoutes)
+  .route("/account/skills", accountSkillRoutes)
   .route("/account", accountRoutes)
   .route("/admin", adminRoutes)
   .route("/projects/:id/artifacts", artifactRoutes)
   .route("/projects/:projectId/routines", routineRoutes)
   .route("/projects/:id/connectors", projectConnectorRoutes)
+  .route("/projects/:id/skills", projectSkillRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)

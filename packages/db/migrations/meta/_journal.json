@@ -113,6 +113,13 @@
       "when": 1792501579128,
       "tag": "0015_project_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792503649437,
+      "tag": "0016_skills",
+      "breakpoints": true
     }
   ]
 }

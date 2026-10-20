@@ -23,6 +23,7 @@ import { Route as AppSettingsConnectorsRouteImport } from './routes/_app/setting
 import { Route as AppSettingsInvitesRouteImport } from './routes/_app/settings/invites'
 import { Route as AppSettingsKeysRouteImport } from './routes/_app/settings/keys'
 import { Route as AppSettingsServerRouteImport } from './routes/_app/settings/server'
+import { Route as AppSettingsSkillsRouteImport } from './routes/_app/settings/skills'
 import { Route as AppProjectsProjectIdIndexRouteImport } from './routes/_app/projects/$projectId/index'
 import { Route as AppProjectsProjectIdFilesRouteImport } from './routes/_app/projects/$projectId/files'
 import { Route as AppSettingsProjectsProjectIdRouteImport } from './routes/_app/settings/projects/$projectId'
@@ -99,6 +100,11 @@ const AppSettingsServerRoute = AppSettingsServerRouteImport.update({
   path: '/server',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsSkillsRoute = AppSettingsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppProjectsProjectIdIndexRoute =
   AppProjectsProjectIdIndexRouteImport.update({
     id: '/',
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
+  '/settings/skills': typeof AppSettingsSkillsRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
@@ -168,6 +175,7 @@ export interface FileRoutesByTo {
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
+  '/settings/skills': typeof AppSettingsSkillsRoute
   '/settings': typeof AppSettingsIndexRoute
   '/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/_app/settings/invites': typeof AppSettingsInvitesRoute
   '/_app/settings/keys': typeof AppSettingsKeysRoute
   '/_app/settings/server': typeof AppSettingsServerRoute
+  '/_app/settings/skills': typeof AppSettingsSkillsRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/_app/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
@@ -214,6 +223,7 @@ export interface FileRouteTypes {
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
+    | '/settings/skills'
     | '/settings/'
     | '/projects/$projectId/files'
     | '/settings/projects/$projectId'
@@ -233,6 +243,7 @@ export interface FileRouteTypes {
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
+    | '/settings/skills'
     | '/settings'
     | '/projects/$projectId/files'
     | '/settings/projects/$projectId'
@@ -255,6 +266,7 @@ export interface FileRouteTypes {
     | '/_app/settings/invites'
     | '/_app/settings/keys'
     | '/_app/settings/server'
+    | '/_app/settings/skills'
     | '/_app/settings/'
     | '/_app/projects/$projectId/files'
     | '/_app/settings/projects/$projectId'
@@ -369,6 +381,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsServerRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/skills': {
+      id: '/_app/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof AppSettingsSkillsRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/projects/$projectId/': {
       id: '/_app/projects/$projectId/'
       path: '/'
@@ -420,6 +439,7 @@ interface AppSettingsRouteChildren {
   AppSettingsInvitesRoute: typeof AppSettingsInvitesRoute
   AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsServerRoute: typeof AppSettingsServerRoute
+  AppSettingsSkillsRoute: typeof AppSettingsSkillsRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsProjectsProjectIdRoute: typeof AppSettingsProjectsProjectIdRoute
 }
@@ -430,6 +450,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsInvitesRoute: AppSettingsInvitesRoute,
   AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsServerRoute: AppSettingsServerRoute,
+  AppSettingsSkillsRoute: AppSettingsSkillsRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsProjectsProjectIdRoute: AppSettingsProjectsProjectIdRoute,
 }

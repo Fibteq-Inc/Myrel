@@ -243,6 +243,37 @@ describe("task script", () => {
     expect(existsSync(join(workdir, "escape.txt"))).toBe(false);
   });
 
+  it("puts the turn's skills next to the work and where OpenCode looks, and takes them away again", () => {
+    const source = mkdtempSync(join(tmpdir(), "myrel-src-"));
+    const b64 = (t: string) => Buffer.from(t).toString("base64");
+    const bundle = {
+      skills: [
+        { name: "pdf-forms", files: [{ path: "SKILL.md", content: b64("---\nname: pdf-forms\n---\n") }, { path: "scripts/fill.sh", content: b64("echo filled") }] },
+        { name: "evil", files: [{ path: "../../escape.txt", content: b64("x") }] },
+      ],
+    };
+    writeFileSync(join(source, "bundle.json"), JSON.stringify(bundle));
+    const home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+    const own = join(home, ".config", "opencode", "skills");
+    // Someone's own skill there stays.
+    execFileSync("mkdir", ["-p", join(own, "theirs")]);
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "skills/pdf-forms/scripts/fill.sh", skills: { url: `file://${join(source, "bundle.json")}` } });
+    const { code, events } = runScript({ ...taskEnv(s, shell, { workdir }), HOME: home });
+    expect(code).toBe(0);
+    expect(events).toContainEqual({ type: "log", stream: "stdout", text: "filled" });
+    expect(readFileSync(join(own, "pdf-forms", "SKILL.md"), "utf8")).toContain("pdf-forms");
+    expect(existsSync(join(home, ".claude", "skills", "pdf-forms", "scripts", "fill.sh"))).toBe(true);
+    expect(existsSync(join(workdir, "escape.txt"))).toBe(false);
+    expect(existsSync(join(workdir, "skills", ".bundle.json"))).toBe(false);
+
+    const next = runScript({ ...taskEnv(spec({ harness: "shell", prompt: "true" }), shell, { workdir }), HOME: home });
+    expect(next.code).toBe(0);
+    expect(existsSync(join(own, "pdf-forms"))).toBe(false);
+    expect(existsSync(join(workdir, "skills"))).toBe(false);
+    expect(existsSync(join(own, "theirs"))).toBe(true);
+  });
+
   it("saves every result to the workspace and starts the next task from it", () => {
     const remote = mkdtempSync(join(tmpdir(), "myrel-ws-"));
     execFileSync("git", ["init", "-q", "--bare", remote]);

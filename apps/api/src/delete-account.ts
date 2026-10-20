@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { deleteProject } from "./projects/delete";
+import { deleteOwnerFiles } from "./skills/store";
 
 const { projectMembers, projects, usageEvents, user } = schema;
 
@@ -62,6 +63,7 @@ export async function deleteAccount(env: Env, userId: string): Promise<void> {
     }
   }
 
+  await deleteOwnerFiles(env, { userId }).catch((err) => console.error("account delete: skill files", userId, err));
   await db.batch([
     db.update(usageEvents).set({ userId: null }).where(eq(usageEvents.userId, userId)),
     db.delete(user).where(eq(user.id, userId)),

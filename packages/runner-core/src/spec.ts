@@ -78,6 +78,11 @@ export const TaskSpec = z.object({
    * through Myrel's tools. Its bearer token is a secret (MYREL_MCP_TOKEN).
    */
   mcp: z.object({ url: z.string().url(), connectors: z.array(McpConnector).max(30).optional() }).optional(),
+  /**
+   * Skills to put in the sandbox before the harness starts: a JSON SkillBundle at this address,
+   * read with the MCP token (see MYREL_SKILLS_URL in the task script).
+   */
+  skills: z.object({ url: z.string().url() }).optional(),
   timeoutSec: z
     .number()
     .int()
