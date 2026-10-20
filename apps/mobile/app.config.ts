@@ -13,14 +13,19 @@ const config: ExpoConfig = {
   scheme: "altair",
   version: "0.1.0",
   orientation: "portrait",
+  // Four-petal mark, rendered from assets/icon.svg; re-export the PNGs when it changes.
+  icon: "./assets/icon.png",
   userInterfaceStyle: "dark",
   backgroundColor: "#0e0e10",
   ios: {
     bundleIdentifier: "io.fibteq.altair",
     supportsTablet: true,
+    // Only HTTPS/TLS, which is exempt from export compliance; saves the question on every upload.
+    infoPlist: { ITSAppUsesNonExemptEncryption: false },
   },
   android: {
     package: "io.fibteq.altair",
+    adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#5148e6" },
     // Firebase config for FCM pushes: the path of google-services.json, which EAS provides
     // through the GOOGLE_SERVICES_JSON file variable (the file itself stays out of git).
     ...(googleServicesFile && { googleServicesFile }),
@@ -28,7 +33,7 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     "expo-secure-store",
-    ["expo-notifications", { color: "#8b9bff" }],
+    ["expo-notifications", { color: "#8b9bff", icon: "./assets/notification-icon.png" }],
   ],
   experiments: { typedRoutes: true },
   // OTA updates only reach builds of the same app version (bump `version` for native changes).
