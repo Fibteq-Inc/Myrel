@@ -47,6 +47,8 @@ export class Sandbox extends DurableObject<Env> {
   private building: Promise<BaseSnapshot> | null = null;
   /** The task that ran last, so it reads as running until its last events reached the thread. */
   private ended: string | null = null;
+  /** A container start under way (from warm or a task), which a second caller joins rather than restarting it. */
+  private starting: Promise<void> | null = null;
 
   /** Starts a task and returns once it is running. Its events go to the thread. */
   async run(input: SandboxRun): Promise<void> {
@@ -55,6 +57,21 @@ export class Sandbox extends DurableObject<Env> {
     const abort = new AbortController();
     this.current = { taskId: spec.taskId, abort };
     this.ctx.waitUntil(this.execute(input.threadId, spec, input.secrets, abort.signal));
+  }
+
+  /**
+   * Starts the container ahead of a task, while the thread still prepares the turn, so the task
+   * finds it running. Does nothing when the base snapshot is not ready yet (the task builds it).
+   */
+  async warm(): Promise<void> {
+    const container = this.ctx.container;
+    if (!container || container.running || this.starting || this.current) return;
+    const id = (await this.env.SANDBOX.getByName(BASE).baseSnapshot(false))?.id;
+    if (!id || container.running || this.starting || this.current) return;
+    const started = Date.now();
+    await this.startOnce(container, id)
+      .then(() => console.log(`sandbox: warmed in ${clock(Date.now() - started)}`))
+      .catch((err) => console.warn("sandbox: warming up failed", err));
   }
 
   /**
@@ -193,6 +210,8 @@ export class Sandbox extends DurableObject<Env> {
   ): Promise<Container> {
     const container = this.ctx.container;
     if (!container) throw new Error("The sandbox container is not configured on this server.");
+    // A warm-up already starting it: wait for that rather than starting it again.
+    if (this.starting) await abortable(this.starting.catch(() => {}), signal);
     if (container.running) return container;
     const base = this.env.SANDBOX.getByName(BASE);
     let id = (await base.baseSnapshot(false))?.id;
@@ -202,7 +221,7 @@ export class Sandbox extends DurableObject<Env> {
       id = await this.waitForBase(() => base.baseSnapshot(true), log, signal);
     }
     try {
-      await abortable(this.startFrom(container, id), signal);
+      await abortable(this.startOnce(container, id), signal);
     } catch (err) {
       if (signal.aborted) throw err;
       // Snapshots expire after 30 unused days: rebuild once.
@@ -210,7 +229,7 @@ export class Sandbox extends DurableObject<Env> {
       settingUp();
       log("Preparing the sandbox tools again. This takes a few minutes…");
       const stale = id;
-      await abortable(this.startFrom(container, await this.waitForBase(() => base.baseSnapshot(true, stale), log, signal)), signal);
+      await abortable(this.startOnce(container, await this.waitForBase(() => base.baseSnapshot(true, stale), log, signal)), signal);
     }
     return container;
   }
@@ -234,6 +253,14 @@ export class Sandbox extends DurableObject<Env> {
     } finally {
       clearInterval(beat);
     }
+  }
+
+  private startOnce(container: Container, snapshotId: string): Promise<void> {
+    const start = this.startFrom(container, snapshotId).finally(() => {
+      if (this.starting === start) this.starting = null;
+    });
+    this.starting = start;
+    return start;
   }
 
   private async startFrom(container: Container, snapshotId: string) {
@@ -303,7 +330,7 @@ export class Sandbox extends DurableObject<Env> {
       await this.ctx.storage.put("base", base);
       await this.ctx.storage.delete("base_failed_at");
       const steps = output.split("\n").filter((l) => l.startsWith("+ ["));
-      console.log(`sandbox: prepared the base snapshot ${SETUP_VERSION} in ${clock(Date.now() - started)}\n${steps.join("\n").slice(0, 4000)}`);
+      console.log(`sandbox: prepared the base snapshot ${SETUP_VERSION} (${(snapshot.size / 1e9).toFixed(1)} GB) in ${clock(Date.now() - started)}\n${steps.join("\n").slice(0, 4000)}`);
       return base;
     } catch (err) {
       await this.ctx.storage.put("base_failed_at", Date.now());

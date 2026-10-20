@@ -62,6 +62,17 @@ describe("opencode", () => {
       { type: "usage", inputTokens: 10, outputTokens: 5, costUsd: 0.01 },
     ]);
     expect(opencode.parse("plain output")).toEqual([{ type: "log", stream: "stdout", text: "plain output" }]);
+    expect(opencode.parse("\x1b[93m\x1b[1m! \x1b[0mpermission requested: external_directory (/workspace/*); auto-rejecting")).toEqual([
+      {
+        type: "log",
+        stream: "stderr",
+        text: "OpenCode was not allowed to use external_directory (/workspace/*): it needed approval, which nobody can give in the sandbox.",
+      },
+    ]);
+  });
+
+  it("works in the folders next to its own (repos, files, skills) without asking", () => {
+    expect(opencodeConfig(spec()).permission).toMatchObject({ external_directory: "allow", bash: "allow", edit: "allow" });
   });
 
   it("registers OpenAI-compatible models as a custom provider without the key", () => {
@@ -187,12 +198,17 @@ describe("task script", () => {
     const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
 
     const s = spec({ harness: "shell", prompt: "echo hello > out.txt && git branch --show-current", repo: { url: `file://${origin}` } });
-    const { code, events, stderr } = runScript(taskEnv(s, shell, { workdir }));
+    const home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+    const { code, events, stderr } = runScript({ ...taskEnv(s, shell, { workdir }), HOME: home });
     expect(stderr).toBe("");
     expect(code).toBe(0);
     const repoDir = join(workdir, origin.split("/").pop()!);
     expect(readFileSync(join(repoDir, "out.txt"), "utf8")).toBe("hello\n");
     expect(events).toContainEqual({ type: "log", stream: "stdout", text: taskBranch(s) });
+    // There is no SSH key in the sandbox: GitHub's SSH addresses go over HTTPS with the token.
+    const url = (u: string) => execFileSync("git", ["ls-remote", "--get-url", u], { cwd: repoDir, env: { ...process.env, HOME: home }, encoding: "utf8" }).trim();
+    expect(url("git@github.com:Fibteq-Inc/flow.git")).toBe("https://github.com/Fibteq-Inc/flow.git");
+    expect(url("ssh://git@github.com/Fibteq-Inc/flow.git")).toBe("https://github.com/Fibteq-Inc/flow.git");
     expect(events.filter((e) => e.type === "phase").map((e) => `${e.phase}:${e.state}`)).toEqual([
       "prepare:started",
       "prepare:done",
