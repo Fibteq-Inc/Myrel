@@ -238,6 +238,32 @@ describe("task script", () => {
     expect(out).not.toContain("too-late");
   });
 
+  it("saves what the harness left unpushed in a cloned GitHub repository to the thread's branch there", () => {
+    const origin = mkdtempSync(join(tmpdir(), "myrel-origin-"));
+    const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf8" }).trim();
+    git(origin, "init", "-q", "--bare", "-b", "main");
+    const home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+    // The test's "GitHub" is a local repository.
+    writeFileSync(join(home, ".gitconfig"), `[url "file://${origin}"]\n\tinsteadOf = https://github.com/acme/app.git\n`);
+    const repos = mkdtempSync(join(tmpdir(), "myrel-repos-"));
+    const prompt = [
+      "git clone -q https://github.com/acme/app.git $REPOS/app",
+      "cd $REPOS/app && git commit -q --allow-empty -m init && git push -q origin HEAD:main",
+      "git checkout -q -b feature && echo wip > notes.txt",
+      "git clone -q https://github.com/acme/app.git $REPOS/clean",
+    ].join(" && ");
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt, saveRepos: { dir: repos, branch: "myrel/saved/thr_1" } });
+    const { code, events } = runScript({ ...taskEnv(s, shell, { workdir }), HOME: home, REPOS: repos });
+    expect(code).toBe(0);
+    expect(events).toContainEqual({ type: "log", stream: "system", text: "Saved the unpushed work in app to its branch myrel/saved/thr_1 on GitHub." });
+    expect(events.filter((e) => e.type === "log" && e.text.includes("clean"))).toEqual([]);
+    expect(git(origin, "show", "myrel/saved/thr_1:notes.txt")).toBe("wip");
+    expect(git(origin, "log", "-1", "--format=%s", "myrel/saved/thr_1")).toBe("Unsaved work on feature, saved by Myrel");
+    // The harness's own branch and files are untouched.
+    expect(git(join(repos, "app"), "status", "--porcelain")).toBe("?? notes.txt");
+  });
+
   it("downloads the thread's attachments next to the work before the harness starts", () => {
     const source = mkdtempSync(join(tmpdir(), "myrel-src-"));
     writeFileSync(join(source, "report.pdf"), "%PDF-1.7\n");

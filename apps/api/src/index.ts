@@ -21,7 +21,6 @@ import { accountConnectorRoutes, connectorOAuthRoutes, projectConnectorRoutes } 
 import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
-import { prewarmSandbox } from "./sandbox/sandbox";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -121,8 +120,4 @@ const root = new Hono<AppEnv>().get("/assets/*", (c) => serveBuiltAsset(c.req.ra
 
 export default {
   fetch: root.fetch,
-  // Prepares the sandbox tools after a deploy changed them, before a thread has to wait for them.
-  async scheduled(_controller, env) {
-    await prewarmSandbox(env);
-  },
 } satisfies ExportedHandler<Env>;

@@ -307,6 +307,27 @@ describe("pull requests", () => {
     expect(woken[2]).toContain("was merged.");
   });
 
+  it("settles a merge with nothing left to do without starting the agent", async () => {
+    const { project, thread } = await setup();
+    // Set up as the coordinator would, without starting a turn.
+    const stub = env.THREAD_AGENT.get(env.THREAD_AGENT.idFromName(thread.id));
+    await runInDurableObject(stub, async (_: ThreadAgent, state) => {
+      for (const [key, value] of [["project_id", project.id], ["thread_id", thread.id]]) {
+        state.storage.sql.exec("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+      }
+    });
+    const n = number + 2;
+    fakeGithub.pulls[`acme/app#${n}`] = pull({ number: n, html_url: `https://github.com/acme/app/pull/${n}` });
+    await trackPullRequest(env, project.id, thread.id, `https://github.com/acme/app/pull/${n}`);
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const before = (await projectAgent.getThreadContext(thread.id))!.messages.length;
+
+    await hook("pull_request", { action: "closed", pull_request: pull({ number: n, state: "closed", merged: true }) });
+    const after = (await projectAgent.getThreadContext(thread.id))!.messages;
+    expect(after.slice(before).map((m) => m.body)).toEqual([`acme/app#${n} was merged.`]);
+    expect(await projectAgent.getThread(thread.id)).toMatchObject({ resolved: true, status: "done" });
+  });
+
   it("ignores events about pull requests no thread opened", async () => {
     const { project, thread } = await setup();
     await hook("pull_request", { action: "closed", pull_request: pull({ number: number + 1, state: "closed" }) });

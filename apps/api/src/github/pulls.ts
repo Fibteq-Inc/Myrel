@@ -165,7 +165,8 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
       ...(moved ? { checks: row.checks === null ? null : ("pending" as const) } : {}),
     });
     if (next.state !== row.state && next.state !== "open") {
-      await wake(env, row, next.state === "merged" ? "was merged." : "was closed without merging.");
+      const merged = next.state === "merged";
+      await wake(env, row, merged ? "was merged." : "was closed without merging.", { pr: `${row.fullName}#${row.number}`, merged });
     }
     return;
   }
@@ -243,8 +244,9 @@ async function broadcast(env: PullsEnv, projectId: string, pr: PullRequest) {
   await project.broadcastPullRequest(pr);
 }
 
-async function wake(env: PullsEnv, row: Row, what: string) {
+async function wake(env: PullsEnv, row: Row, what: string, settled?: { pr: string; merged: boolean }) {
   const agent = await getAgentByName(env.THREAD_AGENT, row.threadId);
-  await agent.wake({ kind: "github", event: `Pull request ${row.fullName}#${row.number} "${row.title}" (${row.url}, branch ${row.headRef}) ${what}` });
+  const event = `Pull request ${row.fullName}#${row.number} "${row.title}" (${row.url}, branch ${row.headRef}) ${what}`;
+  await agent.wake({ kind: "github", event, ...(settled && { settled }) });
 }
 

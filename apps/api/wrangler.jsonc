@@ -54,19 +54,16 @@
     { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
   ],
 
-  // Every 10 minutes: prepares the sandbox tools when a deploy changed them (src/sandbox), so no thread
-  // waits minutes for the first start after it. Cheap when nothing changed.
-  "triggers": { "crons": ["*/10 * * * *"] },
-
-  // Sandbox containers. No image is built on deploy: they run Cloudflare's managed Debian image, set up
-  // once and snapshotted (src/sandbox/setup.ts).
+  // Sandbox containers. `wrangler deploy` builds the image from sandbox/Dockerfile (Docker must be
+  // running; Workers Builds has it) and pushes only the layers that changed.
   // The name stays altair-sandbox: a Durable Object namespace attaches to one Container application,
   // and a new name makes wrangler try to create a second one, which fails the deploy.
   "containers": [
     {
       "name": "altair-sandbox",
       "class_name": "Sandbox",
-      "scheduling_policy": "durable_object"
+      "scheduling_policy": "durable_object",
+      "images": { "base": { "dockerfile": "./sandbox/Dockerfile" } }
     }
   ],
 

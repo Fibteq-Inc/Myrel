@@ -1054,8 +1054,11 @@ export type ThreadWake =
   | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number }
   | { kind: "coordinator"; note: string }
   | { kind: "routine"; name: string; prompt: string }
-  /** Something happened on a pull request the thread opened (github/pulls.ts). */
-  | { kind: "github"; event: string };
+  /**
+   * Something happened on a pull request the thread opened (github/pulls.ts). settled: it was merged
+   * or closed, which needs no turn of its own unless the thread's plan still has work.
+   */
+  | { kind: "github"; event: string; settled?: { pr: string; merged: boolean } };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

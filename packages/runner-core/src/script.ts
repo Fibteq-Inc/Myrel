@@ -172,6 +172,36 @@ fi
 rm -f "$HARNESS_PID_FILE" "$HARNESS_DONE_FILE"
 if [ "$CODE" -eq 0 ]; then phase agent done; else phase agent failed "$MYREL_HARNESS_LABEL exited with code $CODE"; fi
 
+# The repositories the harness cloned keep its work on GitHub: whatever it left uncommitted or
+# unpushed becomes one commit on top of where it was, pushed to MYREL_SAVE_BRANCH. Its own branches
+# and index stay as they were.
+save_repo() {
+  local dir="$1" name head tree idx branch commit
+  name="$(basename "$dir")"
+  git -C "$dir" config --get remote.origin.url | grep -q 'github\.com' || return 0
+  head="$(git -C "$dir" rev-parse --verify --quiet HEAD)" || return 0
+  idx="$(mktemp)"
+  cp "$dir/.git/index" "$idx" 2>/dev/null
+  tree="$(GIT_INDEX_FILE="$idx" git -C "$dir" add -A >/dev/null 2>&1 && GIT_INDEX_FILE="$idx" git -C "$dir" write-tree)"
+  rm -f "$idx"
+  [ -n "$tree" ] || { note "Could not save the work in $name."; return 0; }
+  if [ "$tree" = "$(git -C "$dir" rev-parse "HEAD^{tree}")" ] && [ -n "$(git -C "$dir" branch -r --contains HEAD 2>/dev/null)" ]; then
+    return 0
+  fi
+  branch="$(git -C "$dir" symbolic-ref --short -q HEAD || echo "a detached HEAD")"
+  commit="$(git -C "$dir" commit-tree "$tree" -p "$head" -m "Unsaved work on $branch, saved by Myrel")" || { note "Could not save the work in $name."; return 0; }
+  if git -C "$dir" push --quiet --force origin "$commit:refs/heads/$MYREL_SAVE_BRANCH" 2>/dev/null; then
+    note "Saved the unpushed work in $name to its branch $MYREL_SAVE_BRANCH on GitHub."
+  else
+    note "Could not push the unpushed work in $name to GitHub, so it is lost when the sandbox stops."
+  fi
+}
+if [ -n "\${MYREL_SAVE_BRANCH:-}" ] && [ -d "\${MYREL_SAVE_REPOS_DIR:-}" ]; then
+  for SAVE_DIR in "$MYREL_SAVE_REPOS_DIR"/*/; do
+    [ -d "$SAVE_DIR/.git" ] && save_repo "\${SAVE_DIR%/}"
+  done
+fi
+
 # Every result is saved, unfinished work too, so the next task can pick it up.
 if [ -n "$WS" ] && [ -n "$REPO_DIR" ]; then
   phase save started
@@ -244,6 +274,8 @@ export function taskEnv(
     MYREL_BRANCH: workingBranch(spec),
     MYREL_OPEN_PR: spec.openPr ? "1" : "0",
     MYREL_SKILLS_URL: spec.skills?.url ?? "",
+    MYREL_SAVE_REPOS_DIR: spec.saveRepos?.dir ?? "",
+    MYREL_SAVE_BRANCH: spec.saveRepos?.branch ?? "",
     MYREL_PR_BODY: `${spec.prompt.slice(0, 4000)}\n\n---\n_Opened by Myrel._`,
   };
 }

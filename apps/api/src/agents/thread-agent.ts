@@ -39,7 +39,7 @@ import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
 import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
-import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
+import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
 import {
   ACCESS_LEVEL_DENIED,
   ACCESS_WAIT_MS,
@@ -111,6 +111,11 @@ type AgentTurn = {
   /** When it replied with its plan done; the turn ends a minute later unless it moves on. */
   doneReplyAt?: number;
 };
+
+/** The GitHub branch where a cloud turn leaves the unpushed work of the repositories it cloned. */
+function saveBranch(threadId: string): string {
+  return `myrel/saved/${threadId}`;
+}
 
 /** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
 const MAX_AGENT_PROMPT = 90_000;
@@ -218,6 +223,11 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
     }
+    if (reason.kind === "github" && reason.settled && this.getMeta("thread_id") && !this.runningTask() && !this.planHasWork()) {
+      // A merge or close with nothing left to do: said here and settled without starting the agent.
+      this.sql`INSERT INTO github_events (body, created_at, seen) VALUES (${reason.event}, ${new Date().toISOString()}, 1)`;
+      return this.pullRequestSettled(reason.settled);
+    }
     if (reason.kind === "github") {
       this.sql`INSERT INTO github_events (body, created_at) VALUES (${reason.event}, ${new Date().toISOString()})`;
     }
@@ -226,6 +236,32 @@ export class ThreadAgent extends Agent<Env> {
         VALUES (${reason.name}, ${reason.prompt}, ${new Date().toISOString()})`;
     }
     await this.markDirty();
+  }
+
+  /** The plan the agent set has steps still to do. */
+  private planHasWork(): boolean {
+    const plan = this.getMeta("plan");
+    return plan ? (JSON.parse(plan) as Plan).steps.some((s) => s.state === "todo" || s.state === "active") : false;
+  }
+
+  /**
+   * One of the thread's pull requests was merged or closed while nothing is left to do: one line in
+   * the thread, and the thread is resolved once none of its pull requests is open. No agent turn,
+   * so no sandbox starts for it.
+   */
+  private async pullRequestSettled(settled: { pr: string; merged: boolean }) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const tr = this.getMeta("language") === "tr";
+    const body = settled.merged
+      ? tr ? `${settled.pr} birleştirildi.` : `${settled.pr} was merged.`
+      : tr ? `${settled.pr} birleştirilmeden kapatıldı.` : `${settled.pr} was closed without merging.`;
+    const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    const open = (await listPullRequests(this.env.DB, projectId, threadId)).some((pr) => pr.state === "open");
+    if (open) return;
+    await project.updateThread(threadId, { status: "done", resolved: true });
+    await project.notifyThread(threadId, "done", body);
   }
 
   private async markDirty() {
@@ -342,7 +378,7 @@ export class ThreadAgent extends Agent<Env> {
             computer: place.workspace.runnerName,
             asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
           }
-        : { kind: "cloud", images: false };
+        : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
@@ -357,6 +393,8 @@ export class ThreadAgent extends Agent<Env> {
       mark: { at: Date.now(), inputTokens: 0, outputTokens: 0, costUsd: 0 },
     };
     this.setMeta("agent_turn", JSON.stringify(turn));
+    // Lines Myrel writes in the thread between turns follow the person's language.
+    this.setMeta("language", language);
     this.clearAccess();
     // Until the runner says where the CLI really works (a worktree, say), the project's folders.
     if (place.kind === "local") this.setMeta("access_folders", JSON.stringify([place.workspace.path, ...place.workspace.folders]));
@@ -397,7 +435,8 @@ export class ThreadAgent extends Agent<Env> {
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
         spec.model = model.model;
-        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context, infos, skills);
+        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId) }, context, infos, skills);
+        spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
         // A command's variables travel as secrets, so the stored spec only names them.
@@ -414,15 +453,18 @@ export class ThreadAgent extends Agent<Env> {
           }),
         );
         spec.mcp = { url: `${origin}${mcpPath}`, connectors: cloud };
-        const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
+        // The sandbox's disk does not outlive it; the thread's workspace keeps the work outside the
+        // repositories between turns (the repositories' own work goes to GitHub, see saveRepos).
+        const [github, files, workspace] = await Promise.all([
+          projectGithubToken(this.env, projectId, spec.timeoutSec),
+          this.attachmentLinks(origin, input.attachments),
+          threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC),
+        ]);
         if (github) secrets.GITHUB_TOKEN = github;
-        const files = await this.attachmentLinks(origin, input.attachments);
         if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
         const backend = sandboxBackend(this.env, threadId);
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
-        // The sandbox's disk does not outlive it; the thread's workspace keeps the work between turns.
-        const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
         if (workspace) {
           spec.workspace = { remote: workspace.remote };
           secrets.MYREL_WORKSPACE_TOKEN = workspace.token;
