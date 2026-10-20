@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Project } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Project } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
 import { ChevronRight, FolderClosed, Plus, Settings } from "lucide-react-native";
@@ -15,7 +15,8 @@ export default function ProjectsScreen() {
   const { api, server } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const projects = useQuery({ queryKey: ["projects", server], queryFn: () => api.listProjects() });
+  // Polled so each row's live activity stays current while the list is open.
+  const projects = useQuery({ queryKey: ["projects", server], queryFn: () => api.listProjects(), refetchInterval: 15_000 });
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const create = useMutation({
@@ -112,12 +113,41 @@ export default function ProjectsScreen() {
               <Text style={styles.meta}>
                 {item.role === "owner" ? t("projects.owner") : t("projects.member")} · {relativeTime(item.createdAt)}
               </Text>
+              <ProjectActivity project={item} />
             </View>
             <ChevronRight size={16} color={colors.subtle} />
           </Pressable>
         )}
       />
     </>
+  );
+}
+
+/** What is going on in the project right now; nothing when it is idle. */
+function ProjectActivity({ project }: { project: Project }) {
+  const t = useT();
+  const working = project.activity?.working ?? 0;
+  const waiting = project.activity?.waiting ?? 0;
+  if (!working && !waiting) return null;
+  return (
+    <View style={styles.activity}>
+      {working > 0 && (
+        <View style={styles.activityItem}>
+          <View style={[styles.dot, { backgroundColor: colors.accent }]} />
+          <Text style={[styles.activityText, { color: colors.accent }]} numberOfLines={1}>
+            {t("projects.working", { count: working })}
+          </Text>
+        </View>
+      )}
+      {waiting > 0 && (
+        <View style={styles.activityItem}>
+          <View style={[styles.dot, { backgroundColor: colors.warn }]} />
+          <Text style={[styles.activityText, { color: colors.warn }]} numberOfLines={1}>
+            {t("projects.waiting", { count: waiting })}
+          </Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -144,6 +174,10 @@ const styles = StyleSheet.create({
   },
   name: { color: colors.fg, fontSize: 16, fontWeight: "600" },
   meta: { color: colors.subtle, fontSize: 13 },
+  activity: { flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 2, marginTop: 2 },
+  activityItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  activityText: { fontSize: 13, fontWeight: "500" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
   emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600" },
   emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center", paddingHorizontal: 24 },

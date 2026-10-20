@@ -1,12 +1,12 @@
-import { isLocale, type Locale, matchLocale } from "@altair/i18n";
-import { I18nProvider } from "@altair/i18n/react";
+import { isLocale, type Locale, matchLocale } from "@myrel/i18n";
+import { I18nProvider } from "@myrel/i18n/react";
 import { getLocales } from "expo-localization";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { platform } from "./platform";
 
 const LOCALE_KEY = "locale";
 
-/** The saved language, else the first device language Altair speaks, else English. */
+/** The saved language, else the first device language Myrel speaks, else English. */
 async function initialLocale(): Promise<Locale> {
   const saved = await platform.storage.get(LOCALE_KEY);
   if (isLocale(saved)) return saved;

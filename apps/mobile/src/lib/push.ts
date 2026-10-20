@@ -1,4 +1,4 @@
-import type { ApiClient } from "@altair/client";
+import type { ApiClient } from "@myrel/client";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
@@ -29,7 +29,7 @@ export async function registerForPush(api: ApiClient): Promise<void> {
   if (!Device.isDevice) return;
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
-      name: "Altair",
+      name: "Myrel",
       importance: Notifications.AndroidImportance.HIGH,
     });
   }

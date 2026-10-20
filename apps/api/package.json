@@ -1,5 +1,5 @@
 {
-  "name": "@altair/api",
+  "name": "@myrel/api",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -7,17 +7,19 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
-    "deploy": "wrangler d1 migrations apply altair --remote && wrangler deploy",
+    "deploy": "wrangler d1 migrations apply myrel --remote && wrangler deploy",
     "deploy:preview": "wrangler versions upload",
+    "deploy:hosted": "wrangler d1 migrations apply myrel --remote && wrangler deploy --config wrangler.jsonc ../../ee/billing/src/worker.ts",
+    "deploy:hosted:preview": "wrangler versions upload --config wrangler.jsonc ../../ee/billing/src/worker.ts",
     "typecheck": "tsc",
     "test": "vitest run",
     "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false",
     "vapid": "node scripts/vapid.mjs"
   },
   "dependencies": {
-    "@altair/db": "workspace:*",
-    "@altair/protocol": "workspace:*",
-    "@altair/runner-core": "workspace:*",
+    "@myrel/db": "workspace:*",
+    "@myrel/protocol": "workspace:*",
+    "@myrel/runner-core": "workspace:*",
     "agents": "0.28.1",
     "better-auth": "1.7.11",
     "drizzle-orm": "0.45.4",

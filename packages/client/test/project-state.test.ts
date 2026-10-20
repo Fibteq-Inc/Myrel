@@ -1,4 +1,4 @@
-import { createId, type Message, type Task, type Thread } from "@altair/protocol";
+import { createId, formatPlan, type Message, planChecklist, type Task, type Thread } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,
@@ -9,9 +9,12 @@ import {
   emptyProjectState,
   parseChecklist,
   projectChat,
+  threadByCard,
   threadByRoot,
   threadMessages,
+  threadReplyCount,
   threadTasks,
+  threadUsage,
 } from "../src/project-state";
 
 const projectId = createId("project");
@@ -30,6 +33,7 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
   id: createId("thread"),
   projectId,
   rootMessageId,
+  ackMessageId: null,
   title: "T",
   status: "working",
   statusText: null,
@@ -41,6 +45,17 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
 });
 
 describe("project state", () => {
+  it("puts a thread card under the coordinator's acknowledgement when there is one", () => {
+    const ask = msg(1);
+    const ack = msg(2);
+    const withAck = thread(ask.id, { ackMessageId: ack.id });
+    const older = thread(msg(3).id);
+    const s = { ...emptyProjectState, threads: { [withAck.id]: withAck, [older.id]: older } };
+    expect(threadByCard(s).get(ack.id)?.id).toBe(withAck.id);
+    expect(threadByCard(s).has(ask.id)).toBe(false);
+    expect(threadByCard(s).get(older.rootMessageId)?.id).toBe(older.id);
+  });
+
   it("keeps artifacts from sync and live updates, newest first", () => {
     const art = (title: string, updatedAt: string, version = 1) => ({
       id: createId("artifact"),
@@ -92,6 +107,13 @@ describe("project state", () => {
     expect(s.active).toEqual({ [t.id]: true });
   });
 
+  it("drops stale activity on a resync; the server sends the live ones again", () => {
+    let s = applyEvent(emptyProjectState, { type: "agent.activity", threadId: "t1", active: true, label: "Running tests" });
+    s = applyEvent(s, { type: "sync.result", messages: [], hasMore: false, threads: [], reactions: [], artifacts: [], routines: [] });
+    expect(s.active).toEqual({});
+    expect(s.progress).toEqual({});
+  });
+
   it("parses a status checklist", () => {
     expect(parseChecklist("Research\n\n✓ Read docs\n**✓ Compared options**\n✱ Writing summary\n○ Reply")).toEqual({
       title: "Research",
@@ -102,6 +124,15 @@ describe("project state", () => {
         { state: "todo", text: "Reply", depth: 0 },
       ],
     });
+  });
+
+  it("updates a plan card in place and leaves it out of the reply count", () => {
+    const t = createId("thread");
+    const card = { ...msg(2, t), authorKind: "agent" as const, body: formatPlan("Plan\n\n✱ a\n○ b") };
+    let s = applyMessage(applyMessage(emptyProjectState, msg(1, t)), card);
+    s = applyEvent(s, { type: "message.updated", message: { ...card, body: formatPlan("Plan\n\n✓ a\n✱ b") } });
+    expect(threadMessages(s, t).map((m) => planChecklist(m.body))).toEqual([null, "Plan\n\n✓ a\n✱ b"]);
+    expect(threadReplyCount(s, t)).toBe(1);
   });
 
   it("parses skipped steps and a task's steps nested under the plan", () => {
@@ -117,6 +148,20 @@ describe("project state", () => {
     ]);
     // Only the plan's own steps count, and a skipped step is not work left.
     expect(checklistProgress(items)).toEqual({ done: 1, total: 3 });
+  });
+});
+
+describe("thread usage", () => {
+  it("sums the stats under a thread's messages, leaving the person's own CLI unpriced but not unknown", () => {
+    const root = msg(1);
+    const th = thread(root.id);
+    const base = { calls: 0, cachedInputTokens: 0, model: "m" };
+    const cloud = { ...msg(2, th.id), stats: { ...base, durationMs: 1000, inputTokens: 100, outputTokens: 10, costMicros: 500, runtime: "cloud" as const, harness: "opencode" } };
+    const local = { ...msg(3, th.id), stats: { ...base, durationMs: 2000, inputTokens: 50, outputTokens: 5, costMicros: null, runtime: "local" as const, harness: "claude" } };
+    let s = emptyProjectState;
+    for (const m of [root, cloud, local]) s = applyMessage(s, m);
+    expect(threadUsage(s, th.id)).toEqual({ tokens: 165, durationMs: 3000, costMicros: 500 });
+    expect(threadUsage(s, createId("thread"))).toBeNull();
   });
 });
 

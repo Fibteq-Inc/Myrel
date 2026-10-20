@@ -1,8 +1,8 @@
-import type { ComputerAccess, ComputerInfo, ComputerStatus, LocalComputer } from "@altair/client";
+import type { ComputerAccess, ComputerInfo, ComputerStatus, LocalComputer } from "@myrel/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-/** The bundled altair-runner sidecar, driven by the commands in src-tauri/src/runner.rs. */
+/** The bundled myrel-runner sidecar, driven by the commands in src-tauri/src/runner.rs. */
 export function desktopComputer(): LocalComputer {
   return {
     info: () => invoke<ComputerInfo>("runner_info"),

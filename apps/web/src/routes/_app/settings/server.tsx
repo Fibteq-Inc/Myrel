@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Notice, Section } from "../../../components/settings";

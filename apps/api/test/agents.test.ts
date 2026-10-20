@@ -1,28 +1,15 @@
-import type { Message, Project, ServerEvent, Thread, UsageSummary } from "@altair/protocol";
+import { formatPlan, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
-import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { agentProject, api, type Play, signUp, until } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
-
-function api(path: string, init: RequestInit & { token?: string } = {}) {
-  const headers = new Headers(init.headers);
-  if (init.token) headers.set("authorization", `Bearer ${init.token}`);
-  if (init.body) headers.set("content-type", "application/json");
-  return exports.default.fetch(new Request(`${BASE}${path}`, { ...init, headers }));
-}
-
-async function setup() {
-  const email = `u${crypto.randomUUID()}@example.com`;
-  const signUp = await api("/api/auth/sign-up/email", {
-    method: "POST",
-    body: JSON.stringify({ email, password: "correct-horse-battery", name: "İsmail" }),
-  });
-  const token = signUp.headers.get("set-auth-token")!;
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
-  const { project } = (await res.json()) as { project: Project };
+/** A project whose threads are worked by `play`, and a socket listening to it. */
+async function setup(play: Play = () => {}) {
+  const token = await signUp();
+  const computer = await agentProject(token, play);
+  const project: Project = computer.project;
 
   const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, {
     headers: { upgrade: "websocket" },
@@ -31,16 +18,7 @@ async function setup() {
   ws.addEventListener("message", (e) => events.push(JSON.parse(e.data as string) as ServerEvent));
   ws.accept();
   const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
-  return { project, ws, events, agent, token };
-}
-
-async function until<T>(fn: () => T | Promise<T>, what: string): Promise<NonNullable<T>> {
-  for (let i = 0; i < 160; i++) {
-    const v = await fn();
-    if (v) return v as NonNullable<T>;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`Timed out waiting for ${what}`);
+  return { project, ws, events, agent, token, turns: computer.turns };
 }
 
 const call = (name: string, input: unknown) => ({ id: crypto.randomUUID(), name, input });
@@ -51,40 +29,34 @@ afterEach(resetFakeModel);
 
 describe("coordinator and thread agent", () => {
   it("routes an ask into a thread whose agent answers there", async () => {
-    const seen: FakeRequest[] = [];
     setFakeModel((req) => {
-      seen.push(req);
       if (req.turns > 1) return { text: "", toolCalls: [] }; // after its tool results, the model stops
-      if (isCoordinator(req)) {
-        return {
-          text: "",
-          toolCalls: [
-            call("start_thread", {
-              message_id: newMessageId(req.prompt),
-              title: "Durable Objects",
-              instructions: "Explain Durable Objects briefly.",
-              ack: "Durable Objects'i araştırıyorum.",
-            }),
-          ],
-        };
-      }
       return {
         text: "",
         toolCalls: [
-          call("reply", { text: "Durable Objects'i kısaca açıklayacağım." }),
-          call("update_plan", {
+          call("start_thread", {
+            message_id: newMessageId(req.prompt),
             title: "Durable Objects",
-            steps: [
-              { text: "Researched", state: "done" },
-              { text: "Benchmarks", state: "skipped" },
-            ],
+            instructions: "Explain Durable Objects briefly.",
+            ack: "Durable Objects'i araştırıyorum.",
+            project_ack: "Aldım, başlıyorum.",
           }),
-          call("reply", { text: "Durable Objects are single-instance actors with storage." }),
         ],
       };
     });
+    const play: Play = async (turn) => {
+      await turn.call("reply", { text: "Durable Objects'i kısaca açıklayacağım." });
+      const steps = (a: string, b: string) => [
+        { text: "Researched", state: a },
+        { text: "Benchmarks", state: b },
+      ];
+      await turn.call("update_plan", { title: "Durable Objects", steps: steps("active", "todo") });
+      await turn.call("update_plan", { title: "Durable Objects", steps: steps("done", "skipped") });
+      await turn.call("reply", { text: "Durable Objects are single-instance actors with storage." });
+      return "Answered.";
+    };
 
-    const { project, ws, events, agent } = await setup();
+    const { project, ws, events, agent, turns } = await setup(play);
     ws.send(JSON.stringify({ type: "message.send", body: "Durable Objects'i araştır" }));
 
     const thread = await until(async () => {
@@ -95,18 +67,37 @@ describe("coordinator and thread agent", () => {
       resolved: false,
     });
 
+    // The project chat reads: the ask, the coordinator's "on it" line, then the thread card under it.
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m) => m.threadId === null);
+    expect(chat.map((m) => [m.authorId === "coordinator" ? "coordinator" : "person", m.body])).toEqual([
+      ["person", "Durable Objects'i araştır"],
+      ["coordinator", "Aldım, başlıyorum."],
+    ]);
+    expect(thread.ackMessageId).toBe(chat[1]!.id);
+
     const ctx = (await agent.getThreadContext(thread.id))!;
     expect(ctx.root.body).toBe("Durable Objects'i araştır");
     expect(ctx.messages.map((m) => [m.authorKind, m.authorId, m.body])).toEqual([
       ["agent", "coordinator", "Durable Objects'i araştırıyorum."],
       ["agent", "thread-agent", "Durable Objects'i kısaca açıklayacağım."],
+      // One plan card right after the note, updated in place to the plan's last state.
+      ["agent", "thread-agent", formatPlan("Durable Objects\n\n✓ Researched\n– Benchmarks")],
       ["agent", "thread-agent", "Durable Objects are single-instance actors with storage."],
     ]);
+    const card = ctx.messages[2]!;
+    expect(
+      events.some((e) => e.type === "message.created" && e.message.id === card.id && e.message.body.includes("✱ Researched")),
+    ).toBe(true);
+    expect(events.some((e) => e.type === "message.updated" && e.message.id === card.id && e.message.seq === card.seq)).toBe(true);
 
-    // The thread agent saw the brief and the member's name.
-    const threadReq = seen.find((r) => !isCoordinator(r))!;
-    expect(threadReq.prompt).toContain("Explain Durable Objects briefly.");
-    expect(threadReq.prompt).toContain("İsmail (member)");
+    // The thread's agent was the person's Claude Code in the project's folder, and saw the brief and the member's name.
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.start).toMatchObject({ cli: "claude", folder: "/Users/ismail/code/myrel" });
+    expect(turns[0]!.prompt).toContain("You run as Claude Code on the person's own computer");
+    expect(turns[0]!.prompt).toContain("Explain Durable Objects briefly.");
+    expect(turns[0]!.prompt).toContain("İsmail (member)");
+    // It replied itself, so its final message is not posted too.
+    expect(ctx.messages.map((m) => m.body)).not.toContain("Answered.");
 
     // Clients heard about it live.
     await until(() => events.some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active), "idle");
@@ -115,31 +106,57 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("refuses to open a thread on a person's message without an acknowledgement line", async () => {
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      const message_id = newMessageId(req.prompt);
+      // First try without project_ack; after the tool error (two more messages), try again with it.
+      if (req.turns === 1) return { text: "", toolCalls: [call("start_thread", { message_id, title: "X", instructions: "Do X." })] };
+      if (req.turns === 3) {
+        return {
+          text: "",
+          toolCalls: [call("start_thread", { message_id, title: "X", instructions: "Do X.", project_ack: "Tamamdır." })],
+        };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "X'i yap" }));
+
+    const thread = await until(async () => (await agent.listThreads())[0] ?? null, "thread");
+    const ack = (await agent.getMessage(thread.ackMessageId!))!;
+    expect(ack).toMatchObject({ threadId: null, authorId: "coordinator", body: "Tamamdır." });
+    expect(await agent.listThreads()).toHaveLength(1);
+    ws.close();
+  });
+
   it("wakes the thread agent on a reply in the thread, and lets it ask the coordinator", async () => {
     const requests: string[] = [];
     setFakeModel((req) => {
       if (req.turns > 1) return { text: "", toolCalls: [] };
-      if (isCoordinator(req)) {
-        if (req.prompt.includes("Requests from thread agents")) {
-          requests.push(req.prompt);
-          const asking = /Thread \[(thr_[0-9A-Z]{26})\] asks/.exec(req.prompt)![1];
-          return { text: "", toolCalls: [call("message_thread", { thread_id: asking, note: "Ask the person first." })] };
-        }
-        const id = newMessageId(req.prompt);
-        return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Deploy", instructions: "Deploy it." })] }
-          : { text: "", toolCalls: [] };
+      if (req.prompt.includes("Requests from thread agents")) {
+        requests.push(req.prompt);
+        const asking = /Thread \[(thr_[0-9A-Z]{26})\] asks/.exec(req.prompt)![1];
+        return { text: "", toolCalls: [call("message_thread", { thread_id: asking, note: "Ask the person first." })] };
       }
-      if (req.prompt.includes("thanks")) {
-        return { text: "", toolCalls: [call("reply", { text: "Done." }), call("resolve_thread", {})] };
-      }
-      if (req.prompt.includes("Ask the person first.")) {
-        return { text: "", toolCalls: [call("reply", { text: "Deploy now? Yes / No" })] };
-      }
-      return { text: "", toolCalls: [call("request_coordinator", { kind: "permission", reason: "Deploying is irreversible." })] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Deploy", instructions: "Deploy it.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
     });
+    const play: Play = async (turn) => {
+      const latest = turn.prompt.slice(turn.prompt.lastIndexOf("## Thread so far"));
+      if (latest.includes("thanks")) {
+        await turn.call("reply", { text: "Done." });
+        await turn.call("resolve_thread");
+      } else if (turn.prompt.includes("Ask the person first.")) {
+        await turn.call("reply", { text: "Deploy now? Yes / No" });
+      } else {
+        await turn.call("request_coordinator", { kind: "permission", reason: "Deploying is irreversible." });
+      }
+    };
 
-    const { ws, agent } = await setup();
+    const { ws, agent } = await setup(play);
     ws.send(JSON.stringify({ type: "message.send", body: "deploy the site" }));
 
     const thread: Thread = await until(async () => (await agent.listThreads())[0], "thread");
@@ -157,6 +174,110 @@ describe("coordinator and thread agent", () => {
     expect(await bodies()).toContain("Done.");
     ws.close();
   });
+
+  it("forwards a follow-up to a resolved thread, reopens it and links it in the project chat", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      if (!id) return { text: "", toolCalls: [] };
+      const existing = /\[(thr_[0-9A-Z]{26})\] "Calculator"/.exec(req.prompt)?.[1];
+      return {
+        text: "",
+        toolCalls: [
+          existing
+            ? call("message_thread", { thread_id: existing, note: "Make it orange.", project_ack: "Passed this on." })
+            : call("start_thread", { message_id: id, title: "Calculator", instructions: "Build it.", project_ack: "On it." }),
+        ],
+      };
+    });
+    const play: Play = async (turn) => {
+      if (turn.prompt.includes("Make it orange.")) return;
+      await turn.call("reply", { text: "Here it is." });
+      await turn.call("resolve_thread");
+    };
+    const { ws, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "Build a calculator" }));
+    const thread: Thread = await until(async () => ((await agent.listThreads())[0]?.resolved ? (await agent.listThreads())[0] : null), "resolved");
+
+    ws.send(JSON.stringify({ type: "message.send", body: "Make the calculator orange" }));
+    const forwarded = await until(async () => {
+      const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+      return chat.find((m: Message) => m.body.startsWith("Passed this on.")) ?? null;
+    }, "forward line");
+    expect(forwarded.body).toBe(`Passed this on. [Calculator](#${thread.id})`);
+    expect(await agent.getThread(thread.id)).toMatchObject({ resolved: false });
+    ws.close();
+  });
+
+  it("passes what one thread delivers on to another open thread it affects", async () => {
+    const coordinator: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      coordinator.push(req.prompt);
+      const id = newMessageId(req.prompt);
+      if (id) {
+        const title = req.prompt.includes(' "MCP" ') ? "Plans" : "MCP";
+        return { text: "", toolCalls: [call("start_thread", { message_id: id, title, instructions: title, project_ack: "On it." })] };
+      }
+      const updates = req.prompt.slice(req.prompt.indexOf("## Thread updates"));
+      if (req.prompt.includes("## Thread updates") && updates.includes("MCP connector support is ready")) {
+        const thread = (title: string) => new RegExp(`\\[(thr_[0-9A-Z]{26})\\] "${title}"`).exec(req.prompt)![1];
+        return {
+          text: "",
+          toolCalls: [
+            call("relay_to_thread", {
+              from_thread_id: thread("MCP"),
+              to_thread_id: thread("Plans"),
+              note: "MCP connectors are a new feature; count them in the plan limits.",
+            }),
+          ],
+        };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const play: Play = async (turn) => {
+      const latest = turn.prompt.slice(turn.prompt.lastIndexOf("## Thread so far"));
+      if (turn.prompt.includes('Thread: "MCP"')) {
+        await turn.call("reply", { text: latest.includes("finish it") ? "MCP connector support is ready." : "Working on MCP." });
+      } else if (turn.prompt.includes('From the "MCP" thread: MCP connectors are a new feature')) {
+        await turn.call("reply", { text: "Counting MCP connectors in the plan limits too." });
+      } else {
+        await turn.call("reply", { text: "Drafting the plans." });
+      }
+    };
+
+    const { ws, agent } = await setup(play);
+    const replies = async (threadId: string) =>
+      ((await agent.getThreadContext(threadId))?.messages ?? []).filter((m: Message) => m.authorId === "thread-agent").map((m: Message) => m.body);
+    const byTitle = async (title: string) => ((await agent.listThreads()) as Thread[]).find((t) => t.title === title) ?? null;
+
+    ws.send(JSON.stringify({ type: "message.send", body: "Add MCP connectors" }));
+    const mcpThread = await until(() => byTitle("MCP"), "MCP thread");
+    await until(async () => (await replies(mcpThread.id)).includes("Working on MCP.") || null, "MCP reply");
+    ws.send(JSON.stringify({ type: "message.send", body: "Set up the membership plans" }));
+    const plans = await until(() => byTitle("Plans"), "Plans thread");
+    await until(async () => (await replies(plans.id)).includes("Drafting the plans.") || null, "Plans reply");
+
+    // The MCP thread delivers; the coordinator looks at thread updates (normally after a short delay).
+    ws.send(JSON.stringify({ type: "message.send", threadId: mcpThread.id, body: "finish it" }));
+    await until(async () => (await replies(mcpThread.id)).includes("MCP connector support is ready.") || null, "MCP done");
+    await agent.coordinatorTurn();
+    await until(
+      async () => (await replies(plans.id)).includes("Counting MCP connectors in the plan limits too.") || null,
+      "plans thread picks up the relay",
+    );
+    const look = coordinator.find((p) => p.includes("MCP connector support is ready."))!;
+    expect(look).toContain("Nothing new in the project chat.");
+    // Thread updates never land in the project chat.
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+    expect(chat.map((m: Message) => m.body)).toEqual(["Add MCP connectors", "On it.", "Set up the membership plans", "On it."]);
+
+    // The Plans thread's answer is not bounced back to the MCP thread.
+    await agent.coordinatorTurn();
+    expect(coordinator.at(-1)).toContain("Notes already relayed between threads");
+    expect(await replies(mcpThread.id)).toEqual(["Working on MCP.", "MCP connector support is ready."]);
+    ws.close();
+   }, 20_000);
 
   it("reports a failed coordinator turn in the project chat", async () => {
     setFakeModel(() => {
@@ -178,54 +299,49 @@ describe("coordinator and thread agent", () => {
   it("meters every model call and reports it on the usage dashboard", async () => {
     setFakeModel((req) => {
       if (req.turns > 1) return { text: "", toolCalls: [] };
-      if (isCoordinator(req)) {
-        const id = newMessageId(req.prompt);
-        return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Pricing", instructions: "Look into it." })] }
-          : { text: "", toolCalls: [] };
-      }
-      return { text: "", toolCalls: [call("reply", { text: "Here it is." })] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Pricing", instructions: "Look into it.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
     });
 
-    const { project, ws, token, agent } = await setup();
+    const { project, ws, token, agent } = await setup(async (turn) => {
+      await turn.call("reply", { text: "Here it is." });
+    });
     ws.send(JSON.stringify({ type: "message.send", body: "what does it cost?" }));
 
     const usage = async (query = "") =>
       (await (await api(`/api/usage?days=7&tzOffset=-180${query}`, { token })).json()) as UsageSummary;
-    // Coordinator: start_thread, then stop. Thread agent: reply, then stop.
+    // Coordinator: start_thread, then stop. The thread's agent ran on the person's own CLI and account.
     const summary = await until(async () => {
       const s = await usage();
-      return s.totals.calls === 4 ? s : null;
-    }, "four metered calls");
+      return s.totals.calls === 2 ? s : null;
+    }, "two metered calls");
+    await until(async () => (await agent.getMessagesAfter(0)).messages.some((m: Message) => m.body === "Here it is."), "the reply");
 
     // The fake model reports 1000 input / 100 output tokens per call and firerouter/opus has no built-in price.
     expect(summary.totals).toEqual({
-      calls: 4,
-      inputTokens: 4000,
+      calls: 2,
+      inputTokens: 2000,
       cachedInputTokens: 0,
-      outputTokens: 400,
+      outputTokens: 200,
       costMicros: 0,
-      unpricedCalls: 4,
+      unpricedCalls: 2,
     });
-
-    // The thread's reply says what it took: one model call so far in its turn, in the cloud.
-    const { messages } = await agent.getMessagesAfter(0);
-    const reply = messages.find((m: Message) => m.body === "Here it is.")!;
-    expect(reply.stats).toMatchObject({
-      model: "firerouter/opus",
-      calls: 1,
-      inputTokens: 1000,
-      outputTokens: 100,
-      costMicros: null,
-      runtime: "cloud",
-    });
-    expect(reply.stats!.task).toBeUndefined();
+    // The thread's agent ran on the person's computer, so no sandbox time.
+    expect(summary.sandbox).toEqual({ runs: 0, seconds: 0 });
+    await env.DB.prepare(
+      "INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("task_sandbox_test", project.id, "thread_x", Date.now() - 90_000, Date.now(), 90)
+      .run();
+    expect((await usage()).sandbox).toEqual({ runs: 1, seconds: 90 });
+    expect((await usage("&projectId=proj_01JZZZZZZZZZZZZZZZZZZZZZZZ")).sandbox).toEqual({ runs: 0, seconds: 0 });
     expect(summary.daily).toHaveLength(7);
-    expect(summary.daily.at(-1)!.calls).toBe(4);
-    expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Altair", calls: 4 })]);
+    expect(summary.daily.at(-1)!.calls).toBe(2);
+    expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Myrel", calls: 2 })]);
     expect(summary.byModel).toEqual([expect.objectContaining({ provider: "fireworks", model: "firerouter/opus" })]);
-    expect(Object.fromEntries(summary.byAgent.map((a) => [a.agent, a.calls]))).toEqual({ coordinator: 2, thread: 2 });
-    expect(summary.topThreads).toEqual([expect.objectContaining({ title: "Pricing", calls: 2 })]);
+    expect(Object.fromEntries(summary.byAgent.map((a) => [a.agent, a.calls]))).toEqual({ coordinator: 2 });
 
     const [row] = (await env.DB.prepare("SELECT user_id FROM usage_events WHERE project_id = ?").bind(project.id).all())
       .results;

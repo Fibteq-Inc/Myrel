@@ -1,7 +1,7 @@
 /**
  * A tiny in-memory GitHub for tests: one installation (42, org "acme") that
  * covers repos 7 (acme/app) and 8 (acme/docs). Requests are recorded so tests
- * can check what Altair asked for.
+ * can check what Myrel asked for.
  */
 export const fakeGithub = {
   installations: [{ id: 42, account: { login: "acme", type: "Organization", avatar_url: "https://avatars.test/acme" } }],
@@ -12,6 +12,13 @@ export const fakeGithub = {
   files: { "acme/app": { "README.md": "# Acme app\n", "src/index.ts": "export const x = 1;\n" } } as Record<
     string,
     Record<string, string>
+  >,
+  /** Pull requests by "owner/name#number", in GitHub's REST shape. */
+  pulls: {} as Record<string, unknown>,
+  /** CI on a commit, by sha. */
+  checks: {} as Record<
+    string,
+    { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
   requests: [] as { method: string; url: string; body?: unknown }[],
 };
@@ -41,6 +48,18 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname === "/installation/repositories") {
     return Response.json({ total_count: fakeGithub.repos.length, repositories: fakeGithub.repos });
+  }
+  const pull = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
+  if (pull) {
+    const found = fakeGithub.pulls[`${pull[1]}#${pull[2]}`];
+    return found ? Response.json(found) : new Response("{}", { status: 404 });
+  }
+  const ci = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/commits\/([^/]+)\/(check-runs|status)$/);
+  if (ci) {
+    const { check_runs, statuses } = fakeGithub.checks[ci[1]!] ?? { check_runs: [], statuses: [] };
+    if (ci[2] === "check-runs") return Response.json({ total_count: check_runs.length, check_runs });
+    const state = statuses.some((s) => s.state !== "success") ? "pending" : "success";
+    return Response.json({ state, total_count: statuses.length, statuses });
   }
   const contents = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/contents\/?(.*)$/);
   if (contents) {

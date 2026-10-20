@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react-native";
-import { useI18n } from "@altair/i18n/react";
+import { useI18n } from "@myrel/i18n/react";
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import {
   ActivityIndicator,
@@ -89,8 +89,11 @@ export function Spinner({ size = 16, color = colors.accent }: { size?: number; c
   );
 }
 
-/** The Altair mark, as in the web app: a sparkle on a soft indigo tile. */
-export function AltairMark({ size = 28 }: { size?: number }) {
+/** The Myrel mark, as in the web app: a sparkle on a soft indigo tile. */
+/** The four-petal mark (same as the app icon). */
+const MARK_PETAL = "M512 512C512 360 600 250 700 250C760 250 790 300 770 350C740 430 620 470 512 512Z";
+
+export function MyrelMark({ size = 28 }: { size?: number }) {
   return (
     <View
       accessibilityElementsHidden
@@ -99,15 +102,15 @@ export function AltairMark({ size = 28 }: { size?: number }) {
         width: size,
         height: size,
         borderRadius: Math.round(size * 0.3),
-        backgroundColor: "#20234a",
-        borderWidth: 1,
-        borderColor: "#343a6b",
+        backgroundColor: "#5148e6",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      <Svg width={size / 2} height={size / 2} viewBox="0 0 24 24">
-        <Path d="M12 1.5l2.2 7.3 7.3 2.2-7.3 2.2L12 22.5l-2.2-9.3L2.5 11l7.3-2.2z" fill={colors.accent} />
+      <Svg width={size * 0.62} height={size * 0.62} viewBox="232 232 560 560">
+        {[0, 90, 180, 270].map((angle) => (
+          <Path key={angle} d={MARK_PETAL} fill="#f4efe6" transform={`rotate(${angle} 512 512)`} />
+        ))}
       </Svg>
     </View>
   );

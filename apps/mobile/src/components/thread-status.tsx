@@ -1,6 +1,6 @@
-import { parseChecklist } from "@altair/client";
-import type { MessageKey } from "@altair/i18n";
-import type { Thread } from "@altair/protocol";
+import { parseChecklist } from "@myrel/client";
+import type { MessageKey } from "@myrel/i18n";
+import type { Thread } from "@myrel/protocol";
 import { CircleAlert, CircleCheck, CircleDot, CirclePause } from "lucide-react-native";
 import { colors } from "../theme";
 import { Spinner } from "./ui";

@@ -1,8 +1,9 @@
-import { createDb, schema } from "@altair/db";
-import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo } from "@myrel/protocol";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { encryptSecret, keyHint } from "../crypto";
+import { deleteAccount } from "../delete-account";
 import { toApiKey } from "../keys";
 import { PROVIDERS, serverProviderId } from "../llm";
 import { type AppEnv, requireUser } from "../middleware";
@@ -15,6 +16,10 @@ export const accountRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const { id, name, email, role } = c.get("user");
     return c.json({ user: { id, name, email, role } satisfies Me });
+  })
+  .delete("/", async (c) => {
+    await deleteAccount(c.env, c.get("user").id);
+    return c.body(null, 204);
   })
 
   // ---- Model providers and keys ----

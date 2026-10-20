@@ -9,7 +9,7 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        // Must be registered first: a second launch (e.g. from an altair:// link) focuses this window
+        // Must be registered first: a second launch (e.g. from an myrel:// link) focuses this window
         // and the deep-link plugin forwards the URL to it.
         builder = builder
             .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -52,7 +52,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building Altair")
+        .expect("error while building Myrel")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 runner::stop(app);

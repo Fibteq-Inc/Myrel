@@ -1,17 +1,29 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
+  type AgentConnector,
   type CliId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerDirListing,
   type RunnerFolder,
   RunnerToServer,
   type ServerToRunner,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { notifyRunnerProjects, parseInfo, RUNNER_ID_HEADER } from "../runners";
 
-export type TaskStart = { taskId: string; projectId: string; threadId: string; folder: string; cli: CliId; prompt: string };
+export type TaskStart = {
+  taskId: string;
+  projectId: string;
+  threadId: string;
+  folder: string;
+  /** The project's other folders on this computer. */
+  folders?: string[];
+  cli: CliId;
+  prompt: string;
+  /** The CLI runs as the thread's agent, connected to the thread's MCP endpoint (needs feature "agent"). */
+  agent?: { mcpPath: string; token: string; connectors?: AgentConnector[] };
+};
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
 
@@ -61,7 +73,7 @@ export class RunnerAgent extends Agent<Env> {
       connection.close(4401, "unauthorized");
       return;
     }
-    // One live connection per runner: a second `altair-runner start` replaces the first.
+    // One live connection per runner: a second `myrel-runner start` replaces the first.
     for (const other of this.getConnections()) {
       if (other.id !== connection.id) other.close(4000, "replaced by a newer connection");
     }
@@ -88,7 +100,7 @@ export class RunnerAgent extends Agent<Env> {
         return send(connection, { type: "pong" });
       case "hello": {
         if (frame.protocol !== RUNNER_PROTOCOL_VERSION) {
-          connection.close(4400, `unsupported runner protocol ${frame.protocol}; update altair-runner`);
+          connection.close(4400, `unsupported runner protocol ${frame.protocol}; update myrel-runner`);
           return;
         }
         const { type: _t, protocol: _p, running, ...info } = frame;
@@ -107,15 +119,26 @@ export class RunnerAgent extends Agent<Env> {
       case "task.progress": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
         if (task?.status !== "running") return;
+        const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
+        if (frame.usage) await thread.cliUsage(task.id, frame.usage);
+        // Empty text: only the usage changed.
+        if (!frame.text) return;
         const project = await getAgentByName(this.env.PROJECT_AGENT, task.project_id);
         await project.setActivity(task.thread_id, true, frame.text.slice(0, 200));
-        const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
         await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.slice(0, 200) }]);
+        return;
+      }
+      case "task.folders": {
+        const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
+        if (task?.status !== "running") return;
+        await (await getAgentByName(this.env.THREAD_AGENT, task.thread_id)).agentFolders(task.id, frame.folders);
         return;
       }
       case "task.done": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
-        if (task?.status === "running") await this.finish(task, frame.ok, frame.result, frame.cancelled);
+        if (task?.status !== "running") return;
+        if (frame.usage) await (await getAgentByName(this.env.THREAD_AGENT, task.thread_id)).cliUsage(task.id, frame.usage);
+        await this.finish(task, frame.ok, frame.result, frame.cancelled);
         return;
       }
       case "folders":
@@ -149,7 +172,7 @@ export class RunnerAgent extends Agent<Env> {
   /** Sends a task to the computer. Callable over RPC by thread agents. */
   startTask(input: TaskStart): TaskStartResult {
     const connection = this.getConnections()[Symbol.iterator]().next().value as Connection | undefined;
-    if (!connection) return { ok: false, reason: "The computer is offline. Ask the person to run `altair-runner start` on it." };
+    if (!connection) return { ok: false, reason: "The computer is offline. Ask the person to run `myrel-runner start` on it." };
     const { taskId } = input;
     this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at)
       VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()})`;
@@ -158,8 +181,10 @@ export class RunnerAgent extends Agent<Env> {
       taskId,
       threadId: input.threadId,
       folder: input.folder,
+      ...(input.folders?.length && { folders: input.folders }),
       cli: input.cli,
       prompt: input.prompt,
+      ...(input.agent && { agent: input.agent }),
     });
     return { ok: true };
   }
@@ -175,7 +200,7 @@ export class RunnerAgent extends Agent<Env> {
       .from(schema.runners)
       .where(eq(schema.runners.id, this.name));
     if (!parseInfo(row?.info ?? null)?.features.includes("cancel")) {
-      return { ok: false, reason: "Update altair-runner on this computer to stop tasks from Altair (npx altair-runner@latest)." };
+      return { ok: false, reason: "Update myrel-runner on this computer to stop tasks from Myrel (npx myrel-runner@latest)." };
     }
     send(connection, { type: "task.cancel", taskId });
     return { ok: true };
@@ -202,7 +227,7 @@ export class RunnerAgent extends Agent<Env> {
   /** Stops every task and closes the connection, e.g. when the runner is removed. Callable over RPC. */
   async revoke(): Promise<void> {
     for (const task of this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running'`) {
-      await this.finish(task, false, "The computer was disconnected from Altair.");
+      await this.finish(task, false, "The computer was disconnected from Myrel.");
     }
     for (const c of this.getConnections()) c.close(4401, "runner removed");
   }
@@ -212,13 +237,13 @@ export class RunnerAgent extends Agent<Env> {
     question: DistributiveOmit<Question, "requestId">,
   ): Promise<{ ok: false; reason: string } | (Answer & { ok?: undefined })> {
     const [connection] = this.getConnections();
-    if (!connection) return { ok: false, reason: "The computer is offline. Start altair-runner on it first." };
+    if (!connection) return { ok: false, reason: "The computer is offline. Start myrel-runner on it first." };
     const [row] = await createDb(this.env.DB)
       .select({ info: schema.runners.info })
       .from(schema.runners)
       .where(eq(schema.runners.id, this.name));
     if (!parseInfo(row?.info ?? null)?.features.includes("folders")) {
-      return { ok: false, reason: "Update altair-runner on this computer to add folders from here (npx altair-runner@latest update)." };
+      return { ok: false, reason: "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update)." };
     }
     const requestId = crypto.randomUUID();
     const answer = await new Promise<Answer | null>((resolve) => {

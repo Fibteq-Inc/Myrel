@@ -1,11 +1,12 @@
-import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@altair/protocol";
+import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { createAuth } from "../src/auth";
+import { setExtensions } from "../src/extensions";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -158,9 +159,9 @@ describe("GET /api/info", () => {
     const res = await api("/api/info");
     expect(res.status).toBe(200);
     expect(ServerInfo.parse(await res.json())).toMatchObject({
-      app: "altair",
+      app: "myrel",
       apiVersion: API_VERSION,
-      name: "Altair",
+      name: "Myrel",
       auth: { emailPassword: true, signUp: true },
     });
   });
@@ -184,5 +185,40 @@ describe("sign-up switch", () => {
     expect(refused.ok).toBe(false);
     const signedIn = await req("sign-in/email", { email, password: "correct-horse-battery" });
     expect(signedIn.status).toBe(200);
+  });
+
+  it("lets ADMIN_EMAILS sign up while closed as admins, and makes no one else an admin", async () => {
+    const admin = `a${crypto.randomUUID()}@example.com`;
+    const closed = createAuth({ ...env, SIGNUP_ENABLED: "false", ADMIN_EMAILS: ` other@example.com, ${admin.toUpperCase()} ` } as Env);
+    const res = await closed.handler(
+      new Request(`${BASE}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ email: admin, password: "correct-horse-battery", name: "Admin" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { user } = (await res.json()) as { user: { role: string } };
+    expect(user.role).toBe("admin");
+
+    // A regular account is not an admin, and its admin routes stay closed.
+    const token = await signUp();
+    expect((await api("/api/admin/settings", { token })).status).toBe(403);
+  });
+});
+
+describe("extensions", () => {
+  it("lets a deployment's plan limits refuse a new project", async () => {
+    const token = await signUp();
+    await createProject(token, "First");
+    setExtensions({ canCreateProject: async () => ({ ok: false, reason: "Your plan allows 1 project." }) });
+    try {
+      const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Second" }) });
+      expect(res.status).toBe(402);
+      expect(await res.json()).toEqual({ error: "limit_reached", message: "Your plan allows 1 project." });
+    } finally {
+      setExtensions({});
+    }
+    await createProject(token, "Second");
   });
 });

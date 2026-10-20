@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -19,6 +19,7 @@ import {
   shell,
   taskBranch,
   taskEnv,
+  STOP_HARNESS_SCRIPT,
   taskScript,
   TaskSpec,
 } from "../src";
@@ -37,8 +38,8 @@ describe("lines", () => {
   it("round-trips marker lines and rejects bad ones", () => {
     const e: RunnerEvent = { type: "pr", url: "https://github.com/a/b/pull/1" };
     expect(parseMarker(formatMarker(e))).toEqual(e);
-    expect(parseMarker("::altair::{nope")).toBeNull();
-    expect(parseMarker('::altair::{"type":"what"}')).toBeNull();
+    expect(parseMarker("::myrel::{nope")).toBeNull();
+    expect(parseMarker('::myrel::{"type":"what"}')).toBeNull();
     expect(parseLine(shell, formatMarker(e))).toEqual([e]);
   });
 });
@@ -65,10 +66,53 @@ describe("opencode", () => {
 
   it("registers OpenAI-compatible models as a custom provider without the key", () => {
     const s = spec({ model: { kind: "openai", provider: "fireworks", id: "firerouter/opus", baseUrl: "https://api.fireworks.ai/inference/v1" } });
-    expect(opencode.command(s)).toBe(`opencode run --format json --model 'altair/firerouter/opus' "$ALTAIR_PROMPT"`);
+    expect(opencode.command(s)).toBe(`opencode run --format json --model 'myrel/firerouter/opus' "$MYREL_PROMPT"`);
     const config = JSON.stringify(opencodeConfig(s));
-    expect(config).toContain("{env:ALTAIR_MODEL_API_KEY}");
+    expect(config).toContain("{env:MYREL_MODEL_API_KEY}");
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
+  });
+
+  it("lets a model that reads images see the images OpenCode reads", () => {
+    const model = { kind: "openai" as const, provider: "fireworks", id: "qwen-vl", baseUrl: "https://api.fireworks.ai/inference/v1" };
+    const entry = (images?: boolean) =>
+      (opencodeConfig(spec({ model: { ...model, images } })).provider as Record<string, { models: Record<string, unknown> }>).myrel!.models["qwen-vl"];
+    expect(entry(true)).toMatchObject({ attachment: true, modalities: { input: ["text", "image"], output: ["text"] } });
+    expect(entry()).not.toHaveProperty("modalities");
+  });
+
+  it("connects to the thread's MCP endpoint as the thread's agent, with the token from the environment", () => {
+    expect(opencodeConfig(spec()).mcp).toBeUndefined();
+    const config = opencodeConfig(spec({ mcp: { url: "https://myrel.test/api/agent-mcp/thr_1" } }));
+    expect(config.mcp).toEqual({
+      myrel: {
+        type: "remote",
+        url: "https://myrel.test/api/agent-mcp/thr_1",
+        enabled: true,
+        headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" },
+      },
+    });
+  });
+
+  it("adds connectors: remote ones through Myrel with the same token, commands with their variables from secrets", () => {
+    const config = opencodeConfig(
+      spec({
+        mcp: {
+          url: "https://myrel.test/api/agent-mcp/thr_1",
+          connectors: [
+            { transport: "http", name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
+            { transport: "stdio", name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "MYREL_CONNECTOR_1_0" } },
+          ],
+        },
+      }),
+    );
+    const mcp = config.mcp as Record<string, unknown>;
+    expect(mcp.linear).toEqual({
+      type: "remote",
+      url: "https://myrel.test/api/agent-mcp/thr_1/c/linear",
+      enabled: true,
+      headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" },
+    });
+    expect(mcp.db).toEqual({ type: "local", command: ["npx", "-y", "pg-mcp"], enabled: true, environment: { DATABASE_URL: "{env:MYREL_CONNECTOR_1_0}" } });
   });
 });
 
@@ -119,7 +163,7 @@ describe("progress", () => {
 
   it("names branches after the task", () => {
     expect(taskBranch({ taskId: "task_01JABCDEFGHJKMNPQRSTVWXYZ", title: "Giriş hatasını düzelt!" })).toBe(
-      "altair/giris-hatasini-duzelt-tvwxyz",
+      "myrel/giris-hatasini-duzelt-tvwxyz",
     );
   });
 });
@@ -127,7 +171,7 @@ describe("progress", () => {
 /** Runs the real task script with bash, like a sandbox would. */
 function runScript(env: Record<string, string>) {
   const res = spawnSync("bash", ["-c", taskScript()], {
-    env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), "altair-home-")), ...env },
+    env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), "myrel-home-")), ...env },
     encoding: "utf8",
   });
   const events = res.stdout.split("\n").flatMap((l) => parseLine(shell, l));
@@ -136,11 +180,11 @@ function runScript(env: Record<string, string>) {
 
 describe("task script", () => {
   it("clones the repository, runs the harness on a fresh branch and reports phases", () => {
-    const origin = mkdtempSync(join(tmpdir(), "altair-origin-"));
+    const origin = mkdtempSync(join(tmpdir(), "myrel-origin-"));
     const git = (...args: string[]) => execFileSync("git", args, { cwd: origin, stdio: "pipe" });
     git("init", "-q", "-b", "main");
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
-    const workdir = mkdtempSync(join(tmpdir(), "altair-work-"));
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
 
     const s = spec({ harness: "shell", prompt: "echo hello > out.txt && git branch --show-current", repo: { url: `file://${origin}` } });
     const { code, events, stderr } = runScript(taskEnv(s, shell, { workdir }));
@@ -160,13 +204,83 @@ describe("task script", () => {
     ]);
   });
 
+  it("ends a harness that keeps going after its turn is done, as finished", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "echo replied && sleep 30 && echo too-late" });
+    const child = spawn("bash", ["-c", taskScript()], {
+      env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), "myrel-home-")), ...taskEnv(s, shell, { workdir }) },
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    const exited = new Promise<number | null>((resolve) => child.on("close", resolve));
+    while (!out.includes("replied")) await new Promise((r) => setTimeout(r, 50));
+    expect(spawnSync("bash", ["-c", STOP_HARNESS_SCRIPT]).status).toBe(0);
+    expect(await exited).toBe(0);
+    const events = out.split("\n").flatMap((l) => parseLine(shell, l));
+    expect(events).toContainEqual({ type: "phase", phase: "agent", state: "done" });
+    expect(events).toContainEqual({ type: "log", stream: "system", text: "Ended Shell: its reply was sent and its plan is done." });
+    expect(out).not.toContain("too-late");
+  });
+
+  it("downloads the thread's attachments next to the work before the harness starts", () => {
+    const source = mkdtempSync(join(tmpdir(), "myrel-src-"));
+    writeFileSync(join(source, "report.pdf"), "%PDF-1.7\n");
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const files = [
+      { path: "uploads/abc-report.pdf", url: `file://${join(source, "report.pdf")}` },
+      { path: "../escape.txt", url: `file://${join(source, "report.pdf")}` },
+      { path: "uploads/missing.png", url: `file://${join(source, "missing.png")}` },
+    ];
+    const s = spec({ harness: "shell", prompt: "cat files/uploads/abc-report.pdf" });
+    const { code, events } = runScript({ ...taskEnv(s, shell, { workdir }), MYREL_FILES: JSON.stringify(files) });
+    expect(code).toBe(0);
+    expect(events).toContainEqual({ type: "log", stream: "stdout", text: "%PDF-1.7" });
+    expect(events).toContainEqual({
+      type: "log",
+      stream: "system",
+      text: "Could not download uploads/missing.png; read_file gives a fresh link.",
+    });
+    expect(existsSync(join(workdir, "escape.txt"))).toBe(false);
+  });
+
+  it("puts the turn's skills next to the work and where OpenCode looks, and takes them away again", () => {
+    const source = mkdtempSync(join(tmpdir(), "myrel-src-"));
+    const b64 = (t: string) => Buffer.from(t).toString("base64");
+    const bundle = {
+      skills: [
+        { name: "pdf-forms", files: [{ path: "SKILL.md", content: b64("---\nname: pdf-forms\n---\n") }, { path: "scripts/fill.sh", content: b64("echo filled") }] },
+        { name: "evil", files: [{ path: "../../escape.txt", content: b64("x") }] },
+      ],
+    };
+    writeFileSync(join(source, "bundle.json"), JSON.stringify(bundle));
+    const home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+    const own = join(home, ".config", "opencode", "skills");
+    // Someone's own skill there stays.
+    execFileSync("mkdir", ["-p", join(own, "theirs")]);
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "skills/pdf-forms/scripts/fill.sh", skills: { url: `file://${join(source, "bundle.json")}` } });
+    const { code, events } = runScript({ ...taskEnv(s, shell, { workdir }), HOME: home });
+    expect(code).toBe(0);
+    expect(events).toContainEqual({ type: "log", stream: "stdout", text: "filled" });
+    expect(readFileSync(join(own, "pdf-forms", "SKILL.md"), "utf8")).toContain("pdf-forms");
+    expect(existsSync(join(home, ".claude", "skills", "pdf-forms", "scripts", "fill.sh"))).toBe(true);
+    expect(existsSync(join(workdir, "escape.txt"))).toBe(false);
+    expect(existsSync(join(workdir, "skills", ".bundle.json"))).toBe(false);
+
+    const next = runScript({ ...taskEnv(spec({ harness: "shell", prompt: "true" }), shell, { workdir }), HOME: home });
+    expect(next.code).toBe(0);
+    expect(existsSync(join(own, "pdf-forms"))).toBe(false);
+    expect(existsSync(join(workdir, "skills"))).toBe(false);
+    expect(existsSync(join(own, "theirs"))).toBe(true);
+  });
+
   it("saves every result to the workspace and starts the next task from it", () => {
-    const remote = mkdtempSync(join(tmpdir(), "altair-ws-"));
+    const remote = mkdtempSync(join(tmpdir(), "myrel-ws-"));
     execFileSync("git", ["init", "-q", "--bare", remote]);
     const workspace = { remote: `file://${remote}` };
     // Each task gets a fresh workdir, like a sandbox that went to sleep in between.
     const run = (prompt: string) =>
-      runScript(taskEnv(spec({ harness: "shell", prompt, workspace }), shell, { workdir: mkdtempSync(join(tmpdir(), "altair-work-")) }));
+      runScript(taskEnv(spec({ harness: "shell", prompt, workspace }), shell, { workdir: mkdtempSync(join(tmpdir(), "myrel-work-")) }));
 
     const first = run("echo one > notes.txt");
     expect(first.code).toBe(0);
@@ -187,17 +301,17 @@ describe("task script", () => {
   });
 
   it("continues a repository branch from the saved work", () => {
-    const origin = mkdtempSync(join(tmpdir(), "altair-origin-"));
+    const origin = mkdtempSync(join(tmpdir(), "myrel-origin-"));
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: origin });
     execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: origin });
-    const remote = mkdtempSync(join(tmpdir(), "altair-ws-"));
+    const remote = mkdtempSync(join(tmpdir(), "myrel-ws-"));
     execFileSync("git", ["init", "-q", "--bare", remote]);
     const run = (prompt: string) =>
       runScript(
         taskEnv(
           spec({ harness: "shell", prompt, repo: { url: `file://${origin}`, branch: "fix" }, workspace: { remote: `file://${remote}` } }),
           shell,
-          { workdir: mkdtempSync(join(tmpdir(), "altair-work-")) },
+          { workdir: mkdtempSync(join(tmpdir(), "myrel-work-")) },
         ),
       );
     expect(run("echo draft > fix.txt").code).toBe(0);
@@ -207,8 +321,8 @@ describe("task script", () => {
   });
 
   it("goes on without saving when the workspace cannot be reached", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "altair-work-"));
-    const s = spec({ harness: "shell", prompt: "true", workspace: { remote: "file:///nonexistent/altair-ws" } });
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "true", workspace: { remote: "file:///nonexistent/myrel-ws" } });
     const { code, events } = runScript(taskEnv(s, shell, { workdir }));
     expect(code).toBe(0);
     expect(events.some((e) => e.type === "phase" && e.phase === "save")).toBe(false);
@@ -216,7 +330,7 @@ describe("task script", () => {
   });
 
   it("fails the agent phase with the harness's exit code", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "altair-work-"));
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
     writeFileSync(join(workdir, "x"), "");
     const { code, events } = runScript(taskEnv(spec({ harness: "shell", prompt: "exit 3" }), shell, { workdir }));
     expect(code).toBe(3);

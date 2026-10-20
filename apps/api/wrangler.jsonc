@@ -1,9 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "altair",
+  "name": "myrel",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: fetch() goes out like a request from the Internet, so connectors
+  // on other Workers of this zone (Fibteq Flow at astral.fibteq.io) are reachable; without it a
+  // same-zone fetch skips their Worker and fails.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
 
   // The web app (apps/web) is built into ../web/dist and served from the same Worker.
@@ -12,15 +15,15 @@
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/assets/*"]
   },
 
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "altair",
-      // Replace with the id printed by `wrangler d1 create altair` before deploying.
-      "database_id": "0fdc232a-4bf4-4674-a1cc-a5f14e18911a",
+      "database_name": "myrel",
+      // Replace with the id printed by `wrangler d1 create myrel` before deploying.
+      "database_id": "99b4a472-b3d3-42b2-a94f-ffef351634a5",
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
@@ -29,15 +32,15 @@
   // FILES: project files and message uploads, under projects/<projectId>/files/.
   // ARTIFACTS: artifact versions (HTML); the artifact Worker (apps/artifacts) serves them from its own domain.
   "r2_buckets": [
-    { "binding": "FILES", "bucket_name": "altair-files" },
-    { "binding": "ARTIFACTS", "bucket_name": "altair-artifacts" }
+    { "binding": "FILES", "bucket_name": "myrel-files" },
+    { "binding": "ARTIFACTS", "bucket_name": "myrel-artifacts" }
   ],
 
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_AGENT", "class_name": "ProjectAgent" },
       { "name": "THREAD_AGENT", "class_name": "ThreadAgent" },
-      // One per paired computer running altair-runner.
+      // One per paired computer running myrel-runner.
       { "name": "RUNNER_AGENT", "class_name": "RunnerAgent" },
       // One Linux container per thread for run_task (src/sandbox). Needs Cloudflare Containers
       // (Workers Paid plan). Remove this binding and the "containers" block to run without it:
@@ -51,8 +54,14 @@
     { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
   ],
 
+  // Every 10 minutes: prepares the sandbox tools when a deploy changed them (src/sandbox), so no thread
+  // waits minutes for the first start after it. Cheap when nothing changed.
+  "triggers": { "crons": ["*/10 * * * *"] },
+
   // Sandbox containers. No image is built on deploy: they run Cloudflare's managed Debian image, set up
   // once and snapshotted (src/sandbox/setup.ts).
+  // The name stays altair-sandbox: a Durable Object namespace attaches to one Container application,
+  // and a new name makes wrangler try to create a second one, which fails the deploy.
   "containers": [
     {
       "name": "altair-sandbox",
@@ -64,7 +73,7 @@
   // Cloudflare Artifacts (beta): one git repository per thread, where the sandbox saves each task's
   // work so the next task continues from it. Optional: without this binding nothing is saved between
   // tasks except what a task pushes to GitHub.
-  "artifacts": [{ "binding": "WORKSPACES", "namespace": "altair" }],
+  "artifacts": [{ "binding": "WORKSPACES", "namespace": "myrel" }],
 
   // Cloudflare Email Service (Email Sending) for notification emails. Needs a domain onboarded under
   // Compute > Email Service > Email Sending and the EMAIL_FROM var below. Locally, `wrangler dev`
@@ -77,12 +86,14 @@
   // and the model keys below. There is no `secrets.required` list on
   // purpose: with one, `wrangler dev` drops every .dev.vars secret not on it, so the optional
   // model keys could not be used locally.
-  // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
+  // BETTER_AUTH_URL: public origin, e.g. https://myrel.example.com (inferred from the request if empty).
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
-  // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Altair".
+  // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Myrel".
   // SIGNUP_ENABLED: "true" lets anyone create an account; otherwise only existing accounts and invited
   // people can. Admins can change it at runtime in Settings, which then takes precedence.
+  // ADMIN_EMAILS (secret): comma-separated addresses of the server's admins. They may sign up while
+  // sign-ups are closed. Unset = the first account becomes the admin, so set it before opening sign-ups.
   //
   // Models (see src/llm/index.ts): the server default. Each project can pick its own provider, model
   // and key in its settings (src/keys.ts). LLM_PROVIDER: fireworks (default), anthropic or openai.
@@ -105,10 +116,11 @@
   // published and listed but cannot be opened. ARTIFACT_SIGNING_SECRET (secret): shared with
   // the artifact Worker, which only serves links signed with it.
   //
-  // Sandbox (run_task). Repository access comes from the project's GitHub connection.
+  // Sandbox (the cloud thread agent, OpenCode). Repository access comes from the project's GitHub connection.
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
-  // RUNNER_HARNESS: default coding harness, opencode (default) or claude-code.
   // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
+  // RUNNER_IMAGES: "true" or "false" when that model does or does not read images (screenshots);
+  // empty = guessed from its name.
   //
   // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
   //
@@ -117,27 +129,27 @@
   // domain onboarded under Email Service > Email Sending. The value here is Fibteq's own deployment
   // (fibteq.app); self-hosting: use an address on your domain, or empty to turn email off.
   // Web Push: VAPID_PUBLIC_KEY here + VAPID_PRIVATE_KEY secret (generate both with
-  // `pnpm --filter @altair/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
+  // `pnpm --filter @myrel/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
   // Mobile push goes through Expo; EXPO_ACCESS_TOKEN secret only if enhanced push security is on.
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
-    "INSTANCE_NAME": "Altair",
+    "INSTANCE_NAME": "Myrel",
     "SIGNUP_ENABLED": "false",
     "LLM_PROVIDER": "fireworks",
     "LLM_MODEL": "",
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
-    "ARTIFACTS_URL": "https://altair-artifacts.fibteq.workers.dev",
+    "ARTIFACTS_URL": "https://myrel-artifacts.fibteq.workers.dev",
 
     "GITHUB_APP_ID": "5386818",
     "GITHUB_APP_SLUG": "fibteq",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
-    "RUNNER_HARNESS": "opencode",
     "RUNNER_MODEL": "",
+    "RUNNER_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
-    "EMAIL_FROM": "Altair <altair@fibteq.app>",
+    "EMAIL_FROM": "Myrel <myrel@fibteq.app>",
     "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
     "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
   }

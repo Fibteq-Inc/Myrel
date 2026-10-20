@@ -8,7 +8,7 @@ export interface KeyValueStore {
 
 export type PickedFile = { name: string; type: string; size: number; blob: Blob };
 
-/** What the bundled altair-runner is doing (its `start --json` states, plus `error` when it crashed). */
+/** What the bundled myrel-runner is doing (its `start --json` states, plus `error` when it crashed). */
 export type ComputerStatus =
   | { state: "connecting" }
   | { state: "online"; name: string }
@@ -20,7 +20,7 @@ export type ComputerAccess = "read" | "edit" | "full";
 
 export type ComputerInfo = {
   paired: boolean;
-  /** The Altair server this computer is paired with. */
+  /** The Myrel server this computer is paired with. */
   server?: string;
   runnerId?: string;
   access: ComputerAccess;
@@ -31,8 +31,8 @@ export type ComputerInfo = {
 };
 
 /**
- * The computer the app runs on, as an Altair runner (desktop only): pair it with one click and
- * keep the bundled altair-runner running while the app is open. Folders are shared from the
+ * The computer the app runs on, as an Myrel runner (desktop only): pair it with one click and
+ * keep the bundled myrel-runner running while the app is open. Folders are shared from the
  * Devices page like any other runner.
  */
 export interface LocalComputer {
@@ -64,7 +64,7 @@ export interface Platform {
 }
 
 /** Key/value store over Web Storage; falls back to memory when storage is blocked. */
-export function webStorage(prefix = "altair:"): KeyValueStore {
+export function webStorage(prefix = "myrel:"): KeyValueStore {
   const memory = new Map<string, string>();
   const ls = (() => {
     try {

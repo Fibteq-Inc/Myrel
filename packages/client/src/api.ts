@@ -4,8 +4,12 @@ import type {
   ArtifactVersion,
   ArtifactView,
   AdminSettings,
+  BillingSummary,
   ApiKey,
+  Connector,
   CreateApiKeyInput,
+  CreateConnectorInput,
+  CreateSkillInput,
   CreateInviteInput,
   CreateProjectInput,
   Instructions,
@@ -24,6 +28,7 @@ import type {
   ProjectWorkspace,
   ProviderId,
   ProviderInfo,
+  PullRequest,
   PutMemoryInput,
   PairRunnerResult,
   Runner,
@@ -31,10 +36,14 @@ import type {
   RunnerFolder,
   RunnerPairingCode,
   SetWorkspaceInput,
+  Skill,
+  SkillDetail,
   Task,
   ThreadFiles,
   TerminalLine,
   UpdateAdminSettingsInput,
+  UpdateConnectorInput,
+  UpdateSkillInput,
   UpdateProjectSettingsInput,
   CreateRoutineInputRaw,
   Notification,
@@ -44,16 +53,16 @@ import type {
   Routine,
   UpdateRoutineInputRaw,
   UsageSummary,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
-  /** Origin of the API, e.g. "https://altair.example.com". Empty string = same origin (web). */
+  /** Origin of the API, e.g. "https://myrel.example.com". Empty string = same origin (web). */
   baseUrl: string;
   /** Bearer token storage. Omit to use cookies only (same-origin web). */
   tokens?: TokenStore;
   fetch?: typeof fetch;
-  /** Sent with every request, e.g. the mobile app's `origin: altair://`. */
+  /** Sent with every request, e.g. the mobile app's `origin: myrel://`. */
   headers?: Record<string, string>;
   /** Native apps use "omit": they authenticate with the bearer token, never with cookies. */
   credentials?: RequestCredentials;
@@ -129,7 +138,8 @@ export class ApiClient {
 
   // --- auth (Better Auth endpoints) ---
 
-  signUp(input: { email: string; password: string; name: string }) {
+  /** `acceptTerms` is required when the server's info lists legal documents. */
+  signUp(input: { email: string; password: string; name: string; acceptTerms?: boolean }) {
     return this.request<{ user: SessionUser }>("/api/auth/sign-up/email", { method: "POST", body: input });
   }
 
@@ -216,6 +226,11 @@ export class ApiClient {
     return (await this.request<{ user: Me }>("/api/account")).user;
   }
 
+  /** Deletes the signed-in account for good; projects only this person owns go with it. */
+  async deleteAccount() {
+    await this.request("/api/account", { method: "DELETE" });
+  }
+
   /** Better Auth endpoint. */
   async updateProfile(input: { name: string }) {
     await this.request("/api/auth/update-user", { method: "POST", body: input });
@@ -255,6 +270,116 @@ export class ApiClient {
 
   async declineInvite(id: string) {
     await this.request(`/api/account/invites/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  // --- connectors (MCP servers) ---
+
+  /** A person's own connectors, or a project's when `projectId` is given. */
+  private connectorsPath(projectId?: string) {
+    return projectId ? `/api/projects/${encodeURIComponent(projectId)}/connectors` : "/api/account/connectors";
+  }
+
+  async listConnectors(projectId?: string) {
+    return (await this.request<{ connectors: Connector[] }>(this.connectorsPath(projectId))).connectors;
+  }
+
+  /** Adds a connector. An OAuth one answers with `authorizeUrl`: open it so the person signs in. */
+  createConnector(input: CreateConnectorInput, projectId?: string) {
+    return this.request<{ connector: Connector; authorizeUrl?: string }>(this.connectorsPath(projectId), {
+      method: "POST",
+      body: input,
+    });
+  }
+
+  async updateConnector(id: string, input: UpdateConnectorInput, projectId?: string) {
+    return (
+      await this.request<{ connector: Connector }>(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: input,
+      })
+    ).connector;
+  }
+
+  async deleteConnector(id: string, projectId?: string) {
+    await this.request(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** Reconnects and refreshes the tool list. */
+  async checkConnector(id: string, projectId?: string) {
+    return (
+      await this.request<{ connector: Connector }>(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}/check`, {
+        method: "POST",
+        body: {},
+      })
+    ).connector;
+  }
+
+  // --- personal skills and connectors in a project ---
+
+  /** The caller's own skills and connectors, each saying whether it is on in this project (they start off). */
+  getPersonalInProject(projectId: string) {
+    return this.request<{ skills: (Skill & { inProject: boolean })[]; connectors: (Connector & { inProject: boolean })[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/personal`,
+    );
+  }
+
+  async setPersonalInProject(projectId: string, kind: "skills" | "connectors", id: string, on: boolean) {
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/personal/${kind}/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: { on },
+    });
+  }
+
+  // --- skills ---
+
+  /** A person's own skills, or a project's when `projectId` is given. */
+  private skillsPath(projectId?: string) {
+    return projectId ? `/api/projects/${encodeURIComponent(projectId)}/skills` : "/api/account/skills";
+  }
+
+  async listSkills(projectId?: string) {
+    return (await this.request<{ skills: Skill[] }>(this.skillsPath(projectId))).skills;
+  }
+
+  /** One skill with its SKILL.md. */
+  async getSkill(id: string, projectId?: string) {
+    return (await this.request<{ skill: SkillDetail }>(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}`)).skill;
+  }
+
+  /**
+   * Adds a skill. A GitHub source with several skills fails with 409 and a SkillChoices body
+   * (`error: "choose_skill"`): add again with `skill` set to one of them.
+   */
+  async createSkill(input: CreateSkillInput, projectId?: string) {
+    return (await this.request<{ skill: Skill }>(this.skillsPath(projectId), { method: "POST", body: input })).skill;
+  }
+
+  async updateSkill(id: string, input: UpdateSkillInput, projectId?: string) {
+    return (
+      await this.request<{ skill: Skill }>(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}`, { method: "PATCH", body: input })
+    ).skill;
+  }
+
+  /** Takes a GitHub skill again from its branch as it is now. `changed` is false when nothing moved. */
+  updateSkillFromSource(id: string, projectId?: string) {
+    return this.request<{ skill: Skill; changed: boolean }>(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}/update`, {
+      method: "POST",
+      body: {},
+    });
+  }
+
+  async deleteSkill(id: string, projectId?: string) {
+    await this.request(`${this.skillsPath(projectId)}/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** A sign-in link for an OAuth connector. */
+  async authorizeConnector(id: string, projectId?: string) {
+    return (
+      await this.request<{ authorizeUrl: string }>(`${this.connectorsPath(projectId)}/${encodeURIComponent(id)}/authorize`, {
+        method: "POST",
+        body: {},
+      })
+    ).authorizeUrl;
   }
 
   // --- server administration ---
@@ -371,6 +496,12 @@ export class ApiClient {
     return (await this.request<{ tasks: (Task & { log: TerminalLine[] })[] }>(path)).tasks;
   }
 
+  /** Pull requests the thread's tasks opened, with their live state. */
+  async listPullRequests(projectId: string, threadId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests`;
+    return (await this.request<{ pullRequests: PullRequest[] }>(path)).pullRequests;
+  }
+
   /** What the thread's cloud tasks saved: history and the folder or file at `path`. Null when nothing was saved. */
   async threadFiles(projectId: string, threadId: string, path = "") {
     const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/files`;
@@ -391,18 +522,42 @@ export class ApiClient {
     return this.request<UsageSummary>(`/api/usage?${query}`);
   }
 
-  // --- local computers (altair-runner) ---
+  // --- plans and billing (hosted service only; see ServerInfo.billing) ---
+
+  getBilling() {
+    return this.request<BillingSummary>("/api/billing");
+  }
+
+  /** A Stripe Checkout URL for Pro or Team. */
+  startCheckout(input: { plan: "pro" | "team"; interval: "month" | "year"; seats?: number }) {
+    return this.request<{ url: string }>("/api/billing/checkout", { method: "POST", body: input });
+  }
+
+  /** A Stripe billing portal URL: change plan or card, cancel, invoices. */
+  openBillingPortal() {
+    return this.request<{ url: string }>("/api/billing/portal", { method: "POST", body: {} });
+  }
+
+  addTeamMember(email: string) {
+    return this.request<null>("/api/billing/team/members", { method: "POST", body: { email } });
+  }
+
+  removeTeamMember(userId: string) {
+    return this.request<null>(`/api/billing/team/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  }
+
+  // --- local computers (myrel-runner) ---
 
   async listRunners() {
     return (await this.request<{ runners: Runner[] }>("/api/runners")).runners;
   }
 
-  /** A short-lived code for `altair-runner pair`. */
+  /** A short-lived code for `myrel-runner pair`. */
   createPairingCode() {
     return this.request<RunnerPairingCode>("/api/runners/pairing", { method: "POST", body: {} });
   }
 
-  /** Trades a pairing code for a runner login, as `altair-runner pair` does (the desktop app pairs itself). */
+  /** Trades a pairing code for a runner login, as `myrel-runner pair` does (the desktop app pairs itself). */
   pairRunner(input: { code: string; name: string; hostname?: string; platform?: string }) {
     return this.request<PairRunnerResult>("/api/runner/pair", { method: "POST", body: input });
   }
@@ -445,6 +600,21 @@ export class ApiClient {
         body: input,
       })
     ).workspace;
+  }
+
+  /** Adds one of the computer's shared folders to the project's other folders. */
+  async addWorkspaceFolder(projectId: string, path: string) {
+    return (
+      await this.request<{ workspace: ProjectWorkspace }>(`/api/projects/${encodeURIComponent(projectId)}/workspace/folders`, {
+        method: "POST",
+        body: { path },
+      })
+    ).workspace;
+  }
+
+  async removeWorkspaceFolder(projectId: string, path: string) {
+    const url = `/api/projects/${encodeURIComponent(projectId)}/workspace/folders?path=${encodeURIComponent(path)}`;
+    return (await this.request<{ workspace: ProjectWorkspace }>(url, { method: "DELETE" })).workspace;
   }
 
   async clearWorkspace(projectId: string) {

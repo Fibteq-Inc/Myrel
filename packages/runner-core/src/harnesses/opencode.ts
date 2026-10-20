@@ -1,14 +1,14 @@
 import { type Harness, jsonLine, log, num, obj, shellQuote, str, todoStatus } from "../harness";
 import type { RunnerEvent, TaskSpec } from "../spec";
 
-/** Provider name Altair registers in OpenCode's config for OpenAI-compatible models. */
-const CUSTOM_PROVIDER = "altair";
+/** Provider name Myrel registers in OpenCode's config for OpenAI-compatible models. */
+const CUSTOM_PROVIDER = "myrel";
 
 /**
  * OpenCode (`opencode run --format json`). The model comes from the task:
  * an OpenAI-compatible endpoint (Fireworks, OpenAI, ...) is registered as a
  * custom provider; Anthropic uses OpenCode's built-in provider. The key is
- * read from ALTAIR_MODEL_API_KEY so it never lands in the config.
+ * read from MYREL_MODEL_API_KEY so it never lands in the config.
  */
 export const opencode: Harness = {
   id: "opencode",
@@ -16,7 +16,7 @@ export const opencode: Harness = {
 
   command(spec) {
     const model = opencodeModel(spec);
-    return ["opencode run --format json", model ? `--model ${shellQuote(model)}` : "", '"$ALTAIR_PROMPT"']
+    return ["opencode run --format json", model ? `--model ${shellQuote(model)}` : "", '"$MYREL_PROMPT"']
       .filter(Boolean)
       .join(" ");
   },
@@ -50,7 +50,10 @@ export const opencode: Harness = {
           ];
         }
         const title = str(state.title) || str(input.description) || str(input.command) || str(input.filePath) || tool;
-        const events: RunnerEvent[] = [{ type: "tool", name: tool, title: title.slice(0, 500) }];
+        // OpenCode reports a tool once it finished, with when it started and ended.
+        const time = obj(state.time);
+        const ms = num(time.end) - num(time.start);
+        const events: RunnerEvent[] = [{ type: "tool", name: tool, title: title.slice(0, 500), ...(num(time.start) > 0 && ms >= 0 && { ms }) }];
         const output = str(state.output);
         if (tool === "bash" && output) events.push(log(output.trimEnd()));
         return events;
@@ -84,18 +87,42 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
     // Nobody is there to approve: the sandbox is the boundary.
     permission: { edit: "allow", bash: "allow", webfetch: "allow" },
   };
+  if (spec.mcp) {
+    // The token is read from the environment so it never lands in the config.
+    const auth = { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" };
+    const servers: Record<string, unknown> = { myrel: { type: "remote", url: spec.mcp.url, enabled: true, headers: auth } };
+    for (const c of spec.mcp.connectors ?? []) {
+      servers[c.name] =
+        c.transport === "http"
+          ? { type: "remote", url: c.url, enabled: true, headers: auth }
+          : {
+              type: "local",
+              command: [c.command, ...c.args],
+              enabled: true,
+              environment: Object.fromEntries(Object.entries(c.env).map(([name, secret]) => [name, `{env:${secret}}`])),
+            };
+    }
+    config.mcp = servers;
+  }
   const m = spec.model;
   if (!m) return config;
-  const apiKey = "{env:ALTAIR_MODEL_API_KEY}";
+  const apiKey = "{env:MYREL_MODEL_API_KEY}";
   config.provider =
     m.kind === "anthropic"
       ? { anthropic: { options: { apiKey, ...(m.baseUrl ? { baseURL: `${m.baseUrl.replace(/\/+$/, "")}/v1` } : {}) } } }
       : {
           [CUSTOM_PROVIDER]: {
             npm: "@ai-sdk/openai-compatible",
-            name: `Altair (${m.provider})`,
+            name: `Myrel (${m.provider})`,
             options: { baseURL: m.baseUrl, apiKey },
-            models: { [m.id]: { name: m.id, tool_call: true } },
+            // OpenCode passes an image file it reads to the model only when the model says it takes images.
+            models: {
+              [m.id]: {
+                name: m.id,
+                tool_call: true,
+                ...(m.images && { attachment: true, modalities: { input: ["text", "image"], output: ["text"] } }),
+              },
+            },
           },
         };
   return config;

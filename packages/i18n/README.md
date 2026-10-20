@@ -1,6 +1,6 @@
-# @altair/i18n
+# @myrel/i18n
 
-UI strings for Altair, shared by the web app and the mobile app. No
+UI strings for Myrel, shared by the web app and the mobile app. No
 dependencies: a typed catalog per language, `{name}` parameters, plural forms
 through `Intl.PluralRules`, and small React bindings.
 
@@ -18,7 +18,7 @@ Settings → Account, the account menu or the sign-in page.
 3. Use it:
 
    ```tsx
-   import { useT } from "@altair/i18n/react";
+   import { useT } from "@myrel/i18n/react";
 
    const t = useT();
    <button>{t("thread.resolve")}</button>;
@@ -33,8 +33,8 @@ Settings → Account, the account menu or the sign-in page.
 Rules of thumb:
 
 - Every visible string goes through `t`, including `aria-label`, `title` and
-  `placeholder`. Product names (Altair), code and examples like
-  `altair.example.com` stay as they are.
+  `placeholder`. Product names (Myrel), code and examples like
+  `myrel.example.com` stay as they are.
 - Write whole sentences as one message with parameters; never glue pieces
   together, since word order differs between languages.
 - If you don't speak a language, add your best translation and say so in the

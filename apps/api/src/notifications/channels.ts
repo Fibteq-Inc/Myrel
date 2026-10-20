@@ -1,4 +1,4 @@
-import type { NotificationConfig } from "@altair/protocol";
+import type { NotificationConfig } from "@myrel/protocol";
 import type { VapidKeys } from "./webpush";
 
 /** Web Push keys, when VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set. */
@@ -27,7 +27,7 @@ export async function sendEmail(env: Env, email: Email): Promise<void> {
   await env.EMAIL.send({ from: parseAddress(env.EMAIL_FROM), ...email });
 }
 
-/** "Altair <altair@example.com>" or a bare address. */
+/** "Myrel <myrel@example.com>" or a bare address. */
 export function parseAddress(value: string): string | { name: string; email: string } {
   const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value);
   return m ? { name: m[1]!.replace(/^"|"$/g, ""), email: m[2]! } : value.trim();

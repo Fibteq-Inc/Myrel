@@ -1,12 +1,13 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import type { Project } from "@myrel/protocol";
 import { ArrowRight, FolderPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { ProjectBadge } from "../../components/shell/project-header";
 import { NavToggle, PaneHeader } from "../../components/shell/shell";
 import { api, projectsQuery } from "../../lib/api";
-import { AltairMark, Button, errorMessage, Input } from "../../lib/ui";
+import { MyrelMark, Button, errorMessage, Input } from "../../lib/ui";
 
 export const Route = createFileRoute("/_app/")({
   loader: ({ context }) => context.queryClient.ensureQueryData(projectsQuery),
@@ -15,7 +16,8 @@ export const Route = createFileRoute("/_app/")({
 
 function ProjectsPage() {
   const t = useT();
-  const { data: projects } = useSuspenseQuery(projectsQuery);
+  // Polled so each card's live activity stays current while the list is open.
+  const { data: projects } = useSuspenseQuery({ ...projectsQuery, refetchInterval: 15_000 });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -37,12 +39,12 @@ function ProjectsPage() {
     <main className="flex min-h-0 flex-1 flex-col">
       <PaneHeader className="md:hidden">
         <NavToggle />
-        <span className="font-semibold">Altair</span>
+        <span className="font-semibold">Myrel</span>
       </PaneHeader>
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-12 sm:py-20">
           <div className="flex flex-col items-center gap-3 text-center">
-            <AltairMark size={44} />
+            <MyrelMark size={44} />
             <h1 className="text-2xl font-semibold tracking-tight">{t("projects.start")}</h1>
             <p className="max-w-md text-[13px] text-subtle">
               {t("projects.intro")}
@@ -85,9 +87,7 @@ function ProjectsPage() {
                       <ProjectBadge name={p.name} size={32} />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate font-medium">{p.name}</span>
-                        <span className="text-xs text-subtle">
-                          {p.role === "owner" ? t("projects.owner") : t("projects.member")}
-                        </span>
+                        <ProjectActivity project={p} />
                       </span>
                       <ArrowRight
                         size={15}
@@ -103,5 +103,33 @@ function ProjectsPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+/** The card's second line: what is going on in the project right now, or the user's role when nothing is. */
+function ProjectActivity({ project }: { project: Project }) {
+  const t = useT();
+  const working = project.activity?.working ?? 0;
+  const waiting = project.activity?.waiting ?? 0;
+  if (!working && !waiting) {
+    return (
+      <span className="text-xs text-subtle">{project.role === "owner" ? t("projects.owner") : t("projects.member")}</span>
+    );
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-2.5 text-xs">
+      {working > 0 && (
+        <span className="flex items-center gap-1.5 text-accent">
+          <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent" aria-hidden="true" />
+          <span className="truncate">{t("projects.working", { count: working })}</span>
+        </span>
+      )}
+      {waiting > 0 && (
+        <span className="flex items-center gap-1.5 text-warn">
+          <span className="size-1.5 flex-none rounded-full bg-warn" aria-hidden="true" />
+          <span className="truncate">{t("projects.waiting", { count: waiting })}</span>
+        </span>
+      )}
+    </span>
   );
 }

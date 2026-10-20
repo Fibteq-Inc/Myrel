@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, Cloud, Folder, FolderPlus, Laptop } from "lucide-react";
@@ -84,6 +84,11 @@ function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
   return (
     <div className="flex flex-col gap-1.5 text-[13px]">
       <span className="font-mono text-[12.5px]">{workspace.path}</span>
+      {workspace.folders.map((f) => (
+        <span key={f} className="font-mono text-[12.5px] text-muted">
+          {f}
+        </span>
+      ))}
       <span className="flex items-center gap-1.5 text-subtle">
         <OnlineDot online={workspace.online} />
         {workspace.runnerName} · {CLI_NAMES[workspace.cli]} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
@@ -92,7 +97,7 @@ function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
   );
 }
 
-function WorkspaceForm({
+export function WorkspaceForm({
   project,
   workspace,
   onDone,
@@ -245,7 +250,7 @@ function WorkspaceForm({
           <OnlineDot online={false} />
           <span>
             {offlineBefore}
-            <code className="font-mono text-fg">npx altair-runner service install</code>
+            <code className="font-mono text-fg">npx myrel-runner service install</code>
             {offlineAfter}
           </span>
         </p>

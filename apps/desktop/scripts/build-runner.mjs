@@ -1,12 +1,12 @@
-// Builds packages/altair-runner into one self-contained executable per target with `bun build --compile`
-// and puts it where Tauri expects the sidecar: src-tauri/binaries/altair-runner-<target triple>[.exe].
+// Builds packages/myrel-runner into one self-contained executable per target with `bun build --compile`
+// and puts it where Tauri expects the sidecar: src-tauri/binaries/myrel-runner-<target triple>[.exe].
 // Tauri runs this before `tauri dev` and `tauri build` (TAURI_ENV_TARGET_TRIPLE names the target).
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const cli = `${root}packages/altair-runner/dist/cli.js`;
+const cli = `${root}packages/myrel-runner/dist/cli.js`;
 const outDir = fileURLToPath(new URL("../src-tauri/binaries/", import.meta.url));
 
 const BUN_TARGETS = {
@@ -27,14 +27,14 @@ function hostTriple() {
 
 const triple = process.env.TAURI_ENV_TARGET_TRIPLE || hostTriple();
 const exe = triple.includes("windows") ? ".exe" : "";
-const out = `${outDir}altair-runner-${triple}${exe}`;
+const out = `${outDir}myrel-runner-${triple}${exe}`;
 
-run("pnpm", ["--filter", "@fibteq/altair-runner", "build"]);
+run("pnpm", ["--filter", "@fibteq/myrel-runner", "build"]);
 
 try {
   execFileSync("bun", ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
 } catch {
-  console.error("Building the bundled altair-runner needs Bun (https://bun.sh): npm install -g bun");
+  console.error("Building the bundled myrel-runner needs Bun (https://bun.sh): npm install -g bun");
   process.exit(1);
 }
 
@@ -44,7 +44,7 @@ const compile = (target, outfile) =>
 
 if (triple === "universal-apple-darwin") {
   const parts = ["aarch64-apple-darwin", "x86_64-apple-darwin"].map((t) => {
-    const part = `${outDir}altair-runner-${t}`;
+    const part = `${outDir}myrel-runner-${t}`;
     compile(BUN_TARGETS[t], part);
     return part;
   });
@@ -52,7 +52,7 @@ if (triple === "universal-apple-darwin") {
 } else {
   const target = BUN_TARGETS[triple];
   if (!target) {
-    console.error(`No altair-runner build for ${triple}`);
+    console.error(`No myrel-runner build for ${triple}`);
     process.exit(1);
   }
   compile(target, out);

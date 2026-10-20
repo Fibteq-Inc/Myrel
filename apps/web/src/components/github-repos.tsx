@@ -1,6 +1,6 @@
-import type { MessageKey } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
-import type { GithubRepo, ProjectRepo } from "@altair/protocol";
+import type { MessageKey } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
+import type { GithubRepo, ProjectRepo } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CircleAlert,

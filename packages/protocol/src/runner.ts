@@ -3,7 +3,7 @@ import { idPattern } from "./ids";
 import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
 
 /**
- * altair-runner: a small daemon on the user's own computer. It opens an
+ * myrel-runner: a small daemon on the user's own computer. It opens an
  * outbound WebSocket to the server and runs tasks with the user's own CLI
  * (Claude Code, Codex, Gemini CLI) in folders the user shared on that
  * computer. The CLI keeps its own login; no subscription token ever reaches
@@ -11,7 +11,7 @@ import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
  */
 
 /** Bump on breaking changes to the runner wire protocol. */
-export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_PROTOCOL_VERSION = 2;
 
 export const RunnerId = z.string().regex(idPattern("runner"));
 
@@ -24,7 +24,7 @@ export const CLI_NAMES: Record<CliId, string> = {
   gemini: "Gemini CLI",
 };
 
-/** A folder the user shared from their computer with `altair-runner share`. */
+/** A folder the user shared from their computer with `myrel-runner share`. */
 export const RunnerFolder = z.object({ path: z.string().min(1).max(1024), name: z.string().max(255) });
 export type RunnerFolder = z.infer<typeof RunnerFolder>;
 
@@ -35,8 +35,32 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
 /**
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
+ * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
+ * "agent-clis": the same for Codex CLI and Gemini CLI.
+ * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
+ * "skills": the runner downloads the turn's skills (task.start's `agent.skills`) into a folder of the run.
+ * "project-folders": the CLI also gets the project's other folders (task.start's `folders`), reports
+ * the folders it works in ("task.folders"), and Claude Code asks people through Myrel before touching
+ * anything outside them (the thread's approve_access tool).
  */
-export const RunnerFeature = z.enum(["folders", "cancel"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders"]);
+
+/**
+ * A connector (MCP server) for the CLI running as the thread's agent. A remote one is on this
+ * runner's server (origin + path, with the run's token); a command starts on this computer with
+ * these environment variables.
+ */
+export const AgentConnector = z.discriminatedUnion("transport", [
+  z.object({ transport: z.literal("http"), name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/), path: z.string().regex(/^\/api\/[\w/-]+$/).max(300) }),
+  z.object({
+    transport: z.literal("stdio"),
+    name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/),
+    command: z.string().min(1).max(200),
+    args: z.array(z.string().max(2000)).max(50),
+    env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(4000)),
+  }),
+]);
+export type AgentConnector = z.infer<typeof AgentConnector>;
 export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /** What the runner last told the server about the computer. */
@@ -75,6 +99,15 @@ export const RunnerDirListing = z.object({
 });
 export type RunnerDirListing = z.infer<typeof RunnerDirListing>;
 
+/** What the CLI reported using so far in one task, summed from its start. Older runners never send it. */
+export const CliUsage = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  /** The model the CLI says it used, when it says. */
+  model: z.string().max(200).optional(),
+});
+export type CliUsage = z.infer<typeof CliUsage>;
+
 /** Frames the runner sends. */
 export const RunnerToServer = z.discriminatedUnion("type", [
   RunnerInfo.extend({
@@ -83,18 +116,21 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     /** Tasks still running on the computer, e.g. after a reconnect. */
     running: z.array(TaskId).max(100).default([]),
   }),
-  /** A line of progress from the CLI (what it is doing now). */
-  z.object({ type: z.literal("task.progress"), taskId: TaskId, text: z.string().max(2000) }),
+  /** A line of progress from the CLI (what it is doing now). Empty when only its usage changed. */
+  z.object({ type: z.literal("task.progress"), taskId: TaskId, text: z.string().max(2000), usage: CliUsage.optional() }),
   z.object({
     type: z.literal("task.done"),
     taskId: TaskId,
     ok: z.boolean(),
+    usage: CliUsage.optional(),
     /** The CLI's final answer, or what went wrong. */
     result: z.string().max(MAX_TASK_TEXT),
     /** Stopped because the server asked ("task.cancel"). */
     cancelled: z.boolean().optional(),
   }),
   z.object({ type: z.literal("ping") }),
+  /** The folders a task's CLI can work in without asking: where it runs first (feature "project-folders"). */
+  z.object({ type: z.literal("task.folders"), taskId: TaskId, folders: z.array(z.string().min(1).max(1024)).max(60) }),
   // Answers to the server's folder requests (feature "folders").
   RunnerDirListing.extend({ type: z.literal("dirs"), requestId: RunnerRequestId }),
   z.object({ type: z.literal("folders"), requestId: RunnerRequestId, folders: z.array(RunnerFolder).max(200) }),
@@ -114,6 +150,26 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     folder: z.string().min(1).max(1024),
     cli: CliId,
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
+    /** The project's other folders the CLI may also work in; each must be shared too (feature "project-folders"). */
+    folders: z.array(z.string().min(1).max(1024)).max(50).optional(),
+    /**
+     * Present when the CLI runs as the thread's agent instead of doing one task for it: the
+     * runner connects the CLI to the thread's MCP endpoint (server origin + mcpPath) with this
+     * token, so it talks to people through Myrel's tools. Needs feature "agent".
+     */
+    agent: z
+      .object({
+        mcpPath: z.string().regex(/^\/api\/[\w/-]+$/).max(300),
+        token: z.string().min(20).max(200),
+        /** Connectors besides Myrel's tools (feature "connectors"); older runners ignore them. */
+        connectors: z.array(AgentConnector).max(30).optional(),
+        /**
+         * The turn's skills (feature "skills"): a SkillBundle on this runner's server (origin + path,
+         * with the run's token), for the CLI to find in a folder of the run.
+         */
+        skills: z.object({ path: z.string().regex(/^\/api\/[\w/-]+$/).max(300) }).optional(),
+      })
+      .optional(),
   }),
   /** Stop a running task. The runner answers with its "task.done" (cancelled: true). Needs feature "cancel". */
   z.object({ type: z.literal("task.cancel"), taskId: TaskId }),
@@ -140,11 +196,11 @@ export const Runner = RunnerInfo.extend({
 });
 export type Runner = z.infer<typeof Runner>;
 
-/** Shown in the web app; typed into `altair-runner pair` within a few minutes. */
+/** Shown in the web app; typed into `myrel-runner pair` within a few minutes. */
 export const RunnerPairingCode = z.object({ code: z.string(), expiresAt: Timestamp });
 export type RunnerPairingCode = z.infer<typeof RunnerPairingCode>;
 
-/** Sent by `altair-runner pair`, without a user session: the code is the proof. */
+/** Sent by `myrel-runner pair`, without a user session: the code is the proof. */
 export const PairRunnerInput = z.object({
   code: z.string().trim().min(4).max(20),
   name: z.string().trim().min(1).max(80),
@@ -166,6 +222,8 @@ export const ProjectWorkspace = z.object({
   runnerId: RunnerId,
   runnerName: z.string(),
   path: z.string(),
+  /** Other folders on the same computer the agent may work in too. Anything else needs the person's OK. */
+  folders: z.array(z.string()).default([]),
   cli: CliId,
   online: z.boolean(),
 });
@@ -181,3 +239,10 @@ export const SetWorkspaceInput = z.object({
   cli: CliId,
 });
 export type SetWorkspaceInput = z.infer<typeof SetWorkspaceInput>;
+
+/** Adds one of the computer's shared folders to the project's other folders. */
+export const WorkspaceFolderInput = z.object({ path: z.string().min(1).max(1024) });
+export type WorkspaceFolderInput = z.infer<typeof WorkspaceFolderInput>;
+
+/** How many other folders a project can have besides its main one. */
+export const MAX_WORKSPACE_FOLDERS = 20;

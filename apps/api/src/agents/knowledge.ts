@@ -11,7 +11,7 @@ import {
   normalizeFilePath,
   type ProjectFile,
   UPLOADS_FOLDER,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 
@@ -291,12 +291,17 @@ export type KnowledgeHost = {
   listFiles(prefix: string): Promise<ProjectFile[]> | ProjectFile[];
   readText(path: string): Promise<{ found: boolean; text: string | null; size: number }>;
   writeText(path: string, content: string): Promise<ProjectFile>;
+  /**
+   * A short-lived link to download (get) or upload (put) one file with curl. Only harness agents,
+   * which have a shell, get it; without it binary files stay out of reach.
+   */
+  fileLink?(path: string, mode: "get" | "put"): Promise<string | null>;
 };
 
 export const KNOWLEDGE_GUIDE = `Project knowledge:
 - Project instructions are set by members. Follow them in everything you do.
 - Project memory is shared by every agent in this project and outlives this conversation. Save what a later agent would otherwise have to ask again or rediscover: how people want you to work, decisions they made, facts about the project. Keep one memory file per subject (memory_write replaces the whole file, so read it first and keep what is still true), and keep MEMORY short: it is the index everyone reads in full. Do not save what only matters to this conversation, and never save secrets.
-- Project files are the project's shared folder. Files people attach to messages land in uploads/. Read a file before relying on it; put results others will need in a file under a folder named for the work, and mention the path in your reply.`;
+- Project files are the project's shared folder. Files people attach to messages land in uploads/. Read a file before relying on it (read_file hands you a download command for images, PDFs and other binary files); put results others will need in a file under a folder named for the work (write_file for text, file_upload_url for anything else), and mention the path in your reply.`;
 
 export function knowledgeTools(host: KnowledgeHost): Tool[] {
   return [
@@ -352,7 +357,15 @@ export function knowledgeTools(host: KnowledgeHost): Tool[] {
         const clean = checkedPath(path);
         const { found, text, size } = await host.readText(clean);
         if (!found) throw new Error(`No file at ${clean}.`);
-        if (text === null) return `${clean} is a binary file (${formatSize(size)}); it cannot be read as text.`;
+        if (text === null) {
+          const link = await host.fileLink?.(clean, "get");
+          // Uploads carry a time stamp prefix; the original name is the useful one locally.
+          const base = clean.split("/").at(-1)!;
+          const name = (clean.startsWith(`${UPLOADS_FOLDER}/`) ? base.replace(/^[0-9a-z]+-/, "") : base).replaceAll('"', "");
+          return link
+            ? `${clean} is a binary file (${formatSize(size)}). Download it into your working folder to use it (the link works for ${FILE_LINK_MINUTES} minutes):\ncurl -fsSL -o "${name}" "${link}"`
+            : `${clean} is a binary file (${formatSize(size)}); it cannot be read as text.`;
+        }
         const lines = text.split("\n");
         let page = lines.slice(offset, offset + limit).join("\n");
         if (page.length > READ_CHAR_LIMIT) page = `${page.slice(0, READ_CHAR_LIMIT)}\n[…cut at ${READ_CHAR_LIMIT} characters]`;
@@ -370,7 +383,64 @@ export function knowledgeTools(host: KnowledgeHost): Tool[] {
         return `Wrote ${file.path} (${formatSize(file.size)}).`;
       },
     }),
+    ...(host.fileLink
+      ? [
+          tool({
+            name: "file_upload_url",
+            description:
+              "Get a command that uploads a file from your working folder (an image, a PDF, a build) into the project files. Use write_file for text.",
+            input: z.object({ path: z.string().describe("Where it goes in the project files, e.g. reports/chart.png") }),
+            run: async ({ path }) => {
+              const clean = checkedPath(path);
+              const link = await host.fileLink!(clean, "put");
+              if (!link) throw new Error("This server cannot hand out file links (it does not know its own address).");
+              return `Run this within ${FILE_LINK_MINUTES} minutes, with your file in place of LOCAL_FILE:\ncurl -fsS -X PUT --data-binary @LOCAL_FILE "${link}"`;
+            },
+          }),
+        ]
+      : []),
   ];
+}
+
+// ---- Signed file links ----------------------------------------------------
+
+export const FILE_LINK_MINUTES = 60;
+
+type LinkClaims = { projectId: string; path: string; mode: "get" | "put"; by: string; exp: number };
+
+async function linkKey(env: { BETTER_AUTH_SECRET: string }): Promise<CryptoKey> {
+  const material = new TextEncoder().encode(`myrel-file-links:${env.BETTER_AUTH_SECRET}`);
+  return crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+const claimsText = (c: LinkClaims) => [c.projectId, c.path, c.mode, c.by, String(c.exp)].join("\n");
+
+/** A link that lets whoever holds it get or put one project file until it expires. */
+export async function signFileLink(
+  env: { BETTER_AUTH_SECRET: string },
+  origin: string,
+  claims: Omit<LinkClaims, "exp">,
+  now = Date.now(),
+): Promise<string> {
+  const full = { ...claims, exp: Math.floor(now / 1000) + FILE_LINK_MINUTES * 60 };
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await linkKey(env), new TextEncoder().encode(claimsText(full))));
+  const query = new URLSearchParams({ path: full.path, by: full.by, exp: String(full.exp), sig: base64url(sig) });
+  return `${origin}/api/file-links/${encodeURIComponent(full.projectId)}?${query}`;
+}
+
+export async function verifyFileLink(env: { BETTER_AUTH_SECRET: string }, c: LinkClaims & { sig: string }): Promise<boolean> {
+  if (!Number.isFinite(c.exp) || c.exp * 1000 < Date.now() || !c.by) return false;
+  let sig: Uint8Array<ArrayBuffer>;
+  try {
+    sig = Uint8Array.from(atob(c.sig.replaceAll("-", "+").replaceAll("_", "/")), (ch) => ch.charCodeAt(0));
+  } catch {
+    return false;
+  }
+  return crypto.subtle.verify("HMAC", await linkKey(env), sig, new TextEncoder().encode(claimsText(c)));
+}
+
+function base64url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 function checkedPath(input: string): string {

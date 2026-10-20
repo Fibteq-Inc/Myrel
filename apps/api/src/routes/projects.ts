@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   AddProjectRepoInput,
   CreateInviteInput,
@@ -10,27 +10,40 @@ import {
   type ProjectRole,
   type ProjectSettings,
   UpdateMemberInput,
+  MAX_WORKSPACE_FOLDERS,
   SetWorkspaceInput,
+  WorkspaceFolderInput,
   TaskTarget,
   UpdateProjectSettingsInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
+import { listPullRequests } from "../github/pulls";
 import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
+import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
-import { getWorkspace, notifyProject, parseInfo } from "../runners";
+import { getWorkspace, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
+
+const projectColumns = {
+  id: projects.id,
+  name: projects.name,
+  role: projectMembers.role,
+  createdAt: projects.createdAt,
+  activeCount: projects.activeCount,
+  waitingCount: projects.waitingCount,
+};
 
 export const projectRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get("/", async (c) => {
     const rows = await createDb(c.env.DB)
-      .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
+      .select(projectColumns)
       .from(projectMembers)
       .innerJoin(projects, eq(projects.id, projectMembers.projectId))
       .where(eq(projectMembers.userId, c.get("user").id))
@@ -42,6 +55,8 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
 
     const userId = c.get("user").id;
+    const allowed = await canCreateProject(c.env, userId);
+    if (!allowed.ok) return c.json({ error: "limit_reached", message: allowed.reason }, 402);
     const id = createId("project");
     const createdAt = new Date();
     const db = createDb(c.env.DB);
@@ -49,7 +64,7 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projects).values({ id, name: input.data.name, createdBy: userId, createdAt, updatedAt: createdAt }),
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
-    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", createdAt }) }, 201);
+    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", createdAt, activeCount: 0, waitingCount: 0 }) }, 201);
   })
   .get("/:id", async (c) => {
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
@@ -310,6 +325,12 @@ export const projectRoutes = new Hono<AppEnv>()
     const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
     return c.json({ tasks: await agent.getTasks() });
   })
+  // Pull requests the thread's tasks opened, with their live state.
+  .get("/:id/threads/:threadId/pull-requests", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    return c.json({ pullRequests: await listPullRequests(c.env.DB, c.req.param("id"), thread) });
+  })
   // What the thread's cloud tasks saved (its Artifacts workspace): history and one folder or file.
   .get("/:id/threads/:threadId/files", async (c) => {
     const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
@@ -339,7 +360,7 @@ export const projectRoutes = new Hono<AppEnv>()
     const input = SetWorkspaceInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
 
-    // Only your own computers, and only a folder you shared on it with `altair-runner share`.
+    // Only your own computers, and only a folder you shared on it with `myrel-runner share`.
     const db = createDb(c.env.DB);
     const [runner] = await db
       .select()
@@ -353,11 +374,45 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const now = new Date();
     const values = { ...input.data, updatedAt: now };
+    // The other folders belong to the computer: they stay only while the project stays on it.
+    const [before] = await db.select().from(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
+    const kept = before?.runnerId === input.data.runnerId ? parseFolders(before.folders).filter((f) => f !== input.data.path) : [];
     await db
       .insert(projectWorkspaces)
-      .values({ projectId: id, createdBy: userId, createdAt: now, ...values })
-      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, createdBy: userId } });
+      .values({ projectId: id, createdBy: userId, createdAt: now, ...values, folders: JSON.stringify(kept) })
+      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, folders: JSON.stringify(kept), createdBy: userId } });
     await notifyProject(c.env, id);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  // Other folders on the same computer the project's agent may work in, besides its main folder.
+  .post("/:id/workspace/folders", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const input = WorkspaceFolderInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const workspace = await getWorkspace(c.env, id);
+    if (!workspace) return c.json({ error: "invalid_input", message: "Connect a local folder to this project first." }, 400);
+    if (workspace.folders.length >= MAX_WORKSPACE_FOLDERS) {
+      return c.json({ error: "invalid_input", message: `A project can have at most ${MAX_WORKSPACE_FOLDERS} other folders.` }, 400);
+    }
+    // Like the main folder, only one shared on that computer (the folder picker shares it first).
+    const [runner] = await createDb(c.env.DB).select().from(runners).where(eq(runners.id, workspace.runnerId));
+    if (!parseInfo(runner?.info ?? null)?.folders.some((f) => f.path === input.data.path)) {
+      return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
+    }
+    await setWorkspaceFolder(c.env, id, input.data.path, true);
+    return c.json({ workspace: await getWorkspace(c.env, id) });
+  })
+  .delete("/:id/workspace/folders", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const path = c.req.query("path");
+    if (!path) return c.json({ error: "invalid_input", message: "Which folder?" }, 400);
+    await setWorkspaceFolder(c.env, id, path, false);
     return c.json({ workspace: await getWorkspace(c.env, id) });
   })
   .delete("/:id/workspace", async (c) => {
@@ -386,7 +441,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
 export async function findMembership(env: Env, projectId: string, userId: string): Promise<Project | null> {
   const [row] = await createDb(env.DB)
-    .select({ id: projects.id, name: projects.name, role: projectMembers.role, createdAt: projects.createdAt })
+    .select(projectColumns)
     .from(projectMembers)
     .innerJoin(projects, eq(projects.id, projectMembers.projectId))
     .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
@@ -401,8 +456,16 @@ async function findThread(env: Env, projectId: string, threadId: string, userId:
   return (await project.getThread(threadId)) ? threadId : null;
 }
 
-function toProject(row: { id: string; name: string; role: Project["role"]; createdAt: Date }): Project {
-  return { ...row, createdAt: row.createdAt.toISOString() };
+function toProject(row: {
+  id: string;
+  name: string;
+  role: Project["role"];
+  createdAt: Date;
+  activeCount: number;
+  waitingCount: number;
+}): Project {
+  const { activeCount, waitingCount, ...rest } = row;
+  return { ...rest, createdAt: row.createdAt.toISOString(), activity: { working: activeCount, waiting: waitingCount } };
 }
 
 function canManage(role: ProjectRole) {

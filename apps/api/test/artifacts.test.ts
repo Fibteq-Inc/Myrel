@@ -1,13 +1,14 @@
-import type { Artifact, ArtifactVersion, ArtifactView, Message, Project, Thread } from "@altair/protocol";
-import { artifactObjectKey } from "@altair/protocol";
-import { verifyArtifact } from "@altair/protocol/artifact-signature";
+import type { Artifact, ArtifactVersion, ArtifactView, Message, Project, Thread } from "@myrel/protocol";
+import { artifactObjectKey } from "@myrel/protocol";
+import { verifyArtifact } from "@myrel/protocol/artifact-signature";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { agentProject, modelAgent } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -26,8 +27,8 @@ async function signUp() {
 
 async function setup() {
   const token = await signUp();
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
-  const { project } = (await res.json()) as { project: Project };
+  // Its threads are worked by the fake model, as the person's CLI (see fake-agent.ts).
+  const { project } = await agentProject(token, modelAgent);
   const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, {
     headers: { upgrade: "websocket" },
   })).webSocket!;
@@ -58,7 +59,7 @@ describe("artifacts", () => {
       if (isCoordinator(req)) {
         const id = newMessageId(req.prompt);
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Report", instructions: "Make a report." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Report", instructions: "Make a report.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       prompts.push(req.prompt);
@@ -140,7 +141,7 @@ describe("artifacts", () => {
       if (isCoordinator(req)) {
         const id = req.turns === 1 && newMessageId(req.prompt);
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Chart", instructions: "Chart it." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Chart", instructions: "Chart it.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       if (req.turns > 1) {

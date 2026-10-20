@@ -1,26 +1,38 @@
-import { threadMessages, threadTasks } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
+import { planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, LoaderCircle, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
+import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
-import { Checklist, Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking } from "../chat";
+import {
+  Composer,
+  decisionAnswers,
+  mentionedPullRequests,
+  MessageView,
+  PlanCard,
+  PlanProgress,
+  PullRequestCards,
+  ScrollToEnd,
+  Thinking,
+} from "../chat";
+import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
-import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
-import { CHAT_MIN, PANEL_MIN, PANEL_SPLIT, useThreadPanel } from "./panel-state";
+import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
+import { CHAT_MIN, PANEL_MIN, useThreadPanel } from "./panel-state";
+import { ThreadUsage } from "./thread-usage";
 
-/** Below this panel width a workspace tab takes the conversation's place instead of sitting beside it. */
-const SIDE_BY_SIDE = 700;
+const CONVERSATION = "conversation";
 
 /**
  * A thread as a panel on the right of the project chat. Drag its left edge
  * to resize, maximize it to take the whole area, close it to go back to the
- * chat. Its header opens the workspace tools (changes, terminal, outputs)
- * beside the conversation. On phones it covers the screen.
+ * chat. Tabs under its header switch between the conversation and what the
+ * thread changed, opened, ran and produced. On phones it covers the screen.
  */
 export function ThreadPanel({
   threadId,
@@ -61,6 +73,7 @@ export function ThreadPanel({
 
   const thread = state.threads[threadId];
   const messages = thread ? threadMessages(state, thread.id) : [];
+  const usage = thread ? threadUsage(state, thread.id) : null;
   // What this thread published, plus anything its messages delivered from elsewhere.
   const attached = new Set(messages.flatMap((m) => m.artifacts?.map((a) => a.artifactId) ?? []));
   const outputs = Object.values(state.artifacts)
@@ -90,19 +103,39 @@ export function ThreadPanel({
           : tab,
       )
     : [];
+  if (thread) {
+    const prs = threadPullRequests(state, thread.id);
+    const pr: WorkspaceTab = {
+      id: "pr",
+      label: t("workspace.pr"),
+      icon: GitPullRequest,
+      count: prs.length || undefined,
+      content: prs.length ? (
+        <div className="p-4">
+          <PullRequestCards pullRequests={prs} />
+        </div>
+      ) : (
+        <EmptyTab icon={GitPullRequest} title={t("workspace.prEmpty")}>
+          {t("workspace.prEmptyBody")}
+        </EmptyTab>
+      ),
+    };
+    const at = tabs.findIndex((tab) => tab.id === "changes") + 1;
+    tabs.splice(at, 0, pr);
+    tabs.push({ id: "usage", label: t("workspace.usage"), icon: ChartColumn, content: <ThreadUsage messages={messages} /> });
+  }
   const tool = tabs.some((tab) => tab.id === panel.tool) ? panel.tool : null;
-  const sideBySide = measured >= SIDE_BY_SIDE;
+  const current = tabs.find((tab) => tab.id === tool);
+  const sections = [{ id: CONVERSATION, label: t("threadPanel.conversation"), icon: MessageSquareText, count: undefined }, ...tabs];
 
   // Opening an artifact brings the Outputs tab into view.
   useEffect(() => {
-    if (artifact) openTool("outputs", true);
+    if (artifact) openTool("outputs");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artifact]);
 
-  function openTool(id: string, keepOpen = false) {
-    if (tool === id && !keepOpen) return panel.update({ tool: null });
-    // Make room for the conversation and the tool side by side.
-    panel.update({ tool: id, ...(!panel.maximized && panel.width < PANEL_SPLIT ? { width: PANEL_SPLIT } : {}) });
+  function openTool(id: string) {
+    panel.update({ tool: id === CONVERSATION ? null : id });
   }
 
   function startResize(e: ReactPointerEvent<HTMLDivElement>) {
@@ -169,32 +202,72 @@ export function ThreadPanel({
             <ThreadStatusIcon thread={thread} />
             <div className="ml-1.5 flex min-w-0 flex-1 flex-col leading-tight">
               <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
-              <span className={cn("truncate text-[11px]", threadStatus(thread, t).tone)}>
-                {threadStatus(thread, t).label}
+              <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                <span className={cn("truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
+                {usage && usage.tokens > 0 && (
+                  <>
+                    <span aria-hidden="true" className="text-[#3a3a42]">
+                      ·
+                    </span>
+                    <ThreadUsageLabel usage={usage} />
+                  </>
+                )}
               </span>
             </div>
 
             <div
-              role="group"
+              role="tablist"
               aria-label={t("threadPanel.tools")}
-              className="flex items-center gap-0.5 rounded-lg border border-line p-0.5"
+              className="mr-1 flex flex-none items-center gap-0.5 rounded-lg border border-line p-0.5"
             >
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => openTool(tab.id)}
-                  aria-pressed={tool === tab.id}
-                  aria-label={tab.label}
-                  title={tab.label}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-md transition-colors",
-                    tool === tab.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg",
-                  )}
-                >
-                  <tab.icon size={15} />
-                </button>
-              ))}
+              {sections.map((tab, i) => {
+                const selected = (tool ?? CONVERSATION) === tab.id;
+                const label = tab.count ? `${tab.label} (${tab.count})` : tab.label;
+                return (
+                  <button
+                    key={tab.id}
+                    id={`thread-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls="thread-tabpanel"
+                    aria-label={label}
+                    tabIndex={selected ? 0 : -1}
+                    title={label}
+                    onClick={() => openTool(tab.id)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+                      e.preventDefault();
+                      const next = sections[(i + (e.key === "ArrowRight" ? 1 : -1) + sections.length) % sections.length]!;
+                      openTool(next.id);
+                      document.getElementById(`thread-tab-${next.id}`)?.focus();
+                    }}
+                    className={cn(
+                      "relative flex h-7 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                      selected ? "bg-hover text-fg max-sm:w-7 sm:gap-1.5 sm:pl-2 sm:pr-2.5" : "w-7 text-muted hover:bg-hover hover:text-fg",
+                    )}
+                  >
+                    <tab.icon size={15} aria-hidden="true" className="flex-none" />
+                    {selected ? (
+                      <span aria-hidden="true" className="hidden max-w-[9rem] truncate text-[13px] font-medium sm:inline">
+                        {tab.label}
+                        {tab.count ? <span className="ml-1 font-mono text-xs text-muted">{tab.count}</span> : null}
+                      </span>
+                    ) : null}
+                    {tab.count ? (
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "absolute -right-1 -top-1 min-w-3.5 rounded-full bg-raised px-[3px] text-center font-mono text-[9px] leading-[14px] text-muted ring-1 ring-line",
+                          selected && "sm:hidden",
+                        )}
+                      >
+                        {tab.count}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
 
             <IconButton
@@ -226,32 +299,16 @@ export function ThreadPanel({
             </IconButton>
           </header>
 
-          <div className="flex min-h-0 flex-1">
-            {(!tool || sideBySide) && (
-              <Conversation threadId={thread.id} me={me} wide={!tool && measured > 900} openArtifact={artifact} />
-            )}
-            {tool && (
-              <div className={cn("flex min-w-0 flex-col", sideBySide ? "w-[52%] flex-none border-l border-line" : "flex-1")}>
-                {!sideBySide && (
-                  <button
-                    type="button"
-                    onClick={() => panel.update({ tool: null })}
-                    className="flex h-9 flex-none items-center gap-1.5 border-b border-line px-4 text-[13px] text-muted hover:text-fg"
-                  >
-                    <ArrowLeft size={14} aria-hidden="true" />
-                    {t("threadPanel.backToConversation")}
-                  </button>
-                )}
-                <WorkspacePanel
-                  key={thread.id}
-                  tabs={tabs}
-                  active={tool}
-                  onActiveChange={(id) => panel.update({ tool: id })}
-                  onClose={() => panel.update({ tool: null })}
-                  className="flex min-h-0 flex-1"
-                />
-              </div>
-            )}
+          <div id="thread-tabpanel" role="tabpanel" aria-labelledby={`thread-tab-${tool ?? CONVERSATION}`} className="flex min-h-0 flex-1">
+            {/* The conversation stays mounted so a half-written reply survives a look at another tab. */}
+            <Conversation
+              threadId={thread.id}
+              me={me}
+              wide={measured > 900}
+              openArtifact={artifact}
+              className={current ? "hidden" : "flex"}
+            />
+            {current && <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[#0b0b0d]">{current.content}</div>}
           </div>
         </>
       )}
@@ -264,11 +321,13 @@ function Conversation({
   me,
   wide,
   openArtifact,
+  className = "",
 }: {
   threadId: string;
   me: string;
   wide: boolean;
   openArtifact?: string;
+  className?: string;
 }) {
   const t = useT();
   const { project, names, state, send } = useProjectContext();
@@ -276,38 +335,68 @@ function Conversation({
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
   const answers = decisionAnswers(messages);
+  // Each pull request shows under the message that links it; one no message linked yet shows at the end.
+  const pullRequests = threadPullRequests(state, thread.id);
+  const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
   const active = !!state.active[thread.id];
   const working = thread.status === "working" && !thread.resolved;
+  // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
+  const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
+  const planAnchor = (id: string) => `plan-${id}`;
   return (
-    <section aria-label={t("thread.messages")} className="flex min-w-0 flex-1 flex-col">
+    <section aria-label={t("thread.messages")} className={cn("min-w-0 flex-1 flex-col", className)}>
       {thread.statusText && !thread.resolved && (
-        <div className="max-h-[40%] flex-none overflow-y-auto border-b border-line bg-[#111114] px-5 py-3.5">
-          <Checklist text={thread.statusText} live={working} />
+        <div className="flex-none border-b border-line bg-[#111114] px-5 py-2.5">
+          <PlanProgress
+            text={thread.statusText}
+            live={working}
+            onOpen={
+              currentPlan
+                ? () => document.getElementById(planAnchor(currentPlan.id))?.scrollIntoView({ behavior: "smooth", block: "start" })
+                : undefined
+            }
+          />
         </div>
       )}
       <ScrollToEnd dep={messages.length + (active ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
           {root && <MessageView message={root} me={me} names={names} />}
-          {messages.map((m) => (
-            <MessageView
-              key={m.id}
-              message={m}
-              me={me}
-              names={names}
-              reactions={state.reactions[m.id]}
-              decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
-            >
-              {m.artifacts?.length ? (
-                <ArtifactCards
-                  projectId={project.id}
-                  threadId={thread.id}
-                  refs={m.artifacts}
-                  artifacts={state.artifacts}
-                  openId={openArtifact}
+          {messages.map((m) => {
+            const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
+            if (plan !== null) {
+              const current = m.id === currentPlan?.id;
+              return (
+                <PlanCard
+                  key={m.id}
+                  id={planAnchor(m.id)}
+                  text={current && thread.statusText ? thread.statusText : plan}
+                  live={current && working}
                 />
-              ) : null}
-            </MessageView>
-          ))}
+              );
+            }
+            return (
+              <MessageView
+                key={m.id}
+                message={m}
+                me={me}
+                names={names}
+                reactions={state.reactions[m.id]}
+                decision={{ answer: answers.get(m.id), onChoose: (label) => send(label, thread.id) }}
+              >
+                {m.artifacts?.length ? (
+                  <ArtifactCards
+                    projectId={project.id}
+                    threadId={thread.id}
+                    refs={m.artifacts}
+                    artifacts={state.artifacts}
+                    openId={openArtifact}
+                  />
+                ) : null}
+                {m.authorKind === "agent" && <PullRequestCards pullRequests={mentionedPullRequests(m.body, pullRequests)} />}
+              </MessageView>
+            );
+          })}
+          <PullRequestCards pullRequests={unmentioned} />
           {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
         </div>
       </ScrollToEnd>

@@ -34,7 +34,7 @@ export async function githubFetch<T>(token: string, path: string, init: { method
     headers: {
       accept: "application/vnd.github+json",
       authorization: `Bearer ${token}`,
-      "user-agent": "altair",
+      "user-agent": "myrel",
       "x-github-api-version": "2022-11-28",
       ...(init.body === undefined ? {} : { "content-type": "application/json" }),
     },
@@ -79,11 +79,13 @@ export async function appJwt(env: GithubEnv): Promise<string> {
 
 // --- Installation tokens ---
 
-export type RepoPermissions = Partial<Record<"contents" | "pull_requests" | "issues" | "metadata", "read" | "write">>;
+export type RepoPermissions = Partial<
+  Record<"contents" | "pull_requests" | "issues" | "metadata" | "checks" | "statuses", "read" | "write">
+>;
 
 type AccessToken = { token: string; expires_at: string; repositories?: GithubApiRepo[] };
 
-/** The subset of GitHub's repository object Altair uses. */
+/** The subset of GitHub's repository object Myrel uses. */
 export type GithubApiRepo = {
   id: number;
   full_name: string;
@@ -146,7 +148,7 @@ export type UserInstallation = {
 export async function exchangeCode(env: GithubEnv, code: string): Promise<string> {
   const res = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json", "user-agent": "altair" },
+    headers: { accept: "application/json", "content-type": "application/json", "user-agent": "myrel" },
     body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code }),
   });
   const data = (await res.json().catch(() => ({}))) as { access_token?: string; error_description?: string };

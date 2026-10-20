@@ -1,10 +1,10 @@
-import { createDb, schema } from "@altair/db";
-import { type ProjectWorkspace, TaskTarget } from "@altair/protocol";
-import type { RunnerBackend, TaskSpec } from "@altair/runner-core";
+import { createDb, schema } from "@myrel/db";
+import { type AgentConnector, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
+import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { githubConfigured } from "../github/app";
-import { projectRepoToken } from "../github/store";
+import { githubConfigured, installationToken } from "../github/app";
+import { listProjectRepos } from "../github/store";
 import { getWorkspace } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts). */
@@ -25,19 +25,19 @@ export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
 }
 
 /**
- * The person's own computer, through altair-runner (see RunnerAgent): its CLI
+ * The person's own computer, through myrel-runner (see RunnerAgent): its CLI
  * works in the project's local folder with the person's own login. The runner
  * reports back through `ThreadAgent.taskEvents` like the sandbox does.
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace },
+  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: { mcpPath: string; token: string; connectors?: AgentConnector[] } },
 ): RunnerBackend {
-  const { projectId, threadId, workspace } = where;
+  const { projectId, threadId, workspace, agent } = where;
   return {
     id: "local",
     unavailable: () =>
-      workspace.online ? null : "The computer is offline. Ask the person to run `altair-runner start` on it.",
+      workspace.online ? null : "The computer is offline. Ask the person to run `myrel-runner start` on it.",
     start: async (spec: TaskSpec) => {
       const runner = await getAgentByName(env.RUNNER_AGENT, workspace.runnerId);
       const started = await runner.startTask({
@@ -45,8 +45,10 @@ export function localBackend(
         projectId,
         threadId,
         folder: workspace.path,
+        folders: workspace.folders,
         cli: workspace.cli,
         prompt: spec.prompt,
+        agent,
       });
       if (!started.ok) throw new Error(started.reason);
     },
@@ -89,44 +91,28 @@ export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace>
   return {
     kind: "error",
     message: workspace
-      ? "This project runs tasks on the person's computer, and it is offline. Ask them to start altair-runner on it."
+      ? "This project runs tasks on the person's computer, and it is offline. Ask them to start myrel-runner on it."
       : "This project runs tasks on the person's computer, but no local folder is connected. They can connect one from the project header.",
   };
 }
 
 /**
- * The token a task gets for cloning, pushing and opening pull requests: a
- * GitHub App installation token limited to that one repository, which must be
- * connected to the project. Null otherwise; public repositories still clone
- * without it. GitHub's tokens last an hour, so a task gets one that is valid
- * for as much of its run as possible.
+ * The token a cloud agent turn gets for the project's connected repositories, so git and gh work
+ * in the sandbox without asking. One installation token covers every connected repository of the
+ * first repository's installation (nearly always all of them). Null without any.
  */
-export async function repoToken(env: Env, projectId: string, repoUrl: string, runSec: number): Promise<string | null> {
-  const match = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+?)\.git$/.exec(repoUrl);
-  if (!match || !githubConfigured(env)) return null;
-  const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
+export async function projectGithubToken(env: Env, projectId: string, runSec: number): Promise<string | null> {
+  if (!githubConfigured(env)) return null;
+  const repos = await listProjectRepos(env.DB, projectId);
+  const first = repos[0];
+  if (!first) return null;
+  const repositoryIds = repos.filter((r) => r.installationId === first.installationId).map((r) => r.repoId);
   const permissions = { contents: "write", pull_requests: "write", metadata: "read" } as const;
   try {
-    return (await projectRepoToken(env, projectId, match[1]!, permissions, minValidMs)).token;
+    const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
+    return (await installationToken(env, first.installationId, { repositoryIds, permissions }, minValidMs)).token;
   } catch (err) {
-    console.warn("no repository token", repoUrl, err);
-    return null;
-  }
-}
-
-/** Accepts `owner/name`, a github.com URL or any HTTPS git URL; returns an HTTPS clone URL. */
-export function normalizeRepoUrl(repo: string): string | null {
-  const trimmed = repo.trim().replace(/\/+$/, "");
-  if (/^[\w.-]+\/[\w.-]+$/.test(trimmed)) return `https://github.com/${trimmed.replace(/\.git$/, "")}.git`;
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "https:" || url.username || url.password) return null;
-    if (url.hostname === "github.com") {
-      const [owner, name] = url.pathname.split("/").filter(Boolean);
-      return owner && name ? `https://github.com/${owner}/${name.replace(/\.git$/, "")}.git` : null;
-    }
-    return url.href;
-  } catch {
+    console.warn("no GitHub token for the project", projectId, err);
     return null;
   }
 }

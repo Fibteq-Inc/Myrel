@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import { createId, type NotificationKind } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { createId, type NotificationKind } from "@myrel/protocol";
 import { eq, inArray } from "drizzle-orm";
 import { emailEnabled, sendEmail, sendExpoPush, vapidKeys } from "./channels";
 import { sendWebPush } from "./webpush";
@@ -128,7 +128,7 @@ export async function deliverNotification(env: Env, input: NotifyInput): Promise
 }
 
 function emailBody(input: NotifyInput, link: string | null) {
-  const text = [input.body, link ? `Open: ${link}` : "", `— Altair · ${input.projectName}`]
+  const text = [input.body, link ? `Open: ${link}` : "", `— Myrel · ${input.projectName}`]
     .filter(Boolean)
     .join("\n\n");
   const html = `<div style="font-family:system-ui,sans-serif;max-width:560px;color:#18181b">

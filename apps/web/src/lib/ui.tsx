@@ -1,5 +1,5 @@
-import { relativeTime, type Translate } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import { relativeTime, type Translate } from "@myrel/i18n";
+import { useI18n } from "@myrel/i18n/react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
 /** Joins class names, skipping falsy ones. */
@@ -62,16 +62,21 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+/** The four-petal mark (same as the app icon), drawn by MyrelMark here and in apps/mobile. */
+const MARK_PETAL = "M512 512C512 360 600 250 700 250C760 250 790 300 770 350C740 430 620 470 512 512Z";
+
 /** The assistant's mark, used as its avatar. */
-export function AltairMark({ size = 28 }: { size?: number }) {
+export function MyrelMark({ size = 28 }: { size?: number }) {
   return (
     <span
       aria-hidden="true"
       style={{ width: size, height: size, borderRadius: Math.round(size * 0.3) }}
-      className="flex flex-none items-center justify-center border border-[#343a6b] bg-gradient-to-br from-[#2a2e52] to-[#15172a]"
+      className="flex flex-none items-center justify-center bg-gradient-to-br from-[#6d63ff] to-[#3a2fb8]"
     >
-      <svg width={size / 2} height={size / 2} viewBox="0 0 24 24" fill="currentColor" className="text-accent">
-        <path d="M12 1.5l2.2 7.3 7.3 2.2-7.3 2.2L12 22.5l-2.2-9.3L2.5 11l7.3-2.2z" />
+      <svg width={size * 0.62} height={size * 0.62} viewBox="232 232 560 560" fill="#f4efe6">
+        {[0, 90, 180, 270].map((angle) => (
+          <path key={angle} d={MARK_PETAL} transform={`rotate(${angle} 512 512)`} />
+        ))}
       </svg>
     </span>
   );

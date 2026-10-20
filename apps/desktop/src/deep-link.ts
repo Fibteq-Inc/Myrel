@@ -1,12 +1,12 @@
-import { normalizeServerUrl, probeServer, saveServer } from "@altair/client";
+import { normalizeServerUrl, probeServer, saveServer } from "@myrel/client";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { ask, message } from "@tauri-apps/plugin-dialog";
-import type { Platform } from "@altair/client";
+import type { Platform } from "@myrel/client";
 
 /**
- * Handles `altair://` links:
- * - `altair://connect?server=https://altair.example.com` switches to that server after asking.
- * - anything else opens the matching page, e.g. `altair://projects/<id>` → `/projects/<id>`.
+ * Handles `myrel://` links:
+ * - `myrel://connect?server=https://myrel.example.com` switches to that server after asking.
+ * - anything else opens the matching page, e.g. `myrel://projects/<id>` → `/projects/<id>`.
  */
 export async function handleDeepLinks(platform: Platform) {
   const open = (urls: string[]) => {
@@ -23,8 +23,8 @@ async function openLink(platform: Platform, raw: string) {
   } catch {
     return;
   }
-  if (url.protocol !== "altair:") return;
-  // `altair://projects/1` parses with host "projects"; treat host and path as one route.
+  if (url.protocol !== "myrel:") return;
+  // `myrel://projects/1` parses with host "projects"; treat host and path as one route.
   const route = `/${[url.host, url.pathname.replace(/^\/+/, "")].filter(Boolean).join("/")}`;
 
   if (route === "/connect") {
@@ -33,7 +33,7 @@ async function openLink(platform: Platform, raw: string) {
     try {
       const origin = normalizeServerUrl(target);
       await probeServer(origin);
-      const yes = await ask(`Connect Altair to ${new URL(origin).host}? Only continue if you trust this server.`, {
+      const yes = await ask(`Connect Myrel to ${new URL(origin).host}? Only continue if you trust this server.`, {
         title: "Switch server",
         kind: "warning",
       });

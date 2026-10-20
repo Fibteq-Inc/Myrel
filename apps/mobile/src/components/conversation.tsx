@@ -1,9 +1,10 @@
-import type { Artifact, Message, Reaction } from "@altair/protocol";
-import { type ReactNode, useMemo } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { type Artifact, type Message, planChecklist, type Reaction } from "@myrel/protocol";
+import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
+import { PlanCard } from "./checklist";
 import { Composer } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
 
@@ -23,6 +24,7 @@ export function Conversation({
   placeholder,
   onSend,
   header,
+  plan,
   footerFor,
   empty,
 }: {
@@ -38,50 +40,83 @@ export function Conversation({
   onSend: (body: string) => void;
   /** Pinned above the list (e.g. a thread's checklist). */
   header?: ReactNode;
+  /** The plan card the agent is moving along, drawn from the thread's fresh checklist. */
+  plan?: { messageId: string; text: string; live: boolean };
   /** Rendered under a message, e.g. the card of the thread it opened. */
   footerFor?: (message: Message) => ReactNode;
   empty?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
-  const openLink = useOpenLink();
+  const openLink = useOpenLink(projectId);
   const openArtifact = useOpenArtifact(projectId);
   const answers = useMemo(() => decisionAnswers(messages), [messages]);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
   const data = useMemo(() => [...messages].reverse(), [messages]);
+  // KeyboardAvoidingView measures itself relative to its parent, so anything
+  // above it (the navigation header, the project tabs) would leave the
+  // composer under the keyboard. Its distance from the top of the window
+  // is the offset that makes up for that.
+  const frame = useRef<ComponentRef<typeof View>>(null);
+  const [top, setTop] = useState(0);
+  // The keyboard covers the home indicator and navigation bar, so their inset
+  // would only add a gap between the composer and the keyboard.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const ios = Platform.OS === "ios";
+    const show = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
-      {header}
-      <FlatList
-        inverted
-        data={data}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={styles.list}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
-        ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
-        renderItem={({ item }) => (
-          <MessageView
-            message={item}
-            me={me}
-            names={names}
-            reactions={reactions[item.id]}
-            artifacts={artifacts}
-            onLink={openLink}
-            onOpenArtifact={openArtifact}
-            decision={
-              item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
+    <View
+      ref={frame}
+      style={{ flex: 1 }}
+      onLayout={() => frame.current?.measureInWindow((_x, y) => setTop(y))}
+    >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={top}>
+        {header}
+        <FlatList
+          inverted
+          data={data}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={styles.list}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
+          ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
+          renderItem={({ item }) => {
+            const checklist = item.authorKind === "agent" ? planChecklist(item.body) : null;
+            if (checklist !== null) {
+              const current = plan && item.id === plan.messageId ? plan : null;
+              return <PlanCard text={current?.text ?? checklist} live={current?.live ?? false} />;
             }
-          >
-            {footerFor?.(item)}
-          </MessageView>
-        )}
-      />
-      <View style={{ paddingBottom: Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
-        <Composer placeholder={placeholder} onSend={onSend} />
-      </View>
-    </KeyboardAvoidingView>
+            return (
+              <MessageView
+                message={item}
+                me={me}
+                names={names}
+                reactions={reactions[item.id]}
+                artifacts={artifacts}
+                onLink={openLink}
+                onOpenArtifact={openArtifact}
+                decision={
+                  item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
+                }
+              >
+                {footerFor?.(item)}
+              </MessageView>
+            );
+          }}
+        />
+        <View style={{ paddingBottom: keyboardOpen ? 8 : Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
+          <Composer placeholder={placeholder} onSend={onSend} />
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 

@@ -21,6 +21,10 @@ export const user = sqliteTable("user", {
   image: text("image"),
   /** Instance role: admins manage server settings and shared model keys. */
   role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
+  /** When the person accepted the server's terms and privacy policy at sign-up (null: none asked). */
+  termsAcceptedAt: integer("terms_accepted_at", { mode: "timestamp_ms" }),
+  /** The version of those documents (ServerInfo.legal.version); a newer one can ask again. */
+  termsVersion: text("terms_version"),
   ...timestamps,
 });
 
@@ -73,7 +77,7 @@ export const verification = sqliteTable(
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
 
-// --- Altair ---
+// --- Myrel ---
 
 /**
  * Bring-your-own model keys. `ownerId` is a user id, or null for instance keys that admins
@@ -105,8 +109,12 @@ export const projects = sqliteTable("projects", {
   llmModel: text("llm_model"),
   /** Key the project's agents call the model with; null = an instance key for the provider. */
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
-  /** Where tasks run: auto, local or cloud (see TaskTarget in @altair/protocol). */
+  /** Where tasks run: auto, local or cloud (see TaskTarget in @myrel/protocol). */
   taskTarget: text("task_target").notNull().default("auto"),
+  /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
+  activeCount: integer("active_count").notNull().default(0),
+  /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */
+  waitingCount: integer("waiting_count").notNull().default(0),
   ...timestamps,
 });
 
@@ -162,6 +170,25 @@ export const usageEvents = sqliteTable(
   ],
 );
 
+/**
+ * One row per finished agent turn that ran in a cloud sandbox: how long the task ran. The
+ * hosted service's plans limit sandbox time with it, and the Usage page shows it. Like
+ * usage_events it has no foreign keys, so the record outlives the project and thread.
+ */
+export const sandboxRuns = sqliteTable(
+  "sandbox_runs",
+  {
+    /** The task's id. */
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }).notNull(),
+    seconds: integer("seconds").notNull(),
+  },
+  (t) => [index("sandbox_runs_project_ended_idx").on(t.projectId, t.endedAt)],
+);
+
 /** Pending invitations to a project. The invitee accepts after signing in with `email`. */
 export const projectInvites = sqliteTable(
   "project_invites",
@@ -202,7 +229,7 @@ export const githubInstallations = sqliteTable("github_installations", {
   ...timestamps,
 });
 
-/** Altair users GitHub confirmed can reach an installation (checked with their GitHub sign-in). */
+/** Myrel users GitHub confirmed can reach an installation (checked with their GitHub sign-in). */
 export const githubInstallationUsers = sqliteTable(
   "github_installation_users",
   {
@@ -237,7 +264,35 @@ export const projectRepos = sqliteTable(
   (t) => [primaryKey({ columns: [t.projectId, t.repoId] }), index("project_repos_installation_id_idx").on(t.installationId)],
 );
 
-// --- Local runners (altair-runner on the user's computer) ---
+/**
+ * Pull requests a thread's tasks opened, kept current by the GitHub webhook so
+ * the thread shows their live state and its agent hears about CI and reviews.
+ */
+export const pullRequests = sqliteTable(
+  "pull_requests",
+  {
+    repoId: integer("repo_id").notNull(),
+    number: integer("number").notNull(),
+    fullName: text("full_name").notNull(),
+    installationId: integer("installation_id").notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").notNull(),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    state: text("state", { enum: ["open", "closed", "merged"] }).notNull(),
+    draft: integer("draft", { mode: "boolean" }).notNull().default(false),
+    headSha: text("head_sha").notNull(),
+    headRef: text("head_ref").notNull(),
+    checks: text("checks", { enum: ["pending", "success", "failure"] }),
+    review: text("review", { enum: ["approved", "changes_requested"] }),
+    ...timestamps,
+  },
+  (t) => [primaryKey({ columns: [t.repoId, t.number] }), index("pull_requests_project_id_idx").on(t.projectId, t.threadId)],
+);
+
+// --- Local runners (myrel-runner on the user's computer) ---
 
 export const runners = sqliteTable(
   "runners",
@@ -257,7 +312,7 @@ export const runners = sqliteTable(
   (t) => [index("runners_user_id_idx").on(t.userId)],
 );
 
-/** Short-lived codes shown in the web app and typed into `altair-runner pair`. */
+/** Short-lived codes shown in the web app and typed into `myrel-runner pair`. */
 export const runnerPairings = sqliteTable("runner_pairings", {
   /** SHA-256 of the normalized code, hex. */
   codeHash: text("code_hash").primaryKey(),
@@ -279,6 +334,8 @@ export const projectWorkspaces = sqliteTable(
       .notNull()
       .references(() => runners.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
+    /** JSON array of other folders on the same runner the agent may work in too. */
+    folders: text("folders").notNull().default("[]"),
     cli: text("cli", { enum: ["claude", "codex", "gemini"] }).notNull(),
     createdBy: text("created_by")
       .notNull()
@@ -338,3 +395,150 @@ export const notificationSettings = sqliteTable("notification_settings", {
   push: integer("push", { mode: "boolean" }).notNull().default(true),
   updatedAt: timestamps.updatedAt,
 });
+
+// ---- Hosted billing ---------------------------------------------------------
+// Written only by the hosted service's billing extension (ee/billing). They stay empty on a
+// self-hosted server, which has no plans or limits.
+
+/** A person's Stripe customer. One per person; a Team plan is bought by its owner. */
+export const billingCustomers = sqliteTable("billing_customers", {
+  userId: text("user_id").primaryKey(),
+  stripeCustomerId: text("stripe_customer_id").notNull().unique(),
+  /** Set once the person started a trial, so they get only one. */
+  trialUsed: integer("trial_used", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** A Stripe subscription as its webhooks last described it. */
+export const billingSubscriptions = sqliteTable(
+  "billing_subscriptions",
+  {
+    /** Stripe's subscription id. */
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    plan: text("plan", { enum: ["pro", "team"] }).notNull(),
+    interval: text("interval", { enum: ["month", "year"] }).notNull(),
+    /** Stripe's status: trialing, active, past_due, canceled, unpaid, incomplete, ... */
+    status: text("status").notNull(),
+    seats: integer("seats").notNull().default(1),
+    currentPeriodEnd: integer("current_period_end", { mode: "timestamp_ms" }),
+    trialEnd: integer("trial_end", { mode: "timestamp_ms" }),
+    cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" }).notNull().default(false),
+    /** When the subscription last became past_due; the plan holds for a grace period from then. */
+    pastDueSince: integer("past_due_since", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("billing_subscriptions_user_idx").on(t.userId)],
+);
+
+/** The people a Team plan covers besides its owner. */
+export const billingTeamMembers = sqliteTable(
+  "billing_team_members",
+  {
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.ownerId, t.userId] }), uniqueIndex("billing_team_members_user_idx").on(t.userId)],
+);
+
+/** Stripe webhook events already handled, so a redelivery is ignored. */
+export const stripeEvents = sqliteTable("stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+/**
+ * Connectors: MCP servers the thread's agent may use (see @myrel/protocol connectors.ts). A row
+ * belongs to a person (owner_id) or to a project (project_id), never both. `secret` is AES-GCM
+ * ciphertext of a JSON object (headers for http, environment variables for stdio), bound to the
+ * row id; `secret_names` lists its keys, the only part ever shown again.
+ */
+export const connectors = sqliteTable(
+  "connectors",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    transport: text("transport", { enum: ["http", "stdio"] }).notNull(),
+    url: text("url"),
+    /** How a remote server is signed in to; "oauth" keeps the client, tokens and a pending sign-in in `secret`. */
+    auth: text("auth", { enum: ["none", "headers", "oauth"] }).notNull().default("headers"),
+    command: text("command"),
+    args: text("args", { mode: "json" }).$type<string[]>().notNull().default([]),
+    runsOn: text("runs_on", { enum: ["cloud", "local", "both"] }).notNull().default("both"),
+    secret: text("secret"),
+    secretNames: text("secret_names", { mode: "json" }).$type<string[]>().notNull().default([]),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    status: text("status", { enum: ["unknown", "ok", "error", "needs_auth"] }).notNull().default("unknown"),
+    lastError: text("last_error"),
+    tools: text("tools", { mode: "json" }).$type<{ name: string; description?: string }[]>().notNull().default([]),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("connectors_owner_slug_idx").on(t.ownerId, t.slug),
+    uniqueIndex("connectors_project_slug_idx").on(t.projectId, t.slug),
+  ],
+);
+
+/**
+ * Skills (Agent Skills: a SKILL.md and its files) the thread's agent may use (see @myrel/protocol
+ * skills.ts). A row belongs to a person (owner_id) or to a project (project_id), never both. The
+ * files live in R2 (FILES bucket) as one bundle at `skills/<id>.json`; `files` lists them.
+ */
+export const skills = sqliteTable(
+  "skills",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    source: text("source", { mode: "json" })
+      .$type<
+        { kind: "write" } | { kind: "upload" } | { kind: "github"; repo: string; path: string; ref?: string; commit: string }
+      >()
+      .notNull(),
+    files: text("files", { mode: "json" }).$type<{ path: string; size: number }[]>().notNull().default([]),
+    size: integer("size").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("skills_owner_name_idx").on(t.ownerId, t.name), uniqueIndex("skills_project_name_idx").on(t.projectId, t.name)],
+);
+
+/**
+ * A person's own skill or connector turned on in one project. Personal ones work only in the
+ * projects listed here (and only in threads that work for that person); new ones start off.
+ */
+export const projectSkills = sqliteTable(
+  "project_skills",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.skillId] }), index("project_skills_skill_idx").on(t.skillId)],
+);
+
+export const projectConnectors = sqliteTable(
+  "project_connectors",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => connectors.id, { onDelete: "cascade" }),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.connectorId] }), index("project_connectors_connector_idx").on(t.connectorId)],
+);

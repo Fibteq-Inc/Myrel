@@ -1,4 +1,4 @@
-import type { KeyValueStore, PickedFile, Platform } from "@altair/client";
+import type { KeyValueStore, PickedFile, Platform } from "@myrel/client";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";

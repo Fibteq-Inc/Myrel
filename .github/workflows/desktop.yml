@@ -11,14 +11,14 @@ name: Desktop
 #   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD          updater signatures
 # Optional variables:
 #   TAURI_UPDATER_PUBKEY   public half of TAURI_SIGNING_PRIVATE_KEY
-#   ALTAIR_DESKTOP_API_URL default server the app opens on (users can change it)
+#   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
 
 on:
   pull_request:
     paths:
       - apps/desktop/**
       - apps/web/**
-      - packages/altair-runner/**
+      - packages/myrel-runner/**
       - packages/client/**
       - packages/i18n/**
       - packages/protocol/**
@@ -58,7 +58,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # Compiles the bundled altair-runner sidecar into one executable (apps/desktop/scripts/build-runner.mjs).
+      # Compiles the bundled myrel-runner sidecar into one executable (apps/desktop/scripts/build-runner.mjs).
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,7 +91,7 @@ jobs:
           # Empty variables would make the bundler try (and fail) to sign, so only export the ones that are set.
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -n "${!name}" ]; then
-              { echo "$name<<__ALTAIR_EOF__"; printf '%s\n' "${!name}"; echo "__ALTAIR_EOF__"; } >> "$GITHUB_ENV"
+              { echo "$name<<__MYREL_EOF__"; printf '%s\n' "${!name}"; echo "__MYREL_EOF__"; } >> "$GITHUB_ENV"
             fi
           done
           # Updater artifacts need both halves of the key pair.
@@ -107,14 +107,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_API_URL: ${{ vars.ALTAIR_DESKTOP_API_URL || 'https://altair.fibteq.io' }}
+          VITE_API_URL: ${{ vars.MYREL_DESKTOP_API_URL || 'https://myrel.fibteq.io' }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
           args: ${{ matrix.args }} ${{ env.TAURI_EXTRA_ARGS }}
           includeUpdaterJson: ${{ env.UPDATER_JSON == 'true' }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && 'Altair Desktop __VERSION__' || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && 'Myrel Desktop __VERSION__' || '' }}
           releaseDraft: true
           prerelease: false
 
@@ -122,7 +122,7 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: altair-desktop-${{ runner.os }}
+          name: myrel-desktop-${{ runner.os }}
           path: |
             apps/desktop/src-tauri/target/release/bundle/
             apps/desktop/src-tauri/target/*/release/bundle/

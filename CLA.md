@@ -1,6 +1,6 @@
-# Fibteq Altair Contributor License Agreement
+# Fibteq Myrel Contributor License Agreement
 
-Thank you for contributing to Fibteq Altair (the "Project"), maintained by
+Thank you for contributing to Fibteq Myrel (the "Project"), maintained by
 Fibteq ("we" or "us"). This agreement explains the terms under which you
 contribute. It is based on the Apache Software Foundation's Individual
 Contributor License Agreement. Please read it before signing.

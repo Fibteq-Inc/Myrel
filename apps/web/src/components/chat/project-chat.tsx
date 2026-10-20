@@ -1,5 +1,5 @@
-import { projectChat, threadByRoot, threadMessages } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { MessagesSquare } from "lucide-react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -15,7 +15,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   const t = useT();
   const { project, names, state, send } = useProjectContext();
   const chat = projectChat(state);
-  const roots = threadByRoot(state);
+  const roots = threadByCard(state);
   const answers = decisionAnswers(chat);
   const thinking = !!state.active[""];
 
@@ -39,7 +39,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                   <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
                 ) : null}
                 {thread && (
-                  <ThreadCard projectId={project.id} thread={thread} replies={threadMessages(state, thread.id).length} />
+                  <ThreadCard projectId={project.id} thread={thread} replies={threadReplyCount(state, thread.id)} />
                 )}
               </MessageView>
             );

@@ -50,6 +50,90 @@
       "when": 1792441648032,
       "tag": "0006_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792479148662,
+      "tag": "0007_pull_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792486845782,
+      "tag": "0008_thread_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792488007319,
+      "tag": "0009_drop_thread_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792496256297,
+      "tag": "0010_sandbox_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792496680450,
+      "tag": "0011_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792498338226,
+      "tag": "0012_billing_past_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792498763878,
+      "tag": "0013_terms_accepted",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792499362283,
+      "tag": "0014_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792501579128,
+      "tag": "0015_project_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792503649437,
+      "tag": "0016_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792505479369,
+      "tag": "0017_personal_per_project",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792506018332,
+      "tag": "0018_project_folders",
+      "breakpoints": true
     }
   ]
 }

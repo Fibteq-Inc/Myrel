@@ -1,6 +1,7 @@
-import { useT } from "@altair/i18n/react";
-import { DECISION_LANG, parseDecision } from "@altair/protocol";
-import { Check, Copy } from "lucide-react";
+import { useT } from "@myrel/i18n/react";
+import { DECISION_LANG, parseDecision, threadIdFromHref } from "@myrel/protocol";
+import { Link, useParams } from "@tanstack/react-router";
+import { Check, Copy, MessagesSquare } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,6 +15,7 @@ export type DecisionHandlers = {
 
 /** An agent message body: GitHub-flavored Markdown, code blocks with a copy button, decision cards. */
 export function MessageMarkdown({ body, decision }: { body: string; decision?: DecisionHandlers }) {
+  const { projectId } = useParams({ strict: false });
   const components: Components = {
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
@@ -27,18 +29,36 @@ export function MessageMarkdown({ body, decision }: { body: string; decision?: D
       }
       return <CodeBlock lang={lang}>{text.replace(/\n$/, "")}</CodeBlock>;
     },
-    a: ({ href, children }) => (
-      <a href={href} target="_blank" rel="noreferrer">
-        {children}
-      </a>
-    ),
+    a: ({ href, children }) => {
+      // [Title](#thr_…) opens that thread's panel.
+      const threadId = threadIdFromHref(href);
+      if (threadId && projectId) return <ThreadLink projectId={projectId} threadId={threadId}>{children}</ThreadLink>;
+      return (
+        <a href={href} target="_blank" rel="noreferrer">
+          {children}
+        </a>
+      );
+    },
   };
   return (
-    <div className="prose-altair">
+    <div className="prose-myrel">
       <Markdown remarkPlugins={[remarkGfm]} components={components}>
         {body}
       </Markdown>
     </div>
+  );
+}
+
+function ThreadLink({ projectId, threadId, children }: { projectId: string; threadId: string; children: ReactNode }) {
+  return (
+    <Link
+      to="/projects/$projectId/threads/$threadId"
+      params={{ projectId, threadId }}
+      className="inline-flex items-baseline gap-1 rounded-md border border-line bg-raised px-1.5 font-medium text-fg no-underline transition-colors hover:border-edge"
+    >
+      <MessagesSquare size={13} className="flex-none self-center text-subtle" aria-hidden="true" />
+      {children}
+    </Link>
   );
 }
 

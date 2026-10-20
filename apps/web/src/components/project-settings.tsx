@@ -1,10 +1,14 @@
-import { useT } from "@altair/i18n/react";
-import type { InviteRole, ProjectRole, ProviderId, TaskTarget } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { InviteRole, ProjectRole, ProviderId, TaskTarget, UpdateProjectSettingsInput } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { X } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, Users, X } from "lucide-react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
+import { Connectors } from "./connectors";
+import { PersonalInProject } from "./personal-in-project";
+import { Skills } from "./skills";
 import { GithubRepos } from "./github-repos";
+import { ProjectFolders } from "./project-folders";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
@@ -22,75 +26,175 @@ import { useConfirm } from "./ui/confirm";
 
 export const roleKey = (role: ProjectRole) => `role.${role}` as const;
 
+export type ProjectSettingsTab = "general" | "model" | "folders" | "github" | "connectors" | "skills" | "members";
+
 /**
- * Everything about one project: general and model, GitHub, members and
- * invites. Drawn on the settings page and in the project's settings dialog.
+ * Everything about one project, split into tabs: general (name, where tasks run, delete),
+ * model and key, GitHub, connectors, skills, members and invites. Drawn on the settings page
+ * (tabs across the top) and in the project's settings dialog (tabs down the side).
+ * A new group of settings gets its own entry in `tabs` below.
  */
 export function ProjectSettings({
   projectId,
   github,
-  header = true,
+  connectorId,
+  connectorResult,
+  layout = "page",
 }: {
   projectId: string;
   github?: string;
-  /** The project's name and your role; the dialog shows these in its own header. */
-  header?: boolean;
+  /** `?connector=` and `?result=` after a connector's OAuth sign-in. */
+  connectorId?: string;
+  connectorResult?: string;
+  /** "dialog" puts the tabs in a side column and leaves the name and role to the dialog's header. */
+  layout?: "page" | "dialog";
 }) {
   const t = useT();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const canManage = project.role === "owner" || project.role === "admin";
+  // Coming back from a GitHub or connector sign-in opens the tab that started it.
+  const [tab, setTab] = useState<ProjectSettingsTab>(
+    github ? "github" : connectorId || connectorResult ? "connectors" : "general",
+  );
+
+  const tabs: { id: ProjectSettingsTab; label: string; icon: ReactNode }[] = [
+    { id: "general", label: t("projectSettings.tab.general"), icon: <Settings2 size={15} /> },
+    { id: "model", label: t("projectSettings.tab.model"), icon: <Sparkles size={15} /> },
+    { id: "folders", label: t("projectSettings.tab.folders"), icon: <Folder size={15} /> },
+    { id: "github", label: t("projectSettings.tab.github"), icon: <FolderGit2 size={15} /> },
+    { id: "connectors", label: t("projectSettings.tab.connectors"), icon: <Plug size={15} /> },
+    { id: "skills", label: t("settings.skills"), icon: <BookMarked size={15} /> },
+    { id: "members", label: t("projectSettings.tab.members"), icon: <Users size={15} /> },
+  ];
+
+  const panel = (
+    <div role="tabpanel" id={`project-settings-${tab}`} aria-labelledby={`project-settings-tab-${tab}`} className="space-y-10">
+      {tab === "general" && (
+        <>
+          <GeneralForm projectId={projectId} canManage={canManage} />
+          {project.role === "owner" && <DangerZone projectId={projectId} name={project.name} />}
+        </>
+      )}
+      {tab === "model" && <ModelForm projectId={projectId} canManage={canManage} />}
+      {tab === "folders" && <ProjectFolders project={project} canManage={canManage} />}
+      {tab === "github" && <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />}
+      {tab === "connectors" && (
+        <>
+          <Connectors projectId={projectId} canManage={canManage} result={connectorResult} connectorId={connectorId} />
+          <PersonalInProject projectId={projectId} kind="connectors" />
+        </>
+      )}
+      {tab === "skills" && (
+        <>
+          <Skills projectId={projectId} canManage={canManage} />
+          <PersonalInProject projectId={projectId} kind="skills" />
+        </>
+      )}
+      {tab === "members" && (
+        <>
+          <Members projectId={projectId} myRole={project.role} />
+          {canManage && <Invites projectId={projectId} />}
+        </>
+      )}
+    </div>
+  );
+
+  if (layout === "dialog") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        <TabList tabs={tabs} tab={tab} onChange={setTab} vertical />
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7">{panel}</div>
+      </div>
+    );
+  }
 
   return (
     <>
-      {header && (
-        <div>
-          <h1 className="text-xl font-semibold">{project.name}</h1>
-          <p className="mt-1 text-[13px] text-subtle">
-            {t("projectSettings.youAre", { role: t(roleKey(project.role)) })}{" "}
-            <Link to="/projects/$projectId" params={{ projectId }} className="text-accent hover:underline">
-              {t("projectSettings.open")}
-            </Link>
-          </p>
-        </div>
-      )}
-      <GeneralAndModel projectId={projectId} canManage={canManage} />
-      <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />
-      <Members projectId={projectId} myRole={project.role} />
-      {canManage && <Invites projectId={projectId} />}
-      {project.role === "owner" && <DangerZone projectId={projectId} name={project.name} />}
+      <div>
+        <h1 className="text-xl font-semibold">{project.name}</h1>
+        <p className="mt-1 text-[13px] text-subtle">
+          {t("projectSettings.youAre", { role: t(roleKey(project.role)) })}{" "}
+          <Link to="/projects/$projectId" params={{ projectId }} className="text-accent hover:underline">
+            {t("projectSettings.open")}
+          </Link>
+        </p>
+      </div>
+      <div className="!mt-5 space-y-8">
+        <TabList tabs={tabs} tab={tab} onChange={setTab} />
+        {panel}
+      </div>
     </>
   );
 }
 
-function GeneralAndModel({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+/** The project settings' tabs: a side column in the dialog (a strip on phones), a strip on the page. */
+function TabList({
+  tabs,
+  tab,
+  onChange,
+  vertical = false,
+}: {
+  tabs: { id: ProjectSettingsTab; label: string; icon: ReactNode }[];
+  tab: ProjectSettingsTab;
+  onChange: (tab: ProjectSettingsTab) => void;
+  vertical?: boolean;
+}) {
   const t = useT();
+  // Arrow keys move between tabs, as in any tab list.
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const keys = vertical ? ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] : ["ArrowLeft", "ArrowRight"];
+    if (!keys.includes(e.key) && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const i = tabs.findIndex((x) => x.id === tab);
+    const back = e.key === "ArrowUp" || e.key === "ArrowLeft";
+    const next =
+      e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (back ? -1 : 1) + tabs.length) % tabs.length;
+    onChange(tabs[next]!.id);
+    e.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
+  }
+
+  return (
+    <div
+      role="tablist"
+      aria-label={t("projectSettings.sections")}
+      aria-orientation={vertical ? "vertical" : "horizontal"}
+      onKeyDown={onKeyDown}
+      className={
+        vertical
+          ? "flex flex-none gap-1 overflow-x-auto border-b border-line px-3 py-2 sm:w-48 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r sm:px-2 sm:py-4"
+          : "-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1 pb-2"
+      }
+    >
+      {tabs.map((x) => {
+        const active = x.id === tab;
+        return (
+          <button
+            key={x.id}
+            type="button"
+            role="tab"
+            id={`project-settings-tab-${x.id}`}
+            aria-selected={active}
+            aria-controls={`project-settings-${x.id}`}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(x.id)}
+            className={`flex flex-none items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[13px] ${
+              active ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
+            }`}
+          >
+            <span className={active ? "text-fg" : "text-subtle"}>{x.icon}</span>
+            {x.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Saves one tab's fields of the project's settings; renaming also refreshes the project lists. */
+function useSaveSettings(projectId: string) {
   const queryClient = useQueryClient();
-  const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
-  const { data: providers } = useQuery(providersQuery);
-  const { data: keys = [] } = useQuery(keysQuery);
-
-  const [name, setName] = useState(settings.name);
-  const [provider, setProvider] = useState<ProviderId | "">(settings.provider ?? "");
-  const [model, setModel] = useState(settings.model ?? "");
-  const [keyId, setKeyId] = useState(settings.keyId ?? "");
-  const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
-  useEffect(() => {
-    setName(settings.name);
-    setProvider(settings.provider ?? "");
-    setModel(settings.model ?? "");
-    setKeyId(settings.keyId ?? "");
-    setTaskTarget(settings.taskTarget);
-  }, [settings]);
-
-  const save = useMutation({
-    mutationFn: () =>
-      api.updateProjectSettings(projectId, {
-        name: name.trim(),
-        provider: provider || null,
-        model: model.trim() || null,
-        keyId: keyId || null,
-        taskTarget,
-      }),
+  return useMutation({
+    mutationFn: (input: UpdateProjectSettingsInput) => api.updateProjectSettings(projectId, input),
     onSuccess: (s) => {
       queryClient.setQueryData(projectSettingsQuery(projectId).queryKey, s);
       return Promise.all([
@@ -99,17 +203,22 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
       ]);
     },
   });
+}
 
-  const effectiveProvider = provider || providers?.serverDefault;
-  const providerInfo = providers?.providers.find((p) => p.id === effectiveProvider);
-  // A key you cannot see (someone else's) stays selected but is shown as such.
-  const usableKeys = keys.filter((k) => k.provider === effectiveProvider);
-  const foreignKey = keyId && !keys.some((k) => k.id === keyId);
-  const noKey = !keyId && providerInfo && !providerInfo.serverKey;
+function GeneralForm({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
+  const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
+  const [name, setName] = useState(settings.name);
+  const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
+  useEffect(() => {
+    setName(settings.name);
+    setTaskTarget(settings.taskTarget);
+  }, [settings]);
+  const save = useSaveSettings(projectId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate();
+    if (name.trim()) save.mutate({ name: name.trim(), taskTarget });
   }
 
   return (
@@ -120,6 +229,51 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
         </Field>
       </Section>
 
+      <Section title={t("projectSettings.tasks")} description={t("projectSettings.tasksDescription")}>
+        <Field label={t("projectSettings.runTasks")}>
+          <Select value={taskTarget} onChange={(e) => setTaskTarget(e.target.value as TaskTarget)} disabled={!canManage}>
+            <option value="auto">{t("projectSettings.taskTarget.auto")}</option>
+            <option value="local">{t("projectSettings.taskTarget.local")}</option>
+            <option value="cloud">{t("projectSettings.taskTarget.cloud")}</option>
+          </Select>
+        </Field>
+      </Section>
+
+      {canManage && <SaveBar save={save} disabled={!name.trim()} />}
+    </form>
+  );
+}
+
+function ModelForm({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
+  const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
+  const { data: providers } = useQuery(providersQuery);
+  const { data: keys = [] } = useQuery(keysQuery);
+
+  const [provider, setProvider] = useState<ProviderId | "">(settings.provider ?? "");
+  const [model, setModel] = useState(settings.model ?? "");
+  const [keyId, setKeyId] = useState(settings.keyId ?? "");
+  useEffect(() => {
+    setProvider(settings.provider ?? "");
+    setModel(settings.model ?? "");
+    setKeyId(settings.keyId ?? "");
+  }, [settings]);
+  const save = useSaveSettings(projectId);
+
+  const effectiveProvider = provider || providers?.serverDefault;
+  const providerInfo = providers?.providers.find((p) => p.id === effectiveProvider);
+  // A key you cannot see (someone else's) stays selected but is shown as such.
+  const usableKeys = keys.filter((k) => k.provider === effectiveProvider);
+  const foreignKey = keyId && !keys.some((k) => k.id === keyId);
+  const noKey = !keyId && providerInfo && !providerInfo.serverKey;
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    save.mutate({ provider: provider || null, model: model.trim() || null, keyId: keyId || null });
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-10">
       <Section
         title={t("projectSettings.model")}
         description={t("projectSettings.modelDescription")}
@@ -191,26 +345,21 @@ function GeneralAndModel({ projectId, canManage }: { projectId: string; canManag
         )}
       </Section>
 
-      <Section title={t("projectSettings.tasks")} description={t("projectSettings.tasksDescription")}>
-        <Field label={t("projectSettings.runTasks")}>
-          <Select value={taskTarget} onChange={(e) => setTaskTarget(e.target.value as TaskTarget)} disabled={!canManage}>
-            <option value="auto">{t("projectSettings.taskTarget.auto")}</option>
-            <option value="local">{t("projectSettings.taskTarget.local")}</option>
-            <option value="cloud">{t("projectSettings.taskTarget.cloud")}</option>
-          </Select>
-        </Field>
-      </Section>
-
-      {canManage && (
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={save.isPending || !name.trim()}>
-            {t("settings.saveChanges")}
-          </Button>
-          {save.isSuccess && !save.isPending && <Notice tone="ok">{t("settings.saved")}</Notice>}
-          {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
-        </div>
-      )}
+      {canManage && <SaveBar save={save} />}
     </form>
+  );
+}
+
+function SaveBar({ save, disabled }: { save: ReturnType<typeof useSaveSettings>; disabled?: boolean }) {
+  const t = useT();
+  return (
+    <div className="flex items-center gap-3">
+      <Button type="submit" disabled={save.isPending || disabled}>
+        {t("settings.saveChanges")}
+      </Button>
+      {save.isSuccess && !save.isPending && <Notice tone="ok">{t("settings.saved")}</Notice>}
+      {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
+    </div>
   );
 }
 

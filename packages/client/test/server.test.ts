@@ -1,14 +1,14 @@
-import { API_VERSION } from "@altair/protocol";
+import { API_VERSION } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { webPlatform, webStorage } from "../src/platform";
 import { currentServer, normalizeServerUrl, probeServer, saveServer, tokenStoreFor } from "../src/server";
 
-const info = { app: "altair", apiVersion: API_VERSION, name: "Acme", auth: { emailPassword: true, signUp: false } };
+const info = { app: "myrel", apiVersion: API_VERSION, name: "Acme", auth: { emailPassword: true, signUp: false }, billing: false, legal: null };
 const respond = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as typeof fetch;
 
 describe("normalizeServerUrl", () => {
   it("adds https and strips paths", () => {
-    expect(normalizeServerUrl(" altair.acme.com/ ")).toBe("https://altair.acme.com");
+    expect(normalizeServerUrl(" myrel.acme.com/ ")).toBe("https://myrel.acme.com");
     expect(normalizeServerUrl("http://localhost:8787/api")).toBe("http://localhost:8787");
   });
 
@@ -19,13 +19,13 @@ describe("normalizeServerUrl", () => {
 });
 
 describe("probeServer", () => {
-  it("returns info for a compatible Altair server", async () => {
+  it("returns info for a compatible Myrel server", async () => {
     expect(await probeServer("https://a.test", respond(info))).toEqual(info);
   });
 
   it("rejects other apps, unreachable servers and other API versions", async () => {
-    await expect(probeServer("https://a.test", respond({ hello: 1 }))).rejects.toThrow(/not an Altair server/);
-    await expect(probeServer("https://a.test", respond(info, 404))).rejects.toThrow(/not an Altair server/);
+    await expect(probeServer("https://a.test", respond({ hello: 1 }))).rejects.toThrow(/not a Myrel server/);
+    await expect(probeServer("https://a.test", respond(info, 404))).rejects.toThrow(/not a Myrel server/);
     await expect(probeServer("https://a.test", (async () => Promise.reject(new TypeError())) as typeof fetch)).rejects.toThrow(
       /reach/,
     );

@@ -1,6 +1,6 @@
-import type { Translate } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
-import type { Runner } from "@altair/protocol";
+import type { Translate } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
+import type { Runner } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Check, ChevronRight, Folder, Home } from "lucide-react";
 import { useState } from "react";
@@ -11,7 +11,7 @@ import { Button, cn, errorMessage, GhostButton, IconButton } from "../lib/ui";
 export function folderPickerBlocker(runner: Runner, t: Translate): string | null {
   if (!runner.online) return t("folderPicker.offline", { computer: runner.name });
   if (!runner.features.includes("folders")) {
-    return t("folderPicker.updateRunner", { command: "npx altair-runner@latest update" });
+    return t("folderPicker.updateRunner", { command: "npx myrel-runner@latest update" });
   }
   return null;
 }

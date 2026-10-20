@@ -1,9 +1,9 @@
-//! The bundled altair-runner (packages/altair-runner) as a sidecar, so projects can work in local
+//! The bundled myrel-runner (packages/myrel-runner) as a sidecar, so projects can work in local
 //! folders with the user's own Claude Code, Codex or Gemini CLI without installing anything.
 //!
-//! The runner keeps its shared folders (added from Altair > Devices) in `<app data>/runner`,
-//! separate from a standalone `npx altair-runner` install. Its login (server + runner token) stays in the OS keychain and
-//! only reaches the runner through ALTAIR_SERVER / ALTAIR_RUNNER_TOKEN, which it never writes to disk. `start --json` prints one status object per line,
+//! The runner keeps its shared folders (added from Myrel > Devices) in `<app data>/runner`,
+//! separate from a standalone `npx myrel-runner` install. Its login (server + runner token) stays in the OS keychain and
+//! only reaches the runner through MYREL_SERVER / MYREL_RUNNER_TOKEN, which it never writes to disk. `start --json` prints one status object per line,
 //! which is forwarded to the web view as `runner://status` events.
 
 use std::sync::{Mutex, OnceLock};
@@ -42,14 +42,14 @@ fn command<R: Runtime>(app: &AppHandle<R>) -> Result<tauri_plugin_shell::process
     let home = app.path().app_data_dir().map_err(|e| e.to_string())?.join("runner");
     let mut cmd = app
         .shell()
-        .sidecar("altair-runner")
+        .sidecar("myrel-runner")
         .map_err(|e| e.to_string())?
-        .env("ALTAIR_RUNNER_HOME", home);
+        .env("MYREL_RUNNER_HOME", home);
     if let Some(path) = login_path() {
         cmd = cmd.env("PATH", path);
     }
     if let Some(login) = load_login() {
-        cmd = cmd.env("ALTAIR_SERVER", login.server).env("ALTAIR_RUNNER_TOKEN", login.token);
+        cmd = cmd.env("MYREL_SERVER", login.server).env("MYREL_RUNNER_TOKEN", login.token);
     }
     Ok(cmd)
 }
@@ -61,7 +61,7 @@ async fn run<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<String, St
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_owned();
-        Err(if err.is_empty() { "altair-runner failed".into() } else { err })
+        Err(if err.is_empty() { "myrel-runner failed".into() } else { err })
     }
 }
 
@@ -213,14 +213,14 @@ fn login_path() -> Option<String> {
             let (tx, rx) = mpsc::channel();
             thread::spawn(move || {
                 let out = Command::new(shell)
-                    .args(["-ilc", "printf '__ALTAIR_PATH__%s__ALTAIR_PATH__' \"$PATH\""])
+                    .args(["-ilc", "printf '__MYREL_PATH__%s__MYREL_PATH__' \"$PATH\""])
                     .output();
                 let _ = tx.send(out);
             });
             // A shell profile that waits for input must not hold up the app.
             let out = rx.recv_timeout(Duration::from_secs(5)).ok()?.ok()?;
             let text = String::from_utf8_lossy(&out.stdout);
-            let path = text.split("__ALTAIR_PATH__").nth(1)?.to_owned();
+            let path = text.split("__MYREL_PATH__").nth(1)?.to_owned();
             (!path.is_empty()).then_some(path)
         }
         #[cfg(not(unix))]

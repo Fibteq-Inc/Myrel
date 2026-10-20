@@ -1,0 +1,75 @@
+name: Publish update
+
+# Ships JavaScript-only changes to installed builds as an EAS Update: on every
+# push to main that touches the app or the packages it bundles, or by hand
+# (eas workflow:run publish-update.yml). An update is published only when a
+# store build with the same native fingerprint exists, so a change that needs
+# a new build (a native module, an SDK bump) is skipped instead of shipping
+# code the installed apps can't run. It publishes to the channel the builds
+# read, so it doesn't depend on a channel-branch mapping.
+on:
+  push:
+    branches: ['main']
+    paths:
+      - apps/mobile/**
+      - packages/client/**
+      - packages/i18n/**
+      - packages/protocol/**
+      - pnpm-lock.yaml
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options:
+          - production
+          - preview
+        default: production
+      message:
+        type: string
+        required: false
+
+# One job per platform: "all" would also export web, which the app doesn't ship.
+jobs:
+  fingerprint:
+    name: Fingerprint
+    type: fingerprint
+    environment: ${{ inputs.channel || 'production' }}
+  get_android_build:
+    name: Find Android build
+    needs: [fingerprint]
+    type: get-build
+    params:
+      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+      profile: ${{ inputs.channel || 'production' }}
+  get_ios_build:
+    name: Find iOS build
+    needs: [fingerprint]
+    type: get-build
+    params:
+      fingerprint_hash: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+      profile: ${{ inputs.channel || 'production' }}
+  publish_android:
+    name: Publish Android update
+    needs: [get_android_build]
+    if: ${{ needs.get_android_build.outputs.build_id }}
+    type: update
+    environment: ${{ inputs.channel || 'production' }}
+    # Same default server the build profiles in eas.json set.
+    env:
+      EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
+    params:
+      platform: android
+      channel: ${{ inputs.channel || 'production' }}
+      message: ${{ inputs.message || github.commit_message }}
+  publish_ios:
+    name: Publish iOS update
+    needs: [get_ios_build]
+    if: ${{ needs.get_ios_build.outputs.build_id }}
+    type: update
+    environment: ${{ inputs.channel || 'production' }}
+    env:
+      EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
+    params:
+      platform: ios
+      channel: ${{ inputs.channel || 'production' }}
+      message: ${{ inputs.message || github.commit_message }}

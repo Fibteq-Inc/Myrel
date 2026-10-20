@@ -1,12 +1,13 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { fileKey } from "../agents/knowledge";
 import { workspaceName } from "../sandbox/workspace";
+import { deleteOwnerFiles } from "../skills/store";
 
 /**
  * Deletes a project and everything stored for it: the D1 rows (members, invites, repos and the
- * local folder cascade), its files and artifacts in R2, each thread's agent, sandbox and
+ * local folder cascade), its files, skills and artifacts in R2, each thread's agent, sandbox and
  * Artifacts workspace, and the project agent's own storage. Usage rows stay: they are the billing
  * ledger and have no foreign keys on purpose.
  *
@@ -16,6 +17,8 @@ import { workspaceName } from "../sandbox/workspace";
 export async function deleteProject(env: Env, projectId: string): Promise<void> {
   const project = await getAgentByName(env.PROJECT_AGENT, projectId);
   const { threadIds, artifactIds } = await project.prepareDelete();
+  // Skill rows cascade with the project; their files are listed by those rows.
+  await deleteOwnerFiles(env, { projectId }).catch((err) => console.error("project delete: skill files", projectId, err));
   await createDb(env.DB).delete(schema.projects).where(eq(schema.projects.id, projectId));
 
   const steps: Promise<unknown>[] = [

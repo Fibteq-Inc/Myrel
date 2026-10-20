@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   type Attachment,
   type Artifact,
@@ -11,7 +11,10 @@ import {
   type MessageStats,
   type ArtifactRef,
   nextCronRun,
+  normalizeFilePath,
+  planChecklist,
   type NotificationKind,
+  type PullRequest,
   type Reaction,
   type Routine,
   type RoutineSchedule,
@@ -21,21 +24,29 @@ import {
   type Thread,
   type ThreadStatus,
   type UpdateRoutineInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
+import { canUseCoordinator } from "../extensions";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
 import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
 import { deliverNotification, excerpt } from "../notifications/deliver";
-import { type CoordinatorHost, coordinatorPrompt, coordinatorTools, COORDINATOR_SYSTEM, type InboxItem } from "./coordinator";
+import {
+  type CoordinatorHost,
+  coordinatorPrompt,
+  coordinatorTools,
+  COORDINATOR_SYSTEM,
+  type InboxItem,
+  type Relay,
+} from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
-import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID } from "./names";
+import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
-export const USER_ID_HEADER = "x-altair-user-id";
+export const USER_ID_HEADER = "x-myrel-user-id";
 
 type ConnState = { userId: string };
 
@@ -57,6 +68,7 @@ type MessageRow = {
 type ThreadRow = {
   id: string;
   root_message_id: string;
+  ack_message_id: string | null;
   title: string;
   status: ThreadStatus;
   status_text: string | null;
@@ -105,6 +117,16 @@ export type ThreadContext = {
 
 export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
 
+/**
+ * How long the coordinator waits after a message inside a thread before looking at thread updates,
+ * so a burst of replies costs one turn. A project-chat message runs it right away and takes them too.
+ */
+const OBSERVE_DELAY_SEC = 60;
+/** Relays the coordinator sees each turn, so it does not repeat one. */
+const RELAY_HISTORY = 20;
+/** A relay between the same two threads (either way) within this window is refused, so notes cannot bounce. */
+const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+
 /** Most recent project-chat messages the coordinator sees each turn. */
 const COORDINATOR_HISTORY = 40;
 
@@ -119,6 +141,10 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Agents currently working (null = coordinator, otherwise a thread id) and what they are doing. In memory only. */
   private active = new Map<string | null, string | undefined>();
+
+  /** Activity counts last written to D1 for the project list, and the write in flight. */
+  private syncedActivity: string | null = null;
+  private activityWrite: Promise<void> = Promise.resolve();
 
   /** Project instructions, memory and the file index. */
   readonly knowledge: KnowledgeStore;
@@ -154,6 +180,9 @@ export class ProjectAgent extends Agent<Env> {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`;
+    // Added with the coordinator's acknowledgement line.
+    const threadColumns = this.sql<{ name: string }>`PRAGMA table_info(threads)`;
+    if (!threadColumns.some((c) => c.name === "ack_message_id")) this.sql`ALTER TABLE threads ADD COLUMN ack_message_id TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -166,6 +195,14 @@ export class ProjectAgent extends Agent<Env> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       kind TEXT NOT NULL,
       payload TEXT NOT NULL
+    )`;
+    // Notes the coordinator passed from one thread to another.
+    this.sql`CREATE TABLE IF NOT EXISTS coordinator_relays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_thread_id TEXT NOT NULL,
+      to_thread_id TEXT NOT NULL,
+      note TEXT NOT NULL,
+      created_at TEXT NOT NULL
     )`;
     this.knowledge = new KnowledgeStore(
       (strings, ...values) => this.sql(strings, ...values),
@@ -191,7 +228,7 @@ export class ProjectAgent extends Agent<Env> {
     )`;
   }
 
-  // Our clients speak the Altair protocol only; skip the SDK's state/identity frames.
+  // Our clients speak the Myrel protocol only; skip the SDK's state/identity frames.
   override shouldSendProtocolMessages(): boolean {
     return false;
   }
@@ -244,7 +281,19 @@ export class ProjectAgent extends Agent<Env> {
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
         }
-        if (message.threadId) await this.wakeThread(message.threadId, { kind: "message", messageId: message.id });
+        if (message.threadId) {
+          // Writing in a finished thread picks it up again.
+          if (this.getThread(message.threadId)?.resolved) {
+            this.updateThread(message.threadId, { resolved: false, status: "working" });
+          }
+          await this.wakeThread(message.threadId, {
+            kind: "message",
+            messageId: message.id,
+            body: message.body,
+            authorId: userId,
+            seq: message.seq,
+          });
+        }
         else await this.notifyCoordinator({ kind: "message", messageId: message.id });
         return;
       }
@@ -301,6 +350,7 @@ export class ProjectAgent extends Agent<Env> {
       createdAt,
     };
     this.emit({ type: "message.created", message });
+    if (this.observable(message)) this.ctx.waitUntil(this.observeThread(message));
     return message;
   }
 
@@ -314,6 +364,22 @@ export class ProjectAgent extends Agent<Env> {
   getMessage(id: string): Message | null {
     const [row] = this.sql<MessageRow>`SELECT * FROM messages WHERE id = ${id}`;
     return row ? this.toMessage(row) : null;
+  }
+
+  /** Replaces a message's body and tells every client. Callable over RPC. */
+  editMessage(id: string, body: string): Message | null {
+    this.sql`UPDATE messages SET body = ${body} WHERE id = ${id}`;
+    const message = this.getMessage(id);
+    if (message) this.emit({ type: "message.updated", message });
+    return message;
+  }
+
+  /** Replaces what an agent message's stats line says, e.g. with usage reported after it was sent. Callable over RPC. */
+  setMessageStats(id: string, stats: MessageStats): Message | null {
+    this.sql`UPDATE messages SET stats = ${JSON.stringify(stats)} WHERE id = ${id}`;
+    const message = this.getMessage(id);
+    if (message) this.emit({ type: "message.updated", message });
+    return message;
   }
 
   addReaction(reaction: Reaction): void {
@@ -335,13 +401,14 @@ export class ProjectAgent extends Agent<Env> {
   // ---- Threads -----------------------------------------------------------
 
   /** Opens a thread under a project-chat message. Callable over RPC. */
-  createThread(rootMessageId: string, title: string): Thread {
+  createThread(rootMessageId: string, title: string, ackMessageId: string | null = null): Thread {
     const id = createId("thread");
     const now = new Date().toISOString();
-    this.sql`INSERT INTO threads (id, root_message_id, title, status, status_text, resolved, label, created_at, updated_at)
-      VALUES (${id}, ${rootMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
+    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, created_at, updated_at)
+      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
+    this.syncActivity();
     return thread;
   }
 
@@ -361,6 +428,7 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
       resolved = ${next.resolved ? 1 : 0}, label = ${next.label}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
+    this.syncActivity();
     return next;
   }
 
@@ -385,13 +453,18 @@ export class ProjectAgent extends Agent<Env> {
     };
   }
 
+  /** This server's public address (for links and for the sandbox to call back), or null before anyone connected. Callable over RPC. */
+  publicOrigin(): string | null {
+    return this.env.BETTER_AUTH_URL?.replace(/\/$/, "") || (this.ctx.storage.kv.get<string>("origin") ?? null);
+  }
+
   /** A thread's turn ended in a way people should hear about. Callable over RPC. */
   async notifyThread(threadId: string, kind: NotificationKind, text: string): Promise<void> {
     const thread = this.getThread(threadId);
     if (!thread) return;
     try {
       const { projectName } = await this.directory();
-      const origin = this.env.BETTER_AUTH_URL?.replace(/\/$/, "") || (this.ctx.storage.kv.get<string>("origin") ?? null);
+      const origin = this.publicOrigin();
       await deliverNotification(this.env, {
         projectId: this.name,
         projectName,
@@ -412,12 +485,49 @@ export class ProjectAgent extends Agent<Env> {
     await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason });
   }
 
+  override onStart(): void {
+    // Activity lives in memory, so a restart (an eviction or a crash mid-turn) clears whatever was left in D1.
+    this.syncActivity();
+  }
+
   /** Agents report when they start and stop working, and optionally what they are doing. Callable over RPC. */
   setActivity(threadId: string | null, active: boolean, label?: string): void {
-    if (active === this.active.has(threadId) && label === this.active.get(threadId)) return;
+    // A stop always goes out: the map lives in memory and is empty again after the object was evicted
+    // mid-turn, and skipping the stop then left clients showing "Thinking" for good.
+    if (active && this.active.has(threadId) && label === this.active.get(threadId)) return;
     if (active) this.active.set(threadId, label);
     else this.active.delete(threadId);
     this.emit({ type: "agent.activity", threadId, active, label });
+    this.syncActivity();
+  }
+
+  /**
+   * Copies how many agents are working and how many threads wait on a person into the project's D1 row,
+   * so the project list can show it without waking every project. Only writes when the counts change.
+   */
+  private syncActivity(): void {
+    const working = new Set<string>();
+    for (const threadId of this.active.keys()) working.add(threadId ?? "coordinator");
+    let waiting = 0;
+    for (const row of this.sql<{ id: string; status: ThreadStatus }>`
+      SELECT id, status FROM threads WHERE resolved = 0 AND status IN ('working', 'blocked')`) {
+      if (row.status === "working") working.add(row.id);
+      else waiting++;
+    }
+    const counts = { activeCount: working.size, waitingCount: waiting };
+    const key = `${counts.activeCount}/${counts.waitingCount}`;
+    if (key === this.syncedActivity) return;
+    this.syncedActivity = key;
+    // Chained so an older count never lands after a newer one.
+    this.activityWrite = this.activityWrite.then(async () => {
+      try {
+        await createDb(this.env.DB).update(schema.projects).set(counts).where(eq(schema.projects.id, this.name));
+      } catch (err) {
+        console.error("project activity sync failed", err);
+        if (this.syncedActivity === key) this.syncedActivity = null;
+      }
+    });
+    this.ctx.waitUntil(this.activityWrite);
   }
 
   /** The project's local folder changed or its computer connected/disconnected. Callable over RPC. */
@@ -428,6 +538,11 @@ export class ProjectAgent extends Agent<Env> {
   /** A thread's task changed or printed output; relay it to clients. Callable over RPC. */
   broadcastTask(event: Extract<ServerEvent, { type: "task.updated" | "task.output" }>): void {
     this.emit(event);
+  }
+
+  /** A pull request a thread opened changed on GitHub; relay it to clients. Callable over RPC. */
+  broadcastPullRequest(pullRequest: PullRequest): void {
+    this.emit({ type: "pr.updated", pullRequest });
   }
 
   // ---- Routines ----------------------------------------------------------
@@ -619,6 +734,34 @@ export class ProjectAgent extends Agent<Env> {
 
   // ---- Coordinator -------------------------------------------------------
 
+  /**
+   * Whether the coordinator should see a thread message: what a person writes there and the thread
+   * agent's replies, while another thread is open that it could matter to. Plan cards and
+   * attachment-only messages carry nothing to relay.
+   */
+  private observable(m: Message): m is Message & { threadId: string } {
+    if (!m.threadId || !m.body.trim() || planChecklist(m.body) !== null) return false;
+    if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
+    return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
+  }
+
+  private async observeThread(m: Message & { threadId: string }) {
+    const item: InboxItem = { kind: "thread", threadId: m.threadId, messageId: m.id };
+    this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${item.kind}, ${JSON.stringify(item)})`;
+    // One pending look at a time; any coordinator turn before it takes these items too.
+    await this.schedule(OBSERVE_DELAY_SEC, "coordinatorTurn", "observe", { idempotent: true });
+  }
+
+  private recentRelays(): Relay[] {
+    return this.sql<{ from_thread_id: string; to_thread_id: string; note: string; created_at: string }>`
+      SELECT * FROM (SELECT * FROM coordinator_relays ORDER BY id DESC LIMIT ${RELAY_HISTORY}) ORDER BY id`.map((r) => ({
+      fromThreadId: r.from_thread_id,
+      toThreadId: r.to_thread_id,
+      note: r.note,
+      createdAt: r.created_at,
+    }));
+  }
+
   private async notifyCoordinator(item: InboxItem) {
     this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${item.kind}, ${JSON.stringify(item)})`;
     await this.queue("coordinatorTurn", null);
@@ -631,6 +774,11 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`DELETE FROM coordinator_inbox WHERE id <= ${rows.at(-1)!.id}`;
     const inbox = rows.map((r) => JSON.parse(r.payload) as InboxItem);
 
+    const allowed = await canUseCoordinator(this.env, this.name);
+    if (!allowed.ok) {
+      this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: allowed.reason });
+      return;
+    }
     const llm = await projectProvider(this.env, this.name);
     if (!llm.ok) {
       this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
@@ -644,6 +792,13 @@ export class ProjectAgent extends Agent<Env> {
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
       const meter = new TurnMeter(llm.provider.model);
+      const threadUpdates = inbox.flatMap((item) => {
+        if (item.kind !== "thread") return [];
+        const thread = this.getThread(item.threadId);
+        const message = this.getMessage(item.messageId);
+        return thread && message ? [{ thread, message }] : [];
+      });
+      const onlyThreadUpdates = inbox.every((i) => i.kind === "thread");
       await runLoop({
         provider: meteredForTurn(
           llm.provider,
@@ -659,13 +814,17 @@ export class ProjectAgent extends Agent<Env> {
           threads: this.listThreads(),
           routines: this.listRoutines(),
           inbox,
+          threadUpdates,
+          relays: this.recentRelays(),
           knowledge: this.knowledge.snapshot(),
           now: new Date(),
           defaultTimezone: this.defaultTimezone(),
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID })),
-          ...routineTools(this.routineHost(null)),
+          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+            onlyThreadUpdates,
+          }),
+          ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
         ],
         maxSteps: 8,
       });
@@ -692,21 +851,24 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   private coordinatorHost(meter?: TurnMeter): CoordinatorHost {
+    const post = (body: string) =>
+      this.sendMessage({
+        threadId: null,
+        authorKind: "agent",
+        authorId: COORDINATOR_ID,
+        body,
+        ...(meter && { stats: meter.take() ?? undefined }),
+      });
     return {
       getMessage: (id) => this.getMessage(id),
       getThread: (id) => this.getThread(id),
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
-      post: (body) =>
-        this.sendMessage({
-          threadId: null,
-          authorKind: "agent",
-          authorId: COORDINATOR_ID,
-          body,
-          ...(meter && { stats: meter.take() ?? undefined }),
-        }),
+      post,
       react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
-      startThread: async ({ rootMessageId, title, brief, ack }) => {
-        const thread = this.createThread(rootMessageId, title);
+      startThread: async ({ rootMessageId, title, brief, ack, projectAck }) => {
+        // The project-chat line goes first so the card can sit under it: ask, "on it", card.
+        const ackMessage = projectAck ? post(projectAck) : null;
+        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null);
         if (ack) this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: ack });
         const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
         await agent.start({ projectId: this.name, threadId: thread.id, brief });
@@ -714,8 +876,27 @@ export class ProjectAgent extends Agent<Env> {
       },
       messageThread: async (threadId, note) => {
         const thread = this.getThread(threadId);
-        if (thread?.resolved) this.updateThread(threadId, { resolved: false });
+        // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
+        if (thread?.resolved) this.updateThread(threadId, { resolved: false, status: "working" });
         await this.wakeThread(threadId, { kind: "coordinator", note });
+      },
+      relay: async (fromThreadId, toThreadId, note) => {
+        const from = this.getThread(fromThreadId);
+        const to = this.getThread(toThreadId);
+        if (!from) throw new Error(`No thread ${fromThreadId}.`);
+        if (!to) throw new Error(`No thread ${toThreadId}.`);
+        if (from.id === to.id) throw new Error("A thread already knows its own work; relay only to another thread.");
+        // A finished thread is not woken for news; redoing its work is a new ask from a person.
+        if (to.resolved) throw new Error(`"${to.title}" is resolved; do not relay to it.`);
+        const since = new Date(Date.now() - RELAY_COOLDOWN_MS).toISOString();
+        const [recent] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM coordinator_relays WHERE created_at > ${since}
+          AND ((from_thread_id = ${from.id} AND to_thread_id = ${to.id}) OR (from_thread_id = ${to.id} AND to_thread_id = ${from.id}))`;
+        if (recent!.n > 0) {
+          throw new Error(`You already relayed between "${from.title}" and "${to.title}" in the last few minutes; do not relay again.`);
+        }
+        this.sql`INSERT INTO coordinator_relays (from_thread_id, to_thread_id, note, created_at)
+          VALUES (${from.id}, ${to.id}, ${note}, ${new Date().toISOString()})`;
+        await this.wakeThread(to.id, { kind: "coordinator", note: `From the "${from.title}" thread: ${note}` });
       },
     };
   }
@@ -761,6 +942,11 @@ export class ProjectAgent extends Agent<Env> {
 
   forgetFile(path: string) {
     return this.knowledge.forgetFile(path);
+  }
+
+  /** Attachments for a message, from project file paths; throws on a path with no file. */
+  attachmentsFor(paths: string[]) {
+    return this.knowledge.attachmentsFor(paths.map(normalizeFilePath));
   }
 
   async readFileText(path: string): Promise<{ found: boolean; text: string | null; size: number }> {
@@ -826,6 +1012,7 @@ export class ProjectAgent extends Agent<Env> {
       id: r.id,
       projectId: this.name,
       rootMessageId: r.root_message_id,
+      ackMessageId: r.ack_message_id ?? null,
       title: r.title,
       status: r.status,
       statusText: r.status_text,
@@ -863,9 +1050,12 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 
 /** Why a thread agent is woken. */
 export type ThreadWake =
-  | { kind: "message"; messageId: string }
+  /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
+  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number }
   | { kind: "coordinator"; note: string }
-  | { kind: "routine"; name: string; prompt: string };
+  | { kind: "routine"; name: string; prompt: string }
+  /** Something happened on a pull request the thread opened (github/pulls.ts). */
+  | { kind: "github"; event: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

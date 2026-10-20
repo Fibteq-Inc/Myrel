@@ -1,11 +1,12 @@
-import type { Notification, Project, Routine, ServerEvent, Thread } from "@altair/protocol";
+import type { Notification, Project, Routine, ServerEvent, Thread } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { agentProject, modelAgent } from "./fake-agent";
 import { emails as sentEmails, type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -21,8 +22,8 @@ async function setup() {
     body: JSON.stringify({ email, password: "correct-horse-battery", name: "İsmail" }),
   });
   const token = signUp.headers.get("set-auth-token")!;
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
-  const { project } = (await res.json()) as { project: Project };
+  // Its threads are worked by the fake model, as the person's CLI (see fake-agent.ts).
+  const { project } = await agentProject(token, modelAgent);
   const ws = (
     await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, {
       headers: { upgrade: "websocket" },
@@ -172,7 +173,7 @@ describe("routines", () => {
           ? {
               text: "",
               toolCalls: [
-                call("start_thread", { message_id: id, title: "Reminder", instructions: "Remind me in an hour." }),
+                call("start_thread", { message_id: id, title: "Reminder", instructions: "Remind me in an hour.", project_ack: "On it." }),
               ],
             }
           : { text: "", toolCalls: [] };
@@ -208,9 +209,9 @@ describe("routines", () => {
     // Filtered by subject: a late turn from an earlier test's thread can also send mail here.
     const emails = () => sentEmails.filter((e) => e.subject.endsWith("· Reminder"));
     const sent = emails()[0]!;
-    expect(sent.subject).toBe("[Altair] Needs your decision · Reminder");
-    expect(sent.from).toEqual({ name: "Altair", email: "altair@example.com" });
-    expect(sent.html).toContain(`http://altair.test/projects/${thread.projectId}/threads/${thread.id}`);
+    expect(sent.subject).toBe("[Myrel] Needs your decision · Reminder");
+    expect(sent.from).toEqual({ name: "Myrel", email: "myrel@example.com" });
+    expect(sent.html).toContain(`http://myrel.test/projects/${thread.projectId}/threads/${thread.id}`);
 
     // The one-off run wakes the thread; afterwards nothing is left to schedule.
     await agent.runRoutine({ routineId: routine.id });

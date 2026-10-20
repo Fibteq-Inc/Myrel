@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Runner, RunnerPairingCode } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Runner, RunnerPairingCode } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Folder, FolderPlus, MonitorSmartphone, Plus, Trash2, X } from "lucide-react";
@@ -132,7 +132,7 @@ function RunnerRow({ runner, onRemoved }: { runner: Runner; onRemoved: () => voi
           <span className="flex items-center gap-1.5 text-xs text-subtle">
             <OnlineDot online={runner.online} />
             {lastSeen(runner, t)}
-            {runner.version && <span className="hidden sm:inline">· altair-runner {runner.version}</span>}
+            {runner.version && <span className="hidden sm:inline">· myrel-runner {runner.version}</span>}
           </span>
         </span>
         {confirming ? (

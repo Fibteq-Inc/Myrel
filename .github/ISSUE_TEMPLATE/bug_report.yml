@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in Altair does not work as expected.
+description: Something in Myrel does not work as expected.
 labels: [bug]
 body:
   - type: textarea

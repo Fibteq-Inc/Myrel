@@ -17,7 +17,7 @@ async function aesKey(env: SecretEnv): Promise<CryptoKey> {
   if (!source) throw new Error("No KEY_ENCRYPTION_SECRET or BETTER_AUTH_SECRET to encrypt model keys with.");
   const material = await crypto.subtle.importKey("raw", encoder.encode(source), "HKDF", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: encoder.encode("altair"), info: encoder.encode("altair-api-keys-v1") },
+    { name: "HKDF", hash: "SHA-256", salt: encoder.encode("myrel"), info: encoder.encode("myrel-api-keys-v1") },
     material,
     { name: "AES-GCM", length: 256 },
     false,

@@ -1,5 +1,5 @@
-import { projectChat, threadByRoot, threadMessages } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -77,7 +77,7 @@ function ChatTab() {
   const { projectId, state, status, send } = useProject();
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
-  const threads = useMemo(() => threadByRoot(state), [state]);
+  const threads = useMemo(() => threadByCard(state), [state]);
   const onSend = useCallback((body: string) => send(body, null), [send]);
 
   return (
@@ -94,7 +94,7 @@ function ChatTab() {
       footerFor={(m) => {
         const thread = threads.get(m.id);
         if (!thread) return null;
-        return <ThreadCard projectId={projectId} thread={thread} replies={threadMessages(state, thread.id).length} />;
+        return <ThreadCard projectId={projectId} thread={thread} replies={threadReplyCount(state, thread.id)} />;
       }}
       empty={
         status === "open" ? (

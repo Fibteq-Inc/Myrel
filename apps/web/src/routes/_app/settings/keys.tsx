@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { ApiKey, ProviderId } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { ApiKey, ProviderId } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";

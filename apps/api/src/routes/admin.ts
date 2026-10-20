@@ -1,4 +1,4 @@
-import { type AdminSettings, UpdateAdminSettingsInput } from "@altair/protocol";
+import { type AdminSettings, UpdateAdminSettingsInput } from "@myrel/protocol";
 import { Hono } from "hono";
 import { setSignUpEnabled, signUpEnabled } from "../instance";
 import { type AppEnv, requireAdmin, requireUser } from "../middleware";

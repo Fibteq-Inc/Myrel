@@ -1,4 +1,4 @@
-import type { KeyValueStore, Platform } from "@altair/client";
+import type { KeyValueStore, Platform } from "@myrel/client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as Notifications from "expo-notifications";
@@ -6,7 +6,7 @@ import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { secureKey } from "./secure-key";
 
-const PREFIX = "altair:";
+const PREFIX = "myrel:";
 
 const storage: KeyValueStore = {
   get: (key) => AsyncStorage.getItem(PREFIX + key),

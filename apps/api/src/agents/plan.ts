@@ -22,6 +22,12 @@ export const Plan = z.object({
 });
 export type Plan = z.infer<typeof Plan>;
 
+/** Steps `next` marks done that `prev` did not (matched by text). */
+export function newlyDone(prev: Plan | null, next: Plan): string[] {
+  const before = new Set(prev?.steps.filter((s) => s.state === "done").map((s) => s.text) ?? []);
+  return next.steps.filter((s) => s.state === "done" && !before.has(s.text)).map((s) => s.text);
+}
+
 const MARK: Record<PlanStepState, string> = { done: "✓", active: "✱", todo: "○", skipped: "–", failed: "✗" };
 
 /** The plan as checklist text: a header, a blank line, then one marked step per line. */

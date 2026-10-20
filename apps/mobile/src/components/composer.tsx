@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { ArrowUp } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";

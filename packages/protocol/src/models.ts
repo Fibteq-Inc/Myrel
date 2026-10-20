@@ -32,7 +32,7 @@ export const ArtifactRef = z.object({
 });
 export type ArtifactRef = z.infer<typeof ArtifactRef>;
 
-/** Where a reply's work ran: Altair's cloud (the Worker or a sandbox) or the person's computer (altair-runner). */
+/** Where a reply's work ran: Myrel's cloud (the Worker or a sandbox) or the person's computer (myrel-runner). */
 export const Runtime = z.enum(["cloud", "local"]);
 export type Runtime = z.infer<typeof Runtime>;
 
@@ -44,7 +44,7 @@ export const TaskStats = z.object({
   /** The harness or the person's CLI, e.g. "opencode", "claude". */
   harness: z.string(),
   runtime: Runtime,
-  /** The task's model, when Altair chose it; a person's own CLI picks its own. */
+  /** The task's model, when Myrel chose it; a person's own CLI picks its own. */
   model: z.string().nullable(),
   durationMs: Count,
   inputTokens: Count,
@@ -67,6 +67,11 @@ export const MessageStats = z.object({
   costMicros: Count.nullable(),
   /** Where the work behind the message ran. */
   runtime: Runtime,
+  /**
+   * The harness that wrote the message, for a thread's agent ("opencode", or the person's CLI such as
+   * "claude"). Its model is empty when the CLI did not say which one it used.
+   */
+  harness: z.string().optional(),
   task: TaskStats.optional(),
 });
 export type MessageStats = z.infer<typeof MessageStats>;
@@ -103,6 +108,11 @@ export const Thread = z.object({
   projectId: ProjectId,
   /** The project-chat message the thread hangs under. */
   rootMessageId: MessageId,
+  /**
+   * The coordinator's one-line acknowledgement in the project chat ("On it"), posted right under the
+   * person's message. Clients show the thread card under this line when it is set.
+   */
+  ackMessageId: MessageId.nullable().default(null),
   title: z.string(),
   status: ThreadStatus,
   /** The thread agent's progress checklist (`update_status`), shown while it works. */
@@ -145,7 +155,16 @@ export const ThreadFiles = z.object({
 });
 export type ThreadFiles = z.infer<typeof ThreadFiles>;
 
-export const TerminalLine = z.object({ stream: z.enum(["stdout", "stderr", "system"]), text: z.string() });
+export const TerminalLine = z.object({
+  stream: z.enum(["stdout", "stderr", "system"]),
+  text: z.string(),
+  /** When the line arrived (epoch ms). Absent on lines from before it was recorded. */
+  at: z.number().optional(),
+  /** How long the step on this line took (a tool call, opening the sandbox), when known. */
+  ms: z.number().nonnegative().optional(),
+  /** The line is a tool call (a command, a file edit). */
+  tool: z.boolean().optional(),
+});
 export type TerminalLine = z.infer<typeof TerminalLine>;
 
 export const Reaction = z.object({
@@ -160,11 +179,22 @@ export type Reaction = z.infer<typeof Reaction>;
 export const ProjectRole = z.enum(["owner", "admin", "member"]);
 export type ProjectRole = z.infer<typeof ProjectRole>;
 
+/** What is going on in a project right now, for the project list. */
+export const ProjectActivity = z.object({
+  /** Agents working now: the coordinator and threads mid-turn. */
+  working: z.number().int().nonnegative(),
+  /** Open threads waiting on a person: a decision, an approval or a blocker. */
+  waiting: z.number().int().nonnegative(),
+});
+export type ProjectActivity = z.infer<typeof ProjectActivity>;
+
 export const Project = z.object({
   id: ProjectId,
   name: z.string().min(1).max(120),
   role: ProjectRole,
   createdAt: Timestamp,
+  /** Missing from servers older than this field. */
+  activity: ProjectActivity.optional(),
 });
 export type Project = z.infer<typeof Project>;
 
@@ -225,6 +255,24 @@ export const ProjectRepo = z.object({
   createdAt: Timestamp,
 });
 export type ProjectRepo = z.infer<typeof ProjectRepo>;
+
+/** A pull request a thread's task opened, with its live state from GitHub. */
+export const PullRequest = z.object({
+  /** owner/name. */
+  repo: z.string(),
+  number: z.number().int(),
+  url: z.string(),
+  threadId: ThreadId,
+  title: z.string(),
+  state: z.enum(["open", "closed", "merged"]),
+  draft: z.boolean(),
+  /** Combined CI result on the head commit; null when the repository runs no checks. */
+  checks: z.enum(["pending", "success", "failure"]).nullable(),
+  /** The latest decisive review; null when nobody approved or asked for changes. */
+  review: z.enum(["approved", "changes_requested"]).nullable(),
+  updatedAt: Timestamp,
+});
+export type PullRequest = z.infer<typeof PullRequest>;
 
 export const AddProjectRepoInput = z.object({
   installationId: z.number().int().positive(),

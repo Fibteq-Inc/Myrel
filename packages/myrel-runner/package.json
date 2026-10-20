@@ -1,0 +1,60 @@
+{
+  "name": "@fibteq/myrel-runner",
+  "version": "0.9.0",
+  "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
+  "license": "AGPL-3.0-only",
+  "author": "Fibteq",
+  "homepage": "https://github.com/Fibteq-Inc/myrel/tree/main/packages/myrel-runner#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fibteq-Inc/myrel.git",
+    "directory": "packages/myrel-runner"
+  },
+  "bugs": "https://github.com/Fibteq-Inc/myrel/issues",
+  "keywords": [
+    "myrel",
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "agent",
+    "runner"
+  ],
+  "type": "module",
+  "bin": {
+    "myrel-runner": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": "./dist/index.js",
+      "./cli": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "esbuild --bundle --platform=node --target=node22 --format=esm --minify src/cli.ts --outfile=dist/cli.js && esbuild --bundle --platform=node --target=node22 --format=esm --minify src/index.ts --outfile=dist/index.js",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm LICENSE",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "devDependencies": {
+    "@myrel/protocol": "workspace:*",
+    "@types/node": "22.19.1",
+    "esbuild": "0.28.2",
+    "vitest": "5.0.5"
+  }
+}

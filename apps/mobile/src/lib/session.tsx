@@ -7,20 +7,20 @@ import {
   type SessionUser,
   saveServer,
   tokenStoreFor,
-} from "@altair/client";
-import type { ServerInfo } from "@altair/protocol";
+} from "@myrel/client";
+import type { ServerInfo } from "@myrel/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useState } from "react";
 import { platform } from "./platform";
 
 /** Server a fresh install points at; empty means the user picks one first. */
-const DEFAULT_SERVER = (process.env.EXPO_PUBLIC_ALTAIR_SERVER ?? "").replace(/\/$/, "");
+const DEFAULT_SERVER = (process.env.EXPO_PUBLIC_MYREL_SERVER ?? "").replace(/\/$/, "");
 
 /** Native requests carry the app's own origin (trusted by the API) and never use cookies. */
 export function createApi(server: string) {
   return new ApiClient({
     baseUrl: server,
     tokens: tokenStoreFor(platform, server),
-    headers: { origin: "altair://" },
+    headers: { origin: "myrel://" },
     credentials: "omit",
   });
 }
@@ -38,8 +38,9 @@ type SessionValue = {
   retry(): void;
   chooseServer(input: string): Promise<void>;
   signIn(input: { email: string; password: string }): Promise<void>;
-  signUp(input: { email: string; password: string; name: string }): Promise<void>;
+  signUp(input: { email: string; password: string; name: string; acceptTerms?: boolean }): Promise<void>;
   signOut(): Promise<void>;
+  deleteAccount(): Promise<void>;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -130,6 +131,12 @@ export function SessionProvider({ children, onSignOut }: { children: ReactNode; 
     },
     async signOut() {
       await onSignOut?.(api).catch(() => {});
+      await api.signOut().catch(() => {});
+      setUser(null);
+    },
+    async deleteAccount() {
+      // The server drops the sessions and push devices with the account; this clears the local token.
+      await api.deleteAccount();
       await api.signOut().catch(() => {});
       setUser(null);
     },

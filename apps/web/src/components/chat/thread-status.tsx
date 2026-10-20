@@ -1,6 +1,6 @@
-import { checklistProgress, parseChecklist } from "@altair/client";
-import type { MessageKey, Translate } from "@altair/i18n";
-import type { Thread } from "@altair/protocol";
+import { checklistProgress, parseChecklist } from "@myrel/client";
+import type { MessageKey, Translate } from "@myrel/i18n";
+import type { Thread } from "@myrel/protocol";
 import { CircleAlert, CircleCheck, CircleDot, CirclePause, LoaderCircle } from "lucide-react";
 
 type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed";

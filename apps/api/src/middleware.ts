@@ -1,6 +1,7 @@
-import type { InstanceRole } from "@altair/protocol";
+import type { InstanceRole } from "@myrel/protocol";
 import { createMiddleware } from "hono/factory";
 import { createAuth } from "./auth";
+import { isListedAdmin } from "./instance";
 
 export type SessionUser = { id: string; name: string; email: string; role: InstanceRole };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
@@ -18,7 +19,8 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   if (!session) return c.json({ error: "unauthorized" }, 401);
 
   const { id, name, email, role } = session.user;
-  c.set("user", { id, name, email, role: role === "admin" ? "admin" : "user" });
+  const admin = role === "admin" || isListedAdmin(c.env, email);
+  c.set("user", { id, name, email, role: admin ? "admin" : "user" });
   await next();
 });
 

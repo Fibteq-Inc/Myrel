@@ -1,7 +1,7 @@
-import type { ComputerAccess, ComputerInfo, ComputerStatus, LocalComputer } from "@altair/client";
-import type { MessageKey } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
-import { CLI_NAMES, type CliId } from "@altair/protocol";
+import type { ComputerAccess, ComputerInfo, ComputerStatus, LocalComputer } from "@myrel/client";
+import type { MessageKey } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
+import { CLI_NAMES, type CliId } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
 import { useEffect } from "react";
@@ -19,7 +19,7 @@ const INFO_KEY = ["this-computer"];
 
 /**
  * Desktop app only: connects the computer the app runs on with one click, using the bundled
- * altair-runner, instead of the terminal steps. Its folders are managed in the list below like
+ * myrel-runner, instead of the terminal steps. Its folders are managed in the list below like
  * any other computer's.
  */
 export function ThisComputer() {

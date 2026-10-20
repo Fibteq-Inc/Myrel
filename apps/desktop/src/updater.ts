@@ -7,7 +7,7 @@ export async function checkForUpdate() {
   try {
     const update = await check();
     if (!update) return;
-    const yes = await ask(`Altair ${update.version} is available. Install it now and restart?`, {
+    const yes = await ask(`Myrel ${update.version} is available. Install it now and restart?`, {
       title: "Update available",
       okLabel: "Update",
       cancelLabel: "Later",

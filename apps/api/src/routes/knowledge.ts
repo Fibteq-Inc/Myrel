@@ -5,11 +5,11 @@ import {
   normalizeFilePath,
   PutInstructionsInput,
   PutMemoryInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { type Author, contentTypeFor, fileKey, uploadPath } from "../agents/knowledge";
+import { type Author, contentTypeFor, fileKey, uploadPath, verifyFileLink } from "../agents/knowledge";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../middleware";
 import { findMembership } from "./projects";
@@ -58,28 +58,12 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   .get("/:id/files/content", member, async (c) => {
     const path = queryPath(c);
     if (!path) return c.json({ error: "invalid_path" }, 400);
-    const bucket = c.env.FILES;
-    const file = await (await agent(c)).getFile(path);
-    const object = file && bucket ? await bucket.get(fileKey(c.req.param("id")!, path)) : null;
-    if (!file || !object) return c.json({ error: "not_found" }, 404);
-    const name = path.split("/").at(-1)!;
-    const disposition = c.req.query("download") ? "attachment" : "inline";
-    return new Response(object.body, {
-      headers: {
-        "content-type": file.contentType,
-        "content-length": String(object.size),
-        "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(name)}`,
-        // Files are user content served from the app's origin: never let them run scripts or be sniffed.
-        "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
-        "x-content-type-options": "nosniff",
-        "cache-control": "private, no-cache",
-      },
-    });
+    return serve(c, c.req.param("id")!, path);
   })
   .put("/:id/files/content", member, async (c) => {
     const path = queryPath(c);
     if (!path) return c.json({ error: "invalid_path" }, 400);
-    return store(c, path);
+    return store(c, c.req.param("id")!, path, by(c));
   })
   .delete("/:id/files/content", member, async (c) => {
     const path = queryPath(c);
@@ -96,10 +80,62 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     if (!name) return c.json({ error: "missing_name" }, 400);
     const path = uploadPath(name);
     if (!isValidFilePath(path)) return c.json({ error: "invalid_name" }, 400);
-    return store(c, path, 201);
+    return store(c, c.req.param("id")!, path, by(c), 201);
   });
 
-async function store(c: Ctx, path: string, status: 200 | 201 = 200) {
+/**
+ * Signed links a thread's agent gets from read_file / file_upload_url, so a harness can move binary
+ * files between its working folder and the project files with curl. No session: the signature is
+ * the permission, for one path, one direction and a short time. Mounted at /api/file-links.
+ */
+export const fileLinkRoutes = new Hono<AppEnv>()
+  .get("/:projectId", async (c) => {
+    const link = await checkLink(c, "get");
+    return link ? serve(c, link.projectId, link.path) : c.json({ error: "invalid_link" }, 403);
+  })
+  .put("/:projectId", async (c) => {
+    const link = await checkLink(c, "put");
+    return link ? store(c, link.projectId, link.path, { kind: "agent", id: link.by }) : c.json({ error: "invalid_link" }, 403);
+  });
+
+async function checkLink(c: Ctx, mode: "get" | "put") {
+  const projectId = c.req.param("projectId")!;
+  const path = queryPath(c);
+  const ok =
+    path &&
+    (await verifyFileLink(c.env, {
+      projectId,
+      path,
+      mode,
+      by: c.req.query("by") ?? "",
+      exp: Number(c.req.query("exp")),
+      sig: c.req.query("sig") ?? "",
+    }));
+  return ok ? { projectId, path, by: c.req.query("by")! } : null;
+}
+
+async function serve(c: Ctx, projectId: string, path: string) {
+  const bucket = c.env.FILES;
+  const project = await getAgentByName(c.env.PROJECT_AGENT, projectId);
+  const file = await project.getFile(path);
+  const object = file && bucket ? await bucket.get(fileKey(projectId, path)) : null;
+  if (!file || !object) return c.json({ error: "not_found" }, 404);
+  const name = path.split("/").at(-1)!;
+  const disposition = c.req.query("download") ? "attachment" : "inline";
+  return new Response(object.body, {
+    headers: {
+      "content-type": file.contentType,
+      "content-length": String(object.size),
+      "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      // Files are user content served from the app's origin: never let them run scripts or be sniffed.
+      "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, no-cache",
+    },
+  });
+}
+
+async function store(c: Ctx, projectId: string, path: string, author: Author, status: 200 | 201 = 200) {
   if (!c.env.FILES) return c.json({ error: "files_not_configured" }, 501);
   const declared = Number(c.req.header("content-length") ?? 0);
   if (declared > MAX_FILE_SIZE) return c.json({ error: "too_large", maxBytes: MAX_FILE_SIZE }, 413);
@@ -110,8 +146,9 @@ async function store(c: Ctx, path: string, status: 200 | 201 = 200) {
   // Browsers send octet-stream for unknown types; the extension usually knows better.
   const contentType =
     sent && sent !== "application/octet-stream" ? (c.req.header("content-type") as string) : contentTypeFor(path, "application/octet-stream");
-  await c.env.FILES.put(fileKey(c.req.param("id")!, path), bytes, { httpMetadata: { contentType } });
-  const file = await (await agent(c)).recordFile({ path, size: bytes.byteLength, contentType }, by(c));
+  await c.env.FILES.put(fileKey(projectId, path), bytes, { httpMetadata: { contentType } });
+  const project = await getAgentByName(c.env.PROJECT_AGENT, projectId);
+  const file = await project.recordFile({ path, size: bytes.byteLength, contentType }, author);
   return c.json({ file }, status);
 }
 

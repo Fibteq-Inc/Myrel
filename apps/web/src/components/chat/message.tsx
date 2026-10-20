@@ -1,8 +1,8 @@
-import { useT } from "@altair/i18n/react";
-import type { Message, Reaction } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Message, Reaction } from "@myrel/protocol";
 import { AlarmClock, CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import { AltairMark, useRelativeTime } from "../../lib/ui";
+import { MyrelMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
@@ -59,7 +59,7 @@ export function MessageView({
   if (message.authorKind === "agent") {
     return (
       <div className="group flex gap-3.5">
-        <AltairMark size={28} />
+        <MyrelMark size={28} />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
           <MessageMarkdown body={message.body} decision={decision} />
           <AttachmentList attachments={message.attachments} />
@@ -117,7 +117,7 @@ export function Thinking({ label }: { label?: string }) {
   const t = useT();
   return (
     <div className="flex items-center gap-3.5" role="status">
-      <AltairMark size={28} />
+      <MyrelMark size={28} />
       <span className="flex items-center gap-2 text-[13px] text-subtle">
         <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
         {label ?? t("message.thinking")}…

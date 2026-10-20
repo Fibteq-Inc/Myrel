@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import { createId, type MessageStats, type Runtime, type TaskStats } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { createId, type MessageStats, type Runtime, type TaskStats } from "@myrel/protocol";
 import { type CallRecord, costMicros, DEFAULT_PRICES, type LlmEnv, metered, type ModelProvider, parsePrices, priceFor } from "./llm";
 
 /** Who a turn's model calls are billed to. */
@@ -124,6 +124,18 @@ export async function recordTaskUsage(
       costMicros: cost,
       latencyMs,
     });
+}
+
+/** One row for a finished agent turn that ran in a cloud sandbox: how long it ran. */
+export async function recordSandboxRun(
+  d1: D1Database,
+  run: { taskId: string; projectId: string; threadId: string; startedAt: Date; endedAt: Date },
+) {
+  const seconds = Math.max(0, Math.round((run.endedAt.getTime() - run.startedAt.getTime()) / 1000));
+  await createDb(d1)
+    .insert(schema.sandboxRuns)
+    .values({ id: run.taskId, projectId: run.projectId, threadId: run.threadId, startedAt: run.startedAt, endedAt: run.endedAt, seconds })
+    .onConflictDoNothing();
 }
 
 /** A task's cost: the harness's own figure when it gives one, else an estimate from the price table. */

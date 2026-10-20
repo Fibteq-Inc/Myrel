@@ -12,6 +12,11 @@ export function setFakeModel(h: FakeHandler) {
   handler = h;
 }
 
+/** The handler answering model calls now. */
+export function fakeModel(): FakeHandler {
+  return handler;
+}
+
 export function resetFakeModel() {
   handler = silent;
   outbound.length = 0;

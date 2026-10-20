@@ -1,4 +1,4 @@
-import { type Artifact, artifactObjectKey, type ArtifactVersion, createId, MAX_ARTIFACT_BYTES } from "@altair/protocol";
+import { type Artifact, artifactObjectKey, type ArtifactVersion, createId, MAX_ARTIFACT_BYTES } from "@myrel/protocol";
 
 type SqlValue = string | number | boolean | null;
 /** The Agent's `this.sql` tagged template. */

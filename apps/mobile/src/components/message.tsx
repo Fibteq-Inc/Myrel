@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Artifact, Attachment, Message, Reaction } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Artifact, Attachment, Message, Reaction } from "@myrel/protocol";
 import { CircleAlert, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -7,7 +7,7 @@ import { colors, radius } from "../theme";
 import { ArtifactCards } from "./artifact-card";
 import { type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
-import { AltairMark, Spinner, useRelativeTime } from "./ui";
+import { MyrelMark, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
 
@@ -54,7 +54,7 @@ export function MessageView({
   if (message.authorKind === "agent") {
     return (
       <View style={styles.agent}>
-        <AltairMark size={28} />
+        <MyrelMark size={28} />
         <View style={{ flex: 1, minWidth: 0, gap: 8, paddingTop: 2 }}>
           {!!message.body && <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />}
           <Attachments attachments={message.attachments} />
@@ -127,7 +127,7 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
 export function Thinking({ label }: { label: string }) {
   return (
     <View style={styles.agent} accessibilityRole="progressbar" accessibilityLabel={label}>
-      <AltairMark size={28} />
+      <MyrelMark size={28} />
       <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }}>
         <Spinner size={15} color={colors.subtle} />
         <Text style={{ color: colors.subtle, fontSize: 15, flexShrink: 1 }} numberOfLines={2}>

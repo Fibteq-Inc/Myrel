@@ -2,8 +2,8 @@ import { z } from "zod";
 
 /**
  * The coding harness a task runs. Each one is a CLI agent that edits code and
- * runs commands on its own; Altair only starts it and reads its output.
- * - opencode: OpenCode, any model (the default, since Altair is multi-model).
+ * runs commands on its own; Myrel only starts it and reads its output.
+ * - opencode: OpenCode, any model (the default, since Myrel is multi-model).
  * - claude-code: Claude Code (`claude -p`), Claude models only.
  * - shell: no model; the prompt is a bash script. For running tests or a build.
  */
@@ -14,11 +14,13 @@ export type HarnessId = z.infer<typeof HarnessId>;
 export const ModelConfig = z.object({
   /** Wire format: OpenAI-compatible chat or Anthropic messages. */
   kind: z.enum(["openai", "anthropic"]),
-  /** Altair's provider id, e.g. "fireworks". */
+  /** Myrel's provider id, e.g. "fireworks". */
   provider: z.string().min(1),
   /** The provider's model id, e.g. "accounts/fireworks/models/kimi-k2p6". */
   id: z.string().min(1),
   baseUrl: z.string().url().optional(),
+  /** The model reads images, so the harness may show it screenshots and photos. */
+  images: z.boolean().optional(),
 });
 export type ModelConfig = z.infer<typeof ModelConfig>;
 
@@ -43,17 +45,44 @@ export const WorkspaceSpec = z.object({
 });
 export type WorkspaceSpec = z.infer<typeof WorkspaceSpec>;
 
+/**
+ * A connector (MCP server) the thread's agent gets besides Myrel's own tools. A remote one is
+ * reached through Myrel's gateway with the same token as Myrel's tools (MYREL_MCP_TOKEN). A command
+ * starts next to the harness; `env` maps each of its variables to the secret that holds the value.
+ */
+export const McpConnector = z.discriminatedUnion("transport", [
+  z.object({ transport: z.literal("http"), name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/), url: z.string().url() }),
+  z.object({
+    transport: z.literal("stdio"),
+    name: z.string().regex(/^[a-z][a-z0-9_-]{0,40}$/),
+    command: z.string().min(1).max(200),
+    args: z.array(z.string().max(2000)).max(50).default([]),
+    env: z.record(z.string(), z.string().regex(/^[A-Z_][A-Z0-9_]*$/)).default({}),
+  }),
+]);
+export type McpConnector = z.infer<typeof McpConnector>;
+
 /** One unit of work handed to a runner. Stored with the task, so it holds no secrets. */
 export const TaskSpec = z.object({
   taskId: z.string().min(1),
   title: z.string().min(1).max(120),
-  prompt: z.string().min(1).max(32_000),
+  prompt: z.string().min(1).max(100_000),
   harness: HarnessId.default("opencode"),
   repo: RepoSpec.optional(),
   workspace: WorkspaceSpec.optional(),
   /** Commit, push and open (or update) a pull request when the harness finishes with changes. */
   openPr: z.boolean().default(false),
   model: ModelConfig.optional(),
+  /**
+   * The thread's MCP endpoint, when the harness runs as the thread's agent and talks to people
+   * through Myrel's tools. Its bearer token is a secret (MYREL_MCP_TOKEN).
+   */
+  mcp: z.object({ url: z.string().url(), connectors: z.array(McpConnector).max(30).optional() }).optional(),
+  /**
+   * Skills to put in the sandbox before the harness starts: a JSON SkillBundle at this address,
+   * read with the MCP token (see MYREL_SKILLS_URL in the task script).
+   */
+  skills: z.object({ url: z.string().url() }).optional(),
   timeoutSec: z
     .number()
     .int()
@@ -73,7 +102,7 @@ export type TodoStatus = z.infer<typeof TodoStatus>;
 
 /**
  * What a runner reports while a task runs. Every runner (the cloud sandbox,
- * the local `altair-runner`) speaks this, whatever harness it starts.
+ * the local `myrel-runner`) speaks this, whatever harness it starts.
  */
 export const RunnerEvent = z.discriminatedUnion("type", [
   z.object({
@@ -88,9 +117,18 @@ export const RunnerEvent = z.discriminatedUnion("type", [
     items: z.array(z.object({ text: z.string().max(300), status: TodoStatus })).max(50),
   }),
   /** Terminal output. */
-  z.object({ type: z.literal("log"), stream: z.enum(["stdout", "stderr", "system"]), text: z.string() }),
-  /** The harness used a tool (edited a file, ran a command). */
-  z.object({ type: z.literal("tool"), name: z.string().max(100), title: z.string().max(500) }),
+  z.object({
+    type: z.literal("log"),
+    stream: z.enum(["stdout", "stderr", "system"]),
+    text: z.string(),
+    /** How long the step this line reports took (opening the sandbox, starting the harness). */
+    ms: z.number().nonnegative().optional(),
+  }),
+  /**
+   * The harness used a tool (edited a file, ran a command). `ms` is how long it ran, when the
+   * harness reports the tool once it finished; without it the tool ran until the next one started.
+   */
+  z.object({ type: z.literal("tool"), name: z.string().max(100), title: z.string().max(500), ms: z.number().nonnegative().optional() }),
   /** Prose the harness wrote. The last one is the task's summary. */
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("pr"), url: z.string().url() }),
@@ -99,6 +137,8 @@ export const RunnerEvent = z.discriminatedUnion("type", [
     inputTokens: z.number().nonnegative(),
     outputTokens: z.number().nonnegative(),
     costUsd: z.number().nonnegative().optional(),
+    /** The model the harness says it used. */
+    model: z.string().max(200).optional(),
   }),
   /** Always the last event of a task. */
   z.object({

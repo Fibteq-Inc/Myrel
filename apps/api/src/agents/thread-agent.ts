@@ -1,38 +1,65 @@
-import { type ArtifactRef, CLI_NAMES, createId, type ProjectWorkspace, type Task, type TaskStats, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import {
+  type AgentConnector,
+  type Attachment,
+  type ArtifactRef,
+  CLI_NAMES,
+  type CliUsage,
+  createId,
+  formatPlan,
+  type MessageStats,
+  type SkillBundle,
+  type Task,
+  type TaskStatus,
+  type TerminalLine,
+} from "@myrel/protocol";
 import {
   emptyProgress,
-  HarnessId,
   reduceTask,
   renderChecklist,
   type RunnerBackend,
+  type McpConnector,
   type RunnerEvent,
   type TaskProgress,
   TaskSpec,
   workingBranch,
-} from "@altair/runner-core";
+} from "@myrel/runner-core";
+import { createDb, schema } from "@myrel/db";
 import { Agent, getAgentByName } from "agents";
+import { and, eq } from "drizzle-orm";
+import { z } from "zod";
+import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
+import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
+import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
+import { listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
-import { projectProvider, projectTaskModel } from "../keys";
-import { runLoop } from "../llm";
-import { getWorkspace } from "../runners";
-import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBackend, taskPlace } from "../sandbox/backend";
+import { projectTaskModel } from "../keys";
+import { handleMcp, type Tool, tool } from "../llm";
+import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
+import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
-import { meteredForTurn, recordTaskUsage, taskCostMicros, taskRuntime, TurnMeter } from "../usage";
-import { type Author, knowledgeTools } from "./knowledge";
+import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
+import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
+import {
+  ACCESS_LEVEL_DENIED,
+  ACCESS_WAIT_MS,
+  type AccessAnswer,
+  accessAnswer,
+  accessMessage,
+  type AccessRequest,
+  accessTargets,
+  allowAnswer,
+  denyAnswer,
+  describeRequest,
+  insideAny,
+} from "./folder-access";
+import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { routineTools } from "./routine-tools";
-import { renderTasks, type RunTaskInput, type TaskWithLog } from "./thread-tasks";
-import {
-  type CoordinatorNote,
-  type ReplyNeeds,
-  type RoutineRun,
-  THREAD_SYSTEM,
-  threadPrompt,
-  threadTools,
-} from "./thread-worker";
+import type { TaskWithLog } from "./thread-tasks";
+import { type CoordinatorNote, type ReplyNeeds, type RoutineRun, threadPrompt, threadTools } from "./thread-worker";
 
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
@@ -54,31 +81,75 @@ type TaskRow = {
   reported: number;
 };
 
-/** A task's spec as stored. Tasks on the person's computer name their CLI (claude, codex…) as the harness. */
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string };
+/**
+ * A run's spec as stored. Runs on the person's computer name their CLI (claude, codex…) as the harness.
+ * agent: the run was one turn of the thread's agent. Older runs were tasks Myrel's own loop handed out.
+ */
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; agent?: boolean };
 
-type LogRow = { stream: TerminalLine["stream"]; text: string };
+/** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
+type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
+
+/** What the thread's agent did through Myrel's tools during its turn, kept until the turn ends. */
+type AgentTurn = {
+  pending: ArtifactRef[];
+  replied: boolean;
+  /** Its latest reply, for the notification. */
+  lastReply?: string;
+  needs: ReplyNeeds | null;
+  asked: boolean;
+  resolved: boolean;
+  timezone: string;
+  /** The language of the person's latest message, for cards Myrel posts on the agent's behalf. */
+  language?: string;
+  /** Where the last stats line stopped counting; the next message's line starts here. Absent on older turns. */
+  mark?: StatsMark;
+  /** Its latest reply and where that reply's line started, so the usage after it can join it when the turn ends. */
+  lastReplyStats?: { id: string; from: StatsMark };
+  /** Every step of the plan it set this turn is settled (none to do or active). */
+  planDone?: boolean;
+  /** When it replied with its plan done; the turn ends a minute later unless it moves on. */
+  doneReplyAt?: number;
+};
+
+/** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
+const MAX_AGENT_PROMPT = 90_000;
+/** How long one agent turn may run. */
+const AGENT_TURN_SEC = 3600;
+/**
+ * After the agent replied with its plan done, how long its harness may keep going before the turn
+ * is ended for it (some models keep calling tools after their last reply).
+ */
+const FINISH_AFTER_REPLY_SEC = 60;
+
+type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null };
 
 /** Terminal lines kept per task; older ones are dropped. */
 const MAX_LOG_LINES = 2000;
-/** A task on the person's computer has no sandbox, clone or pull request steps; its CLI just works. */
+/** A run on the person's computer has no sandbox, clone or pull request steps; its CLI just works. */
 const LOCAL_PHASES: RunnerEvent[] = [
   { type: "phase", phase: "prepare", state: "skipped" },
   { type: "phase", phase: "clone", state: "skipped" },
   { type: "phase", phase: "publish", state: "skipped" },
   { type: "phase", phase: "agent", state: "started" },
 ];
-/** Extra time after a task's own timeout before it is declared lost (its runner went away). */
+/** Attached files a cloud turn downloads before the agent starts; older ones it fetches with read_file. */
+const PREFETCH_MAX_FILES = 20;
+const PREFETCH_MAX_BYTES = 200 * 1024 * 1024;
+/** Extra time after a run's own timeout before it is declared lost (its runner went away). */
 const WATCHDOG_GRACE_SEC = 300;
+/** How often a running cloud turn checks that its sandbox is still on it (a deploy restarts sandboxes). */
+const SANDBOX_CHECK_SEC = 60;
+/** Why a cloud turn ended when its sandbox lost it. */
+const SANDBOX_LOST = "The sandbox stopped while working, most likely because a new version of Myrel was deployed. Send your message again to continue.";
 
 /**
- * One instance per thread (named by thread id). Runs the thread agent: each
- * wake queues a turn that reads the thread from the ProjectAgent, calls the
- * model and acts through reply / update_status / request_coordinator.
- * Messages themselves live in the ProjectAgent; this DO keeps the brief,
- * coordinator notes, a read cursor, and the tasks the agent ran (run_task, in
- * the sandbox or on the person's computer) with their progress
- * and terminal output.
+ * One instance per thread (named by thread id). Each wake queues a turn of the
+ * thread's agent: a coding harness (see harness-agent.ts) that gets the thread
+ * as its prompt and acts through Myrel's tools over MCP (agentMcp). Messages
+ * themselves live in the ProjectAgent; this DO keeps the brief, coordinator
+ * notes, a read cursor, and each turn's run (on the person's computer or in
+ * the sandbox) with its progress and terminal output.
  */
 export class ThreadAgent extends Agent<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -108,7 +179,17 @@ export class ThreadAgent extends Agent<Env> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL,
       stream TEXT NOT NULL,
-      text TEXT NOT NULL
+      text TEXT NOT NULL,
+      at INTEGER,
+      ms INTEGER,
+      tool INTEGER
+    )`;
+    this.migrateLogTimes();
+    this.sql`CREATE TABLE IF NOT EXISTS github_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      seen INTEGER NOT NULL DEFAULT 0
     )`;
     this.sql`CREATE TABLE IF NOT EXISTS routine_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,10 +208,18 @@ export class ThreadAgent extends Agent<Env> {
     await this.markDirty();
   }
 
-  /** A person wrote in the thread, the coordinator sent a note, or a routine ran. Task results come through taskEvents. */
+  /**
+   * A person wrote in the thread, the coordinator sent a note, a routine ran, or one of the
+   * thread's pull requests changed on GitHub. Task results come through taskEvents.
+   */
   async wake(reason: ThreadWake): Promise<void> {
+    // An answer to a folder card the running turn waits on goes to that turn, not to a new one.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
+    }
+    if (reason.kind === "github") {
+      this.sql`INSERT INTO github_events (body, created_at) VALUES (${reason.event}, ${new Date().toISOString()})`;
     }
     if (reason.kind === "routine") {
       this.sql`INSERT INTO routine_runs (name, prompt, created_at)
@@ -147,6 +236,8 @@ export class ThreadAgent extends Agent<Env> {
   /** Queue callback. Turns run one at a time; wakes during a turn get their own turn after it. */
   async threadTurn(): Promise<void> {
     if (this.getMeta("dirty") !== "1") return;
+    // The agent is mid-turn; this wake waits for it (finishAgentTurn queues the next turn).
+    if (this.runningTask()) return;
     this.setMeta("dirty", "0");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
@@ -155,25 +246,19 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const ctx = await project.getThreadContext(threadId);
     if (!ctx) return;
-    const artifacts = await project.listArtifacts();
 
-    const llm = await projectProvider(this.env, projectId);
-    if (!llm.ok) {
-      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
-      await project.updateThread(threadId, { status: "failed" });
-      return;
+    const place = await taskPlace(this.env, projectId);
+    if (place.kind === "error") return this.cannotWork(place.message);
+    // Runners before 0.5.0 can host only Claude Code as the agent.
+    const needs = place.kind === "local" && place.workspace.cli !== "claude" ? "agent-clis" : "agent";
+    if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, needs))) {
+      return this.cannotWork(
+        `myrel-runner on "${place.workspace.runnerName}" is too old to work this thread. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
+      );
     }
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
-    const tasks = this.taskRows().map((row) => ({
-      task: this.toTask(row),
-      progress: JSON.parse(row.progress) as TaskProgress,
-      log: row.status === "running" || row.reported ? [] : this.taskLog(row.id),
-      isNew: row.status !== "running" && row.reported === 0,
-    }));
-    const workspace = await getWorkspace(this.env, projectId);
-    const place = await taskPlace(this.env, projectId);
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     // Only the last few runs matter; older ones are history the thread already acted on.
     const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
@@ -184,291 +269,609 @@ export class ThreadAgent extends Agent<Env> {
       createdAt: r.created_at,
       isNew: r.seen === 0,
     }));
-    // The newest task this turn reports on for the first time.
-    const finishedTask = this.sql<TaskRow>`
-      SELECT * FROM tasks WHERE status != 'running' AND reported = 0 ORDER BY created_at DESC LIMIT 1`[0];
+    // Only the last few events matter; the pull requests' current state is listed separately.
+    const githubRows = this.sql<NoteRow>`SELECT * FROM (SELECT * FROM github_events ORDER BY id DESC LIMIT 10) ORDER BY id`;
+    const githubEvents: CoordinatorNote[] = githubRows.map((g) => ({ body: g.body, createdAt: g.created_at, isNew: g.seen === 0 }));
     this.sql`UPDATE notes SET seen = 1`;
-    this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
     this.sql`UPDATE routine_runs SET seen = 1`;
+    this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
+    const prompt = threadPrompt({
+      ...ctx,
+      brief: this.getMeta("brief") ?? "",
+      lastSeenSeq,
+      notes,
+      artifacts: await project.listArtifacts(),
+      repos: await listProjectRepos(this.env.DB, projectId),
+      routineRuns,
+      githubEvents,
+      pullRequests: await listPullRequests(this.env.DB, projectId, threadId),
+      now: new Date(),
+    });
+    const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
+    // The person the thread works for: their own connectors are on for it.
+    const requester = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null;
+    await this.startAgentTurn({
+      prompt,
+      requester,
+      place,
+      timezone: ctx.defaultTimezone,
+      language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
+      attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
+    });
+  }
 
-    // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
-    let resolved: boolean = false as boolean;
-    let asked: boolean = false as boolean;
-    // Artifacts published this turn, attached to the next reply.
-    let pending: ArtifactRef[] = [];
-    let lastReply: { text: string; needs?: ReplyNeeds } | null = null as { text: string; needs?: ReplyNeeds } | null;
+  /** Nothing can work this thread right now: say why, and wait for the person. */
+  private async cannotWork(reason: string) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: reason });
+    await project.updateThread(threadId, { status: "blocked" });
+    await project.notifyThread(threadId, "blocked", reason);
+  }
+
+  /**
+   * Hands this turn to the thread's agent, connected to this thread's MCP endpoint with a token that
+   * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
+   */
+  private async startAgentTurn(input: {
+    prompt: string;
+    place: Exclude<TaskPlace, { kind: "error" }>;
+    timezone: string;
+    language: string;
+    /** Files attached to the thread's messages, oldest first: a cloud turn finds them already downloaded. */
+    attachments: Attachment[];
+    /** Who the thread works for, whose own connectors it may use. */
+    requester: string | null;
+  }) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const { place, language } = input;
+    const { token, hash } = await newAgentToken();
+    const agentPlace: AgentPlace =
+      place.kind === "local"
+        ? {
+            kind: "local",
+            cli: place.workspace.cli,
+            folder: place.workspace.path,
+            folders: place.workspace.folders,
+            computer: place.workspace.runnerName,
+            asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
+          }
+        : { kind: "cloud", images: false };
+    // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
+    const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
+    const taskId = createId("task");
+    const turn: AgentTurn = {
+      pending: [],
+      replied: false,
+      needs: null,
+      asked: false,
+      resolved: false,
+      timezone: input.timezone,
+      language,
+      mark: { at: Date.now(), inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    };
+    this.setMeta("agent_turn", JSON.stringify(turn));
+    this.clearAccess();
+    // Until the runner says where the CLI really works (a worktree, say), the project's folders.
+    if (place.kind === "local") this.setMeta("access_folders", JSON.stringify([place.workspace.path, ...place.workspace.folders]));
+    this.setMeta("agent_token", hash);
+    this.deleteMeta("task_checklist");
     await project.updateThread(threadId, { status: "working" });
     await project.setActivity(threadId, true);
     try {
-      // Bill the turn to the newest person in the thread, else whoever asked in the root message.
-      const requester = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
-      const meter = new TurnMeter(llm.provider.model);
-      // The first reply after a task finished reports on it, so its stats carry the task too.
-      let taskStats = finishedTask ? this.taskStats(finishedTask) : undefined;
-      const stats = () => {
-        const s = meter.take(taskStats);
-        taskStats = undefined;
-        return s ?? undefined;
-      };
-      await runLoop({
-        provider: meteredForTurn(
-          llm.provider,
-          this.env,
-          { projectId, threadId, userId: requester.authorKind === "user" ? requester.authorId : null, agent: "thread" },
-          meter,
-        ),
-        system: THREAD_SYSTEM,
-        prompt: threadPrompt({
-          ...ctx,
-          brief: this.getMeta("brief") ?? "",
-          lastSeenSeq,
-          notes,
-          artifacts,
-          repos: await listProjectRepos(this.env.DB, projectId),
-          tasks: renderTasks(tasks),
-          workspace,
-          place,
-          routineRuns,
-          now: new Date(),
-        }),
-        tools: [
-          ...threadTools({
-            reply: async (text, needs) => {
-              const artifacts = pending;
-              pending = [];
-              // A later plain reply does not cancel an earlier ask in the same turn.
-              lastReply = { text, needs: needs ?? lastReply?.needs };
-              const m = await project.sendMessage({
-                threadId,
-                authorKind: "agent",
-                authorId: THREAD_AGENT_ID,
-                body: text,
-                artifacts,
-                stats: stats(),
-              });
-              // Our own replies are not news on the next turn.
-              this.setMeta("last_seen_seq", String(m.seq));
-              return m;
-            },
-            publishArtifact: async (input) => {
-              const result = await project.publishArtifact({ ...input, threadId });
-              if ("error" in result) throw new Error(result.error);
-              const { artifact } = result;
-              // A second publish of the same artifact in one turn replaces its card.
-              pending = [
-                ...pending.filter((p) => p.artifactId !== artifact.id),
-                { artifactId: artifact.id, version: artifact.version, title: artifact.title },
-              ];
-              return artifact;
-            },
-            setPlan: async (plan) => {
-              this.setMeta("plan", JSON.stringify(plan));
-              // A finished task's steps go once the agent moves its plan on.
-              if (!this.runningTask()) this.deleteMeta("task_checklist");
-              await this.showStatus();
-            },
-            requestCoordinator: async (kind, reason) => {
-              asked = true;
-              await project.requestCoordinator(threadId, kind, reason);
-            },
-            resolve: async () => {
-              resolved = true;
-            },
-            listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
-            readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
-            runTask: async (input) => {
-              const started = await this.startTask(input);
-              if (!started.ok) throw new Error(started.error);
-              return started.message;
-            },
-            cancelTask: () => this.cancelRunningTask(),
-            readWorkspace: (path) => this.readWorkspace(path),
+      const mcpPath = `/api/agent-mcp/${threadId}`;
+      const connectors = await this.turnConnectors(place, input.requester);
+      const infos = connectors.map((c) => ({ name: c.name, title: c.title }));
+      const skills = await this.turnSkills(place, input.requester);
+      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context, infos, skills), timeoutSec: AGENT_TURN_SEC });
+      // The stored spec keeps only the start of the prompt; the runner gets all of it.
+      const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
+      if (place.kind === "local") {
+        const { workspace } = place;
+        const local: AgentConnector[] = await Promise.all(
+          connectors.map(async (c): Promise<AgentConnector> =>
+            c.transport === "http"
+              ? { transport: "http", name: c.name, path: `${mcpPath}/c/${c.name}` }
+              : { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env: await readSecrets(this.env, { id: c.id, secret: c.secret }) },
+          ),
+        );
+        const agent = { mcpPath, token, ...(local.length && { connectors: local }), ...(skills.length && { skills: { path: `${mcpPath}/skills` } }) };
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent });
+        const unavailable = backend.unavailable(spec);
+        if (unavailable) throw new Error(unavailable);
+        // The person's own CLI does the work, so the run shows that CLI.
+        const run = { ...spec, title: CLI_NAMES[workspace.cli] };
+        await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(run, {}), language);
+        await this.taskEvents(taskId, LOCAL_PHASES);
+      } else {
+        const allowed = await canUseSandbox(this.env, projectId);
+        if (!allowed.ok) throw new Error(allowed.reason);
+        const origin = await project.publicOrigin();
+        if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
+        const model = await projectTaskModel(this.env, projectId);
+        if (!model.ok) throw new Error(model.reason);
+        spec.model = model.model;
+        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context, infos, skills);
+        if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
+        const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
+        // A command's variables travel as secrets, so the stored spec only names them.
+        const cloud: McpConnector[] = await Promise.all(
+          connectors.map(async (c, i): Promise<McpConnector> => {
+            if (c.transport === "http") return { transport: "http", name: c.name, url: `${origin}${mcpPath}/c/${c.name}` };
+            const vars = Object.entries(await readSecrets(this.env, { id: c.id, secret: c.secret }));
+            const env: Record<string, string> = {};
+            vars.forEach(([name, value], j) => {
+              env[name] = `MYREL_CONNECTOR_${i}_${j}`;
+              secrets[`MYREL_CONNECTOR_${i}_${j}`] = value;
+            });
+            return { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env };
           }),
-          ...knowledgeTools({
-            memoryRead: (name) => project.getMemory(name),
-            memoryWrite: (name, description, content) => project.putMemory(name, { description, content }, BY),
-            memoryDelete: (name) => project.deleteMemory(name),
-            listFiles: (prefix) => project.listFiles(prefix),
-            readText: (path) => project.readFileText(path),
-            writeText: (path, content) => project.writeFileText(path, content, BY),
-          }),
-          ...routineTools({
-            listRoutines: () => project.listRoutines(),
-            createRoutine: (input) => project.createRoutine(input, "agent"),
-            setPaused: (id, paused) => project.updateRoutine(id, { paused }),
-            deleteRoutine: (id) => project.deleteRoutine(id),
-            defaultTimezone: ctx.defaultTimezone,
-            threadId,
-          }),
-        ],
-        // The opening note and each plan update take a step of their own.
-        maxSteps: 24,
+        );
+        spec.mcp = { url: `${origin}${mcpPath}`, connectors: cloud };
+        const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
+        if (github) secrets.GITHUB_TOKEN = github;
+        const files = await this.attachmentLinks(origin, input.attachments);
+        if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
+        const backend = sandboxBackend(this.env, threadId);
+        const unavailable = backend.unavailable(spec);
+        if (unavailable) throw new Error(unavailable);
+        // The sandbox's disk does not outlive it; the thread's workspace keeps the work between turns.
+        const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
+        if (workspace) {
+          spec.workspace = { remote: workspace.remote };
+          secrets.MYREL_WORKSPACE_TOKEN = workspace.token;
+        }
+        await this.launch(stored(spec), backend.id, () => backend.start(spec, secrets), language);
+        if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
+          await this.taskEvents(taskId, [
+            { type: "log", stream: "system", text: "This thread's workspace could not be opened, so this turn's work will not be saved for the next one." },
+          ]);
+        }
+      }
+      await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId });
+      if (this.runningTask()?.backend === "sandbox") await this.schedule(SANDBOX_CHECK_SEC, "sandboxCheck", { taskId });
+    } catch (err) {
+      // Once recorded, launch() finished the run as failed and finishAgentTurn reported it.
+      if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
+        this.deleteMeta("agent_token");
+        this.deleteMeta("agent_turn");
+        this.deleteMeta("agent_connectors");
+        this.clearAccess();
+        this.deleteMeta("agent_skills");
+        const message = err instanceof Error ? err.message : String(err);
+        await project.sendMessage({
+          threadId,
+          authorKind: "system",
+          authorId: SYSTEM_ID,
+          body: `This thread's agent could not start: ${message}`,
+        });
+        await project.updateThread(threadId, { status: "failed" });
+        await project.notifyThread(threadId, "failed", message);
+        await project.setActivity(threadId, false);
+      }
+    }
+  }
+
+  /**
+   * Download links for the files attached in the thread, for the sandbox to fetch before the agent
+   * starts (see MYREL_FILES in runner-core's task script). Newest first, within a count and size budget.
+   */
+  private async attachmentLinks(origin: string, attachments: Attachment[]): Promise<{ path: string; url: string }[]> {
+    const { projectId } = this.ids();
+    const picked: Attachment[] = [];
+    let bytes = 0;
+    for (const a of [...attachments].reverse()) {
+      if (picked.some((p) => p.path === a.path)) continue;
+      if (picked.length >= PREFETCH_MAX_FILES || bytes + a.size > PREFETCH_MAX_BYTES) break;
+      picked.push(a);
+      bytes += a.size;
+    }
+    return Promise.all(
+      picked.map(async (a) => ({ path: a.path, url: await signFileLink(this.env, origin, { projectId, path: a.path, mode: "get", by: THREAD_AGENT_ID }) })),
+    );
+  }
+
+  /** The agent's run ended: deliver what it left unsaid, settle the thread's state, and take any wakes that waited. */
+  private async finishAgentTurn(taskId: string) {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (!row) return;
+    this.sql`UPDATE tasks SET reported = 1 WHERE id = ${taskId}`;
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    this.deleteMeta("agent_token");
+    this.deleteMeta("agent_turn");
+    this.deleteMeta("agent_connectors");
+    this.clearAccess();
+    this.deleteMeta("agent_skills");
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    let pending = turn?.pending ?? [];
+    const replied = turn?.replied ?? false;
+    let lastText: string | null = null;
+    // The usage since its last message goes on the message that ends the turn, if there is one.
+    const tail = this.runStats(row, turn?.mark).stats;
+    let sentTail = false;
+    if (!replied && row.status === "done" && row.summary) {
+      // It answered in its final message instead of through reply: that answer is still the person's.
+      lastText = row.summary;
+      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: row.summary, artifacts: pending, stats: tail });
+      pending = [];
+      sentTail = true;
+    } else if (row.status !== "done") {
+      await project.sendMessage({
+        threadId,
+        authorKind: "agent",
+        authorId: THREAD_AGENT_ID,
+        body: taskReport(this.toTask(row).title, row, this.taskLog(taskId, 15)),
+        artifacts: pending,
+        stats: tail,
       });
-      // A finished task always gets an answer. A failed one first gets one more turn to fix it and run it
-      // again; if the agent stays silent, the thread posts the result and hands it to the coordinator.
-      const nudged = this.getMeta("task_nudged");
-      const unreported = finishedTask ?? (nudged ? this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${nudged}`[0] : undefined);
-      if (unreported && (lastReply || this.runningTask())) this.deleteMeta("task_nudged");
-      else if (unreported) {
-        const title = this.toTask(unreported).title;
-        if (unreported.status === "failed" && nudged !== unreported.id) {
-          this.setMeta("task_nudged", unreported.id);
-          this.sql`INSERT INTO notes (body, created_at) VALUES (${`The task "${title}" failed and you ended your turn without telling the person. Find the cause in its output under "Tasks". If it is in your own command or prompt, fix it and run the task again; otherwise reply with what failed and what you need.`}, ${new Date().toISOString()})`;
-          await this.markDirty();
-        } else {
-          this.deleteMeta("task_nudged");
-          await project.sendMessage({
+      pending = [];
+      sentTail = true;
+    }
+    if (pending.length) {
+      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending, stats: tail });
+      sentTail = true;
+    }
+    // Otherwise what it used after its last reply (often the rest of that reply's own model call) joins that reply.
+    const last = turn?.lastReplyStats;
+    if (!sentTail && last && tail.inputTokens + tail.outputTokens > 0) {
+      await project.setMessageStats(last.id, this.runStats(row, last.from).stats);
+    }
+    const resolved = turn?.resolved ?? false;
+    const asked = turn?.asked ?? false;
+    const failed = row.status === "failed" && !replied;
+    await project.updateThread(threadId, {
+      status: resolved ? "done" : asked ? "blocked" : failed ? "failed" : "review_ready",
+      resolved,
+    });
+    const kind = failed ? "failed" : resolved ? "done" : (turn?.needs ?? ((replied || lastText) && !asked ? "ready" : null));
+    if (kind) await project.notifyThread(threadId, kind, lastText ?? turn?.lastReply ?? row.summary ?? "");
+    await project.setActivity(threadId, false);
+    if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
+  }
+
+  /**
+   * One MCP message from the thread's agent (POST /api/agent-mcp/:threadId). Only the token of the
+   * running turn is accepted. Callable over RPC.
+   */
+  async agentMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
+    const hash = this.getMeta("agent_token");
+    if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
+    const answer = await handleMcp(await this.agentToolset(), { name: "myrel", version: "1" }, body);
+    return { ok: true, answer };
+  }
+
+  /**
+   * The connectors this turn's agent gets (see turnConnectors), remembered so the gateway knows
+   * which remote ones the turn's token opens. None from a runner too old to pass them on.
+   */
+  private async turnConnectors(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnConnector[]> {
+    const { projectId } = this.ids();
+    if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "connectors"))) return [];
+    const connectors = await turnConnectors(this.env, { projectId, userId: requester, place: place.kind }).catch((err) => {
+      console.error("connectors", err);
+      return [];
+    });
+    this.setMeta("agent_connectors", JSON.stringify(connectors.map((c) => ({ id: c.id, name: c.name, transport: c.transport }))));
+    // Servers gain tools over time; keep the list settings show current without holding up the turn.
+    const remote = connectors.filter((c) => c.transport === "http").map((c) => c.id);
+    this.ctx.waitUntil(refreshStaleTools(this.env, remote).catch((err) => console.error("connector tools", err)));
+    return connectors;
+  }
+
+  /**
+   * The skills this turn's agent gets (see turnSkills), remembered so the running turn's token
+   * opens their files. None from a runner too old to put them next to its CLI.
+   */
+  private async turnSkills(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnSkill[]> {
+    const { projectId } = this.ids();
+    if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "skills"))) return [];
+    const skills = await turnSkills(this.env, { projectId, userId: requester }).catch((err) => {
+      console.error("skills", err);
+      return [];
+    });
+    this.setMeta("agent_skills", JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name }))));
+    return skills;
+  }
+
+  /**
+   * The files of the running turn's skills (GET /api/agent-mcp/:threadId/skills), for the sandbox
+   * or the runner to put next to the agent. Only the running turn's token opens them. Callable over RPC.
+   */
+  async skillBundle(token: string): Promise<SkillBundle | null> {
+    const hash = this.getMeta("agent_token");
+    if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return null;
+    const given = JSON.parse(this.getMeta("agent_skills") ?? "[]") as { id: string; name: string }[];
+    const skills = await Promise.all(given.map(async (s) => ({ name: s.name, files: await readBundle(this.env, s.id) })));
+    return { skills: skills.filter((s) => s.files.length) };
+  }
+
+  /**
+   * Where a remote connector's call from the running turn goes (GET/POST/DELETE
+   * /api/agent-mcp/:threadId/c/:name), with its credentials. Only the running turn's token opens
+   * it, and only for a connector that turn was given. Callable over RPC.
+   */
+  async connectorTarget(
+    token: string,
+    name: string,
+  ): Promise<{ ok: true; url: string; headers: Record<string, string> } | { ok: false; error: "unauthorized" | "not_found" }> {
+    const hash = this.getMeta("agent_token");
+    if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false, error: "unauthorized" };
+    const given = JSON.parse(this.getMeta("agent_connectors") ?? "[]") as { id: string; name: string; transport: string }[];
+    const connector = given.find((c) => c.name === name && c.transport === "http");
+    const target = connector ? await remoteTarget(this.env, connector.id) : null;
+    return target ? { ok: true, ...target } : { ok: false, error: "not_found" };
+  }
+
+  /**
+   * The folders the running turn's CLI works in, as its runner reports them when the run starts
+   * (feature "project-folders"). Callable over RPC by the RunnerAgent.
+   */
+  agentFolders(taskId: string, folders: string[]): void {
+    if (this.runningTask()?.id === taskId) this.setMeta("access_folders", JSON.stringify(folders));
+  }
+
+  /**
+   * Claude Code's permission prompt tool (`--permission-prompt-tool mcp__myrel__approve_access`).
+   * A path inside the project's folders that still needs permission is about the runner's access
+   * level, which Myrel does not widen. A path outside them is put to the person as a card, and the
+   * run waits for the answer.
+   */
+  private approveAccessTool(): Tool {
+    return tool({
+      name: "approve_access",
+      description:
+        "Claude Code calls this when a step needs permission; it asks the person when the step reaches outside the project's folders. Do not call it yourself.",
+      input: z.object({ tool_name: z.string().max(200), input: z.record(z.string(), z.unknown()).default({}), tool_use_id: z.string().optional() }),
+      run: async ({ tool_name, input }) => {
+        const started = JSON.parse(this.getMeta("access_folders") ?? "[]") as string[];
+        const targets = accessTargets(input, started[0]);
+        const outside = targets.filter((t) => !insideAny(t.path, started));
+        if (!outside.length) return denyAnswer(ACCESS_LEVEL_DENIED);
+        // Folders the person allowed this turn, or added to the project since it started.
+        const { projectId } = this.ids();
+        const workspace = await getWorkspace(this.env, projectId);
+        const allowed = () => [
+          ...(JSON.parse(this.getMeta("access_grants") ?? "[]") as string[]),
+          ...(workspace ? [workspace.path, ...workspace.folders] : []),
+        ];
+        for (const target of outside) {
+          if (insideAny(target.path, allowed())) continue;
+          const answer = await this.askAccess(target.folder, describeRequest(tool_name, target));
+          if (answer === null) return denyAnswer(`The person did not answer about ${target.folder} in time. Carry on without it, and say in your reply what you could not reach.`);
+          if (answer === "deny") return denyAnswer(`The person did not allow ${target.folder}. Carry on without it; if the work cannot be done without it, say so in a reply.`);
+        }
+        return allowAnswer(input);
+      },
+    });
+  }
+
+  /**
+   * Puts one folder to the person as a card (or joins a card already asking about it) and waits for
+   * the answer: null when none came in time or the turn ended.
+   */
+  private async askAccess(folder: string, what: string): Promise<AccessAnswer | null> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    let request = this.accessRequests().find((r) => r.folder === folder && !r.answer);
+    if (!request) {
+      request = { id: crypto.randomUUID(), folder };
+      this.setMeta("access_requests", JSON.stringify([...this.accessRequests(), request]));
+      const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+      const body = accessMessage(folder, what, turn?.language ?? "en");
+      const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+      // Not news for the next turn, unless someone wrote in between.
+      if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      await project.updateThread(threadId, { status: "blocked" });
+      await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
+    }
+    const id = request.id;
+    const until = Date.now() + ACCESS_WAIT_MS;
+    while (Date.now() < until && this.runningTask()) {
+      const answer = this.accessRequests().find((r) => r.id === id)?.answer;
+      if (answer) {
+        await project.updateThread(threadId, { status: "working" });
+        return answer;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return null;
+  }
+
+  /** A person answered the running turn's folder cards. Returns false when the message is not such an answer. */
+  private async answerAccess(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const answer = accessAnswer(reason.body ?? "");
+    const open = this.accessRequests().filter((r) => !r.answer);
+    if (!answer || !open.length || !this.runningTask()) return false;
+    const { projectId } = this.ids();
+    let given = answer;
+    // Only owners and admins change the project's folders; anyone else's yes counts for this turn.
+    if (answer === "always" && !(reason.authorId && (await this.canManage(reason.authorId)))) given = "once";
+    const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
+    for (const r of open) {
+      let mine = given;
+      if (mine === "always" && !(await this.addProjectFolder(projectId, r.folder))) mine = "once";
+      if (mine !== "deny") grants.push(r.folder);
+      r.answer = mine;
+    }
+    this.setMeta("access_grants", JSON.stringify(grants));
+    this.setMeta("access_requests", JSON.stringify(this.accessRequests().map((r) => open.find((o) => o.id === r.id) ?? r)));
+    // The answer was for this turn: it is not news for the next one.
+    if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(reason.seq));
+    return true;
+  }
+
+  /** Shares the folder on the project's computer and adds it to the project's folders. */
+  private async addProjectFolder(projectId: string, folder: string): Promise<boolean> {
+    const workspace = await getWorkspace(this.env, projectId);
+    if (!workspace) return false;
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, workspace.runnerId);
+    const shared = await runner.setShared(folder, true);
+    if (!shared.ok) {
+      console.warn("folder not shared", folder, shared.reason);
+      return false;
+    }
+    // The runner keeps the folder's real path; that is the one it accepts later.
+    const path = shared.folders.find((f) => f.path === folder)?.path ?? shared.folders.at(-1)?.path ?? folder;
+    return setWorkspaceFolder(this.env, projectId, path, true);
+  }
+
+  private async canManage(userId: string): Promise<boolean> {
+    const { projectId } = this.ids();
+    const [row] = await createDb(this.env.DB)
+      .select({ role: schema.projectMembers.role })
+      .from(schema.projectMembers)
+      .where(and(eq(schema.projectMembers.projectId, projectId), eq(schema.projectMembers.userId, userId)));
+    return row?.role === "owner" || row?.role === "admin";
+  }
+
+  private accessRequests(): AccessRequest[] {
+    return JSON.parse(this.getMeta("access_requests") ?? "[]") as AccessRequest[];
+  }
+
+  private clearAccess() {
+    this.deleteMeta("access_folders");
+    this.deleteMeta("access_grants");
+    this.deleteMeta("access_requests");
+  }
+
+  /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
+  private async agentToolset(): Promise<Tool[]> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
+    const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
+    const track = (url: string) => trackPullRequest(this.env, projectId, threadId, url);
+    const local = this.runningTask()?.backend === "local";
+    return [
+      ...(local ? [this.approveAccessTool()] : []),
+      ...threadTools({
+        reply: async (text, needs, files) => {
+          // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
+          const attachments = files?.length ? await project.attachmentsFor(files) : [];
+          const t = turn();
+          const row = this.runningTask();
+          const counted = row ? this.runStats(row, t.mark) : null;
+          save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs, ...(counted && { mark: counted.mark }) });
+          const m = await project.sendMessage({
             threadId,
             authorKind: "agent",
             authorId: THREAD_AGENT_ID,
-            body: taskReport(title, unreported, this.taskLog(unreported.id, 15)),
-            artifacts: pending,
-            stats: stats(),
+            body: text,
+            attachments,
+            artifacts: t.pending,
+            ...(counted && { stats: counted.stats }),
           });
-          pending = [];
-          if (unreported.status === "failed") {
-            asked = true;
-            await project.requestCoordinator(
-              threadId,
-              "handoff",
-              `The task "${title}" failed and this thread's agent could not recover: ${unreported.summary ?? "no error message"}`,
-            );
+          if (counted) save({ lastReplyStats: { id: m.id, from: counted.from } });
+          if (t.planDone && row?.backend === "sandbox") {
+            const at = Date.now();
+            save({ doneReplyAt: at });
+            await this.schedule(FINISH_AFTER_REPLY_SEC, "finishAfterReply", { taskId: row.id, at });
           }
-        }
-      }
-      // Published but never mentioned in a reply: still deliver the cards.
-      if (pending.length) {
-        await project.sendMessage({
-          threadId,
-          authorKind: "agent",
-          authorId: THREAD_AGENT_ID,
-          body: "",
-          artifacts: pending,
-          stats: stats(),
-        });
-      }
-      const running = this.runningTask() !== null;
-      await project.updateThread(threadId, {
-        status: running ? "working" : resolved ? "done" : asked ? "blocked" : "review_ready",
-        resolved: resolved && !running,
-      });
-      // People hear about results and asks; a turn that only consulted the coordinator stays quiet.
-      const kind = resolved ? "done" : (lastReply?.needs ?? (lastReply && !asked ? "ready" : null));
-      if (kind) await project.notifyThread(threadId, kind, lastReply?.text ?? "");
-    } catch (err) {
-      console.error("thread turn failed", err);
-      await project.sendMessage({
+          // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
+          if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+          // A pull request it links to is followed even when it forgot track_pull_request.
+          for (const url of pullRequestUrls(text)) await track(url).catch((err) => console.warn("tracking pull request failed", url, err));
+          return m;
+        },
+        publishArtifact: async (input) => {
+          const result = await project.publishArtifact({ ...input, threadId });
+          if ("error" in result) throw new Error(result.error);
+          const { artifact } = result;
+          const ref = { artifactId: artifact.id, version: artifact.version, title: artifact.title };
+          save({ pending: [...turn().pending.filter((p) => p.artifactId !== artifact.id), ref] });
+          return artifact;
+        },
+        setPlan: async (plan) => {
+          this.setMeta("plan", JSON.stringify(plan));
+          // A plan with work left (again) keeps the turn going after a reply.
+          save({ planDone: plan.steps.every((s) => s.state !== "todo" && s.state !== "active"), doneReplyAt: undefined });
+          await this.showStatus();
+        },
+        requestCoordinator: async (kind, reason) => {
+          save({ asked: true });
+          await project.requestCoordinator(threadId, kind, reason);
+        },
+        resolve: async () => save({ resolved: true }),
+        listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
+        readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+        trackPullRequest: async (url) => {
+          const pr = await track(url);
+          if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
+          return `Following ${pr.repo}#${pr.number}: its state shows in the thread, and CI failures, reviews and the merge will wake you.`;
+        },
+      }),
+      ...knowledgeTools({
+        memoryRead: (name: string) => project.getMemory(name),
+        memoryWrite: (name: string, description: string, content: string) => project.putMemory(name, { description, content }, BY),
+        memoryDelete: (name: string) => project.deleteMemory(name),
+        listFiles: (prefix?: string) => project.listFiles(prefix),
+        readText: (path: string) => project.readFileText(path),
+        writeText: (path: string, content: string) => project.writeFileText(path, content, BY),
+        // The harness has a shell: binary files move with curl over a signed link.
+        fileLink: async (path: string, mode: "get" | "put") => {
+          const origin = await project.publicOrigin();
+          return origin ? signFileLink(this.env, origin, { projectId, path, mode, by: THREAD_AGENT_ID }) : null;
+        },
+      }),
+      ...routineTools({
+        listRoutines: () => project.listRoutines(),
+        createRoutine: (input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, "agent"),
+        setPaused: (id: string, paused: boolean) => project.updateRoutine(id, { paused }),
+        deleteRoutine: (id: string) => project.deleteRoutine(id),
+        defaultTimezone: turn()?.timezone ?? "UTC",
         threadId,
-        authorKind: "system",
-        authorId: SYSTEM_ID,
-        body: `This thread's turn failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-      await project.updateThread(threadId, { status: "failed" });
-      await project.notifyThread(threadId, "failed", err instanceof Error ? err.message : String(err));
-    } finally {
-      // A running task keeps the thread visibly working.
-      await project.setActivity(threadId, this.runningTask() !== null);
-    }
+      }),
+    ];
   }
 
-  // ---- Tasks (run_task) ---------------------------------------------------
-
-  /** Starts a task for run_task, or says why it cannot. Callable over RPC. */
-  async startTask(input: RunTaskInput): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-    try {
-      const { projectId } = this.ids();
-      this.assertIdle();
-      const place = await taskPlace(this.env, projectId);
-      if (place.kind === "error") throw new Error(place.message);
-      return {
-        ok: true,
-        message: place.kind === "local" ? await this.launchLocalTask(input, place.workspace) : await this.launchTask(input),
-      };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  private async launchTask(input: RunTaskInput): Promise<string> {
-    const { projectId, threadId } = this.ids();
-    this.assertIdle();
-
-    const harness = HarnessId.catch("opencode").parse(input.harness ?? this.env.RUNNER_HARNESS);
-    const secrets: Record<string, string> = {};
-    let model: TaskSpec["model"];
-    if (harness !== "shell") {
-      const m = await projectTaskModel(this.env, projectId);
-      if (!m.ok) throw new Error(m.reason);
-      if (harness === "claude-code" && m.model.kind !== "anthropic") {
-        throw new Error("Claude Code needs an Anthropic model, and this server uses another provider. Use opencode.");
-      }
-      model = m.model;
-      secrets.ALTAIR_MODEL_API_KEY = m.apiKey;
-      if (harness === "claude-code") secrets.ANTHROPIC_API_KEY = m.apiKey;
-    }
-
-    let repo: TaskSpec["repo"];
-    if (input.repo) {
-      const url = normalizeRepoUrl(input.repo);
-      if (!url) throw new Error(`"${input.repo}" is not a repository I can clone. Use owner/name or an https URL.`);
-      repo = { url, branch: input.branch || undefined, baseBranch: input.baseBranch || undefined };
-    } else if (input.openPr) {
-      throw new Error("open_pr needs a repo.");
-    }
-
-    const spec = TaskSpec.parse({
-      taskId: createId("task"),
-      title: input.title,
-      prompt: input.prompt,
-      harness,
-      repo,
-      openPr: input.openPr ?? false,
+  /**
+   * The line under an agent message: what the turn's run used since `from` (the turn's start, or the
+   * previous message's line), where it ran, the harness and its model. Returns the new mark too.
+   */
+  private runStats(row: TaskRow, from?: StatsMark): { stats: MessageStats; from: StatsMark; mark: StatsMark } {
+    const spec = JSON.parse(row.spec) as StoredSpec;
+    const progress = JSON.parse(row.progress) as TaskProgress;
+    const start = from ?? { at: Date.parse(row.created_at), inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    const mark: StatsMark = { at: Date.now(), ...progress.usage };
+    const inputTokens = Math.max(0, mark.inputTokens - start.inputTokens);
+    const outputTokens = Math.max(0, mark.outputTokens - start.outputTokens);
+    const costUsd = Math.max(0, mark.costUsd - start.costUsd);
+    const runtime = taskRuntime(row.backend);
+    const model = spec.model?.id ?? progress.model ?? "";
+    const stats: MessageStats = {
       model,
-    });
-    if (spec.repo) {
-      const token = await repoToken(this.env, projectId, spec.repo.url, spec.timeoutSec);
-      if (token) secrets.GITHUB_TOKEN = token;
-      else if (spec.openPr) {
-        throw new Error("Opening a pull request needs write access to the repository. Ask the person to connect it to this project in the project's GitHub settings.");
-      }
-    }
-    const backend = sandboxBackend(this.env, threadId);
-    const unavailable = backend.unavailable(spec);
-    if (unavailable) throw new Error(unavailable);
-    // The sandbox's disk does not outlive it; the thread's workspace keeps the work between tasks.
-    const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
-    if (workspace) {
-      spec.workspace = { remote: workspace.remote };
-      secrets.ALTAIR_WORKSPACE_TOKEN = workspace.token;
-    }
-    await this.launch(spec, backend.id, () => backend.start(spec, secrets), input.language);
-    if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
-      await this.taskEvents(spec.taskId, [
-        { type: "log", stream: "system", text: "This thread's workspace could not be opened, so this task's work will not be saved for the next one." },
-      ]);
-    }
-    await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId: spec.taskId });
-    return `Started "${spec.title}". Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
+      durationMs: Math.max(0, mark.at - start.at),
+      calls: 0,
+      inputTokens,
+      cachedInputTokens: 0,
+      outputTokens,
+      // A person's own CLI runs on their own account, so Myrel puts no price on it.
+      costMicros: runtime === "local" ? null : taskCostMicros(this.env, model || null, { inputTokens, outputTokens, costUsd }),
+      runtime,
+      harness: spec.harness,
+    };
+    return { stats, from: start, mark };
   }
 
-  private async launchLocalTask(input: RunTaskInput, workspace: ProjectWorkspace): Promise<string> {
-    const { projectId, threadId } = this.ids();
-    const spec = TaskSpec.parse({ taskId: createId("task"), title: input.title, prompt: input.prompt });
-    const backend = localBackend(this.env, { projectId, threadId, workspace });
-    const unavailable = backend.unavailable(spec);
-    if (unavailable) throw new Error(unavailable);
-    // The person's own CLI does the work, so the task shows that CLI instead of an Altair harness.
-    await this.launch(
-      { ...spec, harness: workspace.cli, runnerId: workspace.runnerId },
-      backend.id,
-      () => backend.start(spec, {}),
-      input.language,
-    );
-    await this.taskEvents(spec.taskId, LOCAL_PHASES);
-    return `Started "${spec.title}" on the person's computer, with ${CLI_NAMES[workspace.cli]} in ${workspace.path}. Its progress shows on the thread's checklist; its result arrives in a later turn. Carry on or end your turn.`;
+  /**
+   * What a person's CLI reported using so far in a run, summed from its start (myrel-runner sends
+   * totals). Added to the run's progress as the difference. Callable over RPC.
+   */
+  async cliUsage(taskId: string, usage: CliUsage): Promise<void> {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (!row || row.status !== "running") return;
+    const progress = JSON.parse(row.progress) as TaskProgress;
+    const inputTokens = Math.max(0, usage.inputTokens - progress.usage.inputTokens);
+    const outputTokens = Math.max(0, usage.outputTokens - progress.usage.outputTokens);
+    const newModel = usage.model && usage.model !== progress.model ? usage.model : undefined;
+    if (inputTokens === 0 && outputTokens === 0 && !newModel) return;
+    await this.taskEvents(taskId, [{ type: "usage", inputTokens, outputTokens, ...(newModel && { model: newModel }) }]);
   }
 
+  // ---- Runs -----------------------------------------------------------------
   /** Records a task, starts it on its backend and shows it. */
   private async launch(spec: StoredSpec, backend: string, start: () => Promise<void>, language?: string) {
     // Recorded before starting: a fast task can report back before start() returns.
@@ -487,7 +890,7 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
-   * Progress from a runner (the sandbox, or a person's altair-runner). Callable
+   * Progress from a runner (the sandbox, or a person's myrel-runner). Callable
    * over RPC. Events after the task finished are ignored.
    */
   async taskEvents(taskId: string, events: RunnerEvent[]): Promise<void> {
@@ -497,14 +900,20 @@ export class ThreadAgent extends Agent<Env> {
 
     const lines: TerminalLine[] = [];
     let progress = JSON.parse(row.progress) as TaskProgress;
+    // Runners send events in batches, so a line's time is when its batch arrived (within a second).
+    const at = Date.now();
+    const ms = (v: number | undefined) => (v === undefined ? {} : { ms: Math.round(v) });
     for (const e of events) {
       progress = reduceTask(progress, e);
-      if (e.type === "log") lines.push({ stream: e.stream, text: e.text });
-      else if (e.type === "tool") lines.push({ stream: "system", text: `→ ${e.title}` });
-      else if (e.type === "phase" && e.state === "failed") lines.push({ stream: "stderr", text: e.detail ?? `${e.phase} failed` });
-      else if (e.type === "pr") lines.push({ stream: "system", text: `Pull request: ${e.url}` });
+      if (e.type === "log") lines.push({ stream: e.stream, text: e.text, at, ...ms(e.ms) });
+      else if (e.type === "tool") lines.push({ stream: "system", text: `→ ${e.title}`, at, tool: true, ...ms(e.ms) });
+      else if (e.type === "phase" && e.state === "failed") lines.push({ stream: "stderr", text: e.detail ?? `${e.phase} failed`, at });
+      else if (e.type === "pr") lines.push({ stream: "system", text: `Pull request: ${e.url}`, at });
     }
-    for (const l of lines) this.sql`INSERT INTO task_log (task_id, stream, text) VALUES (${taskId}, ${l.stream}, ${l.text})`;
+    for (const l of lines) {
+      this.sql`INSERT INTO task_log (task_id, stream, text, at, ms, tool)
+        VALUES (${taskId}, ${l.stream}, ${l.text}, ${l.at ?? null}, ${l.ms ?? null}, ${l.tool ? 1 : null})`;
+    }
     if (lines.length) {
       this.sql`DELETE FROM task_log WHERE task_id = ${taskId} AND id <= (
         SELECT id FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT 1 OFFSET ${MAX_LOG_LINES})`;
@@ -531,30 +940,42 @@ export class ThreadAgent extends Agent<Env> {
     if (!projectId || !threadId) return;
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     if (lines.length) await project.broadcastTask({ type: "task.output", taskId, threadId, lines });
-    this.setMeta("task_checklist", renderChecklist(spec.title, progress, row.language));
-    await this.showStatus();
+    // An older loop's task nested its steps under the plan; an agent turn's plan is the agent's own,
+    // and its latest step shows as the thread's activity (the runner sets it for the person's computer).
+    if (!spec.agent) {
+      this.setMeta("task_checklist", renderChecklist(spec.title, progress, row.language));
+      await this.showStatus();
+    } else if (!finished && row.backend !== "local") {
+      const step = events.findLast((e) => e.type === "tool");
+      if (step?.type === "tool") await project.setActivity(threadId, true, step.title.slice(0, 200));
+    }
     if (finished) {
       if (spec.model) {
         const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
         const ms = Date.now() - Date.parse(row.created_at);
         await recordTaskUsage(this.env, ctx, progress.usage, ms).catch((err) => console.error("task usage", err));
       }
+      if (row.backend === "sandbox") {
+        const run = { taskId, projectId, threadId, startedAt: new Date(row.created_at), endedAt: new Date() };
+        await recordSandboxRun(this.env.DB, run).catch((err) => console.error("sandbox run", err));
+      }
       await this.publishTask(taskId);
-      // The agent reads the result and tells the person.
-      await this.markDirty();
+      // From now on the webhook keeps the pull request's state current and wakes this thread on CI and reviews.
+      if (progress.prUrl) {
+        await trackPullRequest(this.env, projectId, threadId, progress.prUrl).catch((err) =>
+          console.error("tracking pull request failed", progress.prUrl, err),
+        );
+      }
+      // A turn's run was the agent itself; an older loop's task result wakes the thread.
+      if (spec.agent) await this.finishAgentTurn(taskId);
+      else await this.markDirty();
     }
   }
 
-  /** Stops the running task. Returns what the model is told. */
-  async cancelRunningTask(): Promise<string> {
+  /** Stops the running turn, if any. */
+  private async cancelRunningTask(): Promise<void> {
     const row = this.runningTask();
-    if (!row) return "No task is running.";
-    try {
-      await this.backendOf(row).cancel(row.id);
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
-    return `Cancelling "${this.toTask(row).title}". Its result arrives in a later turn.`;
+    if (row) await this.backendOf(row).cancel(row.id).catch((err) => console.warn("cancel failed", err));
   }
 
   /** Every task in this thread with its recent terminal output. Callable over RPC. */
@@ -567,6 +988,12 @@ export class ThreadAgent extends Agent<Env> {
     const row = this.runningTask();
     if (!row || row.id !== taskId) return { ok: false, error: "This task is not running." };
     try {
+      if (row.backend === "sandbox") {
+        // A sandbox that lost the task (restarted by a deploy) cannot stop it, so it ends here.
+        const stopped = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!).cancel(taskId);
+        if (!stopped) await this.taskEvents(taskId, [{ type: "done", ok: false, error: "Cancelled." }]);
+        return { ok: true };
+      }
       await this.backendOf(row).cancel(taskId);
       return { ok: true };
     } catch (err) {
@@ -587,6 +1014,35 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /** Schedule callback: a task its runner never finished (the container went away). */
+  /**
+   * A minute after the agent replied with its plan done: if its run is still going and it has not
+   * replied or changed its plan since, the turn is over, so its harness is ended (as finished).
+   */
+  async finishAfterReply(payload: { taskId: string; at: number }): Promise<void> {
+    const row = this.runningTask();
+    if (!row || row.id !== payload.taskId || row.backend !== "sandbox") return;
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    if (!turn?.planDone || turn.doneReplyAt !== payload.at) return;
+    const ended = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!)
+      .finish(row.id)
+      .catch((err) => (console.warn("ending a finished turn failed", err), false));
+    if (!ended) console.warn("ending a finished turn: its harness was not running", row.id);
+  }
+
+  /** While a cloud turn runs: ends it when its sandbox no longer has it, else checks again later. */
+  async sandboxCheck(payload: { taskId: string }): Promise<void> {
+    const row = this.runningTask();
+    if (!row || row.id !== payload.taskId || row.backend !== "sandbox") return;
+    const sandbox = this.env.SANDBOX.getByName(this.getMeta("thread_id")!);
+    if (await sandbox.running(row.id)) {
+      await this.schedule(SANDBOX_CHECK_SEC, "sandboxCheck", payload);
+      return;
+    }
+    // Stops whatever the lost run left in the container.
+    await sandbox.cancel(row.id).catch(() => false);
+    await this.taskEvents(row.id, [{ type: "done", ok: false, error: SANDBOX_LOST }]);
+  }
+
   async taskWatchdog(payload: { taskId: string }): Promise<void> {
     await this.taskEvents(payload.taskId, [
       { type: "done", ok: false, error: "The runner stopped answering, so the task was given up." },
@@ -599,8 +1055,22 @@ export class ThreadAgent extends Agent<Env> {
     return sandboxBackend(this.env, this.getMeta("thread_id")!);
   }
 
-  /** Shows the agent's plan, with the current task's steps nested in it, as the thread's checklist. */
-  private async showStatus() {
+  /** Status updates in order, so two at once cannot both open a plan card. */
+  private statusQueue: Promise<void> = Promise.resolve();
+
+  /**
+   * Shows the agent's plan, with the current task's steps nested in it: as the
+   * thread's checklist (the progress line on top) and as the plan card in the
+   * conversation. A plan with a new title opens a new card; the old one keeps
+   * its last state.
+   */
+  private showStatus(): Promise<void> {
+    const run = this.statusQueue.then(() => this.writeStatus());
+    this.statusQueue = run.catch((err) => console.error("plan status", err));
+    return run;
+  }
+
+  private async writeStatus() {
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) return;
@@ -609,6 +1079,23 @@ export class ThreadAgent extends Agent<Env> {
     if (statusText === null) return;
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     await project.updateThread(threadId, { statusText });
+
+    const cardId = this.getMeta("plan_card_id");
+    const shown = this.getMeta("plan_card_text");
+    if (shown === statusText) return;
+    const titleOf = (text: string) => text.split("\n", 1)[0];
+    if (cardId && shown !== null && titleOf(shown) === titleOf(statusText)) {
+      await project.editMessage(cardId, formatPlan(statusText));
+    } else {
+      const card = await project.sendMessage({
+        threadId,
+        authorKind: "agent",
+        authorId: THREAD_AGENT_ID,
+        body: formatPlan(statusText),
+      });
+      this.setMeta("plan_card_id", card.id);
+    }
+    this.setMeta("plan_card_text", statusText);
   }
 
   private ids() {
@@ -616,13 +1103,6 @@ export class ThreadAgent extends Agent<Env> {
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) throw new Error("This thread is not set up yet.");
     return { projectId, threadId };
-  }
-
-  private assertIdle() {
-    const running = this.runningTask();
-    if (running) {
-      throw new Error(`"${this.toTask(running).title}" is still running. Wait for its result, or cancel it with cancel_task.`);
-    }
   }
 
   private async publishTask(taskId: string) {
@@ -654,26 +1134,15 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   private taskLog(taskId: string, limit = MAX_LOG_LINES): TerminalLine[] {
-    return this.sql<LogRow>`SELECT stream, text FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT ${limit}`
+    return this.sql<LogRow>`SELECT stream, text, at, ms, tool FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT ${limit}`
       .reverse()
-      .map((r) => ({ stream: r.stream, text: r.text }));
-  }
-
-  /** What a finished task took, for the stats under the reply that reports it. */
-  private taskStats(row: TaskRow): TaskStats {
-    const spec = JSON.parse(row.spec) as StoredSpec;
-    const { usage } = JSON.parse(row.progress) as TaskProgress;
-    const model = spec.model?.id ?? null;
-    return {
-      title: spec.title,
-      harness: spec.harness,
-      runtime: taskRuntime(row.backend),
-      model,
-      durationMs: Math.max(0, Date.parse(row.finished_at ?? row.created_at) - Date.parse(row.created_at)),
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      costMicros: taskCostMicros(this.env, model, usage),
-    };
+      .map((r) => ({
+        stream: r.stream,
+        text: r.text,
+        ...(r.at !== null && { at: r.at }),
+        ...(r.ms !== null && { ms: r.ms }),
+        ...(r.tool && { tool: true }),
+      }));
   }
 
   private toTask(row: TaskRow): Task {
@@ -696,6 +1165,14 @@ export class ThreadAgent extends Agent<Env> {
    * Threads that ran tasks on a person's computer before tasks were unified
    * kept them in an older `tasks` table. Moves them into the current one.
    */
+  /** Terminal lines got their time, duration and tool flag later; older threads gain the columns. */
+  private migrateLogTimes() {
+    const columns = new Set(this.sql<{ name: string }>`PRAGMA table_info(task_log)`.map((c) => c.name));
+    if (!columns.has("at")) this.sql`ALTER TABLE task_log ADD COLUMN at INTEGER`;
+    if (!columns.has("ms")) this.sql`ALTER TABLE task_log ADD COLUMN ms INTEGER`;
+    if (!columns.has("tool")) this.sql`ALTER TABLE task_log ADD COLUMN tool INTEGER`;
+  }
+
   private migrateLocalTasks() {
     const columns = this.sql<{ name: string }>`PRAGMA table_info(tasks)`;
     if (!columns.some((c) => c.name === "runner_id")) return;
@@ -745,7 +1222,7 @@ export class ThreadAgent extends Agent<Env> {
 }
 
 /** A short result message for a task the agent did not report on itself, in the task's language. */
-function taskReport(title: string, row: TaskRow, log: LogRow[]): string {
+function taskReport(title: string, row: TaskRow, log: TerminalLine[]): string {
   const tr = row.language.toLowerCase().startsWith("tr");
   const outcome =
     row.status === "done"

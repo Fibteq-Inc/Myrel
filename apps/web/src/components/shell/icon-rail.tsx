@@ -1,10 +1,10 @@
-import type { SessionUser } from "@altair/client";
-import { LOCALE_NAMES, LOCALES, type MessageKey } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import type { SessionUser } from "@myrel/client";
+import { LOCALE_NAMES, LOCALES, type MessageKey } from "@myrel/i18n";
+import { useI18n } from "@myrel/i18n/react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
 import { canChooseServer, server } from "../../lib/api";
-import { AltairMark, cn, UserAvatar } from "../../lib/ui";
+import { MyrelMark, cn, UserAvatar } from "../../lib/ui";
 import { NotificationBell } from "../notifications";
 import { viewSearch } from "../project-view";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
@@ -48,7 +48,7 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       className="flex h-full w-[60px] flex-none flex-col items-center gap-1.5 border-r border-line bg-rail py-3.5"
     >
       <Link to="/" aria-label={t("rail.home")} className="mb-3.5">
-        <AltairMark size={36} />
+        <MyrelMark size={36} />
       </Link>
 
       {RAIL_ITEMS.map((item) =>

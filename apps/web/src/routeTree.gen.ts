@@ -18,9 +18,12 @@ import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppUsageRouteImport } from './routes/_app/usage'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app/projects/$projectId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
+import { Route as AppSettingsConnectorsRouteImport } from './routes/_app/settings/connectors'
 import { Route as AppSettingsInvitesRouteImport } from './routes/_app/settings/invites'
 import { Route as AppSettingsKeysRouteImport } from './routes/_app/settings/keys'
 import { Route as AppSettingsServerRouteImport } from './routes/_app/settings/server'
+import { Route as AppSettingsSkillsRouteImport } from './routes/_app/settings/skills'
 import { Route as AppProjectsProjectIdIndexRouteImport } from './routes/_app/projects/$projectId/index'
 import { Route as AppProjectsProjectIdFilesRouteImport } from './routes/_app/projects/$projectId/files'
 import { Route as AppSettingsProjectsProjectIdRouteImport } from './routes/_app/settings/projects/$projectId'
@@ -72,6 +75,16 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsConnectorsRoute = AppSettingsConnectorsRouteImport.update({
+  id: '/connectors',
+  path: '/connectors',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsInvitesRoute = AppSettingsInvitesRouteImport.update({
   id: '/invites',
   path: '/invites',
@@ -85,6 +98,11 @@ const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
 const AppSettingsServerRoute = AppSettingsServerRouteImport.update({
   id: '/server',
   path: '/server',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsSkillsRoute = AppSettingsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppProjectsProjectIdIndexRoute =
@@ -132,9 +150,12 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/usage': typeof AppUsageRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
+  '/settings/billing': typeof AppSettingsBillingRoute
+  '/settings/connectors': typeof AppSettingsConnectorsRoute
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
+  '/settings/skills': typeof AppSettingsSkillsRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
@@ -149,9 +170,12 @@ export interface FileRoutesByTo {
   '/devices': typeof AppDevicesRoute
   '/usage': typeof AppUsageRoute
   '/': typeof AppIndexRoute
+  '/settings/billing': typeof AppSettingsBillingRoute
+  '/settings/connectors': typeof AppSettingsConnectorsRoute
   '/settings/invites': typeof AppSettingsInvitesRoute
   '/settings/keys': typeof AppSettingsKeysRoute
   '/settings/server': typeof AppSettingsServerRoute
+  '/settings/skills': typeof AppSettingsSkillsRoute
   '/settings': typeof AppSettingsIndexRoute
   '/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
@@ -170,9 +194,12 @@ export interface FileRoutesById {
   '/_app/usage': typeof AppUsageRoute
   '/_app/': typeof AppIndexRoute
   '/_app/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
+  '/_app/settings/billing': typeof AppSettingsBillingRoute
+  '/_app/settings/connectors': typeof AppSettingsConnectorsRoute
   '/_app/settings/invites': typeof AppSettingsInvitesRoute
   '/_app/settings/keys': typeof AppSettingsKeysRoute
   '/_app/settings/server': typeof AppSettingsServerRoute
+  '/_app/settings/skills': typeof AppSettingsSkillsRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/projects/$projectId/files': typeof AppProjectsProjectIdFilesRoute
   '/_app/settings/projects/$projectId': typeof AppSettingsProjectsProjectIdRoute
@@ -191,9 +218,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/projects/$projectId'
+    | '/settings/billing'
+    | '/settings/connectors'
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
+    | '/settings/skills'
     | '/settings/'
     | '/projects/$projectId/files'
     | '/settings/projects/$projectId'
@@ -208,9 +238,12 @@ export interface FileRouteTypes {
     | '/devices'
     | '/usage'
     | '/'
+    | '/settings/billing'
+    | '/settings/connectors'
     | '/settings/invites'
     | '/settings/keys'
     | '/settings/server'
+    | '/settings/skills'
     | '/settings'
     | '/projects/$projectId/files'
     | '/settings/projects/$projectId'
@@ -228,9 +261,12 @@ export interface FileRouteTypes {
     | '/_app/usage'
     | '/_app/'
     | '/_app/projects/$projectId'
+    | '/_app/settings/billing'
+    | '/_app/settings/connectors'
     | '/_app/settings/invites'
     | '/_app/settings/keys'
     | '/_app/settings/server'
+    | '/_app/settings/skills'
     | '/_app/settings/'
     | '/_app/projects/$projectId/files'
     | '/_app/settings/projects/$projectId'
@@ -310,6 +346,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/billing': {
+      id: '/_app/settings/billing'
+      path: '/billing'
+      fullPath: '/settings/billing'
+      preLoaderRoute: typeof AppSettingsBillingRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/connectors': {
+      id: '/_app/settings/connectors'
+      path: '/connectors'
+      fullPath: '/settings/connectors'
+      preLoaderRoute: typeof AppSettingsConnectorsRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/invites': {
       id: '/_app/settings/invites'
       path: '/invites'
@@ -329,6 +379,13 @@ declare module '@tanstack/react-router' {
       path: '/server'
       fullPath: '/settings/server'
       preLoaderRoute: typeof AppSettingsServerRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/skills': {
+      id: '/_app/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof AppSettingsSkillsRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/projects/$projectId/': {
@@ -377,17 +434,23 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppSettingsRouteChildren {
+  AppSettingsBillingRoute: typeof AppSettingsBillingRoute
+  AppSettingsConnectorsRoute: typeof AppSettingsConnectorsRoute
   AppSettingsInvitesRoute: typeof AppSettingsInvitesRoute
   AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsServerRoute: typeof AppSettingsServerRoute
+  AppSettingsSkillsRoute: typeof AppSettingsSkillsRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsProjectsProjectIdRoute: typeof AppSettingsProjectsProjectIdRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsBillingRoute: AppSettingsBillingRoute,
+  AppSettingsConnectorsRoute: AppSettingsConnectorsRoute,
   AppSettingsInvitesRoute: AppSettingsInvitesRoute,
   AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsServerRoute: AppSettingsServerRoute,
+  AppSettingsSkillsRoute: AppSettingsSkillsRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsProjectsProjectIdRoute: AppSettingsProjectsProjectIdRoute,
 }

@@ -1,13 +1,13 @@
-import type { Message, Project, ServerEvent, Task } from "@altair/protocol";
+import { type Message, type Project, type ServerEvent, type Task } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { readWorkspace, threadWorkspace } from "../src/sandbox/workspace";
-import { resetFakeModel, setFakeModel } from "./fake-llm";
+import { resetFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -25,8 +25,6 @@ async function until<T>(fn: () => T | Promise<T>, what: string): Promise<NonNull
   throw new Error(`Timed out waiting for ${what}`);
 }
 
-const call = (name: string, input: unknown) => ({ id: crypto.randomUUID(), name, input });
-
 /** A project with one thread whose agent is ready, and a socket listening to it. */
 async function threadSetup() {
   const email = `u${crypto.randomUUID()}@example.com`;
@@ -35,7 +33,7 @@ async function threadSetup() {
     body: JSON.stringify({ email, password: "correct-horse-battery", name: "İsmail" }),
   });
   const token = signUp.headers.get("set-auth-token")!;
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
+  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Myrel" }) });
   const { project } = (await res.json()) as { project: Project };
   const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, {
     headers: { upgrade: "websocket" },
@@ -53,50 +51,37 @@ async function threadSetup() {
 
 afterEach(resetFakeModel);
 
-describe("run_task", () => {
-  it("runs a task in the thread's sandbox and wakes the agent with its result", async () => {
-    const prompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1) return { text: "", toolCalls: [] };
-      prompts.push(req.prompt);
-      if (!req.prompt.includes("## Tasks")) {
-        return {
-          text: "",
-          toolCalls: [
-            call("update_plan", {
-              title: "Testler",
-              steps: [
-                { text: "Testleri çalıştır", state: "active" },
-                { text: "Sonucu bildir", state: "todo" },
-              ],
-            }),
-            call("run_task", { title: "Testleri çalıştır", prompt: "pnpm test", harness: "shell", language: "tr" }),
-          ],
-        };
-      }
-      return { text: "", toolCalls: [call("reply", { text: "Sandbox açılamadı." })] };
-    });
-
+describe("the cloud agent", () => {
+  it("runs the thread's agent as OpenCode in its sandbox, connected to the thread's MCP endpoint", async () => {
     const { project, token, ws, events, projectAgent, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });
 
-    // The test runtime has no container, so the sandbox reports that and the task fails.
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    await until(async () => (await bodies()).includes("Sandbox açılamadı."), "the agent's reply about the result");
-
-    const [task] = (await threadAgent.getTasks()) as (Task & { log: { text: string }[] })[];
-    expect(task).toMatchObject({ title: "Testleri çalıştır", harness: "shell", backend: "sandbox", status: "failed" });
+    // The test runtime has no container, so the sandbox reports that and the turn fails.
+    const [task] = await until(async () => {
+      const tasks = (await threadAgent.getTasks()) as (Task & { log: { text: string }[] })[];
+      return tasks[0]?.status === "failed" ? tasks : null;
+    }, "the failed turn");
+    expect(task).toMatchObject({ title: "OpenCode", harness: "opencode", backend: "sandbox" });
     expect(task!.summary).toContain("container is not configured");
-    expect(task!.log.map((l) => l.text)).toContain("Starting Shell in the sandbox…");
+    expect(task!.log.map((l) => l.text)).toContain("Starting OpenCode in the sandbox…");
 
-    // The second turn saw the result, and the checklist shows where it stopped, in the thread's language.
-    expect(prompts[1]).toContain("Testleri çalıştır (failed, NEW result)");
-    const t = (await projectAgent.getThread(thread.id))!;
-    // The task's steps sit under the agent's own plan step.
-    expect(t.statusText).toMatch(/^Testler\n\n✱ Testleri çalıştır\n {2}✗ Sandbox açılamadı: The sandbox container is not configured/);
-    expect(t.statusText).toContain("\n○ Sonucu bildir");
+    // What the sandbox was handed: Myrel's instructions and the thread, the model, and where to call back.
+    const spec = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) =>
+      JSON.parse(state.storage.sql.exec<{ spec: string }>("SELECT spec FROM tasks").one().spec),
+    );
+    expect(spec).toMatchObject({ agent: true, mcp: { url: `http://myrel.test/api/agent-mcp/${thread.id}` }, model: { provider: "fireworks" } });
+    expect(spec.prompt).toContain("You run as OpenCode in this thread's own Linux sandbox");
 
-    // Clients heard about the task and its output live.
+    // The person hears what happened, in the thread's language.
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    const report = await until(async () => (await bodies()).find((b) => b.startsWith('"OpenCode" görevi başarısız oldu.')), "the report");
+    expect(report).toContain("container is not configured");
+    // The report carries the turn's line: OpenCode in the cloud, with the project's model.
+    const reported = ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).find((m: Message) => m.body === report)!;
+    expect(reported.stats).toMatchObject({ runtime: "cloud", harness: "opencode", model: spec.model.id });
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "failed", "failed");
+
+    // Clients heard about the run and its output live.
     expect(events.some((e) => e.type === "task.updated" && e.task.status === "running")).toBe(true);
     await until(() => events.some((e) => e.type === "task.updated" && e.task.status === "failed"), "task.updated failed");
     expect(events.some((e) => e.type === "task.output" && e.taskId === task!.id)).toBe(true);
@@ -110,42 +95,48 @@ describe("run_task", () => {
     ws.close();
   });
 
-  it("nudges a silent agent once after a failed task, then reports it and hands it to the coordinator", async () => {
-    const prompts: string[] = [];
-    setFakeModel((req) => {
-      if (req.turns > 1) return { text: "", toolCalls: [] };
-      prompts.push(req.prompt);
-      if (prompts.length > 1) return { text: "", toolCalls: [] };
-      return {
-        text: "",
-        toolCalls: [call("run_task", { title: "Komutları çalıştır", prompt: "ls demo", harness: "shell", language: "tr" })],
-      };
-    });
+  it("ends a turn its sandbox lost (a deploy restarted it), on Stop or on its own check", async () => {
+    const { project, threadAgent, thread } = await threadSetup();
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });
+    await until(async () => ((await threadAgent.getTasks())[0]?.status === "failed" ? true : null), "the first turn");
 
-    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run it." });
+    // Runs the sandbox does not know, like ones a deploy cut off mid-way.
+    const lost = (id: string) =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
+        const spec = { taskId: id, title: "OpenCode", prompt: "x", harness: "opencode", openPr: false, timeoutSec: 60 };
+        const progress = { phases: { prepare: "started", clone: "pending", agent: "pending", save: "skipped", publish: "pending" }, phaseDetail: {}, todos: [], lastText: null, lastTool: null, prUrl: null, usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, finished: null };
+        state.storage.sql.exec(
+          "INSERT INTO tasks (id, spec, backend, status, progress, language, created_at) VALUES (?, ?, 'sandbox', 'running', ?, 'en', ?)",
+          id, JSON.stringify(spec), JSON.stringify(progress), new Date().toISOString(),
+        );
+      });
+    const status = async (id: string) => (await threadAgent.getTasks()).find((t) => t.id === id)?.status;
 
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    const report = await until(
-      async () => (await bodies()).find((b) => b.startsWith('"Komutları çalıştır" görevi başarısız oldu.')),
-      "the thread's own report",
-    );
-    expect(report).toContain("container is not configured");
-    // One more turn carried the nudge, and only one: then the thread reported it itself.
-    const nudge = 'The task "Komutları çalıştır" failed and you ended your turn without telling the person.';
-    expect(prompts.filter((p) => p.includes(nudge))).toHaveLength(1);
-    await until(async () => (await projectAgent.getThread(thread.id))!.status === "blocked", "the thread to wait on the coordinator");
-    ws.close();
+    await lost("task_stop");
+    expect(await threadAgent.cancelTask("task_stop")).toEqual({ ok: true });
+    expect(await status("task_stop")).toBe("cancelled");
+
+    await lost("task_check");
+    await threadAgent.sandboxCheck({ taskId: "task_check" });
+    const task = (await threadAgent.getTasks()).find((t) => t.id === "task_check")!;
+    expect(task.status).toBe("failed");
+    expect(task.summary).toContain("new version of Myrel was deployed");
   });
 
-  it("reports what it cannot do as a tool error, without starting anything", async () => {
-    const { project, ws, threadAgent, thread } = await threadSetup();
-    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
-    const pr = await threadAgent.startTask({ title: "PR", prompt: "fix", repo: "acme/app", openPr: true });
-    expect(pr).toMatchObject({ ok: false, error: expect.stringContaining("needs write access") });
-    const ssh = await threadAgent.startTask({ title: "x", prompt: "fix", repo: "ssh://git@example.com/x" });
-    expect(ssh).toMatchObject({ ok: false, error: expect.stringContaining("not a repository I can clone") });
-    expect(await threadAgent.getTasks()).toEqual([]);
+  it("learns the address the sandbox calls back on when someone opens the project", async () => {
+    const { ws, projectAgent } = await threadSetup();
+    ws.close();
+    expect(await projectAgent.publicOrigin()).toBe("http://myrel.test");
+    // A project nobody opened yet does not know it, so its cloud turns say so instead of starting.
+    const other = await getAgentByName(env.PROJECT_AGENT, `proj_${crypto.randomUUID()}`);
+    expect(await other.publicOrigin()).toBeNull();
+  });
+
+  it("tells clients a thread stopped even when the project forgot it was working", async () => {
+    const { ws, events, projectAgent, thread } = await threadSetup();
+    // As after an eviction mid-turn: the in-memory activity is gone, but clients still show it.
+    await projectAgent.setActivity(thread.id, false);
+    await until(() => events.some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active), "the stop");
     ws.close();
   });
 });
@@ -168,12 +159,12 @@ describe("thread workspace", () => {
         };
       },
       create: async (name: string) => {
-        repos.set(name, { remote: `https://artifacts.example/altair/${name}.git` });
+        repos.set(name, { remote: `https://artifacts.example/myrel/${name}.git` });
         return {};
       },
     };
     const ws = await threadWorkspace({ WORKSPACES } as unknown as Env, "thr_1", 2100);
-    expect(ws).toEqual({ remote: "https://artifacts.example/altair/thread-thr_1.git", token: `art_v1_${"a".repeat(40)}` });
+    expect(ws).toEqual({ remote: "https://artifacts.example/myrel/thread-thr_1.git", token: `art_v1_${"a".repeat(40)}` });
     await threadWorkspace({ WORKSPACES } as unknown as Env, "thr_1", 2100);
     expect([...repos.keys()]).toEqual(["thread-thr_1"]);
     expect(tokens).toEqual([["write", 2100], ["write", 2100]]);
@@ -234,7 +225,7 @@ describe("reading a thread's workspace", () => {
     expect((await readWorkspace(env, "thr_1", "main", "../README.md"))!.file?.path).toBe("README.md");
     expect(await readWorkspace(env, "thr_1", "main", "nope")).toMatchObject({ entries: null, file: null });
     // Nothing saved on the branch, no repository, or no binding: nothing to show.
-    expect(await readWorkspace(env, "thr_1", "altair/other")).toBeNull();
+    expect(await readWorkspace(env, "thr_1", "myrel/other")).toBeNull();
     expect(await readWorkspace(env, "thr_2", "main")).toBeNull();
     expect(await readWorkspace({} as Env, "thr_1", "main")).toBeNull();
   });

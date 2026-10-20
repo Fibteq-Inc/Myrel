@@ -47,7 +47,12 @@ export type Translate = (key: MessageKey, params?: Params) => string;
  */
 export function createTranslator(locale: Locale): Translate {
   const catalog = catalogs[locale];
-  const plurals = new Intl.PluralRules(locale);
+  // Hermes (the React Native engine) has no Intl.PluralRules; English and Turkish both only
+  // distinguish "one" from "other", so that rule covers every locale we ship.
+  const plurals: Pick<Intl.PluralRules, "select"> =
+    typeof Intl.PluralRules === "function"
+      ? new Intl.PluralRules(locale)
+      : { select: (n) => (n === 1 ? "one" : "other") };
   return (key, params) => {
     const message = catalog[key] ?? en[key];
     const text =

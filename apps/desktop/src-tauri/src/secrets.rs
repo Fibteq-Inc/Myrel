@@ -1,6 +1,6 @@
 //! Bearer tokens in the OS keychain. The web view only sees them through these two commands.
 
-const SERVICE: &str = "io.fibteq.altair";
+const SERVICE: &str = "io.fibteq.myrel";
 
 fn entry(key: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, key).map_err(|e| e.to_string())

@@ -1,13 +1,32 @@
-import { LOCALE_NAMES, LOCALES, isLocale } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { Field, Notice, Section, Select } from "../../../components/settings";
+import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { api, meQuery, sessionQuery } from "../../../lib/api";
 import { Button, errorMessage, Input } from "../../../lib/ui";
 
+type SettingsSearch = { section?: string; connector?: string; result?: string; project?: string };
+
 export const Route = createFileRoute("/_app/settings/")({
+  // A connector's OAuth sign-in comes back to /settings?section=connectors&connector=<id>&result=ok|error.
+  validateSearch: (search: Record<string, unknown>): SettingsSearch => {
+    const out: SettingsSearch = {};
+    for (const k of ["section", "connector", "result", "project"] as const) {
+      if (typeof search[k] === "string") out[k] = search[k];
+    }
+    return out;
+  },
+  beforeLoad: ({ search }) => {
+    if (search.section !== "connectors") return;
+    const back = { connector: search.connector, result: search.result };
+    if (search.project) {
+      throw redirect({ to: "/settings/projects/$projectId", params: { projectId: search.project }, search: back });
+    }
+    throw redirect({ to: "/settings/connectors", search: back });
+  },
   component: AccountSettings,
 });
 
@@ -102,6 +121,57 @@ function AccountSettings() {
           </Select>
         </div>
       </Section>
+
+      <DeleteAccount email={me.email} />
     </>
+  );
+}
+
+/** Deletes the account after typing its email; projects only this person owns go with it. */
+function DeleteAccount({ email }: { email: string }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [confirming, setConfirming] = useState(false);
+  const remove = useMutation({
+    mutationFn: async () => {
+      await api.deleteAccount();
+      await api.signOut().catch(() => {});
+    },
+    onSuccess: async () => {
+      queryClient.clear();
+      await navigate({ to: "/login" });
+    },
+  });
+
+  return (
+    <Section title={t("deleteAccount.title")}>
+      <div className="flex flex-col gap-3 rounded-xl border border-bad/40 bg-bad/5 px-4 py-3 sm:flex-row sm:items-center">
+        <p className="flex-1 text-[13px] text-muted">{t("deleteAccount.description")}</p>
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="inline-flex h-8 flex-none items-center justify-center rounded-lg border border-bad/50 px-3 text-[13px] font-medium text-bad hover:bg-bad/10"
+        >
+          {t("deleteAccount.button")}
+        </button>
+      </div>
+      {confirming && (
+        <ConfirmDialog
+          title={t("deleteAccount.confirmTitle")}
+          body={t("deleteAccount.confirmBody", { email })}
+          confirmLabel={t("deleteAccount.confirm")}
+          busyLabel={t("deleteAccount.deleting")}
+          typeToConfirm={email}
+          busy={remove.isPending}
+          error={remove.error ? errorMessage(remove.error, t) : undefined}
+          onConfirm={() => remove.mutate()}
+          onClose={() => {
+            setConfirming(false);
+            remove.reset();
+          }}
+        />
+      )}
+    </Section>
   );
 }

@@ -1,12 +1,12 @@
-import { createDb, schema } from "@altair/db";
-import { type CliId, type ProjectWorkspace, type Runner, RunnerInfo } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { type CliId, MAX_WORKSPACE_FOLDERS, type ProjectWorkspace, type Runner, type RunnerFeature, RunnerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 
 const { runners, projectWorkspaces } = schema;
 
 /** Header the API Worker sets after checking a runner's token. The RunnerAgent trusts it. */
-export const RUNNER_ID_HEADER = "x-altair-runner-id";
+export const RUNNER_ID_HEADER = "x-myrel-runner-id";
 
 /** Pairing codes are valid this long. */
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -73,6 +73,7 @@ export async function getWorkspace(env: Env, projectId: string): Promise<Project
       runnerId: projectWorkspaces.runnerId,
       runnerName: runners.name,
       path: projectWorkspaces.path,
+      folders: projectWorkspaces.folders,
       cli: projectWorkspaces.cli,
     })
     .from(projectWorkspaces)
@@ -80,7 +81,50 @@ export async function getWorkspace(env: Env, projectId: string): Promise<Project
     .where(eq(projectWorkspaces.projectId, projectId))
     .limit(1);
   if (!row) return null;
-  return { projectId, ...row, cli: row.cli as CliId, online: await isRunnerOnline(env, row.runnerId) };
+  return {
+    projectId,
+    ...row,
+    folders: parseFolders(row.folders),
+    cli: row.cli as CliId,
+    online: await isRunnerOnline(env, row.runnerId),
+  };
+}
+
+/** A workspace's other folders, from their JSON column. */
+export function parseFolders(raw: string): string[] {
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value.filter((f): f is string => typeof f === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Adds a folder to the project's other folders, or takes one out. The main folder is never one
+ * of them. Returns false when the project has no local folder. Callable from routes and agents.
+ */
+export async function setWorkspaceFolder(env: Env, projectId: string, path: string, add: boolean): Promise<boolean> {
+  const db = createDb(env.DB);
+  const [row] = await db
+    .select({ path: projectWorkspaces.path, folders: projectWorkspaces.folders })
+    .from(projectWorkspaces)
+    .where(eq(projectWorkspaces.projectId, projectId));
+  if (!row) return false;
+  const others = parseFolders(row.folders).filter((f) => f !== path);
+  const folders = add && path !== row.path ? [...others, path].slice(-MAX_WORKSPACE_FOLDERS) : others;
+  await db
+    .update(projectWorkspaces)
+    .set({ folders: JSON.stringify(folders), updatedAt: new Date() })
+    .where(eq(projectWorkspaces.projectId, projectId));
+  await notifyProject(env, projectId);
+  return true;
+}
+
+/** Whether a paired computer's myrel-runner announced a feature in its last hello. */
+export async function runnerHasFeature(env: Env, runnerId: string, feature: RunnerFeature): Promise<boolean> {
+  const [row] = await createDb(env.DB).select({ info: runners.info }).from(runners).where(eq(runners.id, runnerId));
+  return parseInfo(row?.info ?? null)?.features.includes(feature) ?? false;
 }
 
 /** Tells every project working on this runner that its workspace changed, so open clients refresh. */

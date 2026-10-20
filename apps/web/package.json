@@ -1,5 +1,5 @@
 {
-  "name": "@altair/web",
+  "name": "@myrel/web",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -11,9 +11,9 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@altair/client": "workspace:*",
-    "@altair/i18n": "workspace:*",
-    "@altair/protocol": "workspace:*",
+    "@myrel/client": "workspace:*",
+    "@myrel/i18n": "workspace:*",
+    "@myrel/protocol": "workspace:*",
     "@tanstack/react-query": "5.104.4",
     "@tanstack/react-router": "1.170.45",
     "lucide-react": "1.59.0",

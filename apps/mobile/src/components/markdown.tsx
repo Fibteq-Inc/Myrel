@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
@@ -11,7 +11,7 @@ import { DecisionCard } from "./decision-card";
 export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
 
 /** Draws ```decision blocks as cards, code with a copy button, and routes links to `onLink`. */
-class AltairRenderer extends Renderer {
+class MyrelRenderer extends Renderer {
   constructor(
     private readonly decision: DecisionHandlers | undefined,
     private readonly onLink: (href: string) => void,
@@ -104,7 +104,7 @@ export function MessageMarkdown({
   const onChoose = decision?.onChoose;
   // Rebuilding the renderer re-parses the message, so only do it when what it draws changes.
   const renderer = useMemo(
-    () => new AltairRenderer(hasDecision ? { answer, onChoose } : undefined, onLink),
+    () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink),
     [hasDecision, answer, onChoose, onLink],
   );
   const elements = useMarkdown(body, { colorScheme: "dark", renderer, styles: markedStyles });

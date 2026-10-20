@@ -1,12 +1,14 @@
-import { threadMessages } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { threadMessages, threadUsage } from "@myrel/client";
+import { useI18n, useT } from "@myrel/i18n/react";
+import { planChecklist } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { ChevronDown, ChevronUp, CircleCheck, RotateCcw } from "lucide-react-native";
-import { useCallback, useMemo, useState } from "react";
+import { CircleCheck, RotateCcw } from "lucide-react-native";
+import { useCallback, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Checklist } from "../../../../../components/checklist";
+import { PlanProgress } from "../../../../../components/checklist";
 import { Conversation } from "../../../../../components/conversation";
-import { ThreadStatusIcon, threadStatus } from "../../../../../components/thread-status";
+import { ThreadStatusIcon } from "../../../../../components/thread-status";
+import { formatCost, formatTokens } from "../../../../../lib/format";
 import { useProject } from "../../../../../lib/project";
 import { useSession } from "../../../../../lib/session";
 import { colors } from "../../../../../theme";
@@ -19,7 +21,14 @@ export default function ThreadScreen() {
   const { projectId, state, send, emit } = useProject();
   const names = useNames(projectId);
   const thread = state.threads[threadId];
-  const [checklistOpen, setChecklistOpen] = useState(true);
+  const { locale } = useI18n();
+  const usage = thread ? threadUsage(state, threadId) : null;
+  const usageText =
+    usage && usage.tokens > 0
+      ? [t("stats.tokens", { tokens: formatTokens(usage.tokens, locale) }), usage.costMicros ? formatCost(usage.costMicros, locale) : null]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   // The message that opened the thread leads the conversation.
   const messages = useMemo(() => {
@@ -30,26 +39,16 @@ export default function ThreadScreen() {
   const onSend = useCallback((body: string) => send(body, threadId), [send, threadId]);
 
   const live = thread?.status === "working" && !thread.resolved;
+  // Only the progress line is pinned; the full list is the plan card in the conversation.
   const header = thread?.statusText && !thread.resolved ? (
     <View style={styles.panel}>
-      {checklistOpen ? (
-        <Checklist text={thread.statusText} live={live} />
-      ) : (
-        <Text style={styles.collapsed} numberOfLines={1}>
-          {threadStatus(thread, t).label}
-        </Text>
-      )}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={checklistOpen ? t("mobile.hideProgress") : t("mobile.showProgress")}
-        hitSlop={8}
-        onPress={() => setChecklistOpen((v) => !v)}
-        style={styles.toggle}
-      >
-        {checklistOpen ? <ChevronUp size={16} color={colors.subtle} /> : <ChevronDown size={16} color={colors.subtle} />}
-      </Pressable>
+      <PlanProgress text={thread.statusText} live={live} />
     </View>
   ) : null;
+  // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
+  const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
+  const plan =
+    currentPlan && thread?.statusText ? { messageId: currentPlan.id, text: thread.statusText, live } : undefined;
 
   return (
     <>
@@ -59,9 +58,16 @@ export default function ThreadScreen() {
             thread ? (
               <View style={styles.title}>
                 <ThreadStatusIcon thread={thread} />
-                <Text style={styles.titleText} numberOfLines={1}>
-                  {thread.title}
-                </Text>
+                <View style={styles.titleLines}>
+                  <Text style={styles.titleText} numberOfLines={1}>
+                    {thread.title}
+                  </Text>
+                  {usageText && (
+                    <Text style={styles.usage} numberOfLines={1}>
+                      {usageText}
+                    </Text>
+                  )}
+                </View>
               </View>
             ) : (
               <Text style={styles.titleText}>{t("thread.loading")}</Text>
@@ -95,6 +101,7 @@ export default function ThreadScreen() {
         placeholder={t("thread.placeholder")}
         onSend={onSend}
         header={header}
+        plan={plan}
       />
     </>
   );
@@ -102,7 +109,9 @@ export default function ThreadScreen() {
 
 const styles = StyleSheet.create({
   title: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 },
+  titleLines: { flexShrink: 1 },
   titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", flexShrink: 1 },
+  usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"] },
   resolve: {
     width: 36,
     height: 36,
@@ -114,13 +123,9 @@ const styles = StyleSheet.create({
   },
   panel: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 14,
-    paddingRight: 40,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
     backgroundColor: colors.panel,
   },
-  collapsed: { color: colors.subtle, fontSize: 13 },
-  toggle: { position: "absolute", right: 14, top: 12 },
 });

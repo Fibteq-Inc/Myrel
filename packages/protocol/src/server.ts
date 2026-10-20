@@ -9,14 +9,18 @@ export const API_VERSION = 1;
 
 /** Returned by `GET /api/info`, so an app can check an address before signing in. */
 export const ServerInfo = z.object({
-  app: z.literal("altair"),
+  app: z.literal("myrel"),
   apiVersion: z.number().int().positive(),
-  /** Display name of this deployment, e.g. "Altair Cloud" or a company's self-hosted instance. */
+  /** Display name of this deployment, e.g. "Myrel Cloud" or a company's self-hosted instance. */
   name: z.string(),
   auth: z.object({
     emailPassword: z.boolean(),
     /** Whether new accounts can be created. Older servers do not send it and always allowed it. */
     signUp: z.boolean().default(true),
   }),
+  /** Whether this server sells plans (the hosted service); self-hosted servers have none. */
+  billing: z.boolean().default(false),
+  /** Documents a new account must accept; sign-up sends `acceptTerms: true` when this is set. */
+  legal: z.object({ terms: z.string().url(), privacy: z.string().url(), version: z.string() }).nullable().default(null),
 });
 export type ServerInfo = z.infer<typeof ServerInfo>;

@@ -1,9 +1,9 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
-import { ChevronLeft, Folder, KeyRound, Mail, Server, UserRound } from "lucide-react";
+import { BookMarked, ChevronLeft, CreditCard, Folder, KeyRound, Mail, Plug, Server, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
-import { meQuery, myInvitesQuery, projectsQuery } from "../../lib/api";
+import { meQuery, myInvitesQuery, projectsQuery, serverInfoQuery } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/settings")({
   loader: ({ context }) => context.queryClient.ensureQueryData(meQuery),
@@ -15,12 +15,13 @@ function SettingsLayout() {
   const { data: me } = useQuery(meQuery);
   const { data: projects = [] } = useQuery(projectsQuery);
   const { data: invites = [] } = useQuery(myInvitesQuery);
+  const { data: info } = useQuery(serverInfoQuery);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
       <nav
         aria-label={t("settings.title")}
-        className="flex-none border-b border-line px-3 py-3 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:py-5"
+        className="min-w-0 flex-none border-b border-line px-3 py-3 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:py-5"
       >
         <Link to="/" className="mb-3 flex items-center gap-1.5 px-2 text-[13px] text-subtle hover:text-fg">
           <ChevronLeft size={14} /> {t("settings.back")}
@@ -30,8 +31,19 @@ function SettingsLayout() {
           <NavItem to="/settings" icon={<UserRound size={15} />} exact>
             {t("settings.account")}
           </NavItem>
+          {info?.billing && (
+            <NavItem to="/settings/billing" icon={<CreditCard size={15} />}>
+              {t("settings.billing")}
+            </NavItem>
+          )}
           <NavItem to="/settings/keys" icon={<KeyRound size={15} />}>
             {t("settings.keys")}
+          </NavItem>
+          <NavItem to="/settings/connectors" icon={<Plug size={15} />}>
+            {t("settings.connectors")}
+          </NavItem>
+          <NavItem to="/settings/skills" icon={<BookMarked size={15} />}>
+            {t("settings.skills")}
           </NavItem>
           <NavItem to="/settings/invites" icon={<Mail size={15} />}>
             {t("settings.invites")}
@@ -68,7 +80,7 @@ function SettingsLayout() {
           </>
         )}
       </nav>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-2xl space-y-10 px-4 py-6 sm:px-8 sm:py-8">
           <Outlet />
         </div>
@@ -83,7 +95,7 @@ function NavItem({
   exact,
   children,
 }: {
-  to: "/settings" | "/settings/keys" | "/settings/invites" | "/settings/server";
+  to: "/settings" | "/settings/billing" | "/settings/keys" | "/settings/connectors" | "/settings/skills" | "/settings/invites" | "/settings/server";
   icon: ReactNode;
   exact?: boolean;
   children: ReactNode;

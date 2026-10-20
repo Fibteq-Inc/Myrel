@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import type { GithubInstallation, ProjectRepo } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import type { GithubInstallation, ProjectRepo } from "@myrel/protocol";
 import { and, eq } from "drizzle-orm";
 import { type GithubEnv, installationToken, type RepoPermissions, type UserInstallation } from "./app";
 

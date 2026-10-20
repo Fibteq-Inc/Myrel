@@ -1,11 +1,12 @@
-import type { Message, MemoryEntry, Project, ProjectFile, ServerEvent } from "@altair/protocol";
+import type { Message, MemoryEntry, Project, ProjectFile, ServerEvent } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { agentProject, modelAgent, type Turn } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -20,8 +21,8 @@ async function setup() {
     body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "İsmail" }),
   });
   const token = signUp.headers.get("set-auth-token")!;
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
-  const { project } = (await res.json()) as { project: Project };
+  // Its threads are worked by the fake model, as the person's CLI (see fake-agent.ts).
+  const { project } = await agentProject(token, modelAgent);
   const base = `/api/projects/${project.id}`;
   return { token, project, base, agent: await getAgentByName(env.PROJECT_AGENT, project.id) };
 }
@@ -111,7 +112,7 @@ describe("agents and project knowledge", () => {
         return {
           text: "",
           toolCalls: [
-            call("start_thread", { message_id: newMessageId(req.prompt), title: "Summary", instructions: "Summarize the CSV." }),
+            call("start_thread", { message_id: newMessageId(req.prompt), title: "Summary", instructions: "Summarize the CSV.", project_ack: "On it." }),
           ],
         };
       }
@@ -168,6 +169,99 @@ describe("agents and project knowledge", () => {
     expect((await agent.getFile("reports/summary.md"))?.updatedByKind).toBe("agent");
     expect(events.some((e) => e.type === "knowledge.changed" && e.kind === "files")).toBe(true);
     expect(project.id).toBe(thread.projectId);
+    ws.close();
+  });
+});
+
+describe("binary files and harness agents", () => {
+  it("hands the agent signed links to download and upload binary files", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 3]);
+    const out: string[] = [];
+    let upload = "";
+    setFakeModel((req) => {
+      if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [call("start_thread", { message_id: newMessageId(req.prompt), title: "Image", instructions: "Look at it.", project_ack: "On it." })],
+      };
+    });
+
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "İsmail" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const { project } = await agentProject(token, async (turn: Turn) => {
+      const path = /📎 attached: (uploads\/\S+)/.exec(turn.prompt)![1]!;
+      out.push((await turn.call("read_file", { path })).text);
+      upload = (await turn.call("file_upload_url", { path: "reports/chart.png" })).text;
+      await turn.call("reply", { text: "Done." });
+    });
+    const base = `/api/projects/${project.id}`;
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+
+    const res = await api(`${base}/uploads?name=shot.png`, { token, method: "POST", body: png, headers: { "content-type": "image/png" } });
+    const { file } = (await res.json()) as { file: ProjectFile };
+    // Opening the project teaches it its public address, which the links point at.
+    const ws = (await api(`${base}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
+    ws.accept();
+    ws.send(JSON.stringify({ type: "message.send", body: "Bak", attachments: [file.path] }));
+    await until(() => upload, "the agent turn");
+
+    // read_file on a binary file gives a curl command whose link serves the bytes.
+    const get = /curl -fsSL -o "shot\.png" "(http[^"]+)"/.exec(out[0]!)![1]!;
+    const downloaded = await exports.default.fetch(new Request(get));
+    expect(downloaded.status).toBe(200);
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(png);
+    // The link is for that file and for reading only.
+    expect((await exports.default.fetch(new Request(get.replace(encodeURIComponent(file.path), "uploads%2Fother.png")))).status).toBe(403);
+    expect((await exports.default.fetch(new Request(get, { method: "PUT", body: "x" }))).status).toBe(403);
+    expect((await exports.default.fetch(new Request(get.replace(/sig=[^&]+/, "sig=AAAA")))).status).toBe(403);
+
+    // file_upload_url gives a PUT link that stores the file as the agent's.
+    const put = /--data-binary @LOCAL_FILE "(http[^"]+)"/.exec(upload)![1]!;
+    const stored = await exports.default.fetch(new Request(put, { method: "PUT", body: png, headers: { "content-type": "image/png" } }));
+    expect(stored.status).toBe(200);
+    expect(await agent.getFile("reports/chart.png")).toMatchObject({ size: png.length, contentType: "image/png", updatedByKind: "agent" });
+    ws.close();
+  });
+  it("attaches files the agent made to its reply, and refuses a path with no file", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [call("start_thread", { message_id: newMessageId(req.prompt), title: "Rapor", instructions: "Make it.", project_ack: "On it." })],
+      };
+    });
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "İsmail" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const results: { isError: boolean; text: string }[] = [];
+    let done = false;
+    const { project } = await agentProject(token, async (turn: Turn) => {
+      expect(turn.prompt).toContain("file_upload_url");
+      results.push(await turn.call("reply", { text: "Here.", files: ["reports/missing.xlsx"] }));
+      await turn.call("write_file", { path: "reports/summary.csv", content: "a,b\n1,2\n" });
+      results.push(await turn.call("reply", { text: "Tablo hazır.", files: ["reports/summary.csv"] }));
+      done = true;
+    });
+    const base = `/api/projects/${project.id}`;
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const ws = (await api(`${base}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
+    ws.accept();
+    ws.send(JSON.stringify({ type: "message.send", body: "Rapor hazırla" }));
+    await until(() => done, "the agent turn");
+
+    expect(results[0]!.isError).toBe(true);
+    expect(results[1]!.isError).toBe(false);
+    const thread = (await agent.listThreads())[0]!;
+    const messages = (await agent.getThreadContext(thread.id))!.messages;
+    expect(messages.map((m: Message) => m.body)).not.toContain("Here.");
+    expect(messages.find((m: Message) => m.body === "Tablo hazır.")?.attachments).toEqual([
+      { path: "reports/summary.csv", name: "summary.csv", size: 8, contentType: "text/csv; charset=utf-8" },
+    ]);
     ws.close();
   });
 });

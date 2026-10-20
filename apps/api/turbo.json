@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       // The Worker serves apps/web/dist as static assets, so bundle after the SPA is built.
-      "dependsOn": ["^build", "@altair/web#build"],
+      "dependsOn": ["^build", "@myrel/web#build"],
       "outputs": ["dist/**"]
     }
   }

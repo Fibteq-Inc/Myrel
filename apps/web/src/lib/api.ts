@@ -6,20 +6,20 @@ import {
   saveServer,
   tokenStoreFor,
   webPlatform,
-} from "@altair/client";
+} from "@myrel/client";
 import { QueryClient, queryOptions } from "@tanstack/react-query";
 
 // The desktop shell can inject its own platform (keychain, native dialogs) before the app boots.
 export const platform: Platform =
-  (globalThis as { __ALTAIR_PLATFORM__?: Platform }).__ALTAIR_PLATFORM__ ?? webPlatform();
+  (globalThis as { __MYREL_PLATFORM__?: Platform }).__MYREL_PLATFORM__ ?? webPlatform();
 
 /**
  * Server origin: the user's saved choice (desktop/mobile can point at any
- * self-hosted Altair), else VITE_API_URL, else same origin ("").
+ * self-hosted Myrel), else VITE_API_URL, else same origin ("").
  */
 export const server = await currentServer(platform.storage, (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, ""));
 
-/** Apps that are not served by an Altair server let the user pick one. */
+/** Apps that are not served by a Myrel server let the user pick one. */
 export const canChooseServer = platform.name !== "web";
 
 export const api = new ApiClient({ baseUrl: server, tokens: tokenStoreFor(platform, server) });
@@ -62,6 +62,7 @@ export const serverInfoQuery = queryOptions({
 
 // --- settings ---
 
+export const billingQuery = queryOptions({ queryKey: ["billing"], queryFn: () => api.getBilling() });
 export const meQuery = queryOptions({ queryKey: ["me"], queryFn: () => api.getMe() });
 export const providersQuery = queryOptions({ queryKey: ["providers"], queryFn: () => api.listProviders() });
 export const keysQuery = queryOptions({ queryKey: ["keys"], queryFn: () => api.listKeys() });
@@ -71,6 +72,24 @@ export const projectSettingsQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "settings"], queryFn: () => api.getProjectSettings(id) });
 export const projectInvitesQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "invites"], queryFn: () => api.listProjectInvites(id) });
+
+/** A person's own connectors, or a project's. */
+export const connectorsQuery = (projectId?: string) =>
+  queryOptions({
+    queryKey: projectId ? ["projects", projectId, "connectors"] : ["connectors"],
+    queryFn: () => api.listConnectors(projectId),
+  });
+
+/** The caller's own skills and connectors, and which are on in this project. */
+export const personalInProjectQuery = (projectId: string) =>
+  queryOptions({ queryKey: ["projects", projectId, "personal"], queryFn: () => api.getPersonalInProject(projectId) });
+
+/** A person's own skills, or a project's. */
+export const skillsQuery = (projectId?: string) =>
+  queryOptions({
+    queryKey: projectId ? ["projects", projectId, "skills"] : ["skills"],
+    queryFn: () => api.listSkills(projectId),
+  });
 
 /** The signed-in user's notifications. Polled so the bell updates on any page. */
 export const notificationsQuery = queryOptions({

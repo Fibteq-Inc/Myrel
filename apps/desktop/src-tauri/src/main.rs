@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    altair_desktop_lib::run()
+    myrel_desktop_lib::run()
 }

@@ -1,6 +1,6 @@
-import type { SocketStatus } from "@altair/client";
-import type { MessageKey, Translate } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
+import type { SocketStatus } from "@myrel/client";
+import type { MessageKey, Translate } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { BarChart3, Blocks, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";

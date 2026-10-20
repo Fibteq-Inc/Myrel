@@ -1,10 +1,10 @@
-import { normalizeServerUrl, probeServer } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { normalizeServerUrl, probeServer } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { type FormEvent, useState } from "react";
 import { server, switchServer } from "./api";
 import { Button, errorMessage, Input } from "./ui";
 
-/** Shows which Altair server the app talks to and lets the user switch to another (e.g. self-hosted). */
+/** Shows which Myrel server the app talks to and lets the user switch to another (e.g. self-hosted). */
 export function ServerPicker() {
   const t = useT();
   const [editing, setEditing] = useState(server === "");
@@ -45,7 +45,7 @@ export function ServerPicker() {
         <Input
           id="server"
           name="server"
-          placeholder="altair.example.com"
+          placeholder="myrel.example.com"
           defaultValue={server}
           required
           autoComplete="url"

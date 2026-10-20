@@ -1,9 +1,11 @@
-import { LOCALE_NAMES, LOCALES } from "@altair/i18n";
-import { useI18n, useT } from "@altair/i18n/react";
+import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
+import { useI18n, useT } from "@myrel/i18n/react";
+import * as WebBrowser from "expo-web-browser";
+import { Check } from "lucide-react-native";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AltairMark, Button, errorMessage, Input } from "../components/ui";
+import { MyrelMark, Button, errorMessage, Input } from "../components/ui";
 import { useSession } from "../lib/session";
 import { colors } from "../theme";
 
@@ -17,8 +19,8 @@ export default function LoginScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
-            <AltairMark size={44} />
-            <Text style={styles.brandName}>Altair</Text>
+            <MyrelMark size={44} />
+            <Text style={styles.brandName}>Myrel</Text>
           </View>
           {session.offline && !editingServer ? (
             <Offline />
@@ -66,7 +68,7 @@ function hostOf(origin: string) {
   return origin.replace(/^https?:\/\//, "");
 }
 
-/** Lets the user point the app at any Altair server, e.g. a self-hosted one. */
+/** Lets the user point the app at any Myrel server, e.g. a self-hosted one. */
 function ServerForm({ onDone }: { onDone: () => void }) {
   const t = useT();
   const session = useSession();
@@ -94,7 +96,7 @@ function ServerForm({ onDone }: { onDone: () => void }) {
       <Input
         value={value}
         onChangeText={setValue}
-        placeholder="altair.example.com"
+        placeholder="myrel.example.com"
         keyboardType="url"
         textContentType="URL"
         returnKeyType="go"
@@ -121,15 +123,17 @@ function SignInForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const signUpAllowed = session.info?.auth.signUp !== false;
+  const legal = mode === "signup" ? session.info?.legal : null;
 
   async function submit() {
     setPending(true);
     setError(null);
     try {
-      if (mode === "signup") await session.signUp({ email, password, name });
+      if (mode === "signup") await session.signUp({ email, password, name, acceptTerms: accepted });
       else await session.signIn({ email, password });
     } catch (err) {
       setError(errorMessage(err, t("common.error")));
@@ -161,8 +165,32 @@ function SignInForm() {
         returnKeyType="go"
         onSubmitEditing={submit}
       />
+      {legal && (
+        <View style={styles.accept}>
+          <Pressable
+            onPress={() => setAccepted(!accepted)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: accepted }}
+            hitSlop={10}
+            style={[styles.box, accepted && styles.boxOn]}
+          >
+            {accepted && <Check size={14} color={colors.ground} strokeWidth={3} />}
+          </Pressable>
+          <Text style={[styles.hint, { flex: 1 }]}>
+            {t("login.accept.before")}
+            <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.terms)}>
+              {t("legal.terms")}
+            </Text>
+            {t("login.accept.and")}
+            <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.privacy)}>
+              {t("legal.privacy")}
+            </Text>
+            {t("login.accept.after")}
+          </Text>
+        </View>
+      )}
       {error && <Text style={styles.error}>{error}</Text>}
-      <Button onPress={submit} pending={pending} disabled={!email || password.length < 8}>
+      <Button onPress={submit} pending={pending} disabled={!email || password.length < 8 || (legal != null && !accepted)}>
         {mode === "signin" ? t("login.signIn") : t("login.signUp")}
       </Button>
       {signUpAllowed ? (
@@ -198,6 +226,19 @@ const styles = StyleSheet.create({
   title: { color: colors.fg, fontSize: 22, fontWeight: "600" },
   hint: { color: colors.subtle, fontSize: 14, lineHeight: 20 },
   error: { color: colors.bad, fontSize: 14 },
+  accept: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  box: {
+    width: 20,
+    height: 20,
+    marginTop: 1,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.edge,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  boxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  termsLink: { color: colors.link, textDecorationLine: "underline" },
   serverRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   serverText: { flex: 1, color: colors.subtle, fontSize: 13 },
   link: { color: colors.link, fontSize: 13 },

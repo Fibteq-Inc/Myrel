@@ -1,9 +1,9 @@
-import { API_VERSION, ServerInfo } from "@altair/protocol";
+import { API_VERSION, ServerInfo } from "@myrel/protocol";
 import type { KeyValueStore, Platform } from "./platform";
 import type { TokenStore } from "./token-store";
 
 /**
- * Turns what a user types ("altair.acme.com", "https://altair.acme.com/")
+ * Turns what a user types ("myrel.acme.com", "https://myrel.acme.com/")
  * into an origin. Plain http is only accepted for localhost and LAN-style
  * hosts typed with an explicit scheme.
  */
@@ -23,7 +23,7 @@ export function normalizeServerUrl(input: string): string {
 
 export class ServerCheckError extends Error {}
 
-/** Fetches `/api/info` and checks the server is an Altair this app can talk to. */
+/** Fetches `/api/info` and checks the server is a Myrel this app can talk to. */
 export async function probeServer(origin: string, fetchImpl: typeof fetch = fetch): Promise<ServerInfo> {
   let res: Response;
   try {
@@ -32,12 +32,12 @@ export async function probeServer(origin: string, fetchImpl: typeof fetch = fetc
     throw new ServerCheckError("Could not reach the server");
   }
   const parsed = ServerInfo.safeParse(res.ok ? await res.json().catch(() => null) : null);
-  if (!parsed.success) throw new ServerCheckError("This address is not an Altair server");
+  if (!parsed.success) throw new ServerCheckError("This address is not a Myrel server");
   if (parsed.data.apiVersion !== API_VERSION) {
     throw new ServerCheckError(
       parsed.data.apiVersion > API_VERSION
         ? "This server is newer than the app. Update the app to connect."
-        : "This server runs an older Altair version. Ask its admin to update it.",
+        : "This server runs an older Myrel version. Ask its admin to update it.",
     );
   }
   return parsed.data;

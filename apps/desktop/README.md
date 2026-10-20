@@ -1,6 +1,6 @@
-# Altair desktop
+# Myrel desktop
 
-The Altair desktop app for macOS, Windows and Linux, built with [Tauri 2](https://tauri.app). The UI is
+The Myrel desktop app for macOS, Windows and Linux, built with [Tauri 2](https://tauri.app). The UI is
 `apps/web`; this package wraps it and injects a desktop `Platform` (see `packages/client/src/platform.ts`)
 before the app loads:
 
@@ -11,24 +11,24 @@ before the app loads:
 | Notifications | native notifications |
 | File picker | native open dialog |
 | Links | opened in the default browser |
-| `altair://` links | `altair://connect?server=https://altair.example.com` switches server after a confirmation; any other path opens that page, e.g. `altair://projects/<id>` |
+| `myrel://` links | `myrel://connect?server=https://myrel.example.com` switches server after a confirmation; any other path opens that page, e.g. `myrel://projects/<id>` |
 | Updates | checks GitHub releases at startup and offers to install |
-| Local folders | the bundled `altair-runner` (see below) |
+| Local folders | the bundled `myrel-runner` (see below) |
 
-The app is not tied to one server: on first launch it asks for an Altair address (hosted or self-hosted)
+The app is not tied to one server: on first launch it asks for an Myrel address (hosted or self-hosted)
 and checks it with `GET /api/info`. A build can preselect a server with `VITE_API_URL`; release builds
-default to `https://altair.fibteq.io` (repository variable `ALTAIR_DESKTOP_API_URL` overrides it).
+default to `https://myrel.fibteq.io` (repository variable `MYREL_DESKTOP_API_URL` overrides it).
 
-## Bundled altair-runner
+## Bundled myrel-runner
 
-`packages/altair-runner` ships inside the app as a Tauri sidecar, compiled to one executable with
+`packages/myrel-runner` ships inside the app as a Tauri sidecar, compiled to one executable with
 `bun build --compile` (`scripts/build-runner.mjs`, run before every `tauri dev` / `tauri build`). On the
 Devices page, **Connect this computer** pairs it in one click: the app asks the server for a pairing code,
 trades it for a runner login and keeps that login in the OS keychain. The runner gets it through
-`ALTAIR_SERVER` / `ALTAIR_RUNNER_TOKEN` and never writes it to disk. It runs while the app is open, starts
+`MYREL_SERVER` / `MYREL_RUNNER_TOKEN` and never writes it to disk. It runs while the app is open, starts
 again at the next launch, and gets the login shell's `PATH` so it finds `claude`, `codex` and `gemini`.
 Folders are shared from the Devices page like for any other computer; they live in the app data folder
-(`runner/config.json`), separate from a terminal `npx altair-runner` install.
+(`runner/config.json`), separate from a terminal `npx myrel-runner` install.
 
 ## Develop
 
@@ -37,12 +37,12 @@ Install the [Tauri prerequisites](https://tauri.app/start/prerequisites/) (Rust,
 
 ```sh
 pnpm install
-pnpm --filter @altair/desktop dev                                  # opens the app; asks for a server
-VITE_API_URL=http://localhost:8787 pnpm --filter @altair/desktop dev   # against a local `pnpm dev` API
-pnpm --filter @altair/desktop bundle                               # installers in src-tauri/target/release/bundle
+pnpm --filter @myrel/desktop dev                                  # opens the app; asks for a server
+VITE_API_URL=http://localhost:8787 pnpm --filter @myrel/desktop dev   # against a local `pnpm dev` API
+pnpm --filter @myrel/desktop bundle                               # installers in src-tauri/target/release/bundle
 ```
 
-Regenerate icons from `icon.svg` with `pnpm --filter @altair/desktop icons`.
+Regenerate icons from `icon.svg` with `pnpm --filter @myrel/desktop icons`.
 
 ## Release
 
@@ -66,10 +66,10 @@ Builds run without these, but unsigned. Add them under the repository's Settings
 
 **Updater (needed for auto-update):**
 
-1. Run `pnpm --filter @altair/desktop tauri signer generate -w ~/.tauri/altair.key` and keep the key safe.
-2. Secret `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/altair.key`.
+1. Run `pnpm --filter @myrel/desktop tauri signer generate -w ~/.tauri/myrel.key` and keep the key safe.
+2. Secret `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/myrel.key`.
 3. Secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the password you chose.
-4. Variable `TAURI_UPDATER_PUBKEY`: contents of `~/.tauri/altair.key.pub`.
+4. Variable `TAURI_UPDATER_PUBKEY`: contents of `~/.tauri/myrel.key.pub`.
 
 **macOS (Apple Developer Program, $99/year):**
 

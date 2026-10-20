@@ -1,4 +1,4 @@
-# Contributing to Fibteq Altair
+# Contributing to Fibteq Myrel
 
 Thanks for helping. This page covers how to set up the project, what we expect
 in a pull request, and the Contributor License Agreement.
@@ -64,14 +64,14 @@ Before we can merge your first pull request, you need to sign the
 with instructions; you sign by replying with the sentence it gives. You only
 sign once.
 
-The CLA lets Fibteq offer Altair under commercial terms (the hosted service
+The CLA lets Fibteq offer Myrel under commercial terms (the hosted service
 and the enterprise license) as well as under the AGPL. You keep the copyright
 to your work.
 
 ## Licensing of contributions
 
 - Code outside `ee/` is licensed under AGPL-3.0.
-- Code in `ee/` is under the [Fibteq Altair Enterprise License](ee/LICENSE).
+- Code in `ee/` is under the [Fibteq Myrel Enterprise License](ee/LICENSE).
   The core must never import from `ee/`.
 
 ## Code of Conduct

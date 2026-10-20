@@ -1,8 +1,8 @@
-# Fibteq Altair
+# Fibteq Myrel
 
 **An open-source, self-hostable workspace where AI agents do the work inside your projects.**
 
-Fibteq Altair gives a team a project chat with a coordinator agent in it. Ask for
+Fibteq Myrel gives a team a project chat with a coordinator agent in it. Ask for
 something and the coordinator opens a thread for it; a thread agent takes the
 task, shows its progress as a live checklist, and answers in the thread. When
 something is beyond its scope, the thread agent asks the coordinator for
@@ -14,7 +14,7 @@ and running on your own Cloudflare account.
 > work end to end, but agents only talk for now: no tools, sandbox, file
 > storage or web access yet. Expect breaking changes. See the [roadmap](#roadmap).
 
-## Why Altair
+## Why Myrel
 
 - **Coordinator and threads.** One agent routes, many agents work. The
   coordinator never does the work itself; each thread agent owns its task and
@@ -24,21 +24,21 @@ and running on your own Cloudflare account.
 - **Yours to run.** One Cloudflare Worker, Durable Objects and a D1 database.
   No servers to manage, and the free tier is enough to try it.
 - **Apps that follow you.** The web app is served by the same Worker. The
-  desktop and mobile apps (planned) connect to any Altair server you point them at.
+  desktop and mobile apps (planned) connect to any Myrel server you point them at.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   clients["Web, desktop and mobile apps"]
-  subgraph worker["Cloudflare Worker: altair"]
+  subgraph worker["Cloudflare Worker: myrel"]
     assets["Static assets<br/>(apps/web)"]
     api["Hono API /api/*<br/>Better Auth"]
     pa["ProjectAgent DO<br/>coordinator, project chat"]
     ta["ThreadAgent DO<br/>one per thread"]
     ra["RunnerAgent DO<br/>one per paired computer"]
   end
-  runner["altair-runner<br/>your computer, your CLI"]
+  runner["myrel-runner<br/>your computer, your CLI"]
   d1[("D1<br/>users, projects")]
   llm["LLM provider<br/>Fireworks, Anthropic, OpenAI<br/>optionally via AI Gateway"]
   clients --> assets
@@ -60,10 +60,10 @@ flowchart LR
   `ThreadAgent` that does the work (`reply`, `update_status`, `request_coordinator`,
   `resolve_thread`, and `run_local_task` when the project has a local folder). Both
   use a small provider-neutral loop in `apps/api/src/llm`.
-- **Local runner**: `altair-runner` (`packages/altair-runner`) runs on your computer, keeps an
+- **Local runner**: `myrel-runner` (`packages/myrel-runner`) runs on your computer, keeps an
   outbound WebSocket to a `RunnerAgent` Durable Object and runs tasks with your own
   Claude Code, Codex or Gemini CLI in folders you shared. Your CLI logins never leave
-  your computer. See [packages/altair-runner/README.md](packages/altair-runner/README.md).
+  your computer. See [packages/myrel-runner/README.md](packages/myrel-runner/README.md).
 - **Realtime**: messages live in the project's Durable Object SQLite with a
   monotonically increasing `seq`, so clients resync after reconnecting.
 - **Web**: Vite, React 19, TanStack Router and Query, Tailwind CSS 4.
@@ -81,7 +81,7 @@ packages/protocol  message/thread/project types, WebSocket events
 packages/client    typed API client + reconnecting project socket
 packages/i18n      UI strings (en, tr) for web and mobile
 packages/db        Drizzle schema and D1 migrations
-packages/altair-runner    @fibteq/altair-runner, the local daemon for your own coding CLI (altair-runner-alias: its short npm name)
+packages/myrel-runner    @fibteq/myrel-runner, the local daemon for your own coding CLI (myrel-runner-alias: its short npm name)
 docs/              self-hosting, architecture, maintainer notes
 ee/                enterprise features under a commercial license (empty for now)
 ```
@@ -106,7 +106,7 @@ Other scripts: `pnpm typecheck`, `pnpm test`, `pnpm build`. After changing
 
 ## Self-hosting
 
-Altair runs on your own Cloudflare account and deploys with
+Myrel runs on your own Cloudflare account and deploys with
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), so
 every push to your `main` branch ships. The
 [self-hosting guide](docs/self-hosting.md) covers the D1 database, the build
@@ -119,7 +119,7 @@ connecting the apps.
 |---|---|---|
 | 0 | Monorepo, auth, D1, deploy pipeline | Done |
 | 1 | Talking coordinator and thread agents | Done |
-| 1.5 | Local `altair-runner`: work in a folder on your computer with your own Claude Code, Codex or Gemini CLI | Done |
+| 1.5 | Local `myrel-runner`: work in a folder on your computer with your own Claude Code, Codex or Gemini CLI | Done |
 | 2 | Threads that do work: sandboxed runners (OpenCode first), project files on R2, GitHub (clone, branch, PR) | Next |
 | 3 | Artifacts, project memory, decision cards, mobile app (Expo) | Planned |
 | 4 | Events and routines (webhooks, schedules), MCP connectors, desktop app (Tauri) | Planned |
@@ -134,14 +134,14 @@ pull request. Report vulnerabilities privately as described in
 
 ## License
 
-Fibteq Altair is open core:
+Fibteq Myrel is open core:
 
 - Everything outside `ee/` is licensed under the
   [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). If you run
-  a modified Altair as a network service, you must offer its source to its users.
+  a modified Myrel as a network service, you must offer its source to its users.
 - Code in [`ee/`](ee/) is licensed under the
-  [Fibteq Altair Enterprise License](ee/LICENSE). It is source-available but
+  [Fibteq Myrel Enterprise License](ee/LICENSE). It is source-available but
   needs a commercial license for production use.
 
-"Fibteq" and "Fibteq Altair" are names of Fibteq. The licenses cover the code,
+"Fibteq" and "Fibteq Myrel" are names of Fibteq. The licenses cover the code,
 not the names or logos; a fork you distribute should use its own name.

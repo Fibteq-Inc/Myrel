@@ -1,4 +1,4 @@
-import type { NotificationConfig, NotificationSettings, Project } from "@altair/protocol";
+import type { NotificationConfig, NotificationSettings, Project } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { b64urlDecode, b64urlEncode } from "../src/notifications/webpush";
 import { emails, outbound, pushStatus, resetFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -25,7 +25,7 @@ async function setup() {
     }),
   });
   const token = signUp.headers.get("set-auth-token")!;
-  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
+  const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Myrel" }) });
   const { project } = (await res.json()) as { project: Project };
   const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
   const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "do it" });
@@ -98,7 +98,7 @@ describe("notifications", () => {
       body: "The notes are ready.",
       url: `/projects/${project.id}/threads/${thread.id}`,
       tag: thread.id,
-      project: "Altair",
+      project: "Myrel",
     });
 
     // The VAPID JWT is signed by the server's key, for the push service's origin.
