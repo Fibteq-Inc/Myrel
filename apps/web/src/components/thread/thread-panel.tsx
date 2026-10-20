@@ -2,7 +2,7 @@ import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@m
 import { useT } from "@myrel/i18n/react";
 import { planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
-import { CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
+import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -24,6 +24,7 @@ import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
 import { CHAT_MIN, PANEL_MIN, useThreadPanel } from "./panel-state";
+import { ThreadUsage } from "./thread-usage";
 
 const CONVERSATION = "conversation";
 
@@ -121,6 +122,7 @@ export function ThreadPanel({
     };
     const at = tabs.findIndex((tab) => tab.id === "changes") + 1;
     tabs.splice(at, 0, pr);
+    tabs.push({ id: "usage", label: t("workspace.usage"), icon: ChartColumn, content: <ThreadUsage messages={messages} /> });
   }
   const tool = tabs.some((tab) => tab.id === panel.tool) ? panel.tool : null;
   const current = tabs.find((tab) => tab.id === tool);

@@ -1,6 +1,7 @@
 import {
   type Artifact,
   type Message,
+  type MessageStats,
   planChecklist,
   type PullRequest,
   type Reaction,
@@ -158,19 +159,33 @@ export const projectChat = (s: ProjectState) => s.messages.filter((m) => m.threa
 
 export const threadMessages = (s: ProjectState, threadId: string) => s.messages.filter((m) => m.threadId === threadId);
 
+/** What one message's stats line counts, its task included. Cost is null when any part has no price. */
+export function messageUsage(st: MessageStats): { inputTokens: number; outputTokens: number; durationMs: number; costMicros: number | null } {
+  const { task } = st;
+  return {
+    inputTokens: st.inputTokens + (task?.inputTokens ?? 0),
+    outputTokens: st.outputTokens + (task?.outputTokens ?? 0),
+    durationMs: st.durationMs + (task?.durationMs ?? 0),
+    // A person's own CLI is unpriced on purpose; it counts as free rather than unknown.
+    costMicros:
+      st.runtime === "local" && st.harness
+        ? 0
+        : st.costMicros === null || task?.costMicros === null
+          ? null
+          : st.costMicros + (task?.costMicros ?? 0),
+  };
+}
+
 /** What a thread's messages say they used, summed: null when none of them carries stats. Cost is null when any part has no price. */
 export function threadUsage(s: ProjectState, threadId: string): { tokens: number; durationMs: number; costMicros: number | null } | null {
   let total: { tokens: number; durationMs: number; costMicros: number | null } | null = null;
   for (const m of threadMessages(s, threadId)) {
-    const st = m.stats;
-    if (!st) continue;
+    if (!m.stats) continue;
+    const u = messageUsage(m.stats);
     total ??= { tokens: 0, durationMs: 0, costMicros: 0 };
-    const { task } = st;
-    total.tokens += st.inputTokens + st.outputTokens + (task ? task.inputTokens + task.outputTokens : 0);
-    total.durationMs += st.durationMs + (task?.durationMs ?? 0);
-    // A person's own CLI is unpriced on purpose; it counts as free here rather than making the total unknown.
-    const cost = st.runtime === "local" && st.harness ? 0 : st.costMicros === null || task?.costMicros === null ? null : st.costMicros + (task?.costMicros ?? 0);
-    total.costMicros = total.costMicros === null || cost === null ? null : total.costMicros + cost;
+    total.tokens += u.inputTokens + u.outputTokens;
+    total.durationMs += u.durationMs;
+    total.costMicros = total.costMicros === null || u.costMicros === null ? null : total.costMicros + u.costMicros;
   }
   return total;
 }
