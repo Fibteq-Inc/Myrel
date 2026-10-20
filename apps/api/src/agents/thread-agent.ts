@@ -20,7 +20,7 @@ import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type 
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { recordTaskUsage } from "../usage";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
-import { type Author, knowledgeTools } from "./knowledge";
+import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
@@ -435,6 +435,11 @@ export class ThreadAgent extends Agent<Env> {
         listFiles: (prefix?: string) => project.listFiles(prefix),
         readText: (path: string) => project.readFileText(path),
         writeText: (path: string, content: string) => project.writeFileText(path, content, BY),
+        // The harness has a shell: binary files move with curl over a signed link.
+        fileLink: async (path: string, mode: "get" | "put") => {
+          const origin = await project.publicOrigin();
+          return origin ? signFileLink(this.env, origin, { projectId, path, mode, by: THREAD_AGENT_ID }) : null;
+        },
       }),
       ...routineTools({
         listRoutines: () => project.listRoutines(),
