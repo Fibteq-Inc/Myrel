@@ -23,6 +23,11 @@ export const ClientEvent = z.discriminatedUnion("type", [
     type: z.literal("sync"),
     /** Return messages with seq strictly greater than this. 0 = from the start. */
     afterSeq: z.number().int().nonnegative(),
+    /**
+     * Send every page back to back instead of one page per request, so a long
+     * history arrives without a round trip per page. The last page has hasMore false.
+     */
+    all: z.boolean().optional(),
   }),
 ]);
 export type ClientEvent = z.infer<typeof ClientEvent>;
@@ -44,6 +49,8 @@ export const ServerEvent = z.discriminatedUnion("type", [
     messages: z.array(Message),
     /** True when more messages remain after the last one returned. */
     hasMore: z.boolean(),
+    /** The server sends the next page by itself (the sync asked for `all`); don't ask for it. */
+    streamed: z.boolean().optional(),
     /** Every thread in the project, current state (threads are few and change in place). */
     threads: z.array(Thread).default([]),
     /** Reactions on the returned messages. */

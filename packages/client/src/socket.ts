@@ -8,6 +8,13 @@ export type ProjectSocketOptions = {
   /** Highest seq the caller already has (e.g. from a local cache). */
   lastSeq?: number;
   onMessage?: (message: Message) => void;
+  /**
+   * Called instead of `onMessage` with each run of new messages (a whole sync
+   * page at once), so a long history is applied in one state update, not one per message.
+   */
+  onMessages?: (messages: Message[]) => void;
+  /** The client has caught up: a sync finished with nothing more to fetch. */
+  onSynced?: () => void;
   onEvent?: (event: ServerEvent) => void;
   onStatus?: (status: SocketStatus) => void;
   WebSocket?: typeof WebSocket;
@@ -117,22 +124,30 @@ export class ProjectSocket {
       // A gap means we missed something: fetch it (the sync result includes this message too).
       else if (seq > this.lastSeq + 1) this.requestSync();
     } else if (event.type === "sync.result") {
-      this.syncing = false;
-      for (const m of event.messages) this.deliver(m);
-      if (event.hasMore) this.requestSync();
+      // A streamed sync is still running until its last page.
+      if (!event.streamed || !event.hasMore) this.syncing = false;
+      this.deliver(...event.messages);
+      if (!event.hasMore) this.opts.onSynced?.();
+      else if (!event.streamed) this.requestSync();
     }
   }
 
   private requestSync() {
     if (this.syncing || this.ws?.readyState !== 1) return;
     this.syncing = true;
-    this.ws.send(JSON.stringify({ type: "sync", afterSeq: this.lastSeq } satisfies ClientEventInput));
+    this.ws.send(JSON.stringify({ type: "sync", afterSeq: this.lastSeq, all: true } satisfies ClientEventInput));
   }
 
-  private deliver(message: Message) {
-    if (message.seq <= this.lastSeq) return;
-    this.lastSeq = message.seq;
-    this.opts.onMessage?.(message);
+  private deliver(...messages: Message[]) {
+    const fresh: Message[] = [];
+    for (const message of messages) {
+      if (message.seq <= this.lastSeq) continue;
+      this.lastSeq = message.seq;
+      fresh.push(message);
+    }
+    if (fresh.length === 0) return;
+    if (this.opts.onMessages) this.opts.onMessages(fresh);
+    else for (const message of fresh) this.opts.onMessage?.(message);
   }
 
   private scheduleReconnect() {

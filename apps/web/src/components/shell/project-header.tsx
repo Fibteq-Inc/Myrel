@@ -226,10 +226,23 @@ const CONNECTION: Record<Exclude<SocketStatus, "open">, (t: Translate) => { labe
   closed: (t) => ({ label: t("connection.closed"), detail: t("connection.closedDetail"), dot: "bg-bad" }),
 };
 
-/** Shown only while the live connection is down or still coming up. */
+/** How long the connection may be down or coming up before the badge says so. */
+const CONNECTION_GRACE_MS = 2_000;
+
+/**
+ * Shown only while the live connection has been down, or still coming up, for
+ * a moment: a normal connect or a quick reconnect never flashes it.
+ */
 function ConnectionBadge({ status }: { status: SocketStatus }) {
   const t = useT();
-  if (status === "open") return null;
+  const down = status !== "open";
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!down) return setLate(false);
+    const timer = setTimeout(() => setLate(true), CONNECTION_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [down]);
+  if (!down || !late) return null;
   const c = (CONNECTION[status] ?? CONNECTION.connecting)(t);
   return (
     <span

@@ -1,11 +1,13 @@
 import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { MessagesSquare } from "lucide-react";
+import { LoaderCircle, MessagesSquare } from "lucide-react";
+import { useCallback } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn } from "../../lib/ui";
 import { ArtifactCards } from "../artifacts";
 import { Composer } from "./composer";
+import { EarlierMessages, useHistoryWindow } from "./history";
 import { decisionAnswers, MessageView, Thinking } from "./message";
 import { ScrollToEnd } from "./scroll-to-end";
 import { ThreadCard } from "./thread-card";
@@ -13,8 +15,10 @@ import { ThreadCard } from "./thread-card";
 /** The project chat: everything said to the coordinator, with a card for each thread it opened. */
 export function ProjectChat({ me, className = "" }: { me: string; className?: string }) {
   const t = useT();
-  const { project, names, state, send } = useProjectContext();
+  const { project, names, state, ready, send } = useProjectContext();
   const chat = projectChat(state);
+  const history = useHistoryWindow(chat);
+  const choose = useCallback((label: string) => send(label), [send]);
   const roots = threadByCard(state);
   const answers = decisionAnswers(chat);
   const thinking = !!state.active[""];
@@ -23,8 +27,9 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
     <div className={cn("@container flex min-h-0 min-w-0 flex-1 flex-col", className)}>
       <ScrollToEnd dep={chat.length + (thinking ? 1 : 0)} className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6">
-          {chat.length === 0 && <EmptyChat />}
-          {chat.map((m) => {
+          {chat.length === 0 && (ready ? <EmptyChat /> : <LoadingChat />)}
+          <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
+          {history.visible.map((m) => {
             const thread = roots.get(m.id);
             return (
               <MessageView
@@ -33,7 +38,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 me={me}
                 names={names}
                 reactions={state.reactions[m.id]}
-                decision={{ answer: answers.get(m.id), onChoose: (label) => send(label) }}
+                decision={{ answer: answers.get(m.id), onChoose: choose }}
               >
                 {m.artifacts?.length ? (
                   <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
@@ -56,6 +61,15 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           autoFocus
         />
       </div>
+    </div>
+  );
+}
+
+function LoadingChat() {
+  const t = useT();
+  return (
+    <div className="flex justify-center py-20 text-subtle">
+      <LoaderCircle size={20} className="animate-spin" aria-label={t("chat.loading")} />
     </div>
   );
 }

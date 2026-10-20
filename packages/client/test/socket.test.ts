@@ -59,13 +59,13 @@ describe("ProjectSocket", () => {
     await vi.advanceTimersByTimeAsync(0);
     const first = FakeWebSocket.instances[0]!;
     first.open();
-    expect(first.sent).toEqual([{ type: "sync", afterSeq: 0 }]);
+    expect(first.sent).toEqual([{ type: "sync", afterSeq: 0, all: true }]);
 
     first.receive({ type: "sync.result", messages: [msg(1), msg(2)], hasMore: false });
     first.receive({ type: "message.created", message: msg(3) });
     first.receive({ type: "message.created", message: msg(3) }); // duplicate ignored
     first.receive({ type: "message.created", message: msg(5) }); // gap -> sync
-    expect(first.sent.at(-1)).toEqual({ type: "sync", afterSeq: 3 });
+    expect(first.sent.at(-1)).toEqual({ type: "sync", afterSeq: 3, all: true });
     first.receive({ type: "sync.result", messages: [msg(4), msg(5)], hasMore: false });
     expect(received).toEqual([1, 2, 3, 4, 5]);
 
@@ -75,9 +75,42 @@ describe("ProjectSocket", () => {
     socket.sendMessage("queued while offline");
     second.open();
     expect(second.sent).toEqual([
-      { type: "sync", afterSeq: 5 },
+      { type: "sync", afterSeq: 5, all: true },
       { type: "message.send", body: "queued while offline", threadId: null },
     ]);
+    socket.close();
+  });
+
+  it("takes a streamed sync page by page without asking again, and hands each page over at once", async () => {
+    vi.useFakeTimers();
+    const batches: number[][] = [];
+    let synced = 0;
+    const socket = new ProjectSocket({
+      url: () => "ws://test",
+      WebSocket: FakeWebSocket as unknown as typeof WebSocket,
+      onMessages: (ms) => batches.push(ms.map((m) => m.seq)),
+      onSynced: () => synced++,
+    }).connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    ws.receive({ type: "sync.result", messages: [msg(1), msg(2)], hasMore: true, streamed: true });
+    expect(ws.sent).toHaveLength(1);
+    expect(synced).toBe(0);
+    ws.receive({ type: "sync.result", messages: [msg(3)], hasMore: false, streamed: true });
+    expect(batches).toEqual([[1, 2], [3]]);
+    expect(synced).toBe(1);
+    socket.close();
+  });
+
+  it("asks for the next page itself when the server does not stream", async () => {
+    vi.useFakeTimers();
+    const socket = new ProjectSocket({ url: () => "ws://test", WebSocket: FakeWebSocket as unknown as typeof WebSocket }).connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    ws.receive({ type: "sync.result", messages: [msg(1)], hasMore: true });
+    expect(ws.sent.at(-1)).toEqual({ type: "sync", afterSeq: 1, all: true });
     socket.close();
   });
 });

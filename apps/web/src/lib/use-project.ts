@@ -1,6 +1,6 @@
 import {
   applyEvent,
-  applyMessage,
+  applyMessages,
   applyPullRequests,
   applyTasks,
   emptyProjectState,
@@ -8,38 +8,66 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import type { ClientEventInput } from "@myrel/protocol";
-import { useEffect, useReducer, useRef, useState } from "react";
+import type { ClientEventInput, Message } from "@myrel/protocol";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api, queryClient, runnersQuery, workspaceQuery } from "./api";
 
 type Action =
   | Parameters<typeof applyEvent>[1]
-  | { type: "reset" }
   | { type: "idle" }
-  | { type: "message"; message: Parameters<typeof applyMessage>[1] }
+  | { type: "messages"; messages: Message[] }
   | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] }
-  | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] };
+  | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] }
+  | { type: "batch"; actions: Action[] };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
-  if (action.type === "reset") return emptyProjectState;
+  if (action.type === "batch") return action.actions.reduce(reducer, state);
   if (action.type === "idle") return { ...state, active: {}, progress: {} };
-  if (action.type === "message") return applyMessage(state, action.message);
+  if (action.type === "messages") return applyMessages(state, action.messages);
   if (action.type === "tasks") return applyTasks(state, action.tasks);
   if (action.type === "pullRequests") return applyPullRequests(state, action.pullRequests);
   return applyEvent(state, action);
 }
 
+/** How long socket frames are gathered before they are applied together (about one screen frame). */
+const FLUSH_MS = 16;
+
+/**
+ * Projects opened in this tab, as they were when last left. Opening one again
+ * shows it at once and the socket only fetches what came after.
+ */
+const cache = new Map<string, { state: ProjectState; seq: number }>();
+
 /** Live state of one project: messages, threads, reactions and who is working. */
 export function useProject(projectId: string) {
-  const [state, dispatch] = useReducer(reducer, emptyProjectState);
+  const [state, dispatch] = useReducer(reducer, projectId, (id) => cache.get(id)?.state ?? emptyProjectState);
   const [status, setStatus] = useState<SocketStatus>("connecting");
+  /** The first sync has finished (or the project was in the cache): an empty chat is really empty. */
+  const [ready, setReady] = useState(() => cache.has(projectId));
   const socketRef = useRef<ProjectSocket | null>(null);
 
   useEffect(() => {
-    dispatch({ type: "reset" });
+    // Socket frames arrive one at a time; apply them together about once per screen frame,
+    // so a long sync or a busy terminal doesn't redraw the whole project for every line.
+    let queued: Action[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      const actions = queued;
+      queued = [];
+      if (actions.length) dispatch({ type: "batch", actions });
+    };
+    const queue = (action: Action) => {
+      queued.push(action);
+      // A timer rather than requestAnimationFrame, which stops in a background tab.
+      timer ??= setTimeout(flush, FLUSH_MS);
+    };
+
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
-      onMessage: (message) => dispatch({ type: "message", message }),
+      lastSeq: cache.get(projectId)?.seq,
+      onMessages: (messages) => queue({ type: "messages", messages }),
       onEvent: (event) => {
         // Files, memory and instructions are fetched over HTTP; refetch the list that changed.
         if (event.type === "knowledge.changed") {
@@ -49,29 +77,47 @@ export function useProject(projectId: string) {
           void queryClient.invalidateQueries({ queryKey: workspaceQuery(projectId).queryKey });
           void queryClient.invalidateQueries({ queryKey: runnersQuery.queryKey });
         }
-        dispatch(event);
+        queue(event);
+      },
+      onSynced: () => {
+        flush();
+        setReady(true);
       },
       onStatus: (s) => {
         setStatus(s);
         // Activity is not replayed; after reconnecting, the sync re-sends what is still running.
-        if (s !== "open") dispatch({ type: "idle" });
+        if (s !== "open") queue({ type: "idle" });
       },
     }).connect();
     socketRef.current = socket;
-    return () => socket.close();
+    return () => {
+      clearTimeout(timer);
+      socket.close();
+      socketRef.current = null;
+    };
   }, [projectId]);
 
-  return {
-    state,
-    status,
-    send: (body: string, threadId: string | null = null, attachments: string[] = []) =>
+  // Remember where this project was left, for the next time it opens. Messages arrive in seq order.
+  useEffect(() => {
+    const seq = state.messages.at(-1)?.seq ?? 0;
+    if (ready && seq > 0) cache.set(projectId, { state: { ...state, active: {}, progress: {} }, seq });
+  }, [projectId, ready, state]);
+
+  const send = useCallback(
+    (body: string, threadId: string | null = null, attachments: string[] = []) =>
       socketRef.current?.sendMessage(body, { threadId, attachments }),
-    emit: (event: ClientEventInput) => socketRef.current?.send(event),
-    /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
-    loadTasks: async (threadId: string) => {
+    [],
+  );
+  const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);
+  /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
+  const loadTasks = useCallback(
+    async (threadId: string) => {
       const [tasks, pullRequests] = await Promise.all([api.listTasks(projectId, threadId), api.listPullRequests(projectId, threadId)]);
       dispatch({ type: "tasks", tasks });
       dispatch({ type: "pullRequests", pullRequests });
     },
-  };
+    [projectId],
+  );
+
+  return { state, status, ready, send, emit, loadTasks };
 }

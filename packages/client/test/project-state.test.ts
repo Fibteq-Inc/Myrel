@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyEvent,
   applyMessage,
+  applyMessages,
   applyTasks,
   artifactList,
   checklistProgress,
@@ -105,6 +106,20 @@ describe("project state", () => {
     expect(threadByRoot(s).get(root.id)?.status).toBe("review_ready");
     expect(s.reactions[root.id]).toHaveLength(1);
     expect(s.active).toEqual({ [t.id]: true });
+  });
+
+  it("adds a sync page at once and keeps each conversation's list until the messages change", () => {
+    const root = msg(1);
+    const t = thread(root.id);
+    const s = applyMessages(emptyProjectState, [root, msg(2, t.id), msg(3, t.id)]);
+    expect(applyMessages(s, [])).toBe(s);
+    expect(threadMessages(s, t.id).map((m) => m.seq)).toEqual([2, 3]);
+    expect(threadMessages(s, t.id)).toBe(threadMessages(s, t.id));
+    expect(projectChat(s)).toBe(projectChat(s));
+    const next = applyMessage(s, msg(4, t.id));
+    expect(threadMessages(next, t.id).map((m) => m.seq)).toEqual([2, 3, 4]);
+    expect(threadReplyCount(next, t.id)).toBe(3);
+    expect(threadMessages(s, "thr_none")).toEqual([]);
   });
 
   it("drops stale activity on a resync; the server sends the live ones again", () => {

@@ -308,15 +308,24 @@ export class ProjectAgent extends Agent<Env> {
         return;
       }
       case "sync": {
-        const page = this.getMessagesAfter(event.afterSeq);
-        send(connection, {
-          type: "sync.result",
-          ...page,
-          threads: this.listThreads(),
-          reactions: this.reactionsFor(page.messages.map((m) => m.id)),
-          artifacts: this.artifacts.list(),
-          routines: this.listRoutines(),
-        });
+        const threads = this.listThreads();
+        const artifacts = this.artifacts.list();
+        const routines = this.listRoutines();
+        let afterSeq = event.afterSeq;
+        for (;;) {
+          const page = this.getMessagesAfter(afterSeq);
+          send(connection, {
+            type: "sync.result",
+            ...page,
+            ...(event.all ? { streamed: true } : {}),
+            threads,
+            reactions: this.reactionsFor(page.messages.map((m) => m.id)),
+            artifacts,
+            routines,
+          });
+          if (!event.all || !page.hasMore) break;
+          afterSeq = page.messages.at(-1)!.seq;
+        }
         for (const [threadId, label] of this.active) {
           send(connection, { type: "agent.activity", threadId, active: true, label });
         }
