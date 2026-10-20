@@ -29,7 +29,12 @@ export const billingRoutes = new Hono<BillingEnv>()
       .run();
     if (fresh.meta.changes === 0) return c.json({ received: true, duplicate: true });
     try {
-      if (event.type.startsWith("customer.subscription.")) await saveSubscription(c.env, event.data.object as StripeSubscription);
+      if (event.type.startsWith("customer.subscription.")) {
+        const sub = event.data.object as StripeSubscription;
+        const owner = await saveSubscription(c.env, sub);
+        // A plan change in the billing portal keeps the old quantity: Pro is one seat, Team follows its members.
+        if (owner && isPaid(sub.status) && event.type !== "customer.subscription.deleted") await fitSeats(c.env, owner, sub);
+      }
     } catch (err) {
       // Let Stripe retry: forget the event so the redelivery is handled.
       await c.env.DB.prepare("DELETE FROM stripe_events WHERE id = ?").bind(event.id).run();
@@ -119,6 +124,7 @@ export const billingRoutes = new Hono<BillingEnv>()
     if (!row) return c.json({ error: "no_customer", message: "You have no billing account yet." }, 404);
     const session = await stripe<{ url: string }>(c.env, "POST", "/billing_portal/sessions", {
       customer: row.stripe_customer_id,
+      configuration: await portalConfiguration(c.env),
       return_url: `${new URL(c.req.url).origin}/settings/billing`,
     });
     return c.json({ url: session.url });
@@ -173,25 +179,51 @@ async function ownTeam(db: D1Database, userId: string) {
 
 /** Bills a Team for its owner plus members, never fewer than the minimum seats. */
 async function syncSeats(env: Env & StripeEnv, ownerId: string, subscriptionId: string) {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM billing_team_members WHERE owner_id = ?").bind(ownerId).first<{ n: number }>();
-  const seats = Math.max(TEAM_MIN_SEATS, 1 + Number(row?.n ?? 0));
-  const sub = await stripe<StripeSubscription>(env, "GET", `/subscriptions/${subscriptionId}`);
+  await fitSeats(env, ownerId, await stripe<StripeSubscription>(env, "GET", `/subscriptions/${subscriptionId}`));
+}
+
+/** Sets the subscription's quantity to what its plan calls for: 1 for Pro, the Team's size (at least 2) for Team. */
+async function fitSeats(env: Env & StripeEnv, ownerId: string, sub: StripeSubscription) {
   const item = sub.items.data[0];
-  if (!item || item.quantity === seats) return;
-  const updated = await stripe<StripeSubscription>(env, "POST", `/subscriptions/${subscriptionId}`, {
+  const plan = planOfPrice(item?.price.lookup_key);
+  if (!item || !plan) return;
+  let seats = 1;
+  if (plan.plan === "team") {
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM billing_team_members WHERE owner_id = ?").bind(ownerId).first<{ n: number }>();
+    seats = Math.max(TEAM_MIN_SEATS, 1 + Number(row?.n ?? 0));
+  }
+  if (item.quantity === seats) return;
+  const updated = await stripe<StripeSubscription>(env, "POST", `/subscriptions/${sub.id}`, {
     items: [{ id: item.id, quantity: seats }],
     proration_behavior: "create_prorations",
   });
   await saveSubscription(env, updated);
 }
 
-/** Records a subscription as Stripe describes it. Ignores prices that are not Myrel plans. */
-export async function saveSubscription(env: Env, sub: StripeSubscription) {
+let portalConfigurationId: string | null | undefined;
+
+/**
+ * The billing portal configuration made for Myrel (metadata app=myrel), so other products in the same
+ * Stripe account keep their own default. Without one, Stripe's default configuration is used.
+ */
+async function portalConfiguration(env: StripeEnv) {
+  if (portalConfigurationId === undefined) {
+    const list = await stripe<{ data: { id: string; metadata?: Record<string, string> }[] }>(env, "GET", "/billing_portal/configurations", {
+      active: true,
+      limit: 100,
+    }).catch(() => ({ data: [] }));
+    portalConfigurationId = list.data.find((config) => config.metadata?.app === "myrel")?.id ?? null;
+  }
+  return portalConfigurationId ?? undefined;
+}
+
+/** Stores a subscription and returns the person who owns it, or null for a price that is not Myrel's. */
+export async function saveSubscription(env: Env, sub: StripeSubscription): Promise<string | null> {
   const item = sub.items.data[0];
   const plan = planOfPrice(item?.price.lookup_key);
   if (!item || !plan) {
     console.warn("billing: subscription with an unknown price", sub.id, item?.price.lookup_key);
-    return;
+    return null;
   }
   const userId =
     sub.metadata?.user_id ||
@@ -215,4 +247,5 @@ export async function saveSubscription(env: Env, sub: StripeSubscription) {
   ]);
   // A Team that lapses keeps its member list, so renewing restores it; members fall back to their own plan meanwhile.
   if (!isPaid(sub.status)) console.log("billing: subscription ended", sub.id, sub.status);
+  return userId;
 }

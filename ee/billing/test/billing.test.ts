@@ -136,6 +136,24 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
   });
 
+  it("sets a Team switched to in the billing portal to at least two seats", async () => {
+    const { userId } = await signUp();
+    const calls: { url: string; body: string }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      calls.push({ url, body: String(init?.body ?? "") });
+      const event = subscriptionEvent(userId, "myrel_team_monthly");
+      event.data.object.items.data[0]!.quantity = 2;
+      return Response.json(event.data.object);
+    };
+    expect((await webhook(subscriptionEvent(userId, "myrel_team_monthly"))).status).toBe(200);
+    expect(calls.map((c) => c.url)).toEqual([`https://api.stripe.com/v1/subscriptions/sub_${userId}`]);
+    expect(new URLSearchParams(calls[0]!.body).get("items[0][quantity]")).toBe("2");
+    const seats = await env.DB.prepare("SELECT seats FROM billing_subscriptions WHERE user_id = ?").bind(userId).first<{ seats: number }>();
+    expect(seats?.seats).toBe(2);
+  });
+
   it("opens a Checkout with a seven-day trial and tax for a first subscription", async () => {
     const { token } = await signUp();
     const calls: { url: string; body: string }[] = [];
