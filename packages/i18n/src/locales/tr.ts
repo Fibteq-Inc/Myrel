@@ -106,6 +106,8 @@ export const tr: Catalog = {
   "stats.unpriced": "Bilinmiyor",
   "stats.task": "Görev",
   "stats.taskRan": "{harness} · {where}",
+  "stats.harness": "Ajan",
+  "stats.threadTotal": "Bu thread şimdiye kadar {time} içinde {tokens} token kullandı",
   "duration.seconds": "{value} sn",
   "duration.minutes": "{minutes} dk {seconds} sn",
   "duration.hours": "{hours} sa {minutes} dk",

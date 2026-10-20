@@ -14,6 +14,12 @@ export type ParseState = {
   result?: string;
   /** True when the CLI reported a failure in its own output. */
   failed?: boolean;
+  /** Tokens the CLI reported using so far, summed. */
+  usage?: { inputTokens: number; outputTokens: number };
+  /** The model the CLI says it uses. */
+  model?: string;
+  /** Model calls already counted, for CLIs that repeat a call's usage on each of its parts. */
+  counted?: Set<string>;
 };
 
 /**
@@ -77,8 +83,16 @@ const claude: CliAdapter = {
     const event = parseJson(line);
     if (!event) return;
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
+    if (event.type === "system" && typeof event.model === "string") state.model = event.model;
     if (event.type === "assistant") {
-      const content = (event.message as { content?: unknown[] } | undefined)?.content ?? [];
+      const message = (event.message ?? {}) as { id?: unknown; model?: unknown; usage?: unknown; content?: unknown[] };
+      if (typeof message.model === "string") state.model = message.model;
+      // Each part of one model call arrives as its own event carrying the call's usage.
+      if (typeof message.id === "string" && message.usage && !state.counted?.has(message.id)) {
+        (state.counted ??= new Set()).add(message.id);
+        addUsage(state, claudeUsage(message.usage));
+      }
+      const content = message.content ?? [];
       for (const part of content as Array<Record<string, unknown>>) {
         if (part.type === "tool_use") state.progress = describeTool(String(part.name), part.input);
         else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
@@ -87,6 +101,12 @@ const claude: CliAdapter = {
       }
     }
     if (event.type === "result") {
+      // The run's own totals, when they say more than what was summed along the way.
+      if (event.usage) {
+        const total = claudeUsage(event.usage);
+        const sum = state.usage ?? { inputTokens: 0, outputTokens: 0 };
+        state.usage = { inputTokens: Math.max(sum.inputTokens, total.inputTokens), outputTokens: Math.max(sum.outputTokens, total.outputTokens) };
+      }
       state.result = typeof event.result === "string" ? event.result : "";
       state.failed = event.is_error === true || (typeof event.subtype === "string" && event.subtype !== "success");
     }
@@ -125,6 +145,10 @@ const codex: CliAdapter = {
       state.result = item.text;
       state.progress = firstLine(item.text);
     }
+    if (event.type === "turn.completed" && event.usage) {
+      const u = event.usage as Record<string, unknown>;
+      addUsage(state, { inputTokens: count(u.input_tokens), outputTokens: count(u.output_tokens) });
+    }
     if (event.type === "turn.failed" || event.type === "error") {
       state.failed = true;
       const message = (event.error as { message?: string } | undefined)?.message ?? event.message;
@@ -154,6 +178,13 @@ const gemini: CliAdapter = {
   end(stdout, state) {
     const doc = parseJson(stdout.trim());
     if (doc && typeof doc.response === "string") state.result = doc.response;
+    // stats.models: { "<model>": { tokens: { prompt, candidates, thoughts, … } } }
+    const models = (doc?.stats as { models?: Record<string, { tokens?: Record<string, unknown> }> } | undefined)?.models;
+    for (const [model, m] of Object.entries(models ?? {})) {
+      state.model ??= model;
+      const tokens = m.tokens ?? {};
+      addUsage(state, { inputTokens: count(tokens.prompt), outputTokens: count(tokens.candidates) + count(tokens.thoughts) });
+    }
     if (doc?.error) {
       state.failed = true;
       state.result = String((doc.error as { message?: string }).message ?? doc.error);
@@ -176,6 +207,25 @@ export async function detectClis(): Promise<RunnerCli[]> {
     ),
   );
   return found.filter((c): c is RunnerCli => c !== null);
+}
+
+function count(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0;
+}
+
+/** Claude's input tokens leave out cache reads and writes; Myrel counts all of them as input. */
+function claudeUsage(usage: unknown): { inputTokens: number; outputTokens: number } {
+  const u = (usage ?? {}) as Record<string, unknown>;
+  return {
+    inputTokens: count(u.input_tokens) + count(u.cache_read_input_tokens) + count(u.cache_creation_input_tokens),
+    outputTokens: count(u.output_tokens),
+  };
+}
+
+function addUsage(state: ParseState, add: { inputTokens: number; outputTokens: number }) {
+  const u = (state.usage ??= { inputTokens: 0, outputTokens: 0 });
+  u.inputTokens += add.inputTokens;
+  u.outputTokens += add.outputTokens;
 }
 
 function parseJson(line: string): Record<string, unknown> | null {

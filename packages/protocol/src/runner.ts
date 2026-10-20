@@ -77,6 +77,15 @@ export const RunnerDirListing = z.object({
 });
 export type RunnerDirListing = z.infer<typeof RunnerDirListing>;
 
+/** What the CLI reported using so far in one task, summed from its start. Older runners never send it. */
+export const CliUsage = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  /** The model the CLI says it used, when it says. */
+  model: z.string().max(200).optional(),
+});
+export type CliUsage = z.infer<typeof CliUsage>;
+
 /** Frames the runner sends. */
 export const RunnerToServer = z.discriminatedUnion("type", [
   RunnerInfo.extend({
@@ -85,12 +94,13 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     /** Tasks still running on the computer, e.g. after a reconnect. */
     running: z.array(TaskId).max(100).default([]),
   }),
-  /** A line of progress from the CLI (what it is doing now). */
-  z.object({ type: z.literal("task.progress"), taskId: TaskId, text: z.string().max(2000) }),
+  /** A line of progress from the CLI (what it is doing now). Empty when only its usage changed. */
+  z.object({ type: z.literal("task.progress"), taskId: TaskId, text: z.string().max(2000), usage: CliUsage.optional() }),
   z.object({
     type: z.literal("task.done"),
     taskId: TaskId,
     ok: z.boolean(),
+    usage: CliUsage.optional(),
     /** The CLI's final answer, or what went wrong. */
     result: z.string().max(MAX_TASK_TEXT),
     /** Stopped because the server asked ("task.cancel"). */
