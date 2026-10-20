@@ -31,7 +31,7 @@ Everything runs in one Cloudflare Worker (`apps/api`):
 | Project chat | `ProjectAgent` Durable Object | One per project; messages in its SQLite with a `seq`; WebSocket fan-out |
 | Coordinator | `apps/api/src/agents/coordinator.ts` | Tools: `post_message`, `start_thread`, `message_thread`, `react` |
 | Thread | `ThreadAgent` Durable Object | One per thread; keeps its state and serves Myrel's tools to the harness over MCP (`reply`, `update_plan`, `ask_decision`, `publish_artifact`, `request_coordinator`, `resolve_thread`, …) |
-| Cloud harness | `Sandbox` Durable Object + Container, `apps/api/src/sandbox` | One container per thread running OpenCode; started from a snapshot |
+| Cloud harness | `Sandbox` Durable Object + Container, `apps/api/src/sandbox` | One container per thread running OpenCode, started from the image built from `apps/api/sandbox/Dockerfile` |
 | Files and artifacts | R2 (`FILES`, `ARTIFACTS`), `apps/artifacts` | Project files and artifact versions; artifacts are served from a separate origin |
 | Local runner | `RunnerAgent` Durable Object, `packages/myrel-runner` | One per paired computer; holds the runner's outbound WebSocket, sends tasks, wakes the thread with each result |
 | Model calls | `apps/api/src/llm` | Small provider-neutral loop; Fireworks, Anthropic, OpenAI; optional AI Gateway |

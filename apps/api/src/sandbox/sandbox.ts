@@ -3,7 +3,6 @@ import {
   LineSplitter,
   parseLine,
   type RunnerEvent,
-  SETUP_NOTE,
   STOP_HARNESS_SCRIPT,
   TaskSpec,
   taskEnv,
@@ -11,12 +10,12 @@ import {
 } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
-import { BASE_IMAGE, SANDBOX_HOME, SANDBOX_USER, SETUP_SCRIPT, SETUP_VERSION } from "./setup";
+import { SANDBOX_HOME, SANDBOX_USER } from "./setup";
 
 export type SandboxRun = { threadId: string; spec: TaskSpec; secrets: Record<string, string> };
 
-/** The Sandbox instance that builds and keeps the base snapshot every thread starts from. */
-const BASE = "base";
+/** The image every thread's container starts from (`containers[].images.base` in wrangler.jsonc). */
+const IMAGE = "base";
 /** Keeps a started container up: work arrives through exec. */
 const ENTRYPOINT = ["sleep", "infinity"];
 /** How long an idle container stays up before it sleeps. A thread's next task reuses a warm one. */
@@ -24,27 +23,17 @@ const IDLE_MS = 10 * 60_000;
 /** Events are sent to the thread in batches, at most this often. */
 const FLUSH_MS = 750;
 const MAX_BATCH = 200;
-/** Preparing the tools takes a few minutes; past this something is stuck, so it fails and can be retried. */
-const BUILD_TIMEOUT_MS = 12 * 60_000;
-/** While a thread waits for the tools, it hears that the sandbox is still working this often. */
-const HEARTBEAT_MS = 30_000;
-/** After preparing the tools failed, the scheduled warm-up leaves it alone this long. */
-const PREWARM_BACKOFF_MS = 60 * 60_000;
-
-type BaseSnapshot = { version: string; snapshot: ContainerSnapshot };
 
 /**
  * One per thread (named by thread id): the thread's Linux container. It runs
  * one task at a time with the shared task script from @myrel/runner-core and
  * streams the events back to the ThreadAgent through `taskEvents`.
  *
- * No image is built on deploy. The instance named "base" starts Cloudflare's
- * managed Debian image once, installs the tools (setup.ts) and snapshots it;
- * thread containers start from that snapshot.
+ * Containers start from the image `wrangler deploy` builds from
+ * apps/api/sandbox/Dockerfile, with every tool already installed.
  */
 export class Sandbox extends DurableObject<Env> {
   private current: { taskId: string; abort: AbortController } | null = null;
-  private building: Promise<BaseSnapshot> | null = null;
   /** The task that ran last, so it reads as running until its last events reached the thread. */
   private ended: string | null = null;
   /** A container start under way (from warm or a task), which a second caller joins rather than restarting it. */
@@ -59,17 +48,12 @@ export class Sandbox extends DurableObject<Env> {
     this.ctx.waitUntil(this.execute(input.threadId, spec, input.secrets, abort.signal));
   }
 
-  /**
-   * Starts the container ahead of a task, while the thread still prepares the turn, so the task
-   * finds it running. Does nothing when the base snapshot is not ready yet (the task builds it).
-   */
+  /** Starts the container ahead of a task, while the thread still prepares the turn, so the task finds it running. */
   async warm(): Promise<void> {
     const container = this.ctx.container;
     if (!container || container.running || this.starting || this.current) return;
-    const id = (await this.env.SANDBOX.getByName(BASE).baseSnapshot(false))?.id;
-    if (!id || container.running || this.starting || this.current) return;
     const started = Date.now();
-    await this.startOnce(container, id)
+    await this.startOnce(container)
       .then(() => console.log(`sandbox: warmed in ${clock(Date.now() - started)}`))
       .catch((err) => console.warn("sandbox: warming up failed", err));
   }
@@ -135,11 +119,7 @@ export class Sandbox extends DurableObject<Env> {
         { type: "phase", phase: "prepare", state: "started" },
         { type: "log", stream: "system", text: `Starting ${harness.label} in the sandbox…` },
       );
-      const container = await this.container(
-        (text, ms) => push({ type: "log", stream: "system", text, ...(ms !== undefined && { ms }) }),
-        () => push({ type: "phase", phase: "prepare", state: "started", detail: SETUP_NOTE }),
-        signal,
-      );
+      const container = await this.container(signal);
       push({ type: "log", stream: "system", text: "Sandbox ready", ms: Date.now() - opening });
       const timeout = AbortSignal.timeout(spec.timeoutSec * 1000);
       const proc = await execWhenReady(container, ["bash", "-c", taskScript()], {
@@ -202,71 +182,31 @@ export class Sandbox extends DurableObject<Env> {
     }
   }
 
-  /** The running container, started from the base snapshot on first use. */
-  private async container(
-    log: (text: string, ms?: number) => void,
-    settingUp: () => void,
-    signal: AbortSignal,
-  ): Promise<Container> {
+  /** The running container, started from the image on first use. */
+  private async container(signal: AbortSignal): Promise<Container> {
     const container = this.ctx.container;
     if (!container) throw new Error("The sandbox container is not configured on this server.");
     // A warm-up already starting it: wait for that rather than starting it again.
     if (this.starting) await abortable(this.starting.catch(() => {}), signal);
     if (container.running) return container;
-    const base = this.env.SANDBOX.getByName(BASE);
-    let id = (await base.baseSnapshot(false))?.id;
-    if (!id) {
-      settingUp();
-      log("Preparing the sandbox tools. This happens once and takes a few minutes…");
-      id = await this.waitForBase(() => base.baseSnapshot(true), log, signal);
-    }
-    try {
-      await abortable(this.startOnce(container, id), signal);
-    } catch (err) {
-      if (signal.aborted) throw err;
-      // Snapshots expire after 30 unused days: rebuild once.
-      console.warn("sandbox: starting from the base snapshot failed, rebuilding it", err);
-      settingUp();
-      log("Preparing the sandbox tools again. This takes a few minutes…");
-      const stale = id;
-      await abortable(this.startOnce(container, await this.waitForBase(() => base.baseSnapshot(true, stale), log, signal)), signal);
-    }
+    await abortable(this.startOnce(container), signal);
     return container;
   }
 
-  /**
-   * Waits for the base snapshot, telling the thread every half minute how long it has been, so a
-   * slow first start never looks frozen. Stop works while waiting; the build itself carries on for
-   * the next thread.
-   */
-  private async waitForBase(
-    build: () => Promise<ContainerSnapshot | null>,
-    log: (text: string, ms?: number) => void,
-    signal: AbortSignal,
-  ): Promise<string> {
-    const started = Date.now();
-    const beat = setInterval(() => log(`Still preparing the sandbox tools (${clock(Date.now() - started)})…`), HEARTBEAT_MS);
-    try {
-      const snapshot = await abortable(build(), signal);
-      log("Prepared the sandbox tools", Date.now() - started);
-      return snapshot!.id;
-    } finally {
-      clearInterval(beat);
-    }
-  }
-
-  private startOnce(container: Container, snapshotId: string): Promise<void> {
-    const start = this.startFrom(container, snapshotId).finally(() => {
+  private startOnce(container: Container): Promise<void> {
+    const start = this.startFrom(container).finally(() => {
       if (this.starting === start) this.starting = null;
     });
     this.starting = start;
     return start;
   }
 
-  private async startFrom(container: Container, snapshotId: string) {
+  private async startFrom(container: Container) {
     if (container.running) await container.destroy();
+    const image = container.images[IMAGE];
+    if (!image) throw new Error("This server's sandbox image is missing. Its admin needs to deploy with `wrangler deploy` (see containers in wrangler.jsonc).");
     container.start({
-      containerSnapshot: { id: snapshotId },
+      image,
       entrypoint: ENTRYPOINT,
       // Coding agents need the package registries, git hosts and the model API.
       enableInternet: true,
@@ -276,77 +216,6 @@ export class Sandbox extends DurableObject<Env> {
     const probe = await execWhenReady(container, ["true"], {});
     if ((await probe.exitCode) !== 0) throw new Error("The sandbox did not start.");
   }
-
-  /**
-   * On the "base" instance: the snapshot thread containers start from. With
-   * `build`, makes it when it is missing, outdated or is `stale` (an id that
-   * failed to start); otherwise returns null when there is none to use.
-   */
-  async baseSnapshot(build: boolean, stale?: string): Promise<ContainerSnapshot | null> {
-    const saved = await this.ctx.storage.get<BaseSnapshot>("base");
-    if (saved && saved.version === SETUP_VERSION && saved.snapshot.id !== stale) return saved.snapshot;
-    if (!build) return null;
-    this.building ??= this.buildBase().finally(() => {
-      this.building = null;
-    });
-    return (await this.building).snapshot;
-  }
-
-  /**
-   * On the "base" instance, from the scheduled warm-up: starts preparing the tools when a deploy
-   * changed them, so the first thread after it does not wait. Runs in an alarm, which keeps the
-   * instance alive for the whole build.
-   */
-  async prewarm(): Promise<void> {
-    const saved = await this.ctx.storage.get<BaseSnapshot>("base");
-    if (saved?.version === SETUP_VERSION || this.building) return;
-    const failedAt = (await this.ctx.storage.get<number>("base_failed_at")) ?? 0;
-    if (Date.now() - failedAt < PREWARM_BACKOFF_MS) return;
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now());
-  }
-
-  override async alarm(): Promise<void> {
-    try {
-      await this.baseSnapshot(true);
-    } catch (err) {
-      console.error("sandbox: preparing the base snapshot ahead of time failed", err);
-    }
-  }
-
-  private async buildBase(): Promise<BaseSnapshot> {
-    const container = this.ctx.container;
-    if (!container) throw new Error("The sandbox container is not configured on this server.");
-    if (container.running) await container.destroy();
-    const started = Date.now();
-    const timeout = AbortSignal.timeout(BUILD_TIMEOUT_MS);
-    container.start({ image: BASE_IMAGE, entrypoint: ENTRYPOINT, enableInternet: true, instance: "standard-1" });
-    try {
-      const proc = await execWhenReady(container, ["bash", "-c", SETUP_SCRIPT], { stdout: "pipe", stderr: "combined", signal: timeout });
-      const output = await abortable(new Response(proc.stdout).text(), timeout);
-      const code = await abortable(proc.exitCode, timeout);
-      if (code !== 0) throw new Error(`Preparing the sandbox failed (exit ${code}): ${output.slice(-2000)}`);
-      const snapshot = await abortable(container.snapshotContainer({ name: `myrel-base-${SETUP_VERSION}` }), timeout);
-      const base = { version: SETUP_VERSION, snapshot };
-      await this.ctx.storage.put("base", base);
-      await this.ctx.storage.delete("base_failed_at");
-      const steps = output.split("\n").filter((l) => l.startsWith("+ ["));
-      console.log(`sandbox: prepared the base snapshot ${SETUP_VERSION} (${(snapshot.size / 1e9).toFixed(1)} GB) in ${clock(Date.now() - started)}\n${steps.join("\n").slice(0, 4000)}`);
-      return base;
-    } catch (err) {
-      await this.ctx.storage.put("base_failed_at", Date.now());
-      if (timeout.aborted) {
-        throw new Error(`Preparing the sandbox tools did not finish in ${BUILD_TIMEOUT_MS / 60_000} minutes. Send the message again to retry.`);
-      }
-      throw err;
-    } finally {
-      await container.destroy().catch(() => {});
-    }
-  }
-}
-
-/** From the cron trigger: has the base instance prepare the tools when they are missing or outdated. */
-export async function prewarmSandbox(env: Env): Promise<void> {
-  if (env.SANDBOX) await env.SANDBOX.getByName(BASE).prewarm();
 }
 
 /** Settles like `promise`, or rejects as soon as `signal` aborts. */

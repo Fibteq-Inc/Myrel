@@ -295,12 +295,12 @@ a container.
 
 - It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
   which is on the Workers Paid plan.
-- No image is built or pushed, so deploys need no Docker. Containers start from
-  Cloudflare's managed `cloudflare/debian-trixie` image (Node.js on Debian). The
-  first task on a server installs the tools once (git, gh, jq, ripgrep, Python,
-  OpenCode, Claude Code; `apps/api/src/sandbox/setup.ts`), which takes a few
-  minutes, and snapshots the result. Every thread's container then starts from that
-  snapshot. Changing `setup.ts` makes the next task build a fresh one.
+- `wrangler deploy` builds the sandbox image from `apps/api/sandbox/Dockerfile`
+  (git, gh, jq, ripgrep, Python with document libraries, tesseract, OpenCode) and
+  pushes it to Cloudflare's registry, so Docker must be running where you deploy.
+  Workers Builds has it. Later deploys push only the layers that changed, and
+  containers start from the image in seconds. To deploy the Worker without
+  touching the image, add `--containers-rollout=none`.
 - The coding agent uses the project's model and key (the same ones the agents
   use). `RUNNER_MODEL` picks a different model for it.
 - Cloning private repositories and opening pull requests uses the project's
