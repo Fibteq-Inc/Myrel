@@ -39,7 +39,6 @@ export default defineConfig(async () => {
             SIGNUP_ENABLED: "true",
             // GitHub calls are answered by test/fake-github.ts.
             GITHUB_APP_ID: "1234",
-            GITHUB_APP_SLUG: "myrel-test",
             GITHUB_CLIENT_ID: "Iv1.test",
             GITHUB_CLIENT_SECRET: "test-client-secret",
             GITHUB_WEBHOOK_SECRET: "test-webhook-secret",

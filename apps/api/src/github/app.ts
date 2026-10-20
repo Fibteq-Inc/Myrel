@@ -10,11 +10,9 @@ export type GithubEnv = Pick<
   "GITHUB_APP_ID" | "GITHUB_APP_SLUG" | "GITHUB_CLIENT_ID" | "GITHUB_APP_PRIVATE_KEY" | "GITHUB_CLIENT_SECRET"
 >;
 
-/** True when every setting the GitHub integration needs is present. */
+/** True when every setting the GitHub integration needs is present. The slug is read from GitHub (appSlug). */
 export function githubConfigured(env: GithubEnv): boolean {
-  return Boolean(
-    env.GITHUB_APP_ID && env.GITHUB_APP_SLUG && env.GITHUB_CLIENT_ID && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_CLIENT_SECRET,
-  );
+  return Boolean(env.GITHUB_APP_ID && env.GITHUB_CLIENT_ID && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_CLIENT_SECRET);
 }
 
 export class GithubError extends Error {
@@ -75,6 +73,25 @@ export async function appJwt(env: GithubEnv): Promise<string> {
   const key = await signingKey(env.GITHUB_APP_PRIVATE_KEY);
   const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
   return `${unsigned}.${base64url(new Uint8Array(sig))}`;
+}
+
+let cachedSlug: { appId: string; slug: string; at: number } | null = null;
+
+/**
+ * The app's URL name (github.com/apps/<slug>). Read from GitHub, so renaming the app
+ * on GitHub needs no setting here; GITHUB_APP_SLUG only covers GitHub being unreachable.
+ */
+export async function appSlug(env: GithubEnv): Promise<string> {
+  const cached = cachedSlug;
+  if (cached && cached.appId === env.GITHUB_APP_ID && Date.now() - cached.at < 10 * 60_000) return cached.slug;
+  try {
+    const app = await githubFetch<{ slug: string }>(await appJwt(env), "/app");
+    cachedSlug = { appId: env.GITHUB_APP_ID!, slug: app.slug, at: Date.now() };
+    return app.slug;
+  } catch (err) {
+    if (env.GITHUB_APP_SLUG) return env.GITHUB_APP_SLUG;
+    throw err;
+  }
 }
 
 // --- Installation tokens ---

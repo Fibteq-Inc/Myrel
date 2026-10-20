@@ -10,6 +10,7 @@ interface Env {
   AI_GATEWAY_TOKEN?: string;
   // GitHub App (see src/github/README.md). The integration is off unless all are set.
   GITHUB_APP_ID?: string;
+  /** Optional: the app's slug, only used when GitHub cannot be asked for it. */
   GITHUB_APP_SLUG?: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;

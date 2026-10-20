@@ -191,7 +191,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
 | `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |
-| `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | Fibteq's GitHub App | Your GitHub App's id and URL name. GitHub stays off until all GitHub secrets are set too. |
+| `GITHUB_APP_ID` | Fibteq's GitHub App | Your GitHub App's id. Its URL name is read from GitHub. GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
 | `TERMS_URL`, `PRIVACY_URL` | empty | Links to your terms and privacy policy. When both are set, signing up requires accepting them. |

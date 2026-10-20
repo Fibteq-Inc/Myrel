@@ -185,7 +185,7 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
 
   if (event === "pull_request_review" && payload.review && payload.pull_request) {
     const row = await find(payload.pull_request.number);
-    if (!row || ignored(env, payload.sender)) return;
+    if (!row || ignored(payload.sender)) return;
     const state = payload.review.state.toLowerCase();
     if (payload.action === "dismissed") {
       await save(env, row, { review: null });
@@ -202,7 +202,7 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
 
   const number = event === "issue_comment" && payload.issue?.pull_request ? payload.issue.number : payload.pull_request?.number;
   if ((event === "issue_comment" || event === "pull_request_review_comment") && payload.comment && number) {
-    if (payload.action !== "created" || ignored(env, payload.sender) || !trusted(payload.comment.author_association)) return;
+    if (payload.action !== "created" || ignored(payload.sender) || !trusted(payload.comment.author_association)) return;
     const row = await find(number);
     if (!row) return;
     const where = payload.comment.path ? ` on ${payload.comment.path}` : "";
@@ -210,10 +210,9 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
   }
 }
 
-/** Our own app's activity and other bots' chatter do not wake anyone. */
-function ignored(env: PullsEnv, sender?: Sender) {
-  if (!sender) return true;
-  return sender.type === "Bot" || sender.login === `${env.GITHUB_APP_SLUG}[bot]`;
+/** Our own app's activity and other bots' chatter do not wake anyone (GitHub marks both as bots). */
+function ignored(sender?: Sender) {
+  return !sender || sender.type === "Bot";
 }
 
 /**
