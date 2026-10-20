@@ -95,6 +95,34 @@ describe("the cloud agent", () => {
     ws.close();
   });
 
+  it("ends a turn its sandbox lost (a deploy restarted it), on Stop or on its own check", async () => {
+    const { project, threadAgent, thread } = await threadSetup();
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });
+    await until(async () => ((await threadAgent.getTasks())[0]?.status === "failed" ? true : null), "the first turn");
+
+    // Runs the sandbox does not know, like ones a deploy cut off mid-way.
+    const lost = (id: string) =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
+        const spec = { taskId: id, title: "OpenCode", prompt: "x", harness: "opencode", openPr: false, timeoutSec: 60 };
+        const progress = { phases: { prepare: "started", clone: "pending", agent: "pending", save: "skipped", publish: "pending" }, phaseDetail: {}, todos: [], lastText: null, lastTool: null, prUrl: null, usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, finished: null };
+        state.storage.sql.exec(
+          "INSERT INTO tasks (id, spec, backend, status, progress, language, created_at) VALUES (?, ?, 'sandbox', 'running', ?, 'en', ?)",
+          id, JSON.stringify(spec), JSON.stringify(progress), new Date().toISOString(),
+        );
+      });
+    const status = async (id: string) => (await threadAgent.getTasks()).find((t) => t.id === id)?.status;
+
+    await lost("task_stop");
+    expect(await threadAgent.cancelTask("task_stop")).toEqual({ ok: true });
+    expect(await status("task_stop")).toBe("cancelled");
+
+    await lost("task_check");
+    await threadAgent.sandboxCheck({ taskId: "task_check" });
+    const task = (await threadAgent.getTasks()).find((t) => t.id === "task_check")!;
+    expect(task.status).toBe("failed");
+    expect(task.summary).toContain("new version of Myrel was deployed");
+  });
+
   it("learns the address the sandbox calls back on when someone opens the project", async () => {
     const { ws, projectAgent } = await threadSetup();
     ws.close();

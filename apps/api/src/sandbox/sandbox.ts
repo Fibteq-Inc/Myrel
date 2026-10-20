@@ -45,6 +45,8 @@ type BaseSnapshot = { version: string; snapshot: ContainerSnapshot };
 export class Sandbox extends DurableObject<Env> {
   private current: { taskId: string; abort: AbortController } | null = null;
   private building: Promise<BaseSnapshot> | null = null;
+  /** The task that ran last, so it reads as running until its last events reached the thread. */
+  private ended: string | null = null;
 
   /** Starts a task and returns once it is running. Its events go to the thread. */
   async run(input: SandboxRun): Promise<void> {
@@ -55,8 +57,23 @@ export class Sandbox extends DurableObject<Env> {
     this.ctx.waitUntil(this.execute(input.threadId, spec, input.secrets, abort.signal));
   }
 
-  async cancel(taskId: string): Promise<void> {
-    if (this.current?.taskId === taskId) this.current.abort.abort(new Error("Cancelled"));
+  /**
+   * Stops a task. False when this sandbox is not running it: a deploy restarts the sandbox and
+   * ends its tasks without a word, and the thread then settles the task itself. A container left
+   * over from such a task is stopped too.
+   */
+  async cancel(taskId: string): Promise<boolean> {
+    if (this.current?.taskId === taskId) {
+      this.current.abort.abort(new Error("Cancelled"));
+      return true;
+    }
+    if (!this.current && this.ctx.container?.running) await this.ctx.container.destroy().catch(() => {});
+    return this.ended === taskId;
+  }
+
+  /** Whether the task is still running here (or just ended and is reporting so). */
+  async running(taskId: string): Promise<boolean> {
+    return this.current?.taskId === taskId || this.ended === taskId;
   }
 
   /**
@@ -157,6 +174,7 @@ export class Sandbox extends DurableObject<Env> {
       done = { type: "done", ok: false, error: message.slice(0, 4000) };
     } finally {
       clearInterval(timer);
+      this.ended = spec.taskId;
       this.current = null;
     }
     push(done);

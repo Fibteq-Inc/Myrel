@@ -118,6 +118,10 @@ const PREFETCH_MAX_FILES = 20;
 const PREFETCH_MAX_BYTES = 200 * 1024 * 1024;
 /** Extra time after a run's own timeout before it is declared lost (its runner went away). */
 const WATCHDOG_GRACE_SEC = 300;
+/** How often a running cloud turn checks that its sandbox is still on it (a deploy restarts sandboxes). */
+const SANDBOX_CHECK_SEC = 60;
+/** Why a cloud turn ended when its sandbox lost it. */
+const SANDBOX_LOST = "The sandbox stopped while working, most likely because a new version of Myrel was deployed. Send your message again to continue.";
 
 /**
  * One instance per thread (named by thread id). Each wake queues a turn of the
@@ -392,6 +396,7 @@ export class ThreadAgent extends Agent<Env> {
         }
       }
       await this.schedule(spec.timeoutSec + WATCHDOG_GRACE_SEC, "taskWatchdog", { taskId });
+      if (this.runningTask()?.backend === "sandbox") await this.schedule(SANDBOX_CHECK_SEC, "sandboxCheck", { taskId });
     } catch (err) {
       // Once recorded, launch() finished the run as failed and finishAgentTurn reported it.
       if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
@@ -783,6 +788,12 @@ export class ThreadAgent extends Agent<Env> {
     const row = this.runningTask();
     if (!row || row.id !== taskId) return { ok: false, error: "This task is not running." };
     try {
+      if (row.backend === "sandbox") {
+        // A sandbox that lost the task (restarted by a deploy) cannot stop it, so it ends here.
+        const stopped = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!).cancel(taskId);
+        if (!stopped) await this.taskEvents(taskId, [{ type: "done", ok: false, error: "Cancelled." }]);
+        return { ok: true };
+      }
       await this.backendOf(row).cancel(taskId);
       return { ok: true };
     } catch (err) {
@@ -816,6 +827,20 @@ export class ThreadAgent extends Agent<Env> {
       .finish(row.id)
       .catch((err) => (console.warn("ending a finished turn failed", err), false));
     if (!ended) console.warn("ending a finished turn: its harness was not running", row.id);
+  }
+
+  /** While a cloud turn runs: ends it when its sandbox no longer has it, else checks again later. */
+  async sandboxCheck(payload: { taskId: string }): Promise<void> {
+    const row = this.runningTask();
+    if (!row || row.id !== payload.taskId || row.backend !== "sandbox") return;
+    const sandbox = this.env.SANDBOX.getByName(this.getMeta("thread_id")!);
+    if (await sandbox.running(row.id)) {
+      await this.schedule(SANDBOX_CHECK_SEC, "sandboxCheck", payload);
+      return;
+    }
+    // Stops whatever the lost run left in the container.
+    await sandbox.cancel(row.id).catch(() => false);
+    await this.taskEvents(row.id, [{ type: "done", ok: false, error: SANDBOX_LOST }]);
   }
 
   async taskWatchdog(payload: { taskId: string }): Promise<void> {
