@@ -28,12 +28,12 @@ deploying from Git with [Workers Builds](https://developers.cloudflare.com/worke
 
 ## 1. Get the code
 
-Fork `Fibteq-Inc/altair` (or push a copy to your own repository), then clone it
+Fork `Fibteq-Inc/myrel` (or push a copy to your own repository), then clone it
 and install dependencies:
 
 ```sh
-git clone https://github.com/<you>/altair.git
-cd altair
+git clone https://github.com/<you>/myrel.git
+cd myrel
 pnpm install
 pnpm --filter @altair/api exec wrangler login
 ```
@@ -376,7 +376,7 @@ with the same API version) and keeps a separate sign-in per server. Set
 Pull changes from upstream into your fork and push to `main`:
 
 ```sh
-git remote add upstream https://github.com/Fibteq-Inc/altair.git   # once
+git remote add upstream https://github.com/Fibteq-Inc/myrel.git   # once
 git fetch upstream
 git merge upstream/main
 git push

@@ -4,13 +4,13 @@
   "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",
-  "homepage": "https://github.com/Fibteq-Inc/altair/tree/main/packages/myrel-runner#readme",
+  "homepage": "https://github.com/Fibteq-Inc/myrel/tree/main/packages/myrel-runner#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Fibteq-Inc/altair.git",
+    "url": "git+https://github.com/Fibteq-Inc/myrel.git",
     "directory": "packages/myrel-runner"
   },
-  "bugs": "https://github.com/Fibteq-Inc/altair/issues",
+  "bugs": "https://github.com/Fibteq-Inc/myrel/issues",
   "keywords": [
     "altair",
     "claude-code",

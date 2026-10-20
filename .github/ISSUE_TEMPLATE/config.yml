@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/Fibteq-Inc/altair/security/advisories/new
+    url: https://github.com/Fibteq-Inc/myrel/security/advisories/new
     about: Please report vulnerabilities privately, not in a public issue.
   - name: Questions and ideas
-    url: https://github.com/Fibteq-Inc/altair/discussions
+    url: https://github.com/Fibteq-Inc/myrel/discussions
     about: Ask how to do something or share an idea before it becomes a feature request.
