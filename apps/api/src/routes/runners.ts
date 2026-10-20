@@ -1,11 +1,11 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   createId,
   PairRunnerInput,
   type PairRunnerResult,
   RunnerFolderInput,
   type RunnerPairingCode,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Hono } from "hono";

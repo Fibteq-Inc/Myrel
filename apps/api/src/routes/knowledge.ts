@@ -5,7 +5,7 @@ import {
   normalizeFilePath,
   PutInstructionsInput,
   PutMemoryInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import type { Context } from "hono";
 import { Hono } from "hono";

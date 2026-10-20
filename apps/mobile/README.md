@@ -12,7 +12,7 @@ What it does:
 - The same project tabs as the web app: Conversation, Threads, Artifacts, Files and Usage.
   Threads show the agent's plan as a live checklist; replies show where they ran, the model,
   time, tokens and cost.
-- English and Turkish, from the shared `@altair/i18n` catalog: the device language by default,
+- English and Turkish, from the shared `@myrel/i18n` catalog: the device language by default,
   changeable on the sign-in screen and in Settings.
 - Decision cards answered with one tap: the chosen option is sent as your reply.
 - Links in messages, artifacts above all, open in an in-app WebView.
@@ -24,7 +24,7 @@ What it does:
 
 ```sh
 pnpm install
-pnpm --filter @altair/mobile dev     # then press i / a, or scan the QR code with Expo Go
+pnpm --filter @myrel/mobile dev     # then press i / a, or scan the QR code with Expo Go
 ```
 
 To start on a server without typing it in, set `EXPO_PUBLIC_ALTAIR_SERVER=https://altair.example.com`.

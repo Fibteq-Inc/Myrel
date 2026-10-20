@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunnerToServer } from "@altair/protocol";
+import type { RunnerToServer } from "@myrel/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type RunnerConfig, SessionStore } from "../src/config";
 import { TaskRunner } from "../src/tasks";
@@ -16,11 +16,11 @@ const git = (cwd: string, ...args: string[]) =>
 let home: string;
 let repo: string;
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), "altair-wt-"));
+  home = await mkdtemp(join(tmpdir(), "myrel-wt-"));
   // Behind a symlink, like the temp folder on macOS (/var is /private/var).
   await mkdir(join(home, "real-runner"));
   await symlink(join(home, "real-runner"), join(home, ".runner"));
-  process.env.ALTAIR_RUNNER_HOME = join(home, ".runner");
+  process.env.MYREL_RUNNER_HOME = join(home, ".runner");
   repo = join(home, "repo");
   await mkdir(join(repo, "web"), { recursive: true });
   git(repo, "init", "-q", "-b", "main");
@@ -35,9 +35,9 @@ describe.skipIf(process.platform === "win32")("thread worktrees", () => {
     const a = await threadWorktree(repo, A);
     const b = await threadWorktree(repo, B);
     expect(a?.created).toBe(true);
-    expect(a?.worktree.branch).toBe("altair/thr-000000aaaa");
+    expect(a?.worktree.branch).toBe("myrel/thr-000000aaaa");
     expect(b?.worktree.path).not.toBe(a?.worktree.path);
-    expect(git(a!.cwd, "branch", "--show-current")).toBe("altair/thr-000000aaaa");
+    expect(git(a!.cwd, "branch", "--show-current")).toBe("myrel/thr-000000aaaa");
     // The main checkout stays on its branch.
     expect(git(repo, "branch", "--show-current")).toBe("main");
 
@@ -98,8 +98,8 @@ describe.skipIf(process.platform === "win32")("thread worktrees", () => {
 
     const result = await run(config);
     const [w] = await listWorktrees();
-    expect(result).toContain(`in ${w!.path} on altair/thr-000000aaaa`);
-    expect(result).toContain(`(myrel-runner: worked on branch altair/thr-000000aaaa in ${w!.path}, a git worktree of ${repo}.)`);
+    expect(result).toContain(`in ${w!.path} on myrel/thr-000000aaaa`);
+    expect(result).toContain(`(myrel-runner: worked on branch myrel/thr-000000aaaa in ${w!.path}, a git worktree of ${repo}.)`);
     // Turned off, or read-only: the shared folder itself.
     expect(await run({ ...config, worktrees: false })).toBe(`in ${repo} on main`);
     expect(await run({ ...config, access: "read" })).toBe(`in ${repo} on main`);

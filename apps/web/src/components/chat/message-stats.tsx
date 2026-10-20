@@ -1,6 +1,6 @@
-import type { Locale } from "@altair/i18n";
-import { useI18n, useT } from "@altair/i18n/react";
-import { CLI_NAMES, type MessageStats, type Runtime } from "@altair/protocol";
+import type { Locale } from "@myrel/i18n";
+import { useI18n, useT } from "@myrel/i18n/react";
+import { CLI_NAMES, type MessageStats, type Runtime } from "@myrel/protocol";
 import { Cloud, Laptop } from "lucide-react";
 import { useState } from "react";
 import { useFormat } from "../../lib/format";

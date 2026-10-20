@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Artifact, ArtifactRef } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Artifact, ArtifactRef } from "@myrel/protocol";
 import { AppWindow, ChevronRight } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, radius } from "../theme";

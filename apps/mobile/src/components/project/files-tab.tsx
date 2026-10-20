@@ -1,5 +1,5 @@
-import { useI18n } from "@altair/i18n/react";
-import type { ProjectFile } from "@altair/protocol";
+import { useI18n } from "@myrel/i18n/react";
+import type { ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { type Href, useRouter } from "expo-router";
 import { ChevronRight, FileText, FolderOpen } from "lucide-react-native";

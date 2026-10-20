@@ -15,7 +15,7 @@ export const PANEL_DEFAULT = 520;
 /** The chat keeps at least this much room while the panel is docked. */
 export const CHAT_MIN = 360;
 
-const KEY = "altair.threadPanel";
+const KEY = "myrel.threadPanel";
 
 function load(): PanelLayout {
   try {

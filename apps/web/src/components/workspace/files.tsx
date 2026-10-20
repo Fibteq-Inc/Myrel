@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Task } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Task } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, File, Folder, FolderTree, GitCommitHorizontal } from "lucide-react";
 import { useState } from "react";

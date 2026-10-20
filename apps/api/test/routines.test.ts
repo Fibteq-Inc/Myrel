@@ -1,4 +1,4 @@
-import type { Notification, Project, Routine, ServerEvent, Thread } from "@altair/protocol";
+import type { Notification, Project, Routine, ServerEvent, Thread } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentProject, modelAgent } from "./fake-agent";
 import { emails as sentEmails, type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -210,8 +210,8 @@ describe("routines", () => {
     const emails = () => sentEmails.filter((e) => e.subject.endsWith("· Reminder"));
     const sent = emails()[0]!;
     expect(sent.subject).toBe("[Myrel] Needs your decision · Reminder");
-    expect(sent.from).toEqual({ name: "Myrel", email: "altair@example.com" });
-    expect(sent.html).toContain(`http://altair.test/projects/${thread.projectId}/threads/${thread.id}`);
+    expect(sent.from).toEqual({ name: "Myrel", email: "myrel@example.com" });
+    expect(sent.html).toContain(`http://myrel.test/projects/${thread.projectId}/threads/${thread.id}`);
 
     // The one-off run wakes the thread; afterwards nothing is left to schedule.
     await agent.runRoutine({ routineId: routine.id });

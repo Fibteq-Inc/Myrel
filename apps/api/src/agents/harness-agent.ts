@@ -1,4 +1,4 @@
-import { CLI_NAMES, type CliId } from "@altair/protocol";
+import { CLI_NAMES, type CliId } from "@myrel/protocol";
 import { KNOWLEDGE_GUIDE } from "./knowledge";
 import { ROUTINE_GUIDE } from "./routine-tools";
 
@@ -15,7 +15,7 @@ export type AgentPlace =
   /** images: its model reads images, so it can look at screenshots itself. */
   | { kind: "cloud"; images: boolean };
 
-/** Where a cloud turn finds the files attached in the thread (see ALTAIR_FILES in runner-core's task script). */
+/** Where a cloud turn finds the files attached in the thread (see MYREL_FILES in runner-core's task script). */
 export const SANDBOX_FILES = "/workspace/files";
 
 /** How to read and make PDFs, spreadsheets, documents and images where the agent runs. */
@@ -46,7 +46,7 @@ export function agentSystem(place: AgentPlace): string {
 
 ${where}
 
-People never see your terminal output or your final message. They only see what you send through Myrel's tools (the "altair" MCP server):
+People never see your terminal output or your final message. They only see what you send through Myrel's tools (the "myrel" MCP server):
 - reply: a message in the thread. Use it to say what you will do, to deliver results and to answer questions. Set needs to "blocked" when the work is stuck on something only they can change.
 - update_plan: your plan as a checklist people see. Send the whole plan each time; keep one step active; mark a step done only once its work really happened, skipped when you decide against it, failed when it failed.
 - ask_decision: put a choice to the person as a card with 2 to 4 options, one recommended. Their pick arrives in a later turn; carry on with the recommended option when you can.

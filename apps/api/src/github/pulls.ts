@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import type { PullRequest } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import type { PullRequest } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { githubFetch, installationToken, type RepoPermissions } from "./app";

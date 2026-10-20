@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Attachment, ProjectFile } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -156,7 +156,7 @@ export function FilePreview({
         {url && kind === "image" && <img src={url} alt={displayName(path)} className="mx-auto max-w-full p-5" />}
         {url && kind === "pdf" && <iframe src={url} title={path} className="size-full min-h-[70vh] bg-white" />}
         {text !== null && kind === "markdown" && (
-          <div className="prose-altair p-5">
+          <div className="prose-myrel p-5">
             <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { registerForPush, useNotificationRouting } from "../../lib/push";

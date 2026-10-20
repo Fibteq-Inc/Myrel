@@ -1,5 +1,5 @@
-import { normalizeServerUrl, probeServer } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { normalizeServerUrl, probeServer } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { type FormEvent, useState } from "react";
 import { server, switchServer } from "./api";
 import { Button, errorMessage, Input } from "./ui";
@@ -45,7 +45,7 @@ export function ServerPicker() {
         <Input
           id="server"
           name="server"
-          placeholder="altair.example.com"
+          placeholder="myrel.example.com"
           defaultValue={server}
           required
           autoComplete="url"

@@ -1,4 +1,4 @@
-import type { Locale, Translate } from "@altair/i18n";
+import type { Locale, Translate } from "@myrel/i18n";
 
 const number = (locale: Locale, options?: Intl.NumberFormatOptions) => new Intl.NumberFormat(locale, options);
 const compact = (locale: Locale) => number(locale, { notation: "compact", maximumFractionDigits: 1 });

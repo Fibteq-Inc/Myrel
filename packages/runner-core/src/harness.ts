@@ -7,8 +7,8 @@ import type { HarnessId, RunnerEvent, TaskSpec } from "./spec";
  * `myrel-runner` run the same harnesses the same way.
  *
  * The command runs under bash in the task's working directory with these
- * variables set: ALTAIR_PROMPT (the task prompt), plus whatever `env` returns
- * and the secrets the runner adds (ALTAIR_MODEL_API_KEY for the model).
+ * variables set: MYREL_PROMPT (the task prompt), plus whatever `env` returns
+ * and the secrets the runner adds (MYREL_MODEL_API_KEY for the model).
  */
 export interface Harness {
   readonly id: HarnessId;

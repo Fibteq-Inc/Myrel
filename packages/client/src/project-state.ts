@@ -9,7 +9,7 @@ import {
   type Task,
   type TerminalLine,
   type Thread,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and

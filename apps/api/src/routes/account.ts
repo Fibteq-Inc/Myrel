@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo } from "@myrel/protocol";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { encryptSecret, keyHint } from "../crypto";

@@ -1,6 +1,6 @@
-import type { Decision, Message } from "@altair/protocol";
+import type { Decision, Message } from "@myrel/protocol";
 
-export { DECISION_LANG, type Decision, parseDecision } from "@altair/protocol";
+export { DECISION_LANG, type Decision, parseDecision } from "@myrel/protocol";
 
 /**
  * For each agent message, the first later message by a person in the same

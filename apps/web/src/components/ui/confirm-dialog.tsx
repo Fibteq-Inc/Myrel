@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { GhostButton, Input } from "../../lib/ui";
 

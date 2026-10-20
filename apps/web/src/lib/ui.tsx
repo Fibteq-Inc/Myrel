@@ -1,5 +1,5 @@
-import { relativeTime, type Translate } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import { relativeTime, type Translate } from "@myrel/i18n";
+import { useI18n } from "@myrel/i18n/react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
 /** Joins class names, skipping falsy ones. */
@@ -62,11 +62,11 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-/** The four-petal mark (same as the app icon), drawn by AltairMark here and in apps/mobile. */
+/** The four-petal mark (same as the app icon), drawn by MyrelMark here and in apps/mobile. */
 const MARK_PETAL = "M512 512C512 360 600 250 700 250C760 250 790 300 770 350C740 430 620 470 512 512Z";
 
 /** The assistant's mark, used as its avatar. */
-export function AltairMark({ size = 28 }: { size?: number }) {
+export function MyrelMark({ size = 28 }: { size?: number }) {
   return (
     <span
       aria-hidden="true"

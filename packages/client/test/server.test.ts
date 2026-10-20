@@ -1,14 +1,14 @@
-import { API_VERSION } from "@altair/protocol";
+import { API_VERSION } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { webPlatform, webStorage } from "../src/platform";
 import { currentServer, normalizeServerUrl, probeServer, saveServer, tokenStoreFor } from "../src/server";
 
-const info = { app: "altair", apiVersion: API_VERSION, name: "Acme", auth: { emailPassword: true, signUp: false } };
+const info = { app: "myrel", apiVersion: API_VERSION, name: "Acme", auth: { emailPassword: true, signUp: false } };
 const respond = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as typeof fetch;
 
 describe("normalizeServerUrl", () => {
   it("adds https and strips paths", () => {
-    expect(normalizeServerUrl(" altair.acme.com/ ")).toBe("https://altair.acme.com");
+    expect(normalizeServerUrl(" myrel.acme.com/ ")).toBe("https://myrel.acme.com");
     expect(normalizeServerUrl("http://localhost:8787/api")).toBe("http://localhost:8787");
   });
 

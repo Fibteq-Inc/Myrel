@@ -1,5 +1,5 @@
-import { projectChat, threadByCard, threadReplyCount } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { MessagesSquare } from "lucide-react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";

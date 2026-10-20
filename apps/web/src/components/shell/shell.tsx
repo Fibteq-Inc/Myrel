@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { useRouterState } from "@tanstack/react-router";
 import { Menu as MenuIcon } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";

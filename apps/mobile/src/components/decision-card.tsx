@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import * as Haptics from "expo-haptics";
 import { CircleCheck, CircleHelp } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";

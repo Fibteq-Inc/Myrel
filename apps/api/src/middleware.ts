@@ -1,4 +1,4 @@
-import type { InstanceRole } from "@altair/protocol";
+import type { InstanceRole } from "@myrel/protocol";
 import { createMiddleware } from "hono/factory";
 import { createAuth } from "./auth";
 

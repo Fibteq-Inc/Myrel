@@ -1,5 +1,5 @@
-import { projectChat, threadByCard, threadReplyCount } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useCallback, useMemo, useState } from "react";

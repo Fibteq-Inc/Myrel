@@ -1,8 +1,8 @@
 import { anthropic } from "./anthropic";
 import { openAiCompatible } from "./openai";
-import type { ProviderId as ProtocolProviderId } from "@altair/protocol";
+import type { ProviderId as ProtocolProviderId } from "@myrel/protocol";
 import type { ModelProvider } from "./types";
-import type { ModelConfig } from "@altair/runner-core";
+import type { ModelConfig } from "@myrel/runner-core";
 
 export * from "./loop";
 export * from "./mcp";

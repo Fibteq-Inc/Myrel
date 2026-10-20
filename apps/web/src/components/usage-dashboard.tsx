@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import { type UsageSummary, type UsageTotals } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import { type UsageSummary, type UsageTotals } from "@myrel/protocol";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Bot, Coins, Info, MessagesSquare, Network, Workflow } from "lucide-react";

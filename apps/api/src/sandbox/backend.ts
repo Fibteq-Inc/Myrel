@@ -1,6 +1,6 @@
-import { createDb, schema } from "@altair/db";
-import { type ProjectWorkspace, TaskTarget } from "@altair/protocol";
-import type { RunnerBackend, TaskSpec } from "@altair/runner-core";
+import { createDb, schema } from "@myrel/db";
+import { type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
+import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { githubConfigured, installationToken } from "../github/app";

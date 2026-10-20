@@ -1,5 +1,5 @@
-import { useI18n } from "@altair/i18n/react";
-import { USAGE_RANGES } from "@altair/protocol";
+import { useI18n } from "@myrel/i18n/react";
+import { USAGE_RANGES } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";

@@ -1,6 +1,6 @@
-import type { MessageKey } from "@altair/i18n";
-import { useI18n, useT } from "@altair/i18n/react";
-import { MEMORY_INDEX, type MemoryEntry } from "@altair/protocol";
+import type { MessageKey } from "@myrel/i18n";
+import { useI18n, useT } from "@myrel/i18n/react";
+import { MEMORY_INDEX, type MemoryEntry } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, FolderOpen, Plus, ScrollText, Trash2, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";

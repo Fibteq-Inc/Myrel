@@ -1,5 +1,5 @@
-import { LOCALE_NAMES, LOCALES, isLocale } from "@altair/i18n";
-import { useI18n, useT } from "@altair/i18n/react";
+import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";

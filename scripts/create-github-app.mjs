@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Creates the GitHub App a Myrel server needs (GitHub's manifest flow) from your own browser.
 //
-//   node scripts/create-github-app.mjs [--origin https://altair.example.com] [--org my-org] [--port 8765]
+//   node scripts/create-github-app.mjs [--origin https://myrel.example.com] [--org my-org] [--port 8765]
 //
 // It serves a page on http://localhost:<port>. You click "Create on GitHub", confirm on GitHub,
 // and GitHub sends you back here; the page then shows the six Worker secrets to add
@@ -90,7 +90,7 @@ function secretsPage(app) {
     )
     .join("");
   return page(`<section><p class="ok">The app ${esc(app.slug)} was created. These keys are shown only now.</p>
-<p class="muted">Add each one in Cloudflare as a secret: Workers &amp; Pages → altair → Settings → Variables and Secrets → Add, type <b>Secret</b>. Then redeploy.</p>
+<p class="muted">Add each one in Cloudflare as a secret: Workers &amp; Pages → myrel → Settings → Variables and Secrets → Add, type <b>Secret</b>. Then redeploy.</p>
 <div style="overflow-x:auto"><table>${rows}</table></div>
 <p class="muted">Then connect repositories from a project's settings in Myrel. <a href="${esc(app.html_url)}" target="_blank" rel="noreferrer">Open the app on GitHub</a></p></section>
 <script>
@@ -120,7 +120,7 @@ createServer(async (req, res) => {
     if (!/^[\w-]{1,100}$/.test(code)) return send(400, page(`<section><p class="err">GitHub did not send a code. Start again from <a href="/">the first page</a>.</p></section>`));
     const r = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, {
       method: "POST",
-      headers: { accept: "application/vnd.github+json", "user-agent": "altair-setup" },
+      headers: { accept: "application/vnd.github+json", "user-agent": "myrel-setup" },
     });
     if (!r.ok) return send(400, page(`<section><p class="err">GitHub did not accept the code (${r.status}). It works once and expires after an hour. <a href="/">Start again</a>.</p></section>`));
     const app = await r.json();

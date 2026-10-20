@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunnerToServer, ServerToRunner } from "@altair/protocol";
+import type { RunnerToServer, ServerToRunner } from "@myrel/protocol";
 import { ADAPTERS, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
 import { threadWorktree, type Worktree } from "./worktrees";
@@ -79,7 +79,7 @@ export class TaskRunner {
     let agentDir: string | undefined;
     let agent: { args: string[]; env?: Record<string, string> } = { args: [] };
     if (task.agent && config.server) {
-      agentDir = await mkdtemp(join(tmpdir(), "altair-agent-"));
+      agentDir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
       const url = `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`;
       agent = await adapter.agent({ url, token: task.agent.token, dir: agentDir });
     }

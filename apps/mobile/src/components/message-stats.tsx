@@ -1,5 +1,5 @@
-import { useI18n } from "@altair/i18n/react";
-import type { MessageStats } from "@altair/protocol";
+import { useI18n } from "@myrel/i18n/react";
+import type { MessageStats } from "@myrel/protocol";
 import { Cloud, Laptop } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";

@@ -1,12 +1,12 @@
-import type { Project, ProjectWorkspace, Runner, ServerToRunner } from "@altair/protocol";
-import { RUNNER_PROTOCOL_VERSION } from "@altair/protocol";
+import type { Project, ProjectWorkspace, Runner, ServerToRunner } from "@myrel/protocol";
+import { RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -59,7 +59,7 @@ async function connectRunner(token: string, features: string[] = []) {
     version: "0.1.0",
     hostname: "mbp",
     platform: "darwin",
-    folders: [{ path: "/Users/ismail/code/altair", name: "altair" }],
+    folders: [{ path: "/Users/ismail/code/myrel", name: "myrel" }],
     clis: [{ id: "claude", version: "2.1.0" }],
     features,
     running: [],
@@ -144,15 +144,15 @@ describe("local workspace", () => {
     expect((await put({ runnerId: runner.id, path: "/etc", cli: "claude" })).status).toBe(400);
     // Someone else's computer is not an option.
     const stranger = await pair(await signUp());
-    expect((await put({ runnerId: stranger.runner.id, path: "/Users/ismail/code/altair", cli: "claude" })).status).toBe(400);
+    expect((await put({ runnerId: stranger.runner.id, path: "/Users/ismail/code/myrel", cli: "claude" })).status).toBe(400);
 
-    const ok = await put({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" });
+    const ok = await put({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" });
     expect(ok.status).toBe(200);
     const get = async () =>
       ((await (await api(`/api/projects/${project.id}/workspace`, { token: user })).json()) as {
         workspace: ProjectWorkspace | null;
       }).workspace;
-    expect(await get()).toMatchObject({ runnerName: "Laptop", path: "/Users/ismail/code/altair", cli: "claude", online: true });
+    expect(await get()).toMatchObject({ runnerName: "Laptop", path: "/Users/ismail/code/myrel", cli: "claude", online: true });
 
     ws.close();
     await until(async () => (await get())?.online === false, "offline");
@@ -182,7 +182,7 @@ describe("local workspace", () => {
     old.ws.close();
 
     const { ws, frames, send } = await connectRunner(token, ["folders", "from-the-future"]);
-    let folders = [{ path: "/Users/ismail/code/altair", name: "altair" }];
+    let folders = [{ path: "/Users/ismail/code/myrel", name: "myrel" }];
     ws.addEventListener("message", (e) => {
       const frame = JSON.parse(e.data as string) as ServerToRunner;
       if (frame.type === "dirs.list") {
@@ -224,7 +224,7 @@ describe("local workspace", () => {
     expect((await share("/Users/ismail/code/site", await signUp())).status).toBe(404);
     expect((await share("/Users/ismail/code/site")).status).toBe(200);
     const [after] = await listRunners(user);
-    expect(after!.folders.map((f) => f.path)).toEqual(["/Users/ismail/code/altair", "/Users/ismail/code/site"]);
+    expect(after!.folders.map((f) => f.path)).toEqual(["/Users/ismail/code/myrel", "/Users/ismail/code/site"]);
 
     // Stopping sharing a folder takes it away from projects working in it.
     const project = await createProject(user);
@@ -233,7 +233,7 @@ describe("local workspace", () => {
     expect((await unshare("/Users/ismail/code/site")).status).toBe(200);
     const workspace = await api(`/api/projects/${project.id}/workspace`, { token: user });
     expect(((await workspace.json()) as { workspace: unknown }).workspace).toBeNull();
-    expect((await listRunners(user))[0]!.folders.map((f) => f.path)).toEqual(["/Users/ismail/code/altair"]);
+    expect((await listRunners(user))[0]!.folders.map((f) => f.path)).toEqual(["/Users/ismail/code/myrel"]);
     ws.close();
   });
 
@@ -246,7 +246,7 @@ describe("local workspace", () => {
     await api(`/api/projects/${project.id}/workspace`, {
       method: "PUT",
       token: user,
-      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
     });
     const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
     const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "README'yi özetle" });
@@ -315,7 +315,7 @@ describe("local workspace", () => {
     await api(`/api/projects/${project.id}/workspace`, {
       method: "PUT",
       token: user,
-      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
     });
     const { projectAgent, thread } = await startThread(project.id);
     const notice = await until(
@@ -337,7 +337,7 @@ describe("local workspace", () => {
     await api(`/api/projects/${project.id}/workspace`, {
       method: "PUT",
       token: user,
-      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
     });
     const chat = await openChat(project.id, user);
     const { projectAgent, threadAgent, thread } = await startThread(project.id);

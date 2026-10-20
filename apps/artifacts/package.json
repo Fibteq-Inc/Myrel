@@ -1,5 +1,5 @@
 {
-  "name": "@altair/artifacts",
+  "name": "@myrel/artifacts",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -14,7 +14,7 @@
     "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false"
   },
   "dependencies": {
-    "@altair/protocol": "workspace:*"
+    "@myrel/protocol": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.4",

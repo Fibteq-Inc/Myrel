@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunnerToServer } from "@altair/protocol";
+import type { RunnerToServer } from "@myrel/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ADAPTERS, type ParseState } from "../src/clis";
 import { loadConfig, type RunnerConfig, SessionStore, saveConfig, shareFolder, unshareFolder } from "../src/config";
@@ -12,7 +12,7 @@ import { isNewer } from "../src/update";
 let home: string;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "myrel-runner-"));
-  process.env.ALTAIR_RUNNER_HOME = home;
+  process.env.MYREL_RUNNER_HOME = home;
 });
 
 describe("config", () => {
@@ -29,20 +29,20 @@ describe("config", () => {
 });
 
 describe("env overrides", () => {
-  it("uses ALTAIR_SERVER and ALTAIR_RUNNER_TOKEN without saving the token", async () => {
+  it("uses MYREL_SERVER and MYREL_RUNNER_TOKEN without saving the token", async () => {
     await saveConfig({ folders: [], access: "edit", server: "https://saved.example", token: "art_saved" });
-    process.env.ALTAIR_SERVER = "https://env.example";
-    process.env.ALTAIR_RUNNER_TOKEN = "art_env";
+    process.env.MYREL_SERVER = "https://env.example";
+    process.env.MYREL_RUNNER_TOKEN = "art_env";
     try {
       const config = await loadConfig();
       expect(config).toMatchObject({ server: "https://env.example", token: "art_env" });
       shareFolder(config, "/tmp/x");
       await saveConfig(config);
-      delete process.env.ALTAIR_RUNNER_TOKEN;
+      delete process.env.MYREL_RUNNER_TOKEN;
       expect((await loadConfig()).token).toBe("art_saved");
     } finally {
-      delete process.env.ALTAIR_SERVER;
-      delete process.env.ALTAIR_RUNNER_TOKEN;
+      delete process.env.MYREL_SERVER;
+      delete process.env.MYREL_RUNNER_TOKEN;
     }
   });
 });
@@ -92,13 +92,13 @@ describe("CLI output parsing", () => {
 });
 
 describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
-  const mcp = () => ({ url: "https://altair.test/api/agent-mcp/thr_1", token: "t".repeat(32), dir: home });
+  const mcp = () => ({ url: "https://myrel.test/api/agent-mcp/thr_1", token: "t".repeat(32), dir: home });
 
   it("gives Codex the endpoint as config overrides and the token in its environment", async () => {
     const agent = await ADAPTERS.codex.agent(mcp());
     expect(agent).toEqual({
-      args: ["-c", 'mcp_servers.altair.url="https://altair.test/api/agent-mcp/thr_1"', "-c", 'mcp_servers.altair.bearer_token_env_var="ALTAIR_MCP_TOKEN"'],
-      env: { ALTAIR_MCP_TOKEN: "t".repeat(32) },
+      args: ["-c", 'mcp_servers.myrel.url="https://myrel.test/api/agent-mcp/thr_1"', "-c", 'mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"'],
+      env: { MYREL_MCP_TOKEN: "t".repeat(32) },
     });
     // The prompt still comes last, on stdin.
     expect(ADAPTERS.codex.args({ access: "edit", extra: agent.args }).at(-1)).toBe("-");
@@ -109,7 +109,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     const path = agent.env!.GEMINI_CLI_SYSTEM_SETTINGS_PATH!;
     expect(path).toBe(join(home, "settings.json"));
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-      mcpServers: { altair: { httpUrl: mcp().url, headers: { Authorization: `Bearer ${"t".repeat(32)}` }, trust: true } },
+      mcpServers: { myrel: { httpUrl: mcp().url, headers: { Authorization: `Bearer ${"t".repeat(32)}` }, trust: true } },
     });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
@@ -185,7 +185,7 @@ echo "args: $*" >&2`,
     );
     const folder = join(home, "proj3");
     await mkdir(folder);
-    const config: RunnerConfig = { server: "https://altair.test/", folders: [{ path: folder, name: "proj3" }], access: "edit" };
+    const config: RunnerConfig = { server: "https://myrel.test/", folders: [{ path: folder, name: "proj3" }], access: "edit" };
     const frames: RunnerToServer[] = [];
     const runner = new TaskRunner({ config: () => config, sessions: new SessionStore() });
     runner.setSender((f) => frames.push(f));
@@ -202,9 +202,9 @@ echo "args: $*" >&2`,
     expect(done.ok).toBe(true);
     expect(JSON.parse(done.result)).toEqual({
       mcpServers: {
-        altair: {
+        myrel: {
           type: "http",
-          url: "https://altair.test/api/agent-mcp/thr_01JTEST0000000000000000009",
+          url: "https://myrel.test/api/agent-mcp/thr_01JTEST0000000000000000009",
           headers: { Authorization: `Bearer ${"t".repeat(32)}` },
         },
       },

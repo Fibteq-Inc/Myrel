@@ -1,4 +1,4 @@
-import { createId, type Message } from "@altair/protocol";
+import { createId, type Message } from "@myrel/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectSocket } from "../src/socket";
 

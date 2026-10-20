@@ -1,4 +1,4 @@
-import { useI18n } from "@altair/i18n/react";
+import { useI18n } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Image, ScrollView, StyleSheet, Text, View } from "react-native";

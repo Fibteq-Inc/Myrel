@@ -15,7 +15,7 @@ export type Worktree = {
   threadId: string;
   /** The shared repository's main checkout. */
   repo: string;
-  /** The worktree folder, under ~/.altair-runner/worktrees. */
+  /** The worktree folder, under ~/.myrel-runner/worktrees. */
   path: string;
   branch: string;
   lastUsed: number;
@@ -32,9 +32,9 @@ async function saveWorktrees(all: Worktree[]) {
   await writeJson(indexPath(), all);
 }
 
-/** `altair/thr-<last 10 characters of the thread id>`, unique enough within one repository. */
+/** `myrel/thr-<last 10 characters of the thread id>`, unique enough within one repository. */
 export function branchFor(threadId: string): string {
-  return `altair/thr-${threadId.slice(-10).toLowerCase()}`;
+  return `myrel/thr-${threadId.slice(-10).toLowerCase()}`;
 }
 
 /**

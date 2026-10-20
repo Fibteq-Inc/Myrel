@@ -44,16 +44,16 @@ import type {
   Routine,
   UpdateRoutineInputRaw,
   UsageSummary,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import type { TokenStore } from "./token-store";
 
 export type ApiClientOptions = {
-  /** Origin of the API, e.g. "https://altair.example.com". Empty string = same origin (web). */
+  /** Origin of the API, e.g. "https://myrel.example.com". Empty string = same origin (web). */
   baseUrl: string;
   /** Bearer token storage. Omit to use cookies only (same-origin web). */
   tokens?: TokenStore;
   fetch?: typeof fetch;
-  /** Sent with every request, e.g. the mobile app's `origin: altair://`. */
+  /** Sent with every request, e.g. the mobile app's `origin: myrel://`. */
   headers?: Record<string, string>;
   /** Native apps use "omit": they authenticate with the bearer token, never with cookies. */
   credentials?: RequestCredentials;

@@ -1,5 +1,5 @@
 {
-  "name": "@altair/api",
+  "name": "@myrel/api",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -15,9 +15,9 @@
     "vapid": "node scripts/vapid.mjs"
   },
   "dependencies": {
-    "@altair/db": "workspace:*",
-    "@altair/protocol": "workspace:*",
-    "@altair/runner-core": "workspace:*",
+    "@myrel/db": "workspace:*",
+    "@myrel/protocol": "workspace:*",
+    "@myrel/runner-core": "workspace:*",
     "agents": "0.28.1",
     "better-auth": "1.7.11",
     "drizzle-orm": "0.45.4",

@@ -1,6 +1,6 @@
-import type { Artifact, ArtifactVersion, ArtifactView, Message, Project, Thread } from "@altair/protocol";
-import { artifactObjectKey } from "@altair/protocol";
-import { verifyArtifact } from "@altair/protocol/artifact-signature";
+import type { Artifact, ArtifactVersion, ArtifactView, Message, Project, Thread } from "@myrel/protocol";
+import { artifactObjectKey } from "@myrel/protocol";
+import { verifyArtifact } from "@myrel/protocol/artifact-signature";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentProject, modelAgent } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);

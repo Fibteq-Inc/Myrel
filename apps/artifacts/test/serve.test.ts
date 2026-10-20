@@ -1,5 +1,5 @@
-import { artifactObjectKey, createId } from "@altair/protocol";
-import { signArtifact } from "@altair/protocol/artifact-signature";
+import { artifactObjectKey, createId } from "@myrel/protocol";
+import { signArtifact } from "@myrel/protocol/artifact-signature";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -30,7 +30,7 @@ describe("artifact Worker", () => {
     expect(csp).toContain("default-src 'none'");
     expect(csp).toContain("sandbox allow-scripts");
     expect(csp).not.toContain("allow-same-origin");
-    expect(csp).toContain("frame-ancestors https://altair.test tauri://localhost");
+    expect(csp).toContain("frame-ancestors https://myrel.test tauri://localhost");
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   });
 

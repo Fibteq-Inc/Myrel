@@ -1,6 +1,6 @@
-import { isLocale, type Locale, matchLocale } from "@altair/i18n";
+import { isLocale, type Locale, matchLocale } from "@myrel/i18n";
 
-const KEY = "altair.locale";
+const KEY = "myrel.locale";
 
 /** The saved choice, else the browser's languages, else English. */
 export function initialLocale(): Locale {

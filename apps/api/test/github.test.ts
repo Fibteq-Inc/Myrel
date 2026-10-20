@@ -1,4 +1,4 @@
-import type { GithubRepo, GithubStatus, Project, ProjectRepo, PullRequest, ServerEvent } from "@altair/protocol";
+import type { GithubRepo, GithubStatus, Project, ProjectRepo, PullRequest, ServerEvent } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { runInDurableObject, env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -10,7 +10,7 @@ import { listPullRequests, trackPullRequest } from "../src/github/pulls";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
 import { fakeGithub } from "./fake-github";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 // The GitHub settings are secrets (src/env.d.ts), which the generated test Env does not list.
 const env = testEnv as Env;
 
@@ -83,13 +83,13 @@ describe("connecting GitHub", () => {
   it("reports whether the app is configured", async () => {
     const token = await signUp();
     const status = (await (await api("/api/github", { token })).json()) as GithubStatus;
-    expect(status).toEqual({ configured: true, installUrl: "https://github.com/apps/altair-test/installations/new", installations: [] });
+    expect(status).toEqual({ configured: true, installUrl: "https://github.com/apps/myrel-test/installations/new", installations: [] });
   });
 
   it("installs, then remembers the installations GitHub confirms", async () => {
     const token = await signUp();
     const { githubUrl, landed } = await connect(token);
-    expect(githubUrl.origin + githubUrl.pathname).toBe("https://github.com/apps/altair-test/installations/new");
+    expect(githubUrl.origin + githubUrl.pathname).toBe("https://github.com/apps/myrel-test/installations/new");
     expect(landed).toBe("/projects/x?settings=1&github=connected");
 
     const status = (await (await api("/api/github", { token })).json()) as GithubStatus;
@@ -229,7 +229,7 @@ describe("pull requests", () => {
     state: "open",
     draft: false,
     merged: false,
-    head: { sha: "sha-1", ref: "altair/fix-login" },
+    head: { sha: "sha-1", ref: "myrel/fix-login" },
     ...over,
   });
 
@@ -270,7 +270,7 @@ describe("pull requests", () => {
     expect(await githubEvents(thread.id)).toEqual([expect.stringContaining("failing CI on its latest commit: test")]);
 
     // The fix is pushed: CI starts again, which wakes nobody.
-    await hook("pull_request", { action: "synchronize", pull_request: pull({ head: { sha: "sha-2", ref: "altair/fix-login" } }) });
+    await hook("pull_request", { action: "synchronize", pull_request: pull({ head: { sha: "sha-2", ref: "myrel/fix-login" } }) });
     expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.checks).toBe("pending");
     fakeGithub.checks["sha-2"] = { check_runs: [{ name: "test", status: "completed", conclusion: "success" }], statuses: [] };
     await hook("check_run", { action: "completed", check_run: { head_sha: "sha-2" } });
@@ -298,7 +298,7 @@ describe("pull requests", () => {
     });
     expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.review).toBe("changes_requested");
 
-    await hook("pull_request", { action: "closed", pull_request: pull({ state: "closed", merged: true, head: { sha: "sha-2", ref: "altair/fix-login" } }) });
+    await hook("pull_request", { action: "closed", pull_request: pull({ state: "closed", merged: true, head: { sha: "sha-2", ref: "myrel/fix-login" } }) });
     expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.state).toBe("merged");
 
     const woken = await githubEvents(thread.id);

@@ -1,5 +1,5 @@
-import { artifactObjectKey, artifactPath, type ArtifactView } from "@altair/protocol";
-import { signArtifact } from "@altair/protocol/artifact-signature";
+import { artifactObjectKey, artifactPath, type ArtifactView } from "@myrel/protocol";
+import { signArtifact } from "@myrel/protocol/artifact-signature";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { type AppEnv, requireUser } from "../middleware";

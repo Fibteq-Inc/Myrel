@@ -1,6 +1,6 @@
-import { threadReplyCount } from "@altair/client";
-import { useT } from "@altair/i18n/react";
-import type { Thread } from "@altair/protocol";
+import { threadReplyCount } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
+import type { Thread } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
 import { ListTree } from "lucide-react-native";
 import { useMemo } from "react";

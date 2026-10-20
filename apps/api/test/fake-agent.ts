@@ -1,4 +1,4 @@
-import { type Project, RUNNER_PROTOCOL_VERSION, type ServerToRunner } from "@altair/protocol";
+import { type Project, RUNNER_PROTOCOL_VERSION, type ServerToRunner } from "@myrel/protocol";
 import { exports } from "cloudflare:workers";
 import { fakeModel } from "./fake-llm";
 
@@ -8,8 +8,8 @@ import { fakeModel } from "./fake-llm";
  * tools over the thread's MCP endpoint, then finishes the run.
  */
 
-const BASE = "http://altair.test";
-export const FOLDER = "/Users/ismail/code/altair";
+const BASE = "http://myrel.test";
+export const FOLDER = "/Users/ismail/code/myrel";
 
 export function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -109,7 +109,7 @@ export async function agentProject(token: string, play: Play, opts: { features?:
     version: "0.5.0",
     hostname: "mbp",
     platform: "darwin",
-    folders: [{ path: FOLDER, name: "altair" }],
+    folders: [{ path: FOLDER, name: "myrel" }],
     clis: [{ id: "claude", version: "2.1.0" }],
     features: opts.features ?? ["folders", "cancel", "agent"],
     running: [],

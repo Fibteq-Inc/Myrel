@@ -1,5 +1,5 @@
-import type { Translate } from "@altair/i18n";
-import type { Thread } from "@altair/protocol";
+import type { Translate } from "@myrel/i18n";
+import type { Thread } from "@myrel/protocol";
 import { FileText, GitCompareArrows, type LucideIcon, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 

@@ -1,4 +1,4 @@
-import { API_VERSION, type ServerInfo, ThreadId } from "@altair/protocol";
+import { API_VERSION, type ServerInfo, ThreadId } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -37,7 +37,7 @@ const app = new Hono<AppEnv>()
   // Lets desktop and mobile apps check that an address is a Myrel server they can talk to.
   .get("/info", async (c) =>
     c.json({
-      app: "altair",
+      app: "myrel",
       apiVersion: API_VERSION,
       name: c.env.INSTANCE_NAME || "Myrel",
       auth: { emailPassword: true, signUp: await signUpEnabled(c.env) },

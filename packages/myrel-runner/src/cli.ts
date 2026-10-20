@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { CLI_NAMES } from "@altair/protocol";
+import { CLI_NAMES } from "@myrel/protocol";
 import { detectClis } from "./clis";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
@@ -36,13 +36,13 @@ edit (change files; the default) or full (also run any command). It is saved,
 so the background runner uses it too.
 
 In a git repository, each thread works in its own git worktree on its own
-branch (altair/thr-…), so threads working at the same time never touch each
-other's files. Worktrees live in ~/.altair-runner/worktrees; ones whose branch
+branch (myrel/thr-…), so threads working at the same time never touch each
+other's files. Worktrees live in ~/.myrel-runner/worktrees; ones whose branch
 is merged and that were not used for a day are removed automatically.
 --json prints one JSON status object per line instead of messages.
 
-Environment: ALTAIR_SERVER and ALTAIR_RUNNER_TOKEN override the saved pairing;
-ALTAIR_RUNNER_HOME moves the config folder (default ~/.altair-runner).
+Environment: MYREL_SERVER and MYREL_RUNNER_TOKEN override the saved pairing;
+MYREL_RUNNER_HOME moves the config folder (default ~/.myrel-runner).
 `;
 
 async function main(argv: string[]) {
@@ -133,7 +133,7 @@ async function main(argv: string[]) {
     }
     case "update": {
       // Set when an older version handed the update over to this one.
-      const handedOver = process.env.ALTAIR_RUNNER_UPDATING;
+      const handedOver = process.env.MYREL_RUNNER_UPDATING;
       const latest = handedOver ? null : await latestVersion();
       if (!handedOver && !latest) console.log("Could not reach npm to look for a newer version.");
       if (latest && isNewer(latest, RUNNER_VERSION)) {

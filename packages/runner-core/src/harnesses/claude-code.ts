@@ -15,7 +15,7 @@ export const claudeCode: Harness = {
     return [
       "claude -p --output-format stream-json --verbose --dangerously-skip-permissions",
       model,
-      '"$ALTAIR_PROMPT"',
+      '"$MYREL_PROMPT"',
     ]
       .filter(Boolean)
       .join(" ");

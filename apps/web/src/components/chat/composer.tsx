@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { ProjectFile } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { ProjectFile } from "@myrel/protocol";
 import { ArrowUp, Paperclip } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { errorMessage } from "../../lib/ui";

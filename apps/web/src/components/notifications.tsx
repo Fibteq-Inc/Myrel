@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Notification, NotificationKind } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Notification, NotificationKind } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Bell, CheckCheck, CircleAlert, CircleCheck, CircleHelp, CirclePause, MessageSquareText } from "lucide-react";

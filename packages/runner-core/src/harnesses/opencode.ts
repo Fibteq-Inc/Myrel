@@ -2,13 +2,13 @@ import { type Harness, jsonLine, log, num, obj, shellQuote, str, todoStatus } fr
 import type { RunnerEvent, TaskSpec } from "../spec";
 
 /** Provider name Myrel registers in OpenCode's config for OpenAI-compatible models. */
-const CUSTOM_PROVIDER = "altair";
+const CUSTOM_PROVIDER = "myrel";
 
 /**
  * OpenCode (`opencode run --format json`). The model comes from the task:
  * an OpenAI-compatible endpoint (Fireworks, OpenAI, ...) is registered as a
  * custom provider; Anthropic uses OpenCode's built-in provider. The key is
- * read from ALTAIR_MODEL_API_KEY so it never lands in the config.
+ * read from MYREL_MODEL_API_KEY so it never lands in the config.
  */
 export const opencode: Harness = {
   id: "opencode",
@@ -16,7 +16,7 @@ export const opencode: Harness = {
 
   command(spec) {
     const model = opencodeModel(spec);
-    return ["opencode run --format json", model ? `--model ${shellQuote(model)}` : "", '"$ALTAIR_PROMPT"']
+    return ["opencode run --format json", model ? `--model ${shellQuote(model)}` : "", '"$MYREL_PROMPT"']
       .filter(Boolean)
       .join(" ");
   },
@@ -87,12 +87,12 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
   if (spec.mcp) {
     // The token is read from the environment so it never lands in the config.
     config.mcp = {
-      altair: { type: "remote", url: spec.mcp.url, enabled: true, headers: { Authorization: "Bearer {env:ALTAIR_MCP_TOKEN}" } },
+      myrel: { type: "remote", url: spec.mcp.url, enabled: true, headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" } },
     };
   }
   const m = spec.model;
   if (!m) return config;
-  const apiKey = "{env:ALTAIR_MODEL_API_KEY}";
+  const apiKey = "{env:MYREL_MODEL_API_KEY}";
   config.provider =
     m.kind === "anthropic"
       ? { anthropic: { options: { apiKey, ...(m.baseUrl ? { baseURL: `${m.baseUrl.replace(/\/+$/, "")}/v1` } : {}) } } }

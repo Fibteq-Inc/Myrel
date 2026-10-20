@@ -5,8 +5,8 @@ import {
   ProjectSocket,
   type ProjectState,
   type SocketStatus,
-} from "@altair/client";
-import type { ClientEventInput } from "@altair/protocol";
+} from "@myrel/client";
+import type { ClientEventInput } from "@myrel/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppState } from "react-native";

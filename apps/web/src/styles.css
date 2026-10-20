@@ -37,7 +37,7 @@ body {
 }
 
 /* Markdown in agent messages. */
-.prose-altair {
+.prose-myrel {
   @apply text-body;
   & > * + * {
     @apply mt-3;

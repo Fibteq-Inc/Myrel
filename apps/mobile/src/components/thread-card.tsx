@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Thread } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Thread } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
 import { ChevronRight, SquareTerminal } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";

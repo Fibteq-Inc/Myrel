@@ -1,6 +1,6 @@
 {
   "name": "@fibteq/myrel-runner",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",
@@ -12,7 +12,7 @@
   },
   "bugs": "https://github.com/Fibteq-Inc/myrel/issues",
   "keywords": [
-    "altair",
+    "myrel",
     "claude-code",
     "codex",
     "gemini-cli",
@@ -52,7 +52,7 @@
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {
-    "@altair/protocol": "workspace:*",
+    "@myrel/protocol": "workspace:*",
     "@types/node": "22.19.1",
     "esbuild": "0.28.2",
     "vitest": "5.0.5"

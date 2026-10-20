@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import type { ApiKey, ProviderId } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import type { ApiKey, ProviderId } from "@myrel/protocol";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { decryptSecret } from "./crypto";
 import { createProvider, type ProviderOverride, type ProviderResult, serverProviderId, taskModel } from "./llm";

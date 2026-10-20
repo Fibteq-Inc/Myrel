@@ -1,5 +1,5 @@
-import { checklistProgress, parseChecklist } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { checklistProgress, parseChecklist } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { CircleCheck, CircleDashed, CircleMinus, CircleX } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 import { colors, mono } from "../theme";

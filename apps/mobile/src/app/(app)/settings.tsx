@@ -1,5 +1,5 @@
-import { LOCALE_NAMES, LOCALES } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
+import { useI18n } from "@myrel/i18n/react";
 import { Check, ExternalLink } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";

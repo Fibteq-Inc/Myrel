@@ -1,7 +1,7 @@
-import type { Translate } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
-import type { Routine, RoutineScheduleInput, Thread } from "@altair/protocol";
-import { nextCronRun } from "@altair/protocol";
+import type { Translate } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
+import type { Routine, RoutineScheduleInput, Thread } from "@myrel/protocol";
+import { nextCronRun } from "@myrel/protocol";
 import { AlarmClock, Pause, Play, Plus, Trash2, X, Zap } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { createPortal } from "react-dom";

@@ -6,12 +6,12 @@ import {
   saveServer,
   tokenStoreFor,
   webPlatform,
-} from "@altair/client";
+} from "@myrel/client";
 import { QueryClient, queryOptions } from "@tanstack/react-query";
 
 // The desktop shell can inject its own platform (keychain, native dialogs) before the app boots.
 export const platform: Platform =
-  (globalThis as { __ALTAIR_PLATFORM__?: Platform }).__ALTAIR_PLATFORM__ ?? webPlatform();
+  (globalThis as { __MYREL_PLATFORM__?: Platform }).__MYREL_PLATFORM__ ?? webPlatform();
 
 /**
  * Server origin: the user's saved choice (desktop/mobile can point at any

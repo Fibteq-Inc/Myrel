@@ -1,4 +1,4 @@
-import { type Attachment, type ArtifactRef, CLI_NAMES, createId, formatPlan, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type Attachment, type ArtifactRef, CLI_NAMES, createId, formatPlan, type Task, type TaskStatus, type TerminalLine } from "@myrel/protocol";
 import {
   emptyProgress,
   reduceTask,
@@ -8,7 +8,7 @@ import {
   type TaskProgress,
   TaskSpec,
   workingBranch,
-} from "@altair/runner-core";
+} from "@myrel/runner-core";
 import { Agent, getAgentByName } from "agents";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
@@ -297,11 +297,11 @@ export class ThreadAgent extends Agent<Env> {
         spec.model = model.model;
         spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context);
         spec.mcp = { url: `${origin}${mcpPath}` };
-        const secrets: Record<string, string> = { ALTAIR_MODEL_API_KEY: model.apiKey, ALTAIR_MCP_TOKEN: token };
+        const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
         const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
         if (github) secrets.GITHUB_TOKEN = github;
         const files = await this.attachmentLinks(origin, input.attachments);
-        if (files.length) secrets.ALTAIR_FILES = JSON.stringify(files);
+        if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
         const backend = sandboxBackend(this.env, threadId);
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
@@ -309,7 +309,7 @@ export class ThreadAgent extends Agent<Env> {
         const workspace = await threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC);
         if (workspace) {
           spec.workspace = { remote: workspace.remote };
-          secrets.ALTAIR_WORKSPACE_TOKEN = workspace.token;
+          secrets.MYREL_WORKSPACE_TOKEN = workspace.token;
         }
         await this.launch(stored(spec), backend.id, () => backend.start(spec, secrets), language);
         if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
@@ -340,7 +340,7 @@ export class ThreadAgent extends Agent<Env> {
 
   /**
    * Download links for the files attached in the thread, for the sandbox to fetch before the agent
-   * starts (see ALTAIR_FILES in runner-core's task script). Newest first, within a count and size budget.
+   * starts (see MYREL_FILES in runner-core's task script). Newest first, within a count and size budget.
    */
   private async attachmentLinks(origin: string, attachments: Attachment[]): Promise<{ path: string; url: string }[]> {
     const { projectId } = this.ids();
@@ -408,7 +408,7 @@ export class ThreadAgent extends Agent<Env> {
   async agentMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
-    const answer = await handleMcp(await this.agentToolset(), { name: "altair", version: "1" }, body);
+    const answer = await handleMcp(await this.agentToolset(), { name: "myrel", version: "1" }, body);
     return { ok: true, answer };
   }
 

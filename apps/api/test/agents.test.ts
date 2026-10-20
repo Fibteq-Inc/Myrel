@@ -1,4 +1,4 @@
-import { formatPlan, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@altair/protocol";
+import { formatPlan, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
@@ -92,7 +92,7 @@ describe("coordinator and thread agent", () => {
 
     // The thread's agent was the person's Claude Code in the project's folder, and saw the brief and the member's name.
     expect(turns).toHaveLength(1);
-    expect(turns[0]!.start).toMatchObject({ cli: "claude", folder: "/Users/ismail/code/altair" });
+    expect(turns[0]!.start).toMatchObject({ cli: "claude", folder: "/Users/ismail/code/myrel" });
     expect(turns[0]!.prompt).toContain("You run as Claude Code on the person's own computer");
     expect(turns[0]!.prompt).toContain("Explain Durable Objects briefly.");
     expect(turns[0]!.prompt).toContain("İsmail (member)");

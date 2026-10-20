@@ -1,4 +1,4 @@
-import { type Message, type Project, type ServerEvent, type Task } from "@altair/protocol";
+import { type Message, type Project, type ServerEvent, type Task } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -7,7 +7,7 @@ import type { ThreadAgent } from "../src/agents/thread-agent";
 import { readWorkspace, threadWorkspace } from "../src/sandbox/workspace";
 import { resetFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -69,7 +69,7 @@ describe("the cloud agent", () => {
     const spec = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) =>
       JSON.parse(state.storage.sql.exec<{ spec: string }>("SELECT spec FROM tasks").one().spec),
     );
-    expect(spec).toMatchObject({ agent: true, mcp: { url: `http://altair.test/api/agent-mcp/${thread.id}` }, model: { provider: "fireworks" } });
+    expect(spec).toMatchObject({ agent: true, mcp: { url: `http://myrel.test/api/agent-mcp/${thread.id}` }, model: { provider: "fireworks" } });
     expect(spec.prompt).toContain("You run as OpenCode in this thread's own Linux sandbox");
 
     // The person hears what happened, in the thread's language.
@@ -95,7 +95,7 @@ describe("the cloud agent", () => {
   it("learns the address the sandbox calls back on when someone opens the project", async () => {
     const { ws, projectAgent } = await threadSetup();
     ws.close();
-    expect(await projectAgent.publicOrigin()).toBe("http://altair.test");
+    expect(await projectAgent.publicOrigin()).toBe("http://myrel.test");
     // A project nobody opened yet does not know it, so its cloud turns say so instead of starting.
     const other = await getAgentByName(env.PROJECT_AGENT, `proj_${crypto.randomUUID()}`);
     expect(await other.publicOrigin()).toBeNull();
@@ -128,12 +128,12 @@ describe("thread workspace", () => {
         };
       },
       create: async (name: string) => {
-        repos.set(name, { remote: `https://artifacts.example/altair/${name}.git` });
+        repos.set(name, { remote: `https://artifacts.example/myrel/${name}.git` });
         return {};
       },
     };
     const ws = await threadWorkspace({ WORKSPACES } as unknown as Env, "thr_1", 2100);
-    expect(ws).toEqual({ remote: "https://artifacts.example/altair/thread-thr_1.git", token: `art_v1_${"a".repeat(40)}` });
+    expect(ws).toEqual({ remote: "https://artifacts.example/myrel/thread-thr_1.git", token: `art_v1_${"a".repeat(40)}` });
     await threadWorkspace({ WORKSPACES } as unknown as Env, "thr_1", 2100);
     expect([...repos.keys()]).toEqual(["thread-thr_1"]);
     expect(tokens).toEqual([["write", 2100], ["write", 2100]]);
@@ -194,7 +194,7 @@ describe("reading a thread's workspace", () => {
     expect((await readWorkspace(env, "thr_1", "main", "../README.md"))!.file?.path).toBe("README.md");
     expect(await readWorkspace(env, "thr_1", "main", "nope")).toMatchObject({ entries: null, file: null });
     // Nothing saved on the branch, no repository, or no binding: nothing to show.
-    expect(await readWorkspace(env, "thr_1", "altair/other")).toBeNull();
+    expect(await readWorkspace(env, "thr_1", "myrel/other")).toBeNull();
     expect(await readWorkspace(env, "thr_2", "main")).toBeNull();
     expect(await readWorkspace({} as Env, "thr_1", "main")).toBeNull();
   });

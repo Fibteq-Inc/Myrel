@@ -1,4 +1,4 @@
-import type { Message } from "@altair/protocol";
+import type { Message } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
 import { notificationPath } from "../src/lib/push-target";

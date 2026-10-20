@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import { eq, sql } from "drizzle-orm";
 
 const { instanceSettings, projectInvites, user } = schema;

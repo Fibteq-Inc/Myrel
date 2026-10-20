@@ -8,7 +8,7 @@ import {
   type PullRequest,
   type Routine,
   type Thread,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { type KnowledgeSnapshot, renderKnowledge } from "./knowledge";

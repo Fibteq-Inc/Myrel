@@ -31,7 +31,7 @@ const PYTHON_PACKAGES = [
 ];
 
 /** The user harnesses run as: Claude Code refuses to skip permissions as root. */
-export const SANDBOX_USER = "altair";
+export const SANDBOX_USER = "myrel";
 export const SANDBOX_HOME = `/home/${SANDBOX_USER}`;
 
 /** Runs as root in a fresh container. Exits non-zero on any failure. */

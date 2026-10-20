@@ -7,8 +7,8 @@ import {
   type SessionUser,
   saveServer,
   tokenStoreFor,
-} from "@altair/client";
-import type { ServerInfo } from "@altair/protocol";
+} from "@myrel/client";
+import type { ServerInfo } from "@myrel/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useState } from "react";
 import { platform } from "./platform";
 

@@ -31,7 +31,7 @@ and running on your own Cloudflare account.
 ```mermaid
 flowchart LR
   clients["Web, desktop and mobile apps"]
-  subgraph worker["Cloudflare Worker: altair"]
+  subgraph worker["Cloudflare Worker: myrel"]
     assets["Static assets<br/>(apps/web)"]
     api["Hono API /api/*<br/>Better Auth"]
     pa["ProjectAgent DO<br/>coordinator, project chat"]

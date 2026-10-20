@@ -1,4 +1,4 @@
-import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, SETUP_NOTE, TaskSpec, taskEnv, taskScript } from "@altair/runner-core";
+import { HARNESSES, LineSplitter, parseLine, type RunnerEvent, SETUP_NOTE, TaskSpec, taskEnv, taskScript } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
 import { BASE_IMAGE, SANDBOX_HOME, SANDBOX_USER, SETUP_SCRIPT, SETUP_VERSION } from "./setup";
@@ -19,7 +19,7 @@ type BaseSnapshot = { version: string; snapshot: ContainerSnapshot };
 
 /**
  * One per thread (named by thread id): the thread's Linux container. It runs
- * one task at a time with the shared task script from @altair/runner-core and
+ * one task at a time with the shared task script from @myrel/runner-core and
  * streams the events back to the ThreadAgent through `taskEvents`.
  *
  * No image is built on deploy. The instance named "base" starts Cloudflare's
@@ -174,7 +174,7 @@ export class Sandbox extends DurableObject<Env> {
       const output = await new Response(proc.stdout).text();
       const code = await proc.exitCode;
       if (code !== 0) throw new Error(`Preparing the sandbox failed (exit ${code}): ${output.slice(-2000)}`);
-      const snapshot = await container.snapshotContainer({ name: `altair-base-${SETUP_VERSION}` });
+      const snapshot = await container.snapshotContainer({ name: `myrel-base-${SETUP_VERSION}` });
       const base = { version: SETUP_VERSION, snapshot };
       await this.ctx.storage.put("base", base);
       return base;

@@ -4,7 +4,7 @@ import { type Harness, log } from "../harness";
 export const shell: Harness = {
   id: "shell",
   label: "Shell",
-  command: () => 'bash -c "$ALTAIR_PROMPT"',
+  command: () => 'bash -c "$MYREL_PROMPT"',
   env: () => ({}),
   parse: (line) => [log(line)],
 };

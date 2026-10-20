@@ -1,5 +1,5 @@
-import type { Locale } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import type { Locale } from "@myrel/i18n";
+import { useI18n } from "@myrel/i18n/react";
 
 const number = (locale: Locale, options?: Intl.NumberFormatOptions) => new Intl.NumberFormat(locale, options);
 const compact = (locale: Locale) => number(locale, { notation: "compact", maximumFractionDigits: 1 });

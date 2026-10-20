@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   type Attachment,
   type Artifact,
@@ -23,7 +23,7 @@ import {
   type Thread,
   type ThreadStatus,
   type UpdateRoutineInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { projectProvider } from "../keys";
@@ -37,7 +37,7 @@ import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID } from "./names";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
-export const USER_ID_HEADER = "x-altair-user-id";
+export const USER_ID_HEADER = "x-myrel-user-id";
 
 type ConnState = { userId: string };
 

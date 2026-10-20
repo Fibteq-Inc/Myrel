@@ -8,8 +8,8 @@ import { runnerHome } from "./config";
 const run = promisify(execFile);
 
 /** The launchd label and systemd unit name. */
-export const SERVICE_NAME = "io.fibteq.altair-runner";
-const SYSTEMD_UNIT = "altair-runner.service";
+export const SERVICE_NAME = "io.fibteq.myrel-runner";
+const SYSTEMD_UNIT = "myrel-runner.service";
 
 export type ServiceManager = "launchd" | "systemd" | "startup";
 
@@ -27,7 +27,7 @@ export type ServiceInfo = {
 /**
  * Runs `myrel-runner start` in the background now and at every login: a
  * launchd agent on macOS, a systemd user service on Linux and a Startup
- * folder entry on Windows. The runner is copied into ~/.altair-runner/bin
+ * folder entry on Windows. The runner is copied into ~/.myrel-runner/bin
  * first, so the service keeps working after npx clears its cache. Running it
  * again replaces the copy, e.g. after updating myrel-runner.
  *
@@ -35,7 +35,7 @@ export type ServiceInfo = {
  */
 export async function installService(script: string): Promise<ServiceInfo> {
   const manager = serviceManager();
-  const bin = join(runnerHome(), "bin", "altair-runner.mjs");
+  const bin = join(runnerHome(), "bin", "myrel-runner.mjs");
   await mkdir(join(runnerHome(), "bin"), { recursive: true, mode: 0o700 });
   if (script !== bin) await copyFile(script, bin);
   const args = [process.execPath, bin, "start"];
@@ -137,7 +137,7 @@ async function describe(manager: ServiceManager): Promise<Omit<ServiceInfo, "run
       ? join(homedir(), "Library", "LaunchAgents", `${SERVICE_NAME}.plist`)
       : manager === "systemd"
         ? join(homedir(), ".config", "systemd", "user", SYSTEMD_UNIT)
-        : join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "altair-runner.vbs");
+        : join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "myrel-runner.vbs");
   const log = manager === "systemd" ? `journalctl --user -u ${SYSTEMD_UNIT}` : join(runnerHome(), "runner.log");
   const installed = Boolean(await stat(file).catch(() => null));
   return { manager, file, installed, log };
@@ -154,7 +154,7 @@ function serviceEnv(): Record<string, string> {
     .filter((p) => p && !/[\\/]_npx[\\/]/.test(p))
     .join(delimiter);
   const env: Record<string, string> = { PATH: path };
-  if (process.env.ALTAIR_RUNNER_HOME) env.ALTAIR_RUNNER_HOME = process.env.ALTAIR_RUNNER_HOME;
+  if (process.env.MYREL_RUNNER_HOME) env.MYREL_RUNNER_HOME = process.env.MYREL_RUNNER_HOME;
   return env;
 }
 

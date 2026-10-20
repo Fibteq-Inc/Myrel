@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react-native";
-import { useI18n } from "@altair/i18n/react";
+import { useI18n } from "@myrel/i18n/react";
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import {
   ActivityIndicator,

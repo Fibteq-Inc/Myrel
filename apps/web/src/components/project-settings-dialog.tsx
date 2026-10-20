@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, X } from "lucide-react";
 import { createContext, type ReactNode, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";

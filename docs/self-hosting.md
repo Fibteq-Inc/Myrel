@@ -35,13 +35,13 @@ and install dependencies:
 git clone https://github.com/<you>/myrel.git
 cd myrel
 pnpm install
-pnpm --filter @altair/api exec wrangler login
+pnpm --filter @myrel/api exec wrangler login
 ```
 
 ## 2. Create the D1 database
 
 ```sh
-pnpm --filter @altair/api exec wrangler d1 create myrel
+pnpm --filter @myrel/api exec wrangler d1 create myrel
 ```
 
 Copy the `database_id` it prints into `apps/api/wrangler.jsonc`, replacing the
@@ -70,7 +70,7 @@ Project files and message uploads are stored in R2 (binding `FILES` in
 missing:
 
 ```sh
-pnpm --filter @altair/api exec wrangler r2 bucket create myrel-files
+pnpm --filter @myrel/api exec wrangler r2 bucket create myrel-files
 ```
 
 ## 3. Set the required secret
@@ -80,14 +80,14 @@ sessions. Setting it also creates the `myrel` Worker if it does not exist yet.
 
 ```sh
 openssl rand -base64 32    # copy the output
-pnpm --filter @altair/api exec wrangler secret put BETTER_AUTH_SECRET
+pnpm --filter @myrel/api exec wrangler secret put BETTER_AUTH_SECRET
 ```
 
 Do not change this secret later unless you want to sign everyone out.
 
 ## 4. Connect Workers Builds
 
-In the Cloudflare dashboard, open **Workers & Pages → altair → Settings → Build**,
+In the Cloudflare dashboard, open **Workers & Pages → myrel → Settings → Build**,
 choose **Connect**, pick your repository and set:
 
 | Setting | Value |
@@ -108,7 +108,7 @@ What each command does:
   preview after it reaches `main`.
 
 Trigger the first build by pushing to `main` (or with **Retry build**). When it
-finishes, the Worker is live at `https://altair.<your-subdomain>.workers.dev`.
+finishes, the Worker is live at `https://myrel.<your-subdomain>.workers.dev`.
 To use your own domain, add it under **Settings → Domains & Routes**.
 
 You can also deploy from a laptop without Workers Builds:
@@ -127,7 +127,7 @@ Agents call the provider named by `LLM_PROVIDER`, using that provider's key.
 Set the key:
 
 ```sh
-pnpm --filter @altair/api exec wrangler secret put FIREWORKS_API_KEY
+pnpm --filter @myrel/api exec wrangler secret put FIREWORKS_API_KEY
 ```
 
 or add it in the dashboard under **Settings → Variables and Secrets** (type
@@ -175,7 +175,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BETTER_AUTH_URL` | empty | Public origin, for example `https://altair.example.com`. Inferred from the request when empty. The cloud thread agent calls back on it, so set it when the server sits behind a proxy that changes the host. |
+| `BETTER_AUTH_URL` | empty | Public origin, for example `https://myrel.example.com`. Inferred from the request when empty. The cloud thread agent calls back on it, so set it when the server sits behind a proxy that changes the host. |
 | `TRUSTED_ORIGINS` | empty | Extra comma-separated origins allowed to call the API cross-origin. The desktop app origins are always allowed. |
 | `INSTANCE_NAME` | `Myrel` | Name shown to apps that connect to this server. |
 | `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. |
@@ -187,7 +187,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
-| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <altair@example.com>`. Empty turns email off. |
+| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | Fibteq's GitHub App | Your GitHub App's id and URL name. GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
@@ -251,17 +251,17 @@ sandboxes each page into an opaque origin, and it only serves links the API
 signed within the last hour.
 
 1. Create the bucket **before** deploying the API, since it binds it:
-   `pnpm --filter @altair/api exec wrangler r2 bucket create myrel-artifacts`.
+   `pnpm --filter @myrel/api exec wrangler r2 bucket create myrel-artifacts`.
 2. Pick one random value (`openssl rand -base64 32`) and set it as
    `ARTIFACT_SIGNING_SECRET` on both Workers:
-   `pnpm --filter @altair/api exec wrangler secret put ARTIFACT_SIGNING_SECRET` and
-   `pnpm --filter @altair/artifacts exec wrangler secret put ARTIFACT_SIGNING_SECRET`.
+   `pnpm --filter @myrel/api exec wrangler secret put ARTIFACT_SIGNING_SECRET` and
+   `pnpm --filter @myrel/artifacts exec wrangler secret put ARTIFACT_SIGNING_SECRET`.
 3. Add a second Workers Builds project on the same repository:
 
    | Setting | Value |
    |---|---|
    | Root directory | `/` |
-   | Build command | `pnpm --filter @altair/artifacts build` |
+   | Build command | `pnpm --filter @myrel/artifacts build` |
    | Deploy command | `pnpm run deploy:artifacts` |
    | Non-production branch deploy command | `pnpm run deploy:artifacts:preview` |
 
@@ -351,7 +351,7 @@ person turns email and browser push on or off under the bell.
   emails point at your server. `wrangler dev` only simulates sends; remove the
   `send_email` block to run without email.
 - **Browser push** uses Web Push with VAPID keys. Generate a pair once with
-  `pnpm --filter @altair/api vapid`, put `VAPID_PUBLIC_KEY` (and
+  `pnpm --filter @myrel/api vapid`, put `VAPID_PUBLIC_KEY` (and
   `VAPID_SUBJECT`) in the variables and `VAPID_PRIVATE_KEY` in the secrets.
   Changing the pair later invalidates every browser subscription.
 - **Mobile push** for the Expo app needs nothing on the server: the app
@@ -385,7 +385,7 @@ git push
 Workers Builds deploys the new version and applies new migrations. Keep your
 own `database_id` when resolving the conflict in `wrangler.jsonc`. Read the
 release notes before updating while Myrel is pre-1.0: migrations only move
-forward, so back up D1 first (**D1 → altair → Time Travel** can restore to a
+forward, so back up D1 first (**D1 → myrel → Time Travel** can restore to a
 point in time).
 
 ## Deploy to Cloudflare button
