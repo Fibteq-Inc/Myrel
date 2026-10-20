@@ -3,24 +3,31 @@ import { reportedCost } from "./openai";
 /** Response headers worth passing back to the harness; the rest describe the provider's own plumbing. */
 const PASSED_HEADERS = ["content-type", "cache-control", "retry-after", "x-request-id"];
 
+/** Request headers a harness's model call keeps; its own credentials are replaced. */
+const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta"];
+
 /**
- * Forwards one OpenAI-compatible call from a sandboxed harness to the real provider, adding the
- * key there so it never enters the sandbox, and reports what the call cost when the provider
+ * Forwards one model call from a sandboxed harness to the real provider, adding the key there so
+ * it never enters the sandbox: a bearer token for an OpenAI-compatible API, x-api-key for
+ * Anthropic's. For an OpenAI-compatible call it also reports what the call cost when the provider
  * says so: usage.cost in the last chunk of a stream, or the JSON's usage / a cost header.
+ * OpenCode prices Anthropic calls itself, so those report nothing here.
  */
 export async function proxyModel(
   req: Request,
-  target: { url: string; apiKey: string },
+  target: { url: string; apiKey: string; kind: "openai" | "anthropic" },
   onCost: (usd: number) => Promise<void>,
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
-  const headers = new Headers({ authorization: `Bearer ${target.apiKey}` });
-  for (const name of ["content-type", "accept"]) {
+  const headers = new Headers(target.kind === "anthropic" ? { "x-api-key": target.apiKey } : { authorization: `Bearer ${target.apiKey}` });
+  for (const name of KEPT_HEADERS) {
     const v = req.headers.get(name);
     if (v) headers.set(name, v);
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
-  const upstream = await fetch(target.url, { method: req.method, headers, body: hasBody ? withStreamUsage(await req.text()) : undefined });
+  const text = hasBody ? await req.text() : undefined;
+  const sent = text !== undefined && target.kind === "openai" ? withStreamUsage(text) : text;
+  const upstream = await fetch(target.url, { method: req.method, headers, body: sent });
   const out = new Headers();
   for (const name of PASSED_HEADERS) {
     const v = upstream.headers.get(name);
@@ -30,7 +37,7 @@ export async function proxyModel(
     if (usd !== undefined && usd > 0) waitUntil(onCost(usd).catch((err) => console.error("model cost", err)));
   };
 
-  if (!upstream.body || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers: out });
+  if (!upstream.body || !upstream.ok || target.kind === "anthropic") return new Response(upstream.body, { status: upstream.status, headers: out });
   if (!(upstream.headers.get("content-type") ?? "").includes("text/event-stream")) {
     const text = await upstream.text();
     let usage: Record<string, unknown> | undefined;
