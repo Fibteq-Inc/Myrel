@@ -688,7 +688,7 @@ export const tr: Catalog = {
   "connectors.signIn": "Oturum aç",
   "connectors.signInAgain": "Yeniden oturum aç",
   "connectors.retry": "Yeniden dene",
-  "connectors.check": "Bağlantıyı denetle",
+  "connectors.refreshTools": "Araçları yenile",
   "connectors.on": "Açık",
   "connectors.off": "Kapalı",
   "connectors.enabledLabel": "{name} kullanılsın",

@@ -4,7 +4,9 @@ import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { blockedUrl, probeConnector } from "../src/connectors/client";
 import { proxyMcp } from "../src/connectors/gateway";
-import { remoteTarget, turnConnectors } from "../src/connectors/store";
+import { createDb, schema } from "@myrel/db";
+import { eq } from "drizzle-orm";
+import { refreshStaleTools, remoteTarget, TOOLS_FRESH_MS, turnConnectors } from "../src/connectors/store";
 
 const BASE = "http://myrel.test";
 const env = testEnv as unknown as Env;
@@ -154,6 +156,26 @@ describe("connectors API", () => {
     const other = await signUp();
     expect((await json<{ connectors: Connector[] }>(api("/api/account/connectors", { token: other.token }))).connectors).toEqual([]);
     expect((await api(`/api/account/connectors/${connector.id}`, { method: "DELETE", token: other.token })).status).toBe(404);
+  });
+
+  it("lists a used connector's tools again once its list is old", async () => {
+    const me = await signUp();
+    const { connector } = await json<{ connector: Connector }>(
+      api("/api/account/connectors", {
+        method: "POST",
+        token: me.token,
+        body: { transport: "http", name: "Tracker", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer good-key" } },
+      }),
+      201,
+    );
+    const db = createDb(env.DB);
+    const tools = async () => (await db.select().from(schema.connectors).where(eq(schema.connectors.id, connector.id)))[0]!.tools.map((t) => t.name);
+    await db.update(schema.connectors).set({ tools: [] }).where(eq(schema.connectors.id, connector.id));
+
+    await refreshStaleTools(env, [connector.id]);
+    expect(await tools()).toEqual([]);
+    await refreshStaleTools(env, [connector.id], Date.now() + TOOLS_FRESH_MS);
+    expect(await tools()).toEqual(["create_issue", "list_issues"]);
   });
 
   it("gives a turn the project's and its requester's connectors, with their credentials kept on the server", async () => {

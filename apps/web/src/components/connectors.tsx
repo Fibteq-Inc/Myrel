@@ -308,6 +308,17 @@ function ConnectorItem({ connector: c, projectId, highlight }: { connector: Conn
   const error = toggle.error ?? check.error ?? signIn.error ?? remove.error;
 
   const details = c.transport === "http" ? c.url : [c.command, ...c.args].join(" ");
+  const refreshTools = c.transport === "http" && c.enabled && c.status !== "needs_auth" && (
+    <button
+      type="button"
+      disabled={check.isPending}
+      onClick={() => check.mutate()}
+      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
+    >
+      <RefreshCw size={12} className={cn(check.isPending && "animate-spin")} aria-hidden="true" />
+      {t("connectors.refreshTools")}
+    </button>
+  );
 
   return (
     <li className={cn("bg-panel", highlight && "bg-accent-soft/30")}>
@@ -391,7 +402,7 @@ function ConnectorItem({ connector: c, projectId, highlight }: { connector: Conn
                         check.mutate();
                       }}
                     >
-                      {t("connectors.check")}
+                      {t("connectors.refreshTools")}
                     </MenuItem>
                   )}
                   {c.auth === "oauth" && (
@@ -454,7 +465,10 @@ function ConnectorItem({ connector: c, projectId, highlight }: { connector: Conn
           )}
           {c.tools.length > 0 ? (
             <div>
-              <div className="mb-1.5 text-xs font-medium text-muted">{t("connectors.tools")}</div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-muted">{t("connectors.tools")}</span>
+                {refreshTools}
+              </div>
               <ul className="max-h-64 space-y-1 overflow-y-auto">
                 {c.tools.map((tool) => (
                   <li key={tool.name} className="flex gap-2 text-xs">
@@ -468,9 +482,12 @@ function ConnectorItem({ connector: c, projectId, highlight }: { connector: Conn
               </ul>
             </div>
           ) : (
-            <p className="text-xs text-subtle">
-              {c.transport === "stdio" ? t("connectors.toolsUnknown") : t("connectors.noTools")}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-subtle">
+                {c.transport === "stdio" ? t("connectors.toolsUnknown") : t("connectors.noTools")}
+              </p>
+              {refreshTools}
+            </div>
           )}
         </div>
       )}
