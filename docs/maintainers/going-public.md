@@ -6,7 +6,9 @@ off in the pull request that flips visibility, or keep this file updated.
 ## Already done
 
 - [x] Full git history scanned for leaked secrets with gitleaks 8.28.0
-      (2026-10-19, 13 commits, no findings). The `Secret scan` workflow keeps
+      (2026-10-19, 13 commits, no findings; re-run 2026-10-20 with 8.21.2 over
+      all 101 commits on every branch and pull request ref: one false positive,
+      the RSA key `apps/api/vitest.config.ts` generates for tests). The `Secret scan` workflow keeps
       scanning every pull request and push to `main`.
 - [x] AGPL-3.0 `LICENSE`, `ee/LICENSE` for enterprise code, `CLA.md`.
 - [x] README, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
@@ -29,6 +31,9 @@ off in the pull request that flips visibility, or keep this file updated.
       CLA bot will flag them: keep Claude-made changes co-authored rather than
       authored once the repository is public, or extend the allowlist.
 - [ ] Re-run the secret scan on the latest `main` (the workflow does this on push).
+- [ ] `VAPID_SUBJECT` in `apps/api/wrangler.jsonc` is a personal address;
+      swap it for a team mailbox if that matters. Six early commits are also
+      authored with a `fibteq.com` address, which stays in public history.
 - [ ] Decide what to do with the production D1 `database_id` in
       `apps/api/wrangler.jsonc`. It is not a secret, but forks cannot use it;
       the self-hosting guide tells them to replace it.
