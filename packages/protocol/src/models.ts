@@ -67,6 +67,11 @@ export const MessageStats = z.object({
   costMicros: Count.nullable(),
   /** Where the work behind the message ran. */
   runtime: Runtime,
+  /**
+   * The harness that wrote the message, for a thread's agent ("opencode", or the person's CLI such as
+   * "claude"). Its model is empty when the CLI did not say which one it used.
+   */
+  harness: z.string().optional(),
   task: TaskStats.optional(),
 });
 export type MessageStats = z.infer<typeof MessageStats>;

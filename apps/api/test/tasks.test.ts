@@ -76,6 +76,9 @@ describe("the cloud agent", () => {
     const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
     const report = await until(async () => (await bodies()).find((b) => b.startsWith('"OpenCode" görevi başarısız oldu.')), "the report");
     expect(report).toContain("container is not configured");
+    // The report carries the turn's line: OpenCode in the cloud, with the project's model.
+    const reported = ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).find((m: Message) => m.body === report)!;
+    expect(reported.stats).toMatchObject({ runtime: "cloud", harness: "opencode", model: spec.model.id });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "failed", "failed");
 
     // Clients heard about the run and its output live.

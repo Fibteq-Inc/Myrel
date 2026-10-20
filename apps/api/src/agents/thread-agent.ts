@@ -1,4 +1,15 @@
-import { type Attachment, type ArtifactRef, CLI_NAMES, createId, formatPlan, type Task, type TaskStatus, type TerminalLine } from "@myrel/protocol";
+import {
+  type Attachment,
+  type ArtifactRef,
+  CLI_NAMES,
+  type CliUsage,
+  createId,
+  formatPlan,
+  type MessageStats,
+  type Task,
+  type TaskStatus,
+  type TerminalLine,
+} from "@myrel/protocol";
 import {
   emptyProgress,
   reduceTask,
@@ -19,7 +30,7 @@ import { handleMcp, type Tool } from "../llm";
 import { runnerHasFeature } from "../runners";
 import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
-import { recordSandboxRun, recordTaskUsage } from "../usage";
+import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, sameHash } from "./harness-agent";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { composeStatus, type Plan } from "./plan";
@@ -55,6 +66,9 @@ type TaskRow = {
  */
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; agent?: boolean };
 
+/** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
+type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
+
 /** What the thread's agent did through Myrel's tools during its turn, kept until the turn ends. */
 type AgentTurn = {
   pending: ArtifactRef[];
@@ -65,6 +79,10 @@ type AgentTurn = {
   asked: boolean;
   resolved: boolean;
   timezone: string;
+  /** Where the last stats line stopped counting; the next message's line starts here. Absent on older turns. */
+  mark?: StatsMark;
+  /** Its latest reply and where that reply's line started, so the usage after it can join it when the turn ends. */
+  lastReplyStats?: { id: string; from: StatsMark };
 };
 
 /** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
@@ -270,7 +288,15 @@ export class ThreadAgent extends Agent<Env> {
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
-    const turn: AgentTurn = { pending: [], replied: false, needs: null, asked: false, resolved: false, timezone: input.timezone };
+    const turn: AgentTurn = {
+      pending: [],
+      replied: false,
+      needs: null,
+      asked: false,
+      resolved: false,
+      timezone: input.timezone,
+      mark: { at: Date.now(), inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    };
     this.setMeta("agent_turn", JSON.stringify(turn));
     this.setMeta("agent_token", hash);
     this.deleteMeta("task_checklist");
@@ -373,11 +399,15 @@ export class ThreadAgent extends Agent<Env> {
     let pending = turn?.pending ?? [];
     const replied = turn?.replied ?? false;
     let lastText: string | null = null;
+    // The usage since its last message goes on the message that ends the turn, if there is one.
+    const tail = this.runStats(row, turn?.mark).stats;
+    let sentTail = false;
     if (!replied && row.status === "done" && row.summary) {
       // It answered in its final message instead of through reply: that answer is still the person's.
       lastText = row.summary;
-      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: row.summary, artifacts: pending });
+      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: row.summary, artifacts: pending, stats: tail });
       pending = [];
+      sentTail = true;
     } else if (row.status !== "done") {
       await project.sendMessage({
         threadId,
@@ -385,11 +415,19 @@ export class ThreadAgent extends Agent<Env> {
         authorId: THREAD_AGENT_ID,
         body: taskReport(this.toTask(row).title, row, this.taskLog(taskId, 15)),
         artifacts: pending,
+        stats: tail,
       });
       pending = [];
+      sentTail = true;
     }
     if (pending.length) {
-      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending });
+      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending, stats: tail });
+      sentTail = true;
+    }
+    // Otherwise what it used after its last reply (often the rest of that reply's own model call) joins that reply.
+    const last = turn?.lastReplyStats;
+    if (!sentTail && last && tail.inputTokens + tail.outputTokens > 0) {
+      await project.setMessageStats(last.id, this.runStats(row, last.from).stats);
     }
     const resolved = turn?.resolved ?? false;
     const asked = turn?.asked ?? false;
@@ -428,7 +466,9 @@ export class ThreadAgent extends Agent<Env> {
           // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
           const attachments = files?.length ? await project.attachmentsFor(files) : [];
           const t = turn();
-          save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs });
+          const row = this.runningTask();
+          const counted = row ? this.runStats(row, t.mark) : null;
+          save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs, ...(counted && { mark: counted.mark }) });
           const m = await project.sendMessage({
             threadId,
             authorKind: "agent",
@@ -436,7 +476,9 @@ export class ThreadAgent extends Agent<Env> {
             body: text,
             attachments,
             artifacts: t.pending,
+            ...(counted && { stats: counted.stats }),
           });
+          if (counted) save({ lastReplyStats: { id: m.id, from: counted.from } });
           // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
           // A pull request it links to is followed even when it forgot track_pull_request.
@@ -490,6 +532,50 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
       }),
     ];
+  }
+
+  /**
+   * The line under an agent message: what the turn's run used since `from` (the turn's start, or the
+   * previous message's line), where it ran, the harness and its model. Returns the new mark too.
+   */
+  private runStats(row: TaskRow, from?: StatsMark): { stats: MessageStats; from: StatsMark; mark: StatsMark } {
+    const spec = JSON.parse(row.spec) as StoredSpec;
+    const progress = JSON.parse(row.progress) as TaskProgress;
+    const start = from ?? { at: Date.parse(row.created_at), inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    const mark: StatsMark = { at: Date.now(), ...progress.usage };
+    const inputTokens = Math.max(0, mark.inputTokens - start.inputTokens);
+    const outputTokens = Math.max(0, mark.outputTokens - start.outputTokens);
+    const costUsd = Math.max(0, mark.costUsd - start.costUsd);
+    const runtime = taskRuntime(row.backend);
+    const model = spec.model?.id ?? progress.model ?? "";
+    const stats: MessageStats = {
+      model,
+      durationMs: Math.max(0, mark.at - start.at),
+      calls: 0,
+      inputTokens,
+      cachedInputTokens: 0,
+      outputTokens,
+      // A person's own CLI runs on their own account, so Myrel puts no price on it.
+      costMicros: runtime === "local" ? null : taskCostMicros(this.env, model || null, { inputTokens, outputTokens, costUsd }),
+      runtime,
+      harness: spec.harness,
+    };
+    return { stats, from: start, mark };
+  }
+
+  /**
+   * What a person's CLI reported using so far in a run, summed from its start (myrel-runner sends
+   * totals). Added to the run's progress as the difference. Callable over RPC.
+   */
+  async cliUsage(taskId: string, usage: CliUsage): Promise<void> {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (!row || row.status !== "running") return;
+    const progress = JSON.parse(row.progress) as TaskProgress;
+    const inputTokens = Math.max(0, usage.inputTokens - progress.usage.inputTokens);
+    const outputTokens = Math.max(0, usage.outputTokens - progress.usage.outputTokens);
+    const newModel = usage.model && usage.model !== progress.model ? usage.model : undefined;
+    if (inputTokens === 0 && outputTokens === 0 && !newModel) return;
+    await this.taskEvents(taskId, [{ type: "usage", inputTokens, outputTokens, ...(newModel && { model: newModel }) }]);
   }
 
   // ---- Runs -----------------------------------------------------------------

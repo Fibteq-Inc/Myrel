@@ -1,10 +1,13 @@
 import { useI18n } from "@myrel/i18n/react";
-import type { MessageStats } from "@myrel/protocol";
+import { CLI_NAMES, type MessageStats } from "@myrel/protocol";
 import { Cloud, Laptop } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatCost, formatDuration, formatTokens, modelName } from "../lib/format";
 import { colors, mono, radius } from "../theme";
+
+const HARNESS_NAMES: Record<string, string> = { ...CLI_NAMES, opencode: "OpenCode", "claude-code": "Claude Code", shell: "Shell" };
+const harnessName = (h: string) => HARNESS_NAMES[h] ?? h;
 
 /**
  * The quiet line under an agent's reply: where it ran, the model, how long it
@@ -22,8 +25,10 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
       : stats.costMicros + (task?.costMicros ?? 0);
   const local = stats.runtime === "local";
   const RuntimeIcon = local ? Laptop : Cloud;
+  const harness = task?.harness ?? stats.harness;
   const parts = [
     modelName(task?.model ?? stats.model),
+    harness ? harnessName(harness) : null,
     formatDuration(durationMs, t, locale),
     tokens > 0 ? t("stats.tokens", { tokens: formatTokens(tokens, locale) }) : null,
     cost ? formatCost(cost, locale) : null,
@@ -47,9 +52,10 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
       {open && (
         <View style={styles.box}>
           {task && <Row label={t("stats.task")} value={task.title} />}
-          <Row label={t("stats.model")} value={modelName(stats.model)} mono />
+          {stats.harness && <Row label={t("stats.harness")} value={harnessName(stats.harness)} />}
+          {!!stats.model && <Row label={t("stats.model")} value={modelName(stats.model)} mono />}
           <Row label={t("stats.time")} value={formatDuration(stats.durationMs, t, locale)} />
-          <Row label={t("stats.calls")} value={String(stats.calls)} />
+          {!stats.harness && <Row label={t("stats.calls")} value={String(stats.calls)} />}
           <Row label={t("stats.input")} value={formatTokens(stats.inputTokens, locale)} />
           {stats.cachedInputTokens > 0 && <Row label={t("stats.cached")} value={formatTokens(stats.cachedInputTokens, locale)} />}
           <Row label={t("stats.output")} value={formatTokens(stats.outputTokens, locale)} />

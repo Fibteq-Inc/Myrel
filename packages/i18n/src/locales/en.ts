@@ -109,6 +109,8 @@ export const en = {
   "stats.unpriced": "Unknown",
   "stats.task": "Task",
   "stats.taskRan": "{harness} · {where}",
+  "stats.harness": "Agent",
+  "stats.threadTotal": "Used by this thread so far: {tokens} tokens in {time}",
   "duration.seconds": "{value}s",
   "duration.minutes": "{minutes}m {seconds}s",
   "duration.hours": "{hours}h {minutes}m",

@@ -91,6 +91,37 @@ describe("CLI output parsing", () => {
   });
 });
 
+describe("CLI usage", () => {
+  it("sums Claude Code's model calls once each, then takes the run's totals", () => {
+    const state: ParseState = {};
+    const call = (id: string, text: string) => ({
+      type: "assistant",
+      message: { id, model: "claude-sonnet-5-5", usage: { input_tokens: 10, cache_read_input_tokens: 90, output_tokens: 5 }, content: [{ type: "text", text }] },
+    });
+    // One call's parts arrive as separate events with the same usage.
+    for (const l of [{ type: "system", subtype: "init", model: "claude-sonnet-5-5" }, call("m1", "a"), call("m1", "b"), call("m2", "c")]) {
+      ADAPTERS.claude.line(JSON.stringify(l), state);
+    }
+    expect(state.usage).toEqual({ inputTokens: 200, outputTokens: 10 });
+    expect(state.model).toBe("claude-sonnet-5-5");
+    ADAPTERS.claude.line(JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 30, cache_read_input_tokens: 270, output_tokens: 15 } }), state);
+    expect(state.usage).toEqual({ inputTokens: 300, outputTokens: 15 });
+  });
+
+  it("reads Codex's turn usage and Gemini's per-model stats", () => {
+    const codex: ParseState = {};
+    ADAPTERS.codex.line(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 500, cached_input_tokens: 400, output_tokens: 40 } }), codex);
+    expect(codex.usage).toEqual({ inputTokens: 500, outputTokens: 40 });
+
+    const gemini: ParseState = {};
+    ADAPTERS.gemini.end!(
+      JSON.stringify({ response: "ok", stats: { models: { "gemini-3-pro": { tokens: { prompt: 700, candidates: 50, thoughts: 20 } } } } }),
+      gemini,
+    );
+    expect(gemini).toMatchObject({ model: "gemini-3-pro", usage: { inputTokens: 700, outputTokens: 70 } });
+  });
+});
+
 describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
   const mcp = () => ({ url: "https://myrel.test/api/agent-mcp/thr_1", token: "t".repeat(32), dir: home });
 

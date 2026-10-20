@@ -12,6 +12,10 @@ const HARNESS_NAMES: Record<string, string> = {
   shell: "Shell",
 };
 
+export function harnessName(harness: string) {
+  return HARNESS_NAMES[harness] ?? harness;
+}
+
 /** "accounts/fireworks/models/kimi-k2p6" reads as "kimi-k2p6". */
 export function modelName(model: string) {
   return model.replace(/^accounts\/[^/]+\/models\//, "");
@@ -34,6 +38,8 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
   const cost = totalCost(stats);
   const RuntimeIcon = stats.runtime === "local" ? Laptop : Cloud;
   const where = (r: Runtime) => t(r === "local" ? "stats.local" : "stats.cloud");
+  const model = modelName(task?.model ?? stats.model);
+  const harness = task?.harness ?? stats.harness;
 
   return (
     <div className="text-xs text-subtle">
@@ -48,12 +54,16 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
           <RuntimeIcon size={12} aria-hidden="true" />
           {where(stats.runtime)}
         </span>
-        <Dot />
-        <span className="max-w-[18ch] truncate font-mono text-[11px]">{modelName(task?.model ?? stats.model)}</span>
-        {task && (
+        {model && (
           <>
             <Dot />
-            <span>{HARNESS_NAMES[task.harness] ?? task.harness}</span>
+            <span className="max-w-[18ch] truncate font-mono text-[11px]">{model}</span>
+          </>
+        )}
+        {harness && (
+          <>
+            <Dot />
+            <span>{harnessName(harness)}</span>
           </>
         )}
         <Dot />
@@ -79,7 +89,7 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
               <Row label={t("stats.task")} value={task.title} />
               <Row
                 label=""
-                value={t("stats.taskRan", { harness: HARNESS_NAMES[task.harness] ?? task.harness, where: where(task.runtime) })}
+                value={t("stats.taskRan", { harness: harnessName(task.harness), where: where(task.runtime) })}
               />
               {task.model && <Row label={t("stats.model")} value={modelName(task.model)} mono />}
               <Row label={t("stats.time")} value={dur(task.durationMs)} />
@@ -93,9 +103,11 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
               <hr className="col-span-2 my-1 border-line" />
             </>
           )}
-          <Row label={t("stats.model")} value={modelName(stats.model)} mono />
+          {stats.harness && <Row label={t("stats.harness")} value={harnessName(stats.harness)} />}
+          {stats.model && <Row label={t("stats.model")} value={modelName(stats.model)} mono />}
           <Row label={t("stats.time")} value={dur(stats.durationMs)} />
-          <Row label={t("stats.calls")} value={String(stats.calls)} />
+          {/* A harness reports tokens, not its model calls. */}
+          {!stats.harness && <Row label={t("stats.calls")} value={String(stats.calls)} />}
           <Row label={t("stats.input")} value={fmt.tokens(stats.inputTokens)} />
           {stats.cachedInputTokens > 0 && <Row label={t("stats.cached")} value={fmt.tokens(stats.cachedInputTokens)} />}
           <Row label={t("stats.output")} value={fmt.tokens(stats.outputTokens)} />
@@ -137,6 +149,20 @@ function Dot() {
   return (
     <span aria-hidden="true" className="text-[#3a3a42]">
       ·
+    </span>
+  );
+}
+
+/** A thread's usage so far, for its header: tokens and, when known, cost; the time is in the tooltip. */
+export function ThreadUsageLabel({ usage }: { usage: { tokens: number; durationMs: number; costMicros: number | null } }) {
+  const t = useT();
+  const fmt = useFormat();
+  const { locale } = useI18n();
+  const tokens = fmt.tokens(usage.tokens);
+  return (
+    <span className="flex-none tabular-nums text-subtle" title={t("stats.threadTotal", { tokens, time: duration(usage.durationMs, t, locale) })}>
+      {t("stats.tokens", { tokens })}
+      {usage.costMicros !== null && usage.costMicros > 0 && ` · ${fmt.cost(usage.costMicros)}`}
     </span>
   );
 }
