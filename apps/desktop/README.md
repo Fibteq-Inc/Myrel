@@ -54,8 +54,9 @@ with the same version:
 git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
 ```
 
-For tags and manual runs the macOS build runs on the org's self-hosted Mac runner (labels `self-hosted`, `macOS`),
-so that Mac must be on and awake while a release builds. Pull requests still use GitHub's hosted runners.
+While the repository is private, tags and manual runs build macOS on the org's self-hosted Mac runner (labels
+`self-hosted`, `macOS`), so that Mac must be on and awake while a release builds. Pull requests, and every run once
+the repository is public, use GitHub's hosted runners.
 
 The workflow creates a draft GitHub release with the installers and, when the updater key is set,
 `latest.json` for in-app updates. Publishing the draft makes it live.
