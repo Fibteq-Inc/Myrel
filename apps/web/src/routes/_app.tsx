@@ -38,7 +38,7 @@ function AppLayout() {
 function VerifyBanner({ email, verified }: { email: string; verified?: boolean }) {
   const t = useT();
   const { data: info } = useQuery(serverInfoQuery);
-  const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   if (verified || !info?.auth.emailVerification) return null;
   async function resend() {
     setState("sending");
@@ -47,12 +47,13 @@ function VerifyBanner({ email, verified }: { email: string; verified?: boolean }
       await api.sendVerificationEmail(email, server || location.origin);
       setState("sent");
     } catch {
-      setState("idle");
+      setState("failed");
     }
   }
   return (
     <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-panel px-4 py-2 text-[13px] text-body">
       <span className="min-w-0 flex-1">{t("verify.banner", { email })}</span>
+      {state === "failed" && <span className="text-bad">{t("verify.failed")}</span>}
       {state === "sent" ? (
         <span className="text-muted">{t("verify.sent")}</span>
       ) : (

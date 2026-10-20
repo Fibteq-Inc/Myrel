@@ -47,6 +47,7 @@ export const en = {
   "verify.banner": "Verify your email address. We sent a link to {email}. Until then you cannot accept invitations or use the cloud sandbox.",
   "verify.resend": "Send again",
   "verify.sent": "Sent. Check your inbox.",
+  "verify.failed": "The email could not be sent. Try again later.",
   "rail.main": "Main",
   "rail.home": "Myrel home",
   "rail.projects": "Projects",
