@@ -8,6 +8,7 @@ export * from "./loop";
 export * from "./mcp";
 export * from "./metering";
 export * from "./pricing";
+export * from "./proxy";
 export * from "./types";
 
 type ProviderDef = {

@@ -434,11 +434,14 @@ export class ThreadAgent extends Agent<Env> {
         if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
-        spec.model = model.model;
+        // An OpenAI-compatible model is reached through Myrel (see modelCaller): the key stays here
+        // and each call's cost is counted. OpenCode prices Anthropic models itself.
+        const proxied = model.model.kind === "openai";
+        spec.model = proxied ? { ...model.model, baseUrl: `${origin}${mcpPath}/model` } : model.model;
         spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId) }, context, infos, skills);
         spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
-        const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: model.apiKey, MYREL_MCP_TOKEN: token };
+        const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: proxied ? token : model.apiKey, MYREL_MCP_TOKEN: token };
         // A command's variables travel as secrets, so the stored spec only names them.
         const cloud: McpConnector[] = await Promise.all(
           connectors.map(async (c, i): Promise<McpConnector> => {
@@ -588,6 +591,22 @@ export class ThreadAgent extends Agent<Env> {
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
     const answer = await handleMcp(await this.agentToolset(), { name: "myrel", version: "1" }, body);
     return { ok: true, answer };
+  }
+
+  /**
+   * Who a model call from the running turn bills (/api/agent-mcp/:threadId/model/*): the project
+   * whose key the call uses and the turn's task. Only the running turn's token opens it. Callable over RPC.
+   */
+  async modelCaller(token: string): Promise<{ projectId: string; taskId: string } | null> {
+    const hash = this.getMeta("agent_token");
+    const task = this.runningTask();
+    if (!hash || !task || !sameHash(hash, await hashAgentToken(token))) return null;
+    return { projectId: this.ids().projectId, taskId: task.id };
+  }
+
+  /** What one model call through Myrel cost, added to its turn's usage. Callable over RPC. */
+  async modelCost(taskId: string, costUsd: number): Promise<void> {
+    await this.taskEvents(taskId, [{ type: "usage", inputTokens: 0, outputTokens: 0, costUsd }]);
   }
 
   /**

@@ -74,7 +74,7 @@ export function openAiCompatible(opts: OpenAiCompatibleOptions): ModelProvider {
           cachedInputTokens: data.usage.prompt_tokens_details?.cached_tokens ?? 0,
         },
         model: data.model,
-        ...costField(data.usage, res.headers),
+        ...reportedCost(data.usage, res.headers),
       };
     },
   };
@@ -88,7 +88,7 @@ const USAGE_COST_KEYS = ["cost", "cost_usd", "total_cost", "total_cost_usd"];
  * Fireworks' FireRouter runs on LiteLLM and sends x-litellm-response-cost in US
  * dollars; it picks a model per call, so its own figure beats any price table.
  */
-function costField(usage: Record<string, unknown> | undefined, headers: Headers = new Headers()): { costUsd?: number } {
+export function reportedCost(usage: Record<string, unknown> | undefined, headers: Headers = new Headers()): { costUsd?: number } {
   for (const key of USAGE_COST_KEYS) {
     const v = toUsd(usage?.[key]);
     if (v !== null) return { costUsd: v };
