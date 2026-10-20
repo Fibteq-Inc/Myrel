@@ -276,6 +276,16 @@ export const en = {
   "deleteProject.confirm": "Delete forever",
   "deleteProject.cancel": "Cancel",
   "deleteProject.deleting": "Deleting…",
+  "deleteAccount.title": "Delete account",
+  "deleteAccount.description": "Deletes your account and signs you out everywhere. Projects only you own are deleted with it; shared projects pass to another member.",
+  "deleteAccount.button": "Delete account",
+  "deleteAccount.confirmTitle": "Delete your account?",
+  "deleteAccount.confirmBody": "Your account {email}, your keys, devices and notifications, and every project only you own are deleted for good. This cannot be undone.",
+  "deleteAccount.confirm": "Delete my account",
+  "deleteAccount.deleting": "Deleting…",
+  "settings.legal": "Legal",
+  "legal.privacy": "Privacy policy",
+  "legal.terms": "Terms of use",
 
   // Usage
   "usage.title": "Usage",
