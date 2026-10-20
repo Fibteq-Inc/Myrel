@@ -50,10 +50,21 @@ export function planOfPrice(lookupKey: string | null | undefined): { plan: "pro"
 export const TRIAL_DAYS = 7;
 export const TEAM_MIN_SEATS = 2;
 
-/** Statuses that keep a paid plan. past_due covers Stripe's retries; when they end, Stripe cancels. */
-export const PAID_STATUSES = ["trialing", "active", "past_due"] as const;
-export function isPaid(status: string): boolean {
-  return (PAID_STATUSES as readonly string[]).includes(status);
+/**
+ * How long a past_due subscription keeps its plan while Stripe retries the payment. Myrel applies it
+ * itself, so the Stripe account's retry settings (shared with other Fibteq products) can stay as they are.
+ */
+export const PAST_DUE_GRACE_MS = 14 * 86400_000;
+
+/** Statuses that keep a paid plan; past_due only within the grace period when its start is known. */
+export function isPaid(status: string, pastDueSince?: number | null, now = Date.now()): boolean {
+  if (status === "trialing" || status === "active") return true;
+  return status === "past_due" && (pastDueSince == null || now - pastDueSince < PAST_DUE_GRACE_MS);
+}
+
+/** SQL for the same rule, on a billing_subscriptions row aliased as `alias`. */
+export function paidSql(alias: string, now = Date.now()): string {
+  return `(${alias}.status IN ('trialing', 'active') OR (${alias}.status = 'past_due' AND COALESCE(${alias}.past_due_since, ${now}) > ${now - PAST_DUE_GRACE_MS}))`;
 }
 
 /** First moment of the current calendar month, UTC. Monthly allowances reset then. */

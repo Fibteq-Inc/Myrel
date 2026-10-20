@@ -90,4 +90,11 @@ export type StripeSubscription = {
   };
 };
 
+/** The invoice fields Myrel reads; newer API versions moved the subscription under `parent`. */
+export type StripeInvoice = {
+  id: string;
+  subscription?: string | null;
+  parent?: { subscription_details?: { subscription?: string | null } | null } | null;
+};
+
 export type StripeEvent = { id: string; type: string; data: { object: unknown } };

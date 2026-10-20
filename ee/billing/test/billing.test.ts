@@ -154,6 +154,33 @@ describe("hosted billing", () => {
     expect(seats?.seats).toBe(2);
   });
 
+  it("keeps a past_due plan for 14 days, then ends it on the next failed payment", async () => {
+    const { token, userId } = await signUp();
+    for (const name of ["a", "b", "c"]) expect((await createProject(token, name)).status).toBe(201);
+    expect((await webhook(subscriptionEvent(userId, "myrel_pro_monthly", "past_due"))).status).toBe(200);
+    expect((await createProject(token, "d")).status).toBe(201);
+
+    // Fifteen days later the grace period is over: Free limits apply and the next failure cancels.
+    await env.DB.prepare("UPDATE billing_subscriptions SET past_due_since = ? WHERE user_id = ?").bind(Date.now() - 15 * 86400_000, userId).run();
+    expect((await createProject(token, "e")).status).toBe(402);
+    const calls: { url: string; method: string }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      calls.push({ url, method: init?.method ?? "GET" });
+      return Response.json(subscriptionEvent(userId, "myrel_pro_monthly", "canceled").data.object);
+    };
+    const failed = {
+      id: `evt_${crypto.randomUUID()}`,
+      type: "invoice.payment_failed",
+      data: { object: { id: "in_1", parent: { subscription_details: { subscription: `sub_${userId}` } } } },
+    };
+    expect((await webhook(failed)).status).toBe(200);
+    expect(calls).toEqual([{ url: `https://api.stripe.com/v1/subscriptions/sub_${userId}`, method: "DELETE" }]);
+    const row = await env.DB.prepare("SELECT status, past_due_since FROM billing_subscriptions WHERE user_id = ?").bind(userId).first();
+    expect(row).toEqual({ status: "canceled", past_due_since: null });
+  });
+
   it("opens a Checkout with a seven-day trial and tax for a first subscription", async () => {
     const { token } = await signUp();
     const calls: { url: string; body: string }[] = [];
