@@ -235,7 +235,19 @@ describe("skills API", () => {
     const mine = await add("/api/account/skills", "mine", "Only mine.");
     const off = (await add("/api/account/skills", "off", "Turned off.")) as { skill: Skill };
     await json(api(`/api/account/skills/${off.skill.id}`, { method: "PATCH", token: me.token, body: { enabled: false } }));
-    expect(mine).toBeTruthy();
+    const shared = (await json<{ skills: Skill[] }>(api("/api/account/skills", { token: me.token }))).skills.find((s) => s.name === "shared")!;
+    // Personal skills start off in each project until turned on there.
+    expect((await turnSkills(env, { projectId: project.id, userId: me.id })).map((s) => s.name)).toEqual(["shared"]);
+    const personal = `/api/projects/${project.id}/personal`;
+    for (const s of [(mine as { skill: Skill }).skill, off.skill, shared]) {
+      await json(api(`${personal}/skills/${s.id}`, { method: "PUT", token: me.token, body: { on: true } }));
+    }
+    const listed = await json<{ skills: (Skill & { inProject: boolean })[] }>(api(personal, { token: me.token }));
+    expect(listed.skills.map((s) => [s.name, s.inProject])).toEqual([
+      ["mine", true],
+      ["off", true],
+      ["shared", true],
+    ]);
 
     const skills = await turnSkills(env, { projectId: project.id, userId: me.id });
     expect(skills.map((s) => [s.name, s.description])).toEqual([
@@ -244,5 +256,7 @@ describe("skills API", () => {
     ]);
     // A thread that works for someone else does not get this person's own skills.
     expect((await turnSkills(env, { projectId: project.id, userId: null })).map((s) => s.name)).toEqual(["shared"]);
+    await json(api(`${personal}/skills/${(mine as { skill: Skill }).skill.id}`, { method: "PUT", token: me.token, body: { on: false } }));
+    expect((await turnSkills(env, { projectId: project.id, userId: me.id })).map((s) => s.name)).toEqual(["shared"]);
   });
 });

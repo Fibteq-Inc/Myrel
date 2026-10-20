@@ -313,6 +313,22 @@ export class ApiClient {
     ).connector;
   }
 
+  // --- personal skills and connectors in a project ---
+
+  /** The caller's own skills and connectors, each saying whether it is on in this project (they start off). */
+  getPersonalInProject(projectId: string) {
+    return this.request<{ skills: (Skill & { inProject: boolean })[]; connectors: (Connector & { inProject: boolean })[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/personal`,
+    );
+  }
+
+  async setPersonalInProject(projectId: string, kind: "skills" | "connectors", id: string, on: boolean) {
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/personal/${kind}/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: { on },
+    });
+  }
+
   // --- skills ---
 
   /** A person's own skills, or a project's when `projectId` is given. */
