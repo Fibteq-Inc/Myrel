@@ -1,21 +1,37 @@
 import { LOCALE_NAMES, LOCALES } from "@altair/i18n";
 import { useI18n } from "@altair/i18n/react";
-import { Check } from "lucide-react-native";
+import { Check, ExternalLink } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Button } from "../../components/ui";
+import * as WebBrowser from "expo-web-browser";
+import { Button, errorMessage } from "../../components/ui";
 import { useSession } from "../../lib/session";
 import { colors, radius } from "../../theme";
+
+// The app's own policies, published by Fibteq; a self-hosted server's operator sets that server's terms.
+const LEGAL_SITE = "https://altair.fibteq.io";
 
 /** Account, language and server, like the web settings' Account page. */
 export default function SettingsScreen() {
   const { t, locale, setLocale } = useI18n();
-  const { user, server, info, signOut } = useSession();
+  const { user, server, info, signOut, deleteAccount } = useSession();
 
   function confirmSignOut() {
     Alert.alert(t("mobile.signOutConfirm", { email: user?.email ?? "" }), undefined, [
       { text: t("mobile.cancel"), style: "cancel" },
       { text: t("rail.signOut"), style: "destructive", onPress: () => void signOut() },
+    ]);
+  }
+
+  function confirmDelete() {
+    Alert.alert(t("deleteAccount.confirmTitle"), t("deleteAccount.confirmBody", { email: user?.email ?? "" }), [
+      { text: t("mobile.cancel"), style: "cancel" },
+      {
+        text: t("deleteAccount.confirm"),
+        style: "destructive",
+        onPress: () =>
+          void deleteAccount().catch((err: unknown) => Alert.alert(errorMessage(err, t("common.error")))),
+      },
     ]);
   }
 
@@ -46,10 +62,30 @@ export default function SettingsScreen() {
         <Text style={styles.hint}>{t("server.current", { host: server.replace(/^https?:\/\//, "") })}</Text>
       </Section>
 
+      <Section title={t("settings.legal")}>
+        <LegalLink label={t("legal.privacy")} url={`${LEGAL_SITE}/privacy/`} />
+        <LegalLink label={t("legal.terms")} url={`${LEGAL_SITE}/terms/`} />
+      </Section>
+
       <Button variant="ghost" onPress={confirmSignOut}>
         {t("rail.signOut")}
       </Button>
+
+      <Section title={t("deleteAccount.title")} hint={t("deleteAccount.description")}>
+        <Pressable onPress={confirmDelete} accessibilityRole="button" style={styles.option}>
+          <Text style={[styles.value, { color: colors.bad }]}>{t("deleteAccount.button")}</Text>
+        </Pressable>
+      </Section>
     </ScrollView>
+  );
+}
+
+function LegalLink({ label, url }: { label: string; url: string }) {
+  return (
+    <Pressable onPress={() => void WebBrowser.openBrowserAsync(url)} accessibilityRole="link" style={styles.option}>
+      <Text style={styles.value}>{label}</Text>
+      <ExternalLink size={16} color={colors.subtle} />
+    </Pressable>
   );
 }
 

@@ -203,6 +203,52 @@ export function ThreadPanel({
               </span>
             </div>
 
+            <div
+              role="tablist"
+              aria-label={t("threadPanel.tools")}
+              className="mr-1 flex flex-none items-center gap-0.5 rounded-lg border border-line p-0.5"
+            >
+              {sections.map((tab, i) => {
+                const selected = (tool ?? CONVERSATION) === tab.id;
+                const label = tab.count ? `${tab.label} (${tab.count})` : tab.label;
+                return (
+                  <button
+                    key={tab.id}
+                    id={`thread-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls="thread-tabpanel"
+                    aria-label={label}
+                    tabIndex={selected ? 0 : -1}
+                    title={label}
+                    onClick={() => openTool(tab.id)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+                      e.preventDefault();
+                      const next = sections[(i + (e.key === "ArrowRight" ? 1 : -1) + sections.length) % sections.length]!;
+                      openTool(next.id);
+                      document.getElementById(`thread-tab-${next.id}`)?.focus();
+                    }}
+                    className={cn(
+                      "relative flex size-7 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                      selected ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg",
+                    )}
+                  >
+                    <tab.icon size={15} aria-hidden="true" />
+                    {tab.count ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute -right-1 -top-1 min-w-3.5 rounded-full bg-raised px-[3px] text-center font-mono text-[9px] leading-[14px] text-muted ring-1 ring-line"
+                      >
+                        {tab.count}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
             <IconButton
               type="button"
               onClick={() => emit({ type: "thread.resolve", threadId: thread.id, resolved: !thread.resolved })}
@@ -231,45 +277,6 @@ export function ThreadPanel({
               <X size={17} />
             </IconButton>
           </header>
-
-          <div
-            role="tablist"
-            aria-label={t("threadPanel.tools")}
-            className="@container flex h-11 flex-none items-center gap-0.5 overflow-x-auto border-b border-line px-2.5"
-          >
-            {sections.map((tab, i) => {
-              const selected = (tool ?? CONVERSATION) === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  id={`thread-tab-${tab.id}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-controls="thread-tabpanel"
-                  tabIndex={selected ? 0 : -1}
-                  title={tab.label}
-                  onClick={() => openTool(tab.id)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-                    e.preventDefault();
-                    const next = sections[(i + (e.key === "ArrowRight" ? 1 : -1) + sections.length) % sections.length]!;
-                    openTool(next.id);
-                    document.getElementById(`thread-tab-${next.id}`)?.focus();
-                  }}
-                  className={cn(
-                    "flex h-8 flex-none items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
-                    selected ? "bg-hover font-medium text-fg" : "text-muted hover:text-fg",
-                  )}
-                >
-                  <tab.icon size={14} aria-hidden="true" />
-                  {/* On a narrow panel only the open tab keeps its name. */}
-                  <span className={selected ? "" : "@max-[600px]:sr-only"}>{tab.label}</span>
-                  {tab.count ? <span className="font-mono text-[11px] text-subtle">{tab.count}</span> : null}
-                </button>
-              );
-            })}
-          </div>
 
           <div id="thread-tabpanel" role="tabpanel" aria-labelledby={`thread-tab-${tool ?? CONVERSATION}`} className="flex min-h-0 flex-1">
             {/* The conversation stays mounted so a half-written reply survives a look at another tab. */}

@@ -161,12 +161,14 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | Secret | Needed for | Required |
 |---|---|---|
 | `BETTER_AUTH_SECRET` | Signing sessions and tokens | Always |
+| `KEY_ENCRYPTION_SECRET` | Encrypting model API keys people save in Altair. Falls back to `BETTER_AUTH_SECRET`; set it once and never change it, or saved keys can no longer be read | Recommended |
 | `FIREWORKS_API_KEY` | Agents, when `LLM_PROVIDER` is `fireworks` | For that provider |
 | `ANTHROPIC_API_KEY` | Agents, when `LLM_PROVIDER` is `anthropic` | For that provider |
 | `OPENAI_API_KEY` | Agents, when `LLM_PROVIDER` is `openai` | For that provider |
 | `AI_GATEWAY_TOKEN` | Calling an authenticated AI Gateway | Only with `AI_GATEWAY_URL` on an authenticated gateway |
 | `ARTIFACT_SIGNING_SECRET` | Signing artifact links; set the same value on the artifact Worker | To view artifacts |
 | `VAPID_PRIVATE_KEY` | Browser push notifications (with `VAPID_PUBLIC_KEY`) | No |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` | GitHub integration (see [GitHub App](#github-app)) | No |
 | `EXPO_ACCESS_TOKEN` | Mobile push, only if Expo enhanced push security is on | No |
 
 ### Variables
@@ -186,8 +188,9 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
 | `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Altair <altair@example.com>`. Empty turns email off. |
-| `VAPID_PUBLIC_KEY` | empty | Web Push public key. |
-| `VAPID_SUBJECT` | empty | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | Fibteq's GitHub App | Your GitHub App's id and URL name. GitHub stays off until all GitHub secrets are set too. |
+| `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
+| `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
 
 ### Bindings
 
@@ -211,6 +214,14 @@ supply the D1 id.
 Each feature that needs extra setup gets a section here. Contributors: when a
 change adds a secret, variable or binding, add it to the reference tables above
 and describe the setup in a section below.
+
+### GitHub App
+
+Each Altair server needs its own GitHub App for connecting repositories and
+for threads to open pull requests. Run `node scripts/create-github-app.mjs`
+with `--origin` set to your Altair URL, or follow the manual steps in
+[`apps/api/src/github/README.md`](../apps/api/src/github/README.md). Put the
+app id and slug in `vars` and the four secrets above on the Worker.
 
 ### Cloudflare AI Gateway
 
