@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { catalogs, createTranslator, LOCALES, matchLocale, relativeTime } from "../src";
 
 const params = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
@@ -39,6 +39,16 @@ describe("createTranslator", () => {
     expect(en("threadCard.replies", { count: 3 })).toBe("3 replies");
     expect(en("server.current", { host: "a.dev" })).toBe("Server: a.dev");
     expect(createTranslator("tr")("threadCard.replies", { count: 3 })).toBe("3 yanıt");
+  });
+  it("picks plural forms without Intl.PluralRules (Hermes)", () => {
+    vi.stubGlobal("Intl", { ...Intl, PluralRules: undefined });
+    try {
+      const en = createTranslator("en");
+      expect(en("threadCard.replies", { count: 1 })).toBe("1 reply");
+      expect(en("threadCard.replies", { count: 3 })).toBe("3 replies");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
   it("leaves unknown parameters in place", () => {
     expect(createTranslator("en")("server.current")).toBe("Server: {host}");
