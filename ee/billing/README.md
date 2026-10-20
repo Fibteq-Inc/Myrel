@@ -53,7 +53,8 @@ and coordinator turns over the Free limits are refused.
    (The products, prices and webhook can also be created in the Stripe dashboard; the price
    lookup keys in `src/plans.ts` are what matter.)
 3. In Stripe: Settings > Billing > Subscriptions and emails, retry failed payments for 14 days,
-   then cancel the subscription. Make the setup script's portal configuration the default.
+   then cancel the subscription. The billing portal uses the configuration with metadata
+   `app=myrel`, so other products in the same Stripe account keep their default portal.
 4. Stripe Tax: the head office address is set; add a registration for every place Fibteq must
    collect tax (ask the accountant about the EU and Turkey). Without registrations, Stripe Tax
    charges no tax.

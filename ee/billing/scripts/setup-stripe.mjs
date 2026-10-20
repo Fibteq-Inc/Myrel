@@ -89,7 +89,9 @@ for (const product of PRODUCTS) {
 
 const portal = await api("POST", "/billing_portal/configurations", {
   business_profile: { headline: "Myrel plan and billing" },
-  default_return_url: `${origin}/`,
+  default_return_url: `${origin}/settings/billing`,
+  // The server finds this configuration by its metadata, so the account's default stays as it is.
+  metadata: { app: "myrel" },
   features: {
     customer_update: { enabled: true, allowed_updates: ["email", "address", "tax_id", "name"] },
     invoice_history: { enabled: true },
@@ -103,7 +105,7 @@ const portal = await api("POST", "/billing_portal/configurations", {
     },
   },
 });
-console.log("billing portal configuration", portal.id, "(make it the default in the Stripe dashboard if it is not)");
+console.log("billing portal configuration", portal.id);
 
 const hook = await api("POST", "/webhook_endpoints", {
   url: `${origin}/api/billing/webhook`,
