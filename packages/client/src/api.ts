@@ -130,7 +130,8 @@ export class ApiClient {
 
   // --- auth (Better Auth endpoints) ---
 
-  signUp(input: { email: string; password: string; name: string }) {
+  /** `acceptTerms` is required when the server's info lists legal documents. */
+  signUp(input: { email: string; password: string; name: string; acceptTerms?: boolean }) {
     return this.request<{ user: SessionUser }>("/api/auth/sign-up/email", { method: "POST", body: input });
   }
 

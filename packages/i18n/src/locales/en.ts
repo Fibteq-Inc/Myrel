@@ -31,6 +31,9 @@ export const en = {
   "login.toSignUp": "No account? Sign up",
   "login.toSignIn": "Have an account? Sign in",
   "login.signUpClosed": "New sign-ups are closed on this server.",
+  "login.accept.before": "I accept the ",
+  "login.accept.and": " and the ",
+  "login.accept.after": ".",
 
   // Server picker
   "server.current": "Server: {host}",

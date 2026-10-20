@@ -108,7 +108,7 @@ describe("ServerInfo", () => {
     const { API_VERSION, ServerInfo } = await import("../src/server");
     const info = { app: "myrel", apiVersion: API_VERSION, name: "Myrel", auth: { emailPassword: true } };
     // Servers that predate the sign-up switch always allowed sign-up, and none sold plans.
-    expect(ServerInfo.parse(info)).toEqual({ ...info, auth: { emailPassword: true, signUp: true }, billing: false });
+    expect(ServerInfo.parse(info)).toEqual({ ...info, auth: { emailPassword: true, signUp: true }, billing: false, legal: null });
     expect(ServerInfo.safeParse({ ...info, app: "other" }).success).toBe(false);
   });
 });

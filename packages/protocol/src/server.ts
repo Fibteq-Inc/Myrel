@@ -20,5 +20,7 @@ export const ServerInfo = z.object({
   }),
   /** Whether this server sells plans (the hosted service); self-hosted servers have none. */
   billing: z.boolean().default(false),
+  /** Documents a new account must accept; sign-up sends `acceptTerms: true` when this is set. */
+  legal: z.object({ terms: z.string().url(), privacy: z.string().url(), version: z.string() }).nullable().default(null),
 });
 export type ServerInfo = z.infer<typeof ServerInfo>;

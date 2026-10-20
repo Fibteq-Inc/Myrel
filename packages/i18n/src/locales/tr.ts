@@ -27,6 +27,9 @@ export const tr: Catalog = {
   "login.toSignUp": "Hesabın yok mu? Kaydol",
   "login.toSignIn": "Hesabın var mı? Giriş yap",
   "login.signUpClosed": "Bu sunucuda yeni kayıtlar kapalı.",
+  "login.accept.before": "",
+  "login.accept.and": " ve ",
+  "login.accept.after": " metinlerini okudum ve kabul ediyorum.",
 
   // Server picker
   "server.current": "Sunucu: {host}",

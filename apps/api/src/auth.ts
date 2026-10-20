@@ -3,6 +3,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { bearer } from "better-auth/plugins/bearer";
+import { legalLinks } from "./extensions";
 import { admitNewUser } from "./instance";
 import { trustedOrigins } from "./origins";
 
@@ -19,17 +20,30 @@ export function createAuth(env: Env) {
     user: {
       additionalFields: {
         role: { type: "string", required: false, defaultValue: "user", input: false },
+        termsAcceptedAt: { type: "date", required: false, input: false },
+        termsVersion: { type: "string", required: false, input: false },
       },
     },
     databaseHooks: {
       user: {
         create: {
-          before: async (newUser) => {
+          before: async (newUser, ctx) => {
             const admission = await admitNewUser(env, newUser.email);
             if (!admission.ok) {
               throw new APIError("FORBIDDEN", { message: "Sign-up is disabled on this server.", code: "SIGNUP_DISABLED" });
             }
-            return { data: { ...newUser, role: admission.role } };
+            // The server's terms, when it has any, are accepted at sign-up; the time is kept as the record.
+            const accepted = (ctx?.body as { acceptTerms?: unknown } | undefined)?.acceptTerms === true;
+            const legal = legalLinks(env, "http://localhost");
+            if (legal && !accepted) {
+              throw new APIError("BAD_REQUEST", {
+                message: "Accept the terms of use and privacy policy to create an account.",
+                code: "TERMS_NOT_ACCEPTED",
+              });
+            }
+            // Which version was accepted, so a later version can ask again.
+            const terms = legal && accepted ? { termsAcceptedAt: new Date(), termsVersion: legal.version } : {};
+            return { data: { ...newUser, role: admission.role, ...terms } };
           },
         },
       },

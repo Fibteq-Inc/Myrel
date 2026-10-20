@@ -7,6 +7,8 @@
 /** Whether something may happen now, and if not, the reason to show the person. */
 export type LimitCheck = { ok: true } | { ok: false; reason: string };
 
+export type LegalLinks = { terms: string; privacy: string; version: string };
+
 export type Extensions = {
   /** Whether this server sells plans, so clients show a billing page. */
   billing?: boolean;
@@ -16,6 +18,11 @@ export type Extensions = {
   canUseSandbox?: (env: Env, projectId: string) => Promise<LimitCheck>;
   /** Before a coordinator turn. A project with its own model key is the extension's to exempt. */
   canUseCoordinator?: (env: Env, projectId: string) => Promise<LimitCheck>;
+  /**
+   * The terms and privacy policy people accept when they sign up: URLs, or paths on this server, and
+   * a version (such as their effective date) recorded with each acceptance.
+   */
+  legal?: LegalLinks;
 };
 
 const ALLOWED: LimitCheck = { ok: true };
@@ -39,4 +46,17 @@ export async function canUseCoordinator(env: Env, projectId: string): Promise<Li
 
 export function sellsPlans(): boolean {
   return current.billing ?? false;
+}
+
+/**
+ * The terms and privacy policy new accounts must accept, as absolute URLs, or null when this
+ * server has none. TERMS_URL and PRIVACY_URL (both, with LEGAL_VERSION) take precedence over an extension's.
+ */
+export function legalLinks(env: Env, origin: string): LegalLinks | null {
+  const links =
+    env.TERMS_URL && env.PRIVACY_URL
+      ? { terms: env.TERMS_URL, privacy: env.PRIVACY_URL, version: env.LEGAL_VERSION || "1" }
+      : current.legal;
+  if (!links) return null;
+  return { terms: new URL(links.terms, origin).href, privacy: new URL(links.privacy, origin).href, version: links.version };
 }

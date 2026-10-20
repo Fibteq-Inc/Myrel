@@ -92,6 +92,13 @@
       "when": 1792498338226,
       "tag": "0012_billing_past_due",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792498763878,
+      "tag": "0013_terms_accepted",
+      "breakpoints": true
     }
   ]
 }
