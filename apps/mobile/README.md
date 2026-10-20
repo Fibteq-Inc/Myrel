@@ -39,9 +39,10 @@ works the same, just without pushes.
 Mobile builds are separate from the Cloudflare deploy. One-time setup, done by the account owner:
 
 1. Create an [Expo account](https://expo.dev/signup) and run `npx eas-cli login`.
-2. In `apps/mobile`, run `npx eas-cli init` and put the project id it prints in
-   `EAS_PROJECT_ID` (and your Expo account or organization in `EAS_OWNER`), e.g. as EAS
-   environment variables.
+2. The hosted app is already linked to `@fibteqs-organization/altair` in `app.config.ts`.
+   For your own build, run `npx eas-cli init` in `apps/mobile` and set `EAS_PROJECT_ID` and
+   `EAS_OWNER` to the project id and account it prints (dynamic config can't be written by
+   `eas init` itself).
 3. iOS: an Apple Developer account. EAS creates the certificates and the push key
    (`npx eas-cli credentials`).
 4. Android: a Firebase project's FCM V1 service account key, uploaded with `npx eas-cli credentials`.
