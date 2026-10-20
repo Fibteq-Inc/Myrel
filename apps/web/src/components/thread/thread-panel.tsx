@@ -1,6 +1,6 @@
-import { threadMessages, threadPullRequests, threadTasks } from "@altair/client";
-import { useT } from "@altair/i18n/react";
-import { planChecklist } from "@altair/protocol";
+import { threadMessages, threadPullRequests, threadTasks } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
+import { planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";

@@ -1,6 +1,6 @@
-import type { Translate } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
-import type { Runner } from "@altair/protocol";
+import type { Translate } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
+import type { Runner } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Check, ChevronRight, Folder, Home } from "lucide-react";
 import { useState } from "react";

@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import { DECISION_LANG, parseDecision } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import { DECISION_LANG, parseDecision } from "@myrel/protocol";
 import { Check, Copy } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -34,7 +34,7 @@ export function MessageMarkdown({ body, decision }: { body: string; decision?: D
     ),
   };
   return (
-    <div className="prose-altair">
+    <div className="prose-myrel">
       <Markdown remarkPlugins={[remarkGfm]} components={components}>
         {body}
       </Markdown>

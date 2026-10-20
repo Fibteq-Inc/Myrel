@@ -1,4 +1,4 @@
-import { type Artifact, type Message, planChecklist, type Reaction } from "@altair/protocol";
+import { type Artifact, type Message, planChecklist, type Reaction } from "@myrel/protocol";
 import { type ReactNode, useMemo } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

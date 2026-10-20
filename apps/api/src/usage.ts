@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import { createId, type MessageStats, type Runtime, type TaskStats } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { createId, type MessageStats, type Runtime, type TaskStats } from "@myrel/protocol";
 import { type CallRecord, costMicros, DEFAULT_PRICES, type LlmEnv, metered, type ModelProvider, parsePrices, priceFor } from "./llm";
 
 /** Who a turn's model calls are billed to. */

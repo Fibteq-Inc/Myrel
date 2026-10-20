@@ -1,5 +1,5 @@
-import { LOCALE_NAMES, LOCALES } from "@altair/i18n";
-import { useI18n, useT } from "@altair/i18n/react";
+import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";

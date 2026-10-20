@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import { USAGE_RANGES } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import { USAGE_RANGES } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { BarChart3 } from "lucide-react";

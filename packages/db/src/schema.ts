@@ -105,7 +105,7 @@ export const projects = sqliteTable("projects", {
   llmModel: text("llm_model"),
   /** Key the project's agents call the model with; null = an instance key for the provider. */
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
-  /** Where tasks run: auto, local or cloud (see TaskTarget in @altair/protocol). */
+  /** Where tasks run: auto, local or cloud (see TaskTarget in @myrel/protocol). */
   taskTarget: text("task_target").notNull().default("auto"),
   ...timestamps,
 });

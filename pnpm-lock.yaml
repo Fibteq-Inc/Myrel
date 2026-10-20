@@ -20,13 +20,13 @@ importers:
 
   apps/api:
     dependencies:
-      '@altair/db':
+      '@myrel/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@altair/protocol':
+      '@myrel/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@altair/runner-core':
+      '@myrel/runner-core':
         specifier: workspace:*
         version: link:../../packages/runner-core
       agents:
@@ -60,7 +60,7 @@ importers:
 
   apps/artifacts:
     dependencies:
-      '@altair/protocol':
+      '@myrel/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
     devDependencies:
@@ -79,13 +79,13 @@ importers:
 
   apps/mobile:
     dependencies:
-      '@altair/client':
+      '@myrel/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@altair/i18n':
+      '@myrel/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@altair/protocol':
+      '@myrel/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@react-native-async-storage/async-storage':
@@ -176,13 +176,13 @@ importers:
 
   apps/web:
     dependencies:
-      '@altair/client':
+      '@myrel/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@altair/i18n':
+      '@myrel/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@altair/protocol':
+      '@myrel/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@tanstack/react-query':
@@ -231,7 +231,7 @@ importers:
 
   packages/client:
     dependencies:
-      '@altair/protocol':
+      '@myrel/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
@@ -263,7 +263,7 @@ importers:
 
   packages/myrel-runner:
     devDependencies:
-      '@altair/protocol':
+      '@myrel/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@types/node':
@@ -7478,7 +7478,9 @@ snapshots:
       metro-runtime: 0.87.1
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.88.0': {}
 

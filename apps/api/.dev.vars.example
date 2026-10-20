@@ -10,7 +10,7 @@ FIREWORKS_API_KEY=
 # Use the same secret in apps/artifacts/.dev.vars.
 ARTIFACTS_URL=http://localhost:8788
 ARTIFACT_SIGNING_SECRET=change-me-to-another-long-random-string
-# Optional notification channels (see wrangler.jsonc). Email uses the EMAIL binding; locally sends are only simulated. Generate VAPID keys with `pnpm --filter @altair/api vapid`.
-# EMAIL_FROM=Myrel <altair@example.com>
+# Optional notification channels (see wrangler.jsonc). Email uses the EMAIL binding; locally sends are only simulated. Generate VAPID keys with `pnpm --filter @myrel/api vapid`.
+# EMAIL_FROM=Myrel <myrel@example.com>
 # VAPID_PUBLIC_KEY=
 # VAPID_PRIVATE_KEY=

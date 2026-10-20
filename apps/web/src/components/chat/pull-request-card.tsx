@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { PullRequest } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { PullRequest } from "@myrel/protocol";
 import {
   CircleCheck,
   CircleX,

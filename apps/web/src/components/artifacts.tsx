@@ -1,5 +1,5 @@
-import type { Artifact, ArtifactRef, Thread } from "@altair/protocol";
-import { useT } from "@altair/i18n/react";
+import type { Artifact, ArtifactRef, Thread } from "@myrel/protocol";
+import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {

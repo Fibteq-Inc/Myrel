@@ -1,9 +1,9 @@
-import { API_VERSION, ServerInfo } from "@altair/protocol";
+import { API_VERSION, ServerInfo } from "@myrel/protocol";
 import type { KeyValueStore, Platform } from "./platform";
 import type { TokenStore } from "./token-store";
 
 /**
- * Turns what a user types ("altair.acme.com", "https://altair.acme.com/")
+ * Turns what a user types ("myrel.acme.com", "https://myrel.acme.com/")
  * into an origin. Plain http is only accepted for localhost and LAN-style
  * hosts typed with an explicit scheme.
  */

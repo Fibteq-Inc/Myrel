@@ -1,4 +1,4 @@
-import type { NotificationConfig, NotificationSettings, Project } from "@altair/protocol";
+import type { NotificationConfig, NotificationSettings, Project } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { b64urlDecode, b64urlEncode } from "../src/notifications/webpush";
 import { emails, outbound, pushStatus, resetFakeModel } from "./fake-llm";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);

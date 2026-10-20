@@ -1,4 +1,4 @@
-import { type ClientEventInput, type Message, ServerEvent } from "@altair/protocol";
+import { type ClientEventInput, type Message, ServerEvent } from "@myrel/protocol";
 
 export type SocketStatus = "connecting" | "open" | "closed";
 

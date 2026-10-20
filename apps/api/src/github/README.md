@@ -22,19 +22,19 @@ The manual steps below do the same thing by hand.
 
 On GitHub: **Settings → Developer settings → GitHub Apps → New GitHub App** (for an
 organization: **Organization settings → Developer settings → GitHub Apps**).
-Replace `https://altair.example.com` with your server's public address.
+Replace `https://myrel.example.com` with your server's public address.
 
 | Field | Value |
 | --- | --- |
 | GitHub App name | Anything, e.g. `Fibteq Myrel`. Its URL name becomes the slug. |
-| Homepage URL | `https://altair.example.com` |
-| Callback URL | `https://altair.example.com/api/github/callback` |
+| Homepage URL | `https://myrel.example.com` |
+| Callback URL | `https://myrel.example.com/api/github/callback` |
 | Expire user authorization tokens | Either. Myrel does not keep user tokens. |
 | Request user authorization (OAuth) during installation | **On** (Myrel uses it to check who installed the app) |
 | Setup URL | Leave empty (GitHub disables it when the option above is on) |
 | Redirect on update | On |
 | Webhook → Active | On |
-| Webhook URL | `https://altair.example.com/api/github/webhook` |
+| Webhook URL | `https://myrel.example.com/api/github/webhook` |
 | Webhook secret | A long random string (`openssl rand -hex 32`) |
 
 **Repository permissions**
@@ -64,12 +64,12 @@ After creating it, on the app's page:
 ## 2. Give the Worker the settings
 
 All six are secrets, so a deploy from `wrangler.jsonc` never wipes them. In the Cloudflare
-dashboard: **Workers & Pages → altair → Settings → Variables and Secrets → Add**, type
+dashboard: **Workers & Pages → myrel → Settings → Variables and Secrets → Add**, type
 **Secret**. Or with wrangler from `apps/api`:
 
 ```sh
 wrangler secret put GITHUB_APP_ID           # e.g. 1234567
-wrangler secret put GITHUB_APP_SLUG         # e.g. fibteq-altair
+wrangler secret put GITHUB_APP_SLUG         # e.g. fibteq-myrel
 wrangler secret put GITHUB_CLIENT_ID        # e.g. Iv23li...
 wrangler secret put GITHUB_CLIENT_SECRET
 wrangler secret put GITHUB_WEBHOOK_SECRET   # the webhook secret from step 1

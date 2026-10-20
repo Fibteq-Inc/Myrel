@@ -1,12 +1,12 @@
-import { createDb, schema } from "@altair/db";
-import { type CliId, type ProjectWorkspace, type Runner, type RunnerFeature, RunnerInfo } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { type CliId, type ProjectWorkspace, type Runner, type RunnerFeature, RunnerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 
 const { runners, projectWorkspaces } = schema;
 
 /** Header the API Worker sets after checking a runner's token. The RunnerAgent trusts it. */
-export const RUNNER_ID_HEADER = "x-altair-runner-id";
+export const RUNNER_ID_HEADER = "x-myrel-runner-id";
 
 /** Pairing codes are valid this long. */
 export const PAIRING_TTL_MS = 10 * 60 * 1000;

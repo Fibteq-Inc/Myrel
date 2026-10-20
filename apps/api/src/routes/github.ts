@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import type { GithubRepo, GithubStatus } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import type { GithubRepo, GithubStatus } from "@myrel/protocol";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import {

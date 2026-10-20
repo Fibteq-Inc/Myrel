@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Runner, RunnerPairingCode } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Runner, RunnerPairingCode } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Folder, FolderPlus, MonitorSmartphone, Plus, Trash2, X } from "lucide-react";

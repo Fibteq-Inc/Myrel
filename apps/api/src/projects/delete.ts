@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { fileKey } from "../agents/knowledge";

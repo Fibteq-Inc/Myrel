@@ -1,4 +1,4 @@
-import { CreateRoutineInput, UpdateRoutineInput } from "@altair/protocol";
+import { CreateRoutineInput, UpdateRoutineInput } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { type AppEnv, requireUser } from "../middleware";

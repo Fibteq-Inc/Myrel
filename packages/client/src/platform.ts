@@ -24,7 +24,7 @@ export interface Platform {
 }
 
 /** Key/value store over Web Storage; falls back to memory when storage is blocked. */
-export function webStorage(prefix = "altair:"): KeyValueStore {
+export function webStorage(prefix = "myrel:"): KeyValueStore {
   const memory = new Map<string, string>();
   const ls = (() => {
     try {

@@ -1,4 +1,4 @@
-import type { Message, Routine, Thread } from "@altair/protocol";
+import type { Message, Routine, Thread } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";

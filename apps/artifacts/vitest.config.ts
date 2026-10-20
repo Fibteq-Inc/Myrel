@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      miniflare: { bindings: { ARTIFACT_SIGNING_SECRET: "test-signing-secret", APP_ORIGINS: "https://altair.test" } },
+      miniflare: { bindings: { ARTIFACT_SIGNING_SECRET: "test-signing-secret", APP_ORIGINS: "https://myrel.test" } },
     }),
   ],
 });

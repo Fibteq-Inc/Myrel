@@ -1,5 +1,5 @@
-import { createDb, schema } from "@altair/db";
-import { createId, type NotificationKind } from "@altair/protocol";
+import { createDb, schema } from "@myrel/db";
+import { createId, type NotificationKind } from "@myrel/protocol";
 import { eq, inArray } from "drizzle-orm";
 import { emailEnabled, sendEmail, sendExpoPush, vapidKeys } from "./channels";
 import { sendWebPush } from "./webpush";

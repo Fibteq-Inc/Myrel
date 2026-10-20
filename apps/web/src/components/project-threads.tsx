@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Thread } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Thread } from "@myrel/protocol";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, Search, SquarePen } from "lucide-react";
 import { useMemo, useState } from "react";

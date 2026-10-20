@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   type CliId,
   RUNNER_PROTOCOL_VERSION,
@@ -6,7 +6,7 @@ import {
   type RunnerFolder,
   RunnerToServer,
   type ServerToRunner,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { notifyRunnerProjects, parseInfo, RUNNER_ID_HEADER } from "../runners";

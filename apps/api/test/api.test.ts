@@ -1,11 +1,11 @@
-import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@altair/protocol";
+import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { createAuth } from "../src/auth";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 
 function api(path: string, init: RequestInit & { token?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -158,7 +158,7 @@ describe("GET /api/info", () => {
     const res = await api("/api/info");
     expect(res.status).toBe(200);
     expect(ServerInfo.parse(await res.json())).toMatchObject({
-      app: "altair",
+      app: "myrel",
       apiVersion: API_VERSION,
       name: "Myrel",
       auth: { emailPassword: true, signUp: true },

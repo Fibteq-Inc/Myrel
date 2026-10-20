@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { InviteRole, ProjectRole, ProviderId, TaskTarget } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { InviteRole, ProjectRole, ProviderId, TaskTarget } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { X } from "lucide-react";

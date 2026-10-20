@@ -1,6 +1,6 @@
-import { artifactList } from "@altair/client";
-import { useT } from "@altair/i18n/react";
-import { USAGE_RANGES } from "@altair/protocol";
+import { artifactList } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
+import { USAGE_RANGES } from "@myrel/protocol";
 import { Blocks } from "lucide-react";
 import { useState } from "react";
 import { useProjectContext } from "../lib/project-context";

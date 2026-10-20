@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   AddProjectRepoInput,
   CreateInviteInput,
@@ -13,7 +13,7 @@ import {
   SetWorkspaceInput,
   TaskTarget,
   UpdateProjectSettingsInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";

@@ -11,7 +11,7 @@ import { launchdPlist, startupScript, systemdUnit } from "../src/service";
 
 describe("listDirs", () => {
   it("lists visible folders only, sorted, with the parent", async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), "altair-dirs-")));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "myrel-dirs-")));
     await mkdir(join(root, "beta"));
     await mkdir(join(root, "Alpha"));
     await mkdir(join(root, ".hidden"));
@@ -34,13 +34,13 @@ describe("listDirs", () => {
 
 describe("shareableFolder", () => {
   it("returns the real path of a folder", async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), "altair-share-")));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "myrel-share-")));
     await mkdir(join(root, "app"));
     expect(await shareableFolder(join(root, "app", "..", "app"))).toBe(join(root, "app"));
   });
 
   it("refuses files, missing folders, the home folder and the root", async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), "altair-share-")));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "myrel-share-")));
     await writeFile(join(root, "file.txt"), "x");
     await expect(shareableFolder(join(root, "file.txt"))).rejects.toThrow("not a folder");
     await expect(shareableFolder(join(root, "nope"))).rejects.toThrow("does not exist");
@@ -50,11 +50,11 @@ describe("shareableFolder", () => {
 });
 
 describe("service files", () => {
-  const args = ["/usr/local/bin/node", "/Users/a b/.altair-runner/bin/altair-runner.mjs", "start"];
+  const args = ["/usr/local/bin/node", "/Users/a b/.myrel-runner/bin/myrel-runner.mjs", "start"];
 
   it("launchd: keeps the PATH, escapes values and restarts only after a crash", () => {
     const plist = launchdPlist(args, { PATH: "/opt/homebrew/bin:/usr/bin" }, "/tmp/r&r.log");
-    expect(plist).toContain("<string>/Users/a b/.altair-runner/bin/altair-runner.mjs</string>");
+    expect(plist).toContain("<string>/Users/a b/.myrel-runner/bin/myrel-runner.mjs</string>");
     expect(plist).toContain("<key>PATH</key><string>/opt/homebrew/bin:/usr/bin</string>");
     expect(plist).toContain("<string>/tmp/r&amp;r.log</string>");
     expect(plist).toContain("<key>SuccessfulExit</key><false/>");
@@ -62,7 +62,7 @@ describe("service files", () => {
 
   it("systemd: quotes arguments and environment", () => {
     const unit = systemdUnit(args, { PATH: "/usr/bin:/home/a/100%" });
-    expect(unit).toContain('ExecStart="/usr/local/bin/node" "/Users/a b/.altair-runner/bin/altair-runner.mjs" "start"');
+    expect(unit).toContain('ExecStart="/usr/local/bin/node" "/Users/a b/.myrel-runner/bin/myrel-runner.mjs" "start"');
     expect(unit).toContain('Environment="PATH=/usr/bin:/home/a/100%%"');
     expect(unit).toContain("Restart=on-failure");
   });
@@ -75,7 +75,7 @@ describe("service files", () => {
 
 describe("an unpaired computer", () => {
   it("is told apart from an unreachable server, and the runner stops instead of retrying", async () => {
-    process.env.ALTAIR_RUNNER_HOME = await mkdtemp(join(tmpdir(), "altair-unpaired-"));
+    process.env.MYREL_RUNNER_HOME = await mkdtemp(join(tmpdir(), "myrel-unpaired-"));
     // Answers 401 to everything, the WebSocket upgrade included, like a server that removed this computer.
     const server = createServer((_req, res) => res.writeHead(401).end());
     server.on("upgrade", (_req, socket) => socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n"));

@@ -1,4 +1,4 @@
-import type { ApiClient } from "@altair/client";
+import type { ApiClient } from "@myrel/client";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";

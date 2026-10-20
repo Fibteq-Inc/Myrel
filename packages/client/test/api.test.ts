@@ -6,9 +6,9 @@ describe("ApiClient", () => {
   it("sends extra headers, the bearer token and the chosen credentials mode", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const api = new ApiClient({
-      baseUrl: "https://altair.example.com/",
+      baseUrl: "https://myrel.example.com/",
       tokens: memoryTokenStore("tok"),
-      headers: { origin: "altair://" },
+      headers: { origin: "myrel://" },
       credentials: "omit",
       fetch: async (url, init) => {
         calls.push({ url: String(url), init: init ?? {} });
@@ -17,9 +17,9 @@ describe("ApiClient", () => {
     });
     await api.request("/api/notifications/subscriptions", { method: "POST", body: { kind: "expo", token: "t" } });
     const [call] = calls;
-    expect(call?.url).toBe("https://altair.example.com/api/notifications/subscriptions");
+    expect(call?.url).toBe("https://myrel.example.com/api/notifications/subscriptions");
     expect(call?.init.credentials).toBe("omit");
-    expect(call?.init.headers).toMatchObject({ origin: "altair://", authorization: "Bearer tok" });
+    expect(call?.init.headers).toMatchObject({ origin: "myrel://", authorization: "Bearer tok" });
     expect(JSON.parse(String(call?.init.body))).toEqual({ kind: "expo", token: "t" });
   });
 });

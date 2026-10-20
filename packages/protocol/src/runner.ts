@@ -11,7 +11,7 @@ import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
  */
 
 /** Bump on breaking changes to the runner wire protocol. */
-export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_PROTOCOL_VERSION = 2;
 
 export const RunnerId = z.string().regex(idPattern("runner"));
 

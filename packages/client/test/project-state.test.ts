@@ -1,4 +1,4 @@
-import { createId, formatPlan, type Message, planChecklist, type Task, type Thread } from "@altair/protocol";
+import { createId, formatPlan, type Message, planChecklist, type Task, type Thread } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,

@@ -1,6 +1,6 @@
-import type { Translate } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
-import { CLI_NAMES, type Runner, type RunnerPairingCode } from "@altair/protocol";
+import type { Translate } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
+import { CLI_NAMES, type Runner, type RunnerPairingCode } from "@myrel/protocol";
 import { Check, Copy, Laptop, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
 

@@ -1,10 +1,10 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import {
   MarkNotificationsReadInput,
   type Notification,
   NotificationSettings,
   PushSubscriptionInput,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";

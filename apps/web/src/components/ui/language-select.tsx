@@ -1,5 +1,5 @@
-import { isLocale, LOCALE_NAMES, LOCALES } from "@altair/i18n";
-import { useI18n } from "@altair/i18n/react";
+import { isLocale, LOCALE_NAMES, LOCALES } from "@myrel/i18n";
+import { useI18n } from "@myrel/i18n/react";
 import { Languages } from "lucide-react";
 import { cn } from "../../lib/ui";
 import { Select } from "./controls";

@@ -5,7 +5,7 @@ import {
   type RoutineTarget,
   TimeZone,
   Timestamp,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 

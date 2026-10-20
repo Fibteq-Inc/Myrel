@@ -1,7 +1,7 @@
 import { type RunnerEvent, RunnerEvent as RunnerEventSchema } from "./spec";
 
 /** Prefix of a line that carries a RunnerEvent as JSON. Task scripts print these between harness output. */
-export const MARKER = "::altair::";
+export const MARKER = "::myrel::";
 
 export function formatMarker(event: RunnerEvent): string {
   return `${MARKER}${JSON.stringify(event)}`;

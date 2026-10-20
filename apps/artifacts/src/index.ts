@@ -1,5 +1,5 @@
-import { artifactObjectKey } from "@altair/protocol";
-import { verifyArtifact } from "@altair/protocol/artifact-signature";
+import { artifactObjectKey } from "@myrel/protocol";
+import { verifyArtifact } from "@myrel/protocol/artifact-signature";
 
 /** Origins the Myrel desktop app serves its UI from (see apps/api/src/origins.ts). */
 const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];

@@ -39,7 +39,7 @@ export default defineConfig(async () => {
             SIGNUP_ENABLED: "true",
             // GitHub calls are answered by test/fake-github.ts.
             GITHUB_APP_ID: "1234",
-            GITHUB_APP_SLUG: "altair-test",
+            GITHUB_APP_SLUG: "myrel-test",
             GITHUB_CLIENT_ID: "Iv1.test",
             GITHUB_CLIENT_SECRET: "test-client-secret",
             GITHUB_WEBHOOK_SECRET: "test-webhook-secret",
@@ -47,7 +47,7 @@ export default defineConfig(async () => {
             ARTIFACTS_URL: "https://usercontent.test",
             ARTIFACT_SIGNING_SECRET: "test-signing-secret",
             // Notification channels; outbound calls are captured by test/fake-llm.ts.
-            EMAIL_FROM: "Myrel <altair@example.com>",
+            EMAIL_FROM: "Myrel <myrel@example.com>",
             // A fresh Web Push key pair per run, so no key lives in the repo.
             ...(await vapidKeys()),
             VAPID_SUBJECT: "mailto:test@example.com",

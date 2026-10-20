@@ -9,7 +9,7 @@ Gemini CLI.
   progress back and returns its final answer.
 - The CLI runs with **your own login on your computer**. myrel-runner never reads, sends or stores your Claude,
   OpenAI or Google credentials. The only secret it keeps is its own Myrel runner token, in
-  `~/.altair-runner/config.json` (readable by you only).
+  `~/.myrel-runner/config.json` (readable by you only).
 - It only works in folders you shared, from Myrel > Devices or with `myrel-runner share`. A path from the server that is not one of them
   (after resolving symlinks) is refused.
 
@@ -18,7 +18,7 @@ Gemini CLI.
 Requires Node 22+ and at least one of `claude`, `codex` or `gemini` on your `PATH`, already signed in.
 
 ```sh
-npx myrel-runner pair ABCD-1234 --server https://altair.example.com   # code from Myrel > Devices
+npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
 npx myrel-runner service install                                      # runs now and at every login
 npx myrel-runner@latest update                                        # later: update and restart it
 ```
@@ -32,14 +32,14 @@ instead of in the background (Ctrl+C stops it).
 
 ### In the background
 
-`myrel-runner service install` copies the runner to `~/.altair-runner/bin` (so it keeps working after npx clears its
+`myrel-runner service install` copies the runner to `~/.myrel-runner/bin` (so it keeps working after npx clears its
 cache) and registers it to start at login:
 
 | OS | How | Logs |
 |---|---|---|
-| macOS | launchd agent `~/Library/LaunchAgents/io.fibteq.altair-runner.plist` | `~/.altair-runner/runner.log` |
-| Linux | systemd user service `altair-runner.service` | `journalctl --user -u myrel-runner` |
-| Windows | `altair-runner.vbs` in the Startup folder | `~/.altair-runner/runner.log` |
+| macOS | launchd agent `~/Library/LaunchAgents/io.fibteq.myrel-runner.plist` | `~/.myrel-runner/runner.log` |
+| Linux | systemd user service `myrel-runner.service` | `journalctl --user -u myrel-runner` |
+| Windows | `myrel-runner.vbs` in the Startup folder | `~/.myrel-runner/runner.log` |
 
 It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `gemini`.
 On macOS and Linux it restarts after a crash, but not after a clean stop (the computer was removed in Myrel, or
@@ -51,12 +51,12 @@ from npm and restarts the background runner on it (`service install` again also 
 ### Threads working at the same time
 
 When a shared folder is a git repository, each thread works in its own
-[git worktree](https://git-scm.com/docs/git-worktree) on its own branch, `altair/thr-…`, made from the repository's
+[git worktree](https://git-scm.com/docs/git-worktree) on its own branch, `myrel/thr-…`, made from the repository's
 current commit on the thread's first task. Two threads can then work in the same project at once without changing
 each other's files or switching each other's branch, and your own checkout is left alone. Each task's result says
 which branch and folder the work is in; merge or open a PR from that branch as usual.
 
-Worktrees live in `~/.altair-runner/worktrees`. They start without your uncommitted changes and without ignored files
+Worktrees live in `~/.myrel-runner/worktrees`. They start without your uncommitted changes and without ignored files
 such as `node_modules` or `.env`, so a task may need to install dependencies first. A worktree that has not been used
 for a day, has no uncommitted changes and whose branch is merged into your checkout's branch is removed
 automatically, with its branch. `myrel-runner worktrees` lists them, `worktrees prune` cleans up now,
@@ -86,8 +86,8 @@ decisions, artifacts, memory, routines) added over MCP:
 
 | CLI | How the MCP server is added |
 |---|---|
-| Claude Code | `--mcp-config <file>`, allowed with `--allowedTools mcp__altair` |
-| Codex CLI | `-c mcp_servers.altair.url=…` and `-c mcp_servers.altair.bearer_token_env_var="ALTAIR_MCP_TOKEN"` |
+| Claude Code | `--mcp-config <file>`, allowed with `--allowedTools mcp__myrel` |
+| Codex CLI | `-c mcp_servers.myrel.url=…` and `-c mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"` |
 | Gemini CLI | its own settings file, through `GEMINI_CLI_SYSTEM_SETTINGS_PATH` |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
@@ -97,10 +97,10 @@ Projects without a local folder are worked in the cloud by OpenCode, in the thre
 
 ### For apps that run it (the desktop app)
 
-- `ALTAIR_SERVER` and `ALTAIR_RUNNER_TOKEN` override the saved pairing, and an env token is never written to disk.
+- `MYREL_SERVER` and `MYREL_RUNNER_TOKEN` override the saved pairing, and an env token is never written to disk.
   An app that already has the user's session can pair without a code: `POST /api/runners/pairing` (as the user)
   returns a code, and `POST /api/runner/pair` trades it for the runner token.
-- `ALTAIR_RUNNER_HOME` moves the config folder.
+- `MYREL_RUNNER_HOME` moves the config folder.
 - `myrel-runner start --json` prints one status object per line (`connecting`, `online`, `offline`, `task`,
   `stopped`); `myrel-runner status --json` prints the config without the token.
 - The build is a single JavaScript file with no native dependencies (`dist/cli.js`), so it can be packed into one
@@ -125,12 +125,12 @@ node packages/myrel-runner/dist/cli.js --help
 ## Releasing
 
 1. Bump `version` in `package.json` here and in `packages/myrel-runner-alias/package.json`, and `RUNNER_VERSION`
-   in `src/runner.ts` (a test checks they match). Bump `RUNNER_PROTOCOL_VERSION` in `@altair/protocol` only when the
+   in `src/runner.ts` (a test checks they match). Bump `RUNNER_PROTOCOL_VERSION` in `@myrel/protocol` only when the
    wire format changes; the server refuses runners on another protocol version and tells them to update.
 2. Merge it. The [Release myrel-runner](../../.github/workflows/release-runner.yml) workflow then tests, builds and
    publishes both packages whose version is not on npm yet (it can also be run by hand from the Actions tab).
    It uses npm trusted publishing: once, on npmjs.com, open each package's **Settings > Trusted publishing**, choose
-   GitHub Actions and enter `Fibteq-Inc`, `altair` and `release-runner.yml`.
+   GitHub Actions and enter `Fibteq-Inc`, `myrel` and `release-runner.yml`.
 
 By hand instead (needs an npm account in the `fibteq` npm organization), runner first, then the short name, with
 `pnpm` (it replaces `workspace:` versions and uses the built files from `publishConfig`):

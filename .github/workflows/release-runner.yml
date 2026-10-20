@@ -54,20 +54,20 @@ jobs:
           done
 
       - name: Test and build
-        if: steps.versions.outputs.altair-runner || steps.versions.outputs.altair-runner-alias
+        if: steps.versions.outputs.myrel-runner || steps.versions.outputs.myrel-runner-alias
         run: |
           pnpm --filter @fibteq/myrel-runner test
           pnpm --filter @fibteq/myrel-runner build
 
       # pnpm pack swaps workspace: versions for real ones; npm publish does the trusted-publishing login.
       - name: Publish @fibteq/myrel-runner
-        if: steps.versions.outputs.altair-runner
+        if: steps.versions.outputs.myrel-runner
         run: |
           pnpm --filter @fibteq/myrel-runner pack --pack-destination "$RUNNER_TEMP/pkg"
           npm publish "$RUNNER_TEMP"/pkg/fibteq-myrel-runner-*.tgz --access public
 
       - name: Publish myrel-runner
-        if: steps.versions.outputs.altair-runner-alias
+        if: steps.versions.outputs.myrel-runner-alias
         run: |
           pnpm --filter myrel-runner pack --pack-destination "$RUNNER_TEMP/alias"
           npm publish "$RUNNER_TEMP"/alias/myrel-runner-*.tgz --access public

@@ -1,5 +1,5 @@
-import { isLocale, type Locale, matchLocale } from "@altair/i18n";
-import { I18nProvider } from "@altair/i18n/react";
+import { isLocale, type Locale, matchLocale } from "@myrel/i18n";
+import { I18nProvider } from "@myrel/i18n/react";
 import { getLocales } from "expo-localization";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { platform } from "./platform";

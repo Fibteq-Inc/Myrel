@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { UsageDay } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { UsageDay } from "@myrel/protocol";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useFormat } from "../lib/format";
 

@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, FolderPlus } from "lucide-react";
@@ -6,7 +6,7 @@ import { type FormEvent, useState } from "react";
 import { ProjectBadge } from "../../components/shell/project-header";
 import { NavToggle, PaneHeader } from "../../components/shell/shell";
 import { api, projectsQuery } from "../../lib/api";
-import { AltairMark, Button, errorMessage, Input } from "../../lib/ui";
+import { MyrelMark, Button, errorMessage, Input } from "../../lib/ui";
 
 export const Route = createFileRoute("/_app/")({
   loader: ({ context }) => context.queryClient.ensureQueryData(projectsQuery),
@@ -42,7 +42,7 @@ function ProjectsPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-12 sm:py-20">
           <div className="flex flex-col items-center gap-3 text-center">
-            <AltairMark size={44} />
+            <MyrelMark size={44} />
             <h1 className="text-2xl font-semibold tracking-tight">{t("projects.start")}</h1>
             <p className="max-w-md text-[13px] text-subtle">
               {t("projects.intro")}

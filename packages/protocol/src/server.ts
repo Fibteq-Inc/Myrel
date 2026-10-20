@@ -9,7 +9,7 @@ export const API_VERSION = 1;
 
 /** Returned by `GET /api/info`, so an app can check an address before signing in. */
 export const ServerInfo = z.object({
-  app: z.literal("altair"),
+  app: z.literal("myrel"),
   apiVersion: z.number().int().positive(),
   /** Display name of this deployment, e.g. "Myrel Cloud" or a company's self-hosted instance. */
   name: z.string(),

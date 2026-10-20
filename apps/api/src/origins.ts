@@ -5,7 +5,7 @@
 export const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
 
 /** The mobile app (Expo) sends this origin. Like the desktop ones, no web page can claim it. */
-export const MOBILE_ORIGINS = ["altair://"];
+export const MOBILE_ORIGINS = ["myrel://"];
 
 export function trustedOrigins(env: Pick<Env, "TRUSTED_ORIGINS">): string[] {
   const extra = env.TRUSTED_ORIGINS ? env.TRUSTED_ORIGINS.split(",").map((o) => o.trim()) : [];

@@ -1,6 +1,6 @@
 // Prints a fresh VAPID key pair for Web Push notifications.
 // VAPID_PUBLIC_KEY goes in wrangler.jsonc vars; VAPID_PRIVATE_KEY is a secret:
-//   pnpm --filter @altair/api exec wrangler secret put VAPID_PRIVATE_KEY
+//   pnpm --filter @myrel/api exec wrangler secret put VAPID_PRIVATE_KEY
 const { publicKey, privateKey } = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
   "sign",
   "verify",

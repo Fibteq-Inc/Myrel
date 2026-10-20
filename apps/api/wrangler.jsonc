@@ -118,7 +118,7 @@
   // domain onboarded under Email Service > Email Sending. The value here is Fibteq's own deployment
   // (fibteq.app); self-hosting: use an address on your domain, or empty to turn email off.
   // Web Push: VAPID_PUBLIC_KEY here + VAPID_PRIVATE_KEY secret (generate both with
-  // `pnpm --filter @altair/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
+  // `pnpm --filter @myrel/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
   // Mobile push goes through Expo; EXPO_ACCESS_TOKEN secret only if enhanced push security is on.
   "vars": {
     "BETTER_AUTH_URL": "",

@@ -11,7 +11,7 @@ import {
   normalizeFilePath,
   type ProjectFile,
   UPLOADS_FOLDER,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 
@@ -409,7 +409,7 @@ export const FILE_LINK_MINUTES = 60;
 type LinkClaims = { projectId: string; path: string; mode: "get" | "put"; by: string; exp: number };
 
 async function linkKey(env: { BETTER_AUTH_SECRET: string }): Promise<CryptoKey> {
-  const material = new TextEncoder().encode(`altair-file-links:${env.BETTER_AUTH_SECRET}`);
+  const material = new TextEncoder().encode(`myrel-file-links:${env.BETTER_AUTH_SECRET}`);
   return crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 

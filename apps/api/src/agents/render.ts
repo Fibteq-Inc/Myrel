@@ -1,4 +1,4 @@
-import { type Message, planChecklist, type Thread } from "@altair/protocol";
+import { type Message, planChecklist, type Thread } from "@myrel/protocol";
 
 /** How a message's author reads in a prompt. */
 export function authorLabel(m: Message, names: Record<string, string>): string {

@@ -1,5 +1,5 @@
 {
-  "name": "@altair/client",
+  "name": "@myrel/client",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@altair/protocol": "workspace:*"
+    "@myrel/protocol": "workspace:*"
   },
   "devDependencies": {
     "vitest": "5.0.5"

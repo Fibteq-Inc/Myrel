@@ -1,4 +1,4 @@
-import type { ThreadFiles } from "@altair/protocol";
+import type { ThreadFiles } from "@myrel/protocol";
 
 /**
  * A thread's workspace: a Cloudflare Artifacts repository the sandbox saves

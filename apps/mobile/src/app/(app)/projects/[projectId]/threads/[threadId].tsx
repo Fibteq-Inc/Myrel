@@ -1,6 +1,6 @@
-import { threadMessages } from "@altair/client";
-import { useT } from "@altair/i18n/react";
-import { planChecklist } from "@altair/protocol";
+import { threadMessages } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
+import { planChecklist } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useMemo } from "react";

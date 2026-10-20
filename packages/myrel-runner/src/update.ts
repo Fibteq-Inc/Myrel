@@ -37,7 +37,7 @@ export function runVersion(version: string, args: string[]): Promise<number> {
       stdio: "inherit",
       shell: process.platform === "win32",
       // Tells the new version not to look for a newer one again.
-      env: { ...process.env, ALTAIR_RUNNER_UPDATING: version },
+      env: { ...process.env, MYREL_RUNNER_UPDATING: version },
     });
     child.on("error", reject);
     child.on("exit", (code) => resolve(code ?? 1));

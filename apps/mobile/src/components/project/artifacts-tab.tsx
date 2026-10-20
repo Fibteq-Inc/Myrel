@@ -1,6 +1,6 @@
-import { artifactList } from "@altair/client";
-import { useT } from "@altair/i18n/react";
-import type { Artifact } from "@altair/protocol";
+import { artifactList } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
+import type { Artifact } from "@myrel/protocol";
 import { AppWindow, Blocks, ChevronRight } from "lucide-react-native";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useOpenArtifact } from "../../lib/links";

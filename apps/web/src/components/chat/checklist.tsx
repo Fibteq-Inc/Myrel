@@ -1,5 +1,5 @@
-import { checklistProgress, parseChecklist } from "@altair/client";
-import { useT } from "@altair/i18n/react";
+import { checklistProgress, parseChecklist } from "@myrel/client";
+import { useT } from "@myrel/i18n/react";
 import { CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle } from "lucide-react";
 import { cn } from "../../lib/ui";
 

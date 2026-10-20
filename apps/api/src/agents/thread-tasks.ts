@@ -1,3 +1,3 @@
-import type { Task, TerminalLine } from "@altair/protocol";
+import type { Task, TerminalLine } from "@myrel/protocol";
 
 export type TaskWithLog = Task & { log: TerminalLine[] };

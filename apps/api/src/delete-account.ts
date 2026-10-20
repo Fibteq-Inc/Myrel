@@ -1,4 +1,4 @@
-import { createDb, schema } from "@altair/db";
+import { createDb, schema } from "@myrel/db";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { deleteProject } from "./projects/delete";
 

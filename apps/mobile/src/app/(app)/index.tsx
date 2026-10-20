@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Project } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Project } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
 import { ChevronRight, FolderClosed, Plus, Settings } from "lucide-react-native";

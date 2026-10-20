@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Thread } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Thread } from "@myrel/protocol";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, SquareTerminal } from "lucide-react";
 import { cn } from "../../lib/ui";

@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Artifact, Attachment, Message, Reaction } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Artifact, Attachment, Message, Reaction } from "@myrel/protocol";
 import { CircleAlert, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";

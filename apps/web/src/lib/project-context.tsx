@@ -1,4 +1,4 @@
-import type { Member, Project } from "@altair/protocol";
+import type { Member, Project } from "@myrel/protocol";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { useProject } from "./use-project";
 

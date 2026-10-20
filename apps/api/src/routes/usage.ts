@@ -1,4 +1,4 @@
-import { USAGE_RANGES, type UsageSummary, type UsageTotals } from "@altair/protocol";
+import { USAGE_RANGES, type UsageSummary, type UsageTotals } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { type AppEnv, requireUser } from "../middleware";

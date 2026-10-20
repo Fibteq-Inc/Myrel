@@ -1,7 +1,7 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse } from "node:path";
-import type { RunnerDirListing } from "@altair/protocol";
+import type { RunnerDirListing } from "@myrel/protocol";
 
 const MAX_DIRS = 1000;
 

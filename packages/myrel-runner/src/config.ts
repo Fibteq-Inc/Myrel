@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import type { RunnerFolder } from "@altair/protocol";
+import type { RunnerFolder } from "@myrel/protocol";
 
 /**
  * How much the CLI may do on its own in a shared folder.
@@ -10,7 +10,7 @@ import type { RunnerFolder } from "@altair/protocol";
 export type Access = "read" | "edit" | "full";
 
 export type RunnerConfig = {
-  /** Origin of the Myrel server, e.g. https://altair.example.com */
+  /** Origin of the Myrel server, e.g. https://myrel.example.com */
   server?: string;
   runnerId?: string;
   /** The runner's secret. Only ever sent to `server`. */
@@ -24,29 +24,29 @@ export type RunnerConfig = {
   worktrees?: boolean;
 };
 
-/** ~/.altair-runner, or ALTAIR_RUNNER_HOME. Holds config.json (mode 600) and sessions.json. */
+/** ~/.myrel-runner, or MYREL_RUNNER_HOME. Holds config.json (mode 600) and sessions.json. */
 export function runnerHome(): string {
-  return process.env.ALTAIR_RUNNER_HOME || join(homedir(), ".altair-runner");
+  return process.env.MYREL_RUNNER_HOME || join(homedir(), ".myrel-runner");
 }
 
 export const configPath = () => join(runnerHome(), "config.json");
 
 /**
- * The saved config. ALTAIR_SERVER and ALTAIR_RUNNER_TOKEN override the saved pairing, so an
+ * The saved config. MYREL_SERVER and MYREL_RUNNER_TOKEN override the saved pairing, so an
  * app that paired the runner itself (the desktop app) can start it without writing the token to disk.
  */
 export async function loadConfig(): Promise<RunnerConfig> {
   const raw = await readJson<Partial<RunnerConfig>>(configPath());
   const config: RunnerConfig = { folders: [], access: "edit", ...raw };
-  if (process.env.ALTAIR_SERVER) config.server = process.env.ALTAIR_SERVER;
-  if (process.env.ALTAIR_RUNNER_TOKEN) config.token = process.env.ALTAIR_RUNNER_TOKEN;
+  if (process.env.MYREL_SERVER) config.server = process.env.MYREL_SERVER;
+  if (process.env.MYREL_RUNNER_TOKEN) config.token = process.env.MYREL_RUNNER_TOKEN;
   return config;
 }
 
 export async function saveConfig(config: RunnerConfig): Promise<void> {
   // Never persist a token that only came from the environment.
   const saved = { ...config };
-  if (process.env.ALTAIR_RUNNER_TOKEN && saved.token === process.env.ALTAIR_RUNNER_TOKEN) {
+  if (process.env.MYREL_RUNNER_TOKEN && saved.token === process.env.MYREL_RUNNER_TOKEN) {
     saved.token = (await readJson<Partial<RunnerConfig>>(configPath()))?.token;
   }
   await writeJson(configPath(), saved);

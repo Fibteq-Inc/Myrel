@@ -1,4 +1,4 @@
-import type { Task, TerminalLine } from "@altair/protocol";
+import type { Task, TerminalLine } from "@myrel/protocol";
 import {
   ChevronRight,
   CircleAlert,
@@ -11,8 +11,8 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react";
-import type { Translate } from "@altair/i18n";
-import { useT } from "@altair/i18n/react";
+import type { Translate } from "@myrel/i18n";
+import { useT } from "@myrel/i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { FilesTab } from "./files";

@@ -58,7 +58,7 @@ export const TaskSpec = z.object({
   model: ModelConfig.optional(),
   /**
    * The thread's MCP endpoint, when the harness runs as the thread's agent and talks to people
-   * through Myrel's tools. Its bearer token is a secret (ALTAIR_MCP_TOKEN).
+   * through Myrel's tools. Its bearer token is a secret (MYREL_MCP_TOKEN).
    */
   mcp: z.object({ url: z.string().url() }).optional(),
   timeoutSec: z

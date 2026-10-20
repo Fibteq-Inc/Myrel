@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import type { Decision } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import type { Decision } from "@myrel/protocol";
 import { CircleCheck, CircleHelp } from "lucide-react";
 import { useId } from "react";
 import { cn } from "../../lib/ui";

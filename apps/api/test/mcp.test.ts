@@ -3,7 +3,7 @@ import { z } from "zod";
 import { handleMcp, tool } from "../src/llm";
 
 const echo = tool({ name: "echo", description: "Echo text.", input: z.object({ text: z.string().min(1) }), run: ({ text }) => text });
-const info = { name: "altair", version: "1" };
+const info = { name: "myrel", version: "1" };
 
 describe("handleMcp", () => {
   it("lists tools with their JSON schema and calls them", async () => {

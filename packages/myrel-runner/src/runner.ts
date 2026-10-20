@@ -5,14 +5,14 @@ import {
   RUNNER_PROTOCOL_VERSION,
   type RunnerToServer,
   ServerToRunner,
-} from "@altair/protocol";
+} from "@myrel/protocol";
 import { detectClis } from "./clis";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.5.1";
+export const RUNNER_VERSION = "0.6.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {

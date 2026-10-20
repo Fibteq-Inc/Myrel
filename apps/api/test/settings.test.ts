@@ -1,11 +1,11 @@
-import type { ApiKey, Invite, Member, Project, ProjectSettings } from "@altair/protocol";
+import type { ApiKey, Invite, Member, Project, ProjectSettings } from "@myrel/protocol";
 import { env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { decryptSecret, encryptSecret } from "../src/crypto";
 import { projectProvider } from "../src/keys";
 
-const BASE = "http://altair.test";
+const BASE = "http://myrel.test";
 // Secrets are injected by vitest.config.ts, so the generated binding types do not list them.
 const env = testEnv as unknown as Env;
 

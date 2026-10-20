@@ -1,4 +1,4 @@
-import { useT } from "@altair/i18n/react";
+import { useT } from "@myrel/i18n/react";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";

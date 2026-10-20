@@ -1,5 +1,5 @@
-import { useT } from "@altair/i18n/react";
-import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace } from "@altair/protocol";
+import { useT } from "@myrel/i18n/react";
+import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, Cloud, Folder, FolderPlus, Laptop } from "lucide-react";
