@@ -141,6 +141,46 @@ describe("run_task", () => {
     ws.close();
   });
 
+  it("puts back steps marked done with no work behind them and makes the agent do the work", async () => {
+    const prompts: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1 || !req.prompt.includes("Hesap makinesi")) return { text: "", toolCalls: [] };
+      prompts.push(req.prompt);
+      if (prompts.length === 1) {
+        // Claims the whole plan without doing anything.
+        return {
+          text: "",
+          toolCalls: [
+            call("reply", { text: "Hesap makinesini oluşturuyorum." }),
+            call("update_plan", {
+              title: "Hesap makinesi",
+              steps: [
+                { text: "Dosyayı oluştur", state: "done" },
+                { text: "Sonucu bildir", state: "done" },
+              ],
+            }),
+          ],
+        };
+      }
+      if (prompts.length === 2) {
+        return { text: "", toolCalls: [call("run_task", { title: "Hesap makinesi", prompt: "touch calc.html", harness: "shell" })] };
+      }
+      return { text: "", toolCalls: [call("reply", { text: "Görev çalışmadı." })] };
+    });
+
+    const { project, ws, projectAgent, threadAgent, thread } = await threadSetup();
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Hesap makinesi yap." });
+
+    await until(async () => (await threadAgent.getTasks()).length === 1, "the task the nudge led to");
+    expect(prompts[1]).toContain('You marked "Dosyayı oluştur", "Sonucu bildir" done, but nothing was done this turn');
+    // The unearned steps went back before the agent worked on them again.
+    expect(prompts[1]).toContain("✱ Dosyayı oluştur");
+    expect(prompts[1]).toContain("○ Sonucu bildir");
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    await until(async () => (await bodies()).includes("Görev çalışmadı."), "the reply about the task");
+    ws.close();
+  });
+
   it("reports what it cannot do as a tool error, without starting anything", async () => {
     const { project, ws, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
