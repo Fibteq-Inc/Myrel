@@ -1,0 +1,28 @@
+name: Publish update
+
+# Run by hand (eas workflow:run publish-update.yml) to ship a JavaScript-only
+# change to installed builds of the same app version.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options:
+          - production
+          - preview
+        default: production
+      message:
+        type: string
+        required: false
+
+jobs:
+  publish_update:
+    name: Publish update
+    type: update
+    environment: ${{ inputs.channel || 'production' }}
+    # Same default server the build profiles in eas.json set.
+    env:
+      EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
+    params:
+      branch: ${{ inputs.channel || 'production' }}
+      message: ${{ inputs.message || github.commit_message }}
