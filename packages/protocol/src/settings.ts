@@ -43,12 +43,21 @@ export type CreateApiKeyInput = z.input<typeof CreateApiKeyInput>;
 export const TaskTarget = z.enum(["auto", "local", "cloud"]);
 export type TaskTarget = z.infer<typeof TaskTarget>;
 
+/**
+ * Who works a thread. loop: Altair's own agent loop in the cloud, which hands code and file work
+ * to run_task. harness: experimental; when the project's tasks run on a computer with Claude Code,
+ * that Claude Code session is the thread's agent and talks through Altair's tools over MCP.
+ */
+export const ThreadEngine = z.enum(["loop", "harness"]);
+export type ThreadEngine = z.infer<typeof ThreadEngine>;
+
 export const ProjectSettings = z.object({
   name: z.string(),
   provider: ProviderId.nullable(),
   model: z.string().nullable(),
   keyId: z.string().nullable(),
   taskTarget: TaskTarget,
+  threadEngine: ThreadEngine,
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -58,6 +67,7 @@ export const UpdateProjectSettingsInput = z.object({
   model: z.string().trim().max(200).nullable().optional(),
   keyId: z.string().nullable().optional(),
   taskTarget: TaskTarget.optional(),
+  threadEngine: ThreadEngine.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 

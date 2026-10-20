@@ -21,17 +21,24 @@ export type ParseState = {
 export type CliAdapter = {
   id: CliId;
   bin: string;
-  args(opts: { access: Access; resume?: string }): string[];
+  /**
+   * mcpConfig: path of an MCP config file (Claude Code only), set when the CLI runs as the
+   * thread's agent and talks to people through Altair's tools.
+   */
+  args(opts: { access: Access; resume?: string; mcpConfig?: string }): string[];
   /** Feeds one line of stdout; updates `state` in place. */
   line(line: string, state: ParseState): void;
   /** Called with all of stdout when the CLI exits, for CLIs that print one JSON document. */
   end?(stdout: string, state: ParseState): void;
 };
 
+/** Name of Altair's MCP server in the CLI's config; its tools show up as mcp__altair__<tool>. */
+export const ALTAIR_MCP_SERVER = "altair";
+
 const claude: CliAdapter = {
   id: "claude",
   bin: "claude",
-  args: ({ access, resume }) => [
+  args: ({ access, resume, mcpConfig }) => [
     "-p",
     "--output-format",
     "stream-json",
@@ -39,6 +46,8 @@ const claude: CliAdapter = {
     "--permission-mode",
     { read: "plan", edit: "acceptEdits", full: "bypassPermissions" }[access],
     ...(resume ? ["--resume", resume] : []),
+    // Altair's tools are how the agent talks to people, so they never wait for a permission prompt.
+    ...(mcpConfig ? ["--mcp-config", mcpConfig, "--allowedTools", `mcp__${ALTAIR_MCP_SERVER}`] : []),
   ],
   line(line, state) {
     const event = parseJson(line);

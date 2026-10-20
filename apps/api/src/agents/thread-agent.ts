@@ -15,11 +15,20 @@ import { listRepoFiles, readRepoFile } from "../github/files";
 import { listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
 import { projectProvider, projectTaskModel } from "../keys";
-import { runLoop } from "../llm";
-import { getWorkspace } from "../runners";
-import { localBackend, localCanceller, normalizeRepoUrl, repoToken, sandboxBackend, taskPlace } from "../sandbox/backend";
+import { handleMcp, runLoop, type Tool } from "../llm";
+import { getWorkspace, runnerHasFeature } from "../runners";
+import {
+  localBackend,
+  localCanceller,
+  normalizeRepoUrl,
+  repoToken,
+  sandboxBackend,
+  taskPlace,
+  threadEngine,
+} from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { meteredForTurn, recordTaskUsage, taskCostMicros, taskRuntime, TurnMeter } from "../usage";
+import { agentPrompt, agentTools, hashAgentToken, newAgentToken, sameHash } from "./harness-agent";
 import { type Author, knowledgeTools } from "./knowledge";
 import { composeStatus, newlyDone, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
@@ -55,8 +64,24 @@ type TaskRow = {
   reported: number;
 };
 
-/** A task's spec as stored. Tasks on the person's computer name their CLI (claude, codex…) as the harness. */
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string };
+/**
+ * A task's spec as stored. Tasks on the person's computer name their CLI (claude, codex…) as the harness.
+ * agent: the CLI ran as the thread's agent for one turn (thread engine "harness"), not as a task for it.
+ */
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; agent?: boolean };
+
+/** What the thread's Claude Code did through Altair's tools during its turn, kept until the turn ends. */
+type AgentTurn = {
+  pending: ArtifactRef[];
+  replied: boolean;
+  needs: ReplyNeeds | null;
+  asked: boolean;
+  resolved: boolean;
+  timezone: string;
+};
+
+/** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
+const MAX_AGENT_PROMPT = 90_000;
 
 type LogRow = { stream: TerminalLine["stream"]; text: string };
 
@@ -160,6 +185,8 @@ export class ThreadAgent extends Agent<Env> {
   /** Queue callback. Turns run one at a time; wakes during a turn get their own turn after it. */
   async threadTurn(): Promise<void> {
     if (this.getMeta("dirty") !== "1") return;
+    // The thread's Claude Code is mid-turn; this wake waits for it (finishAgentTurn queues the next turn).
+    if (this.runningAgentTask()) return;
     this.setMeta("dirty", "0");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
@@ -179,7 +206,8 @@ export class ThreadAgent extends Agent<Env> {
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
-    const tasks = this.taskRows().map((row) => ({
+    // An agent turn's run is not a task the agent handed out, so it is not listed under "Tasks".
+    const tasks = this.taskRows().filter((row) => !(JSON.parse(row.spec) as StoredSpec).agent).map((row) => ({
       task: this.toTask(row),
       progress: JSON.parse(row.progress) as TaskProgress,
       log: row.status === "running" || row.reported ? [] : this.taskLog(row.id),
@@ -210,6 +238,33 @@ export class ThreadAgent extends Agent<Env> {
     this.sql`UPDATE routine_runs SET seen = 1`;
     this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
+    const prompt = threadPrompt({
+      ...ctx,
+      brief: this.getMeta("brief") ?? "",
+      lastSeenSeq,
+      notes,
+      artifacts,
+      repos: await listProjectRepos(this.env.DB, projectId),
+      tasks: renderTasks(tasks),
+      workspace,
+      place,
+      routineRuns,
+      githubEvents,
+      pullRequests,
+      now: new Date(),
+    });
+
+    // Thread engine "harness": the person's Claude Code takes this turn instead of Altair's loop.
+    if (place.kind === "local" && (await this.useAgentEngine(projectId, place.workspace))) {
+      const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
+      await this.startAgentTurn({
+        prompt,
+        workspace: place.workspace,
+        timezone: ctx.defaultTimezone,
+        language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
+      });
+      return;
+    }
 
     // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
     let resolved: boolean = false as boolean;
@@ -249,21 +304,7 @@ export class ThreadAgent extends Agent<Env> {
           meter,
         ),
         system: THREAD_SYSTEM,
-        prompt: threadPrompt({
-          ...ctx,
-          brief: this.getMeta("brief") ?? "",
-          lastSeenSeq,
-          notes,
-          artifacts,
-          repos: await listProjectRepos(this.env.DB, projectId),
-          tasks: renderTasks(tasks),
-          workspace,
-          place,
-          routineRuns,
-          githubEvents,
-          pullRequests,
-          now: new Date(),
-        }),
+        prompt,
         tools: [
           ...threadTools({
             reply: async (text, needs) => {
@@ -451,6 +492,187 @@ export class ThreadAgent extends Agent<Env> {
     }
   }
 
+  // ---- Thread engine "harness": Claude Code as the thread's agent -------------
+
+  /** Whether this turn goes to the person's Claude Code (see ThreadEngine). Old runners keep Altair's loop. */
+  private async useAgentEngine(projectId: string, workspace: ProjectWorkspace): Promise<boolean> {
+    if (workspace.cli !== "claude") return false;
+    if ((await threadEngine(this.env, projectId)) !== "harness") return false;
+    return runnerHasFeature(this.env, workspace.runnerId, "agent");
+  }
+
+  /** Hands this turn to Claude Code on the person's computer, connected to this thread's MCP endpoint. */
+  private async startAgentTurn(input: { prompt: string; workspace: ProjectWorkspace; timezone: string; language: string }) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const { token, hash } = await newAgentToken();
+    // A very long thread keeps its newest part; the CLI's resumed session remembers the rest.
+    const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
+    const spec: StoredSpec = {
+      taskId: createId("task"),
+      title: CLI_NAMES.claude,
+      prompt: agentPrompt(context),
+      harness: input.workspace.cli,
+      runnerId: input.workspace.runnerId,
+      openPr: false,
+      timeoutSec: 3600,
+      agent: true,
+    };
+    const turn: AgentTurn = { pending: [], replied: false, needs: null, asked: false, resolved: false, timezone: input.timezone };
+    this.setMeta("agent_turn", JSON.stringify(turn));
+    this.setMeta("agent_token", hash);
+    const backend = localBackend(this.env, {
+      projectId,
+      threadId,
+      workspace: input.workspace,
+      agent: { mcpPath: `/api/agent-mcp/${threadId}`, token },
+    });
+    await project.updateThread(threadId, { status: "working" });
+    await project.setActivity(threadId, true);
+    try {
+      const unavailable = backend.unavailable(spec as TaskSpec);
+      if (unavailable) throw new Error(unavailable);
+      // The stored spec keeps only the start of the prompt; the runner gets all of it.
+      await this.launch({ ...spec, prompt: spec.prompt.slice(0, 4000) }, backend.id, () => backend.start(spec as TaskSpec, {}), input.language);
+      await this.taskEvents(spec.taskId, LOCAL_PHASES);
+    } catch (err) {
+      // launch() already finished the run as failed when it was recorded; finishAgentTurn reported it.
+      if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${spec.taskId}`[0]) {
+        this.deleteMeta("agent_token");
+        this.deleteMeta("agent_turn");
+        await project.sendMessage({
+          threadId,
+          authorKind: "system",
+          authorId: SYSTEM_ID,
+          body: `Claude Code could not start on the computer: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        await project.updateThread(threadId, { status: "failed" });
+        await project.setActivity(threadId, false);
+      }
+    }
+  }
+
+  /** The agent's run ended: deliver what it left unsaid, settle the thread's state, and take any wakes that waited. */
+  private async finishAgentTurn(taskId: string) {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (!row) return;
+    this.sql`UPDATE tasks SET reported = 1 WHERE id = ${taskId}`;
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    this.deleteMeta("agent_token");
+    this.deleteMeta("agent_turn");
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    let pending = turn?.pending ?? [];
+    const replied = turn?.replied ?? false;
+    let lastText: string | null = null;
+    if (!replied && row.status === "done" && row.summary) {
+      // It answered in its final message instead of through reply: that answer is still the person's.
+      lastText = row.summary;
+      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: row.summary, artifacts: pending });
+      pending = [];
+    } else if (row.status !== "done") {
+      await project.sendMessage({
+        threadId,
+        authorKind: "agent",
+        authorId: THREAD_AGENT_ID,
+        body: taskReport(CLI_NAMES.claude, row, this.taskLog(taskId, 15)),
+        artifacts: pending,
+      });
+      pending = [];
+    }
+    if (pending.length) {
+      await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: "", artifacts: pending });
+    }
+    const resolved = turn?.resolved ?? false;
+    const asked = turn?.asked ?? false;
+    const failed = row.status === "failed" && !replied;
+    await project.updateThread(threadId, {
+      status: resolved ? "done" : asked ? "blocked" : failed ? "failed" : "review_ready",
+      resolved,
+    });
+    const kind = failed ? "failed" : resolved ? "done" : (turn?.needs ?? ((replied || lastText) && !asked ? "ready" : null));
+    if (kind) await project.notifyThread(threadId, kind, lastText ?? row.summary ?? "");
+    await project.setActivity(threadId, false);
+    if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
+  }
+
+  /**
+   * One MCP message from the thread's Claude Code (POST /api/agent-mcp/:threadId). Only the token of the
+   * running agent turn is accepted. Callable over RPC.
+   */
+  async agentMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
+    const hash = this.getMeta("agent_token");
+    if (!hash || !this.runningAgentTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
+    const answer = await handleMcp(await this.agentToolset(), { name: "altair", version: "1" }, body);
+    return { ok: true, answer };
+  }
+
+  /** Altair's thread tools for the agent, acting on this thread and recording what the turn did. */
+  private async agentToolset(): Promise<Tool[]> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
+    const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
+    const unavailable = () => {
+      throw new Error("Not available here: you are the agent on the person's computer; use your own tools.");
+    };
+    return agentTools([
+      ...threadTools({
+        reply: async (text, needs) => {
+          const t = turn();
+          save({ pending: [], replied: true, needs: needs ?? t.needs });
+          const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: text, artifacts: t.pending });
+          // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
+          if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+          return m;
+        },
+        publishArtifact: async (input) => {
+          const result = await project.publishArtifact({ ...input, threadId });
+          if ("error" in result) throw new Error(result.error);
+          const { artifact } = result;
+          const ref = { artifactId: artifact.id, version: artifact.version, title: artifact.title };
+          save({ pending: [...turn().pending.filter((p) => p.artifactId !== artifact.id), ref] });
+          return artifact;
+        },
+        setPlan: async (plan) => {
+          this.setMeta("plan", JSON.stringify(plan));
+          await this.showStatus();
+        },
+        requestCoordinator: async (kind, reason) => {
+          save({ asked: true });
+          await project.requestCoordinator(threadId, kind, reason);
+        },
+        resolve: async () => save({ resolved: true }),
+        listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
+        readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+        runTask: unavailable,
+        cancelTask: unavailable,
+        readWorkspace: unavailable,
+      }),
+      ...knowledgeTools({
+        memoryRead: (name: string) => project.getMemory(name),
+        memoryWrite: (name: string, description: string, content: string) => project.putMemory(name, { description, content }, BY),
+        memoryDelete: (name: string) => project.deleteMemory(name),
+        listFiles: (prefix?: string) => project.listFiles(prefix),
+        readText: (path: string) => project.readFileText(path),
+        writeText: (path: string, content: string) => project.writeFileText(path, content, BY),
+      }),
+      ...routineTools({
+        listRoutines: () => project.listRoutines(),
+        createRoutine: (input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, "agent"),
+        setPaused: (id: string, paused: boolean) => project.updateRoutine(id, { paused }),
+        deleteRoutine: (id: string) => project.deleteRoutine(id),
+        defaultTimezone: turn()?.timezone ?? "UTC",
+        threadId,
+      }),
+    ]);
+  }
+
+  private runningAgentTask(): TaskRow | null {
+    const row = this.runningTask();
+    return row && (JSON.parse(row.spec) as StoredSpec).agent ? row : null;
+  }
+
   // ---- Tasks (run_task) ---------------------------------------------------
 
   /** Starts a task for run_task, or says why it cannot. Callable over RPC. */
@@ -625,8 +847,9 @@ export class ThreadAgent extends Agent<Env> {
           console.error("tracking pull request failed", progress.prUrl, err),
         );
       }
-      // The agent reads the result and tells the person.
-      await this.markDirty();
+      // The agent reads the result and tells the person; an agent turn's run was the agent itself.
+      if (spec.agent) await this.finishAgentTurn(taskId);
+      else await this.markDirty();
     }
   }
 

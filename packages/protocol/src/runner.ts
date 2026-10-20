@@ -35,8 +35,9 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
 /**
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
+ * "agent": run Claude Code as the thread's agent, with Altair's tools over MCP (task.start's `agent`).
  */
-export const RunnerFeature = z.enum(["folders", "cancel"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent"]);
 export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /** What the runner last told the server about the computer. */
@@ -114,6 +115,14 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     folder: z.string().min(1).max(1024),
     cli: CliId,
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
+    /**
+     * Present when the CLI runs as the thread's agent instead of doing one task for it: the
+     * runner connects the CLI to the thread's MCP endpoint (server origin + mcpPath) with this
+     * token, so it talks to people through Altair's tools. Needs feature "agent".
+     */
+    agent: z
+      .object({ mcpPath: z.string().regex(/^\/api\/[\w/-]+$/).max(300), token: z.string().min(20).max(200) })
+      .optional(),
   }),
   /** Stop a running task. The runner answers with its "task.done" (cancelled: true). Needs feature "cancel". */
   z.object({ type: z.literal("task.cancel"), taskId: TaskId }),

@@ -1,5 +1,5 @@
 import { createDb, schema } from "@altair/db";
-import { type ProjectWorkspace, TaskTarget } from "@altair/protocol";
+import { type ProjectWorkspace, TaskTarget, ThreadEngine } from "@altair/protocol";
 import type { RunnerBackend, TaskSpec } from "@altair/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -31,9 +31,9 @@ export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace },
+  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: { mcpPath: string; token: string } },
 ): RunnerBackend {
-  const { projectId, threadId, workspace } = where;
+  const { projectId, threadId, workspace, agent } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -47,6 +47,7 @@ export function localBackend(
         folder: workspace.path,
         cli: workspace.cli,
         prompt: spec.prompt,
+        agent,
       });
       if (!started.ok) throw new Error(started.reason);
     },
@@ -92,6 +93,15 @@ export async function taskPlace(env: Env, projectId: string): Promise<TaskPlace>
       ? "This project runs tasks on the person's computer, and it is offline. Ask them to start altair-runner on it."
       : "This project runs tasks on the person's computer, but no local folder is connected. They can connect one from the project header.",
   };
+}
+
+/** Who works the project's threads (see ThreadEngine in @altair/protocol). */
+export async function threadEngine(env: Env, projectId: string): Promise<ThreadEngine> {
+  const [row] = await createDb(env.DB)
+    .select({ threadEngine: schema.projects.threadEngine })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId));
+  return ThreadEngine.catch("loop").parse(row?.threadEngine);
 }
 
 /**

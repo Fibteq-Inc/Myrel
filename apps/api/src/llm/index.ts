@@ -5,6 +5,7 @@ import type { ModelProvider } from "./types";
 import type { ModelConfig } from "@altair/runner-core";
 
 export * from "./loop";
+export * from "./mcp";
 export * from "./metering";
 export * from "./pricing";
 export * from "./types";

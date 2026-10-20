@@ -1,7 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { realpath } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { RunnerToServer, ServerToRunner } from "@altair/protocol";
-import { ADAPTERS, type ParseState } from "./clis";
+import { ADAPTERS, ALTAIR_MCP_SERVER, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
 import { threadWorktree, type Worktree } from "./worktrees";
 
@@ -73,7 +75,25 @@ export class TaskRunner {
     const log = this.opts.log ?? (() => {});
     log(`▶ ${adapter.id} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
 
-    const child = (this.opts.spawn ?? spawn)(adapter.bin, adapter.args({ access: config.access, resume }), {
+    // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
+    let agentDir: string | undefined;
+    let mcpConfig: string | undefined;
+    if (task.agent && task.cli === "claude" && config.server) {
+      agentDir = await mkdtemp(join(tmpdir(), "altair-agent-"));
+      mcpConfig = join(agentDir, "mcp.json");
+      const server = {
+        type: "http",
+        url: `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`,
+        headers: { Authorization: `Bearer ${task.agent.token}` },
+      };
+      // Only this user can read it: it holds the thread's token for this turn.
+      await writeFile(mcpConfig, JSON.stringify({ mcpServers: { [ALTAIR_MCP_SERVER]: server } }), { mode: 0o600 });
+      // Windows runs the CLI through a shell, which would split a path with spaces.
+      if (process.platform === "win32") mcpConfig = `"${mcpConfig}"`;
+    }
+    const cleanup = () => (agentDir ? rm(agentDir, { recursive: true, force: true }).catch(() => {}) : Promise.resolve());
+
+    const child = (this.opts.spawn ?? spawn)(adapter.bin, adapter.args({ access: config.access, resume, mcpConfig }), {
       cwd,
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -124,6 +144,7 @@ export class TaskRunner {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        void cleanup();
         this.running.delete(task.taskId);
         this.worktrees.delete(task.taskId);
         if (this.cancelled.delete(task.taskId)) {

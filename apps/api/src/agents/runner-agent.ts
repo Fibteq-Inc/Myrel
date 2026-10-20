@@ -11,7 +11,16 @@ import { Agent, type Connection, type ConnectionContext, getAgentByName } from "
 import { eq } from "drizzle-orm";
 import { notifyRunnerProjects, parseInfo, RUNNER_ID_HEADER } from "../runners";
 
-export type TaskStart = { taskId: string; projectId: string; threadId: string; folder: string; cli: CliId; prompt: string };
+export type TaskStart = {
+  taskId: string;
+  projectId: string;
+  threadId: string;
+  folder: string;
+  cli: CliId;
+  prompt: string;
+  /** The CLI runs as the thread's agent, connected to the thread's MCP endpoint (needs feature "agent"). */
+  agent?: { mcpPath: string; token: string };
+};
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
 
@@ -160,6 +169,7 @@ export class RunnerAgent extends Agent<Env> {
       folder: input.folder,
       cli: input.cli,
       prompt: input.prompt,
+      ...(input.agent && { agent: input.agent }),
     });
     return { ok: true };
   }

@@ -286,6 +286,109 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("lets the person's Claude Code be the thread's agent, talking through Altair's tools over MCP", { timeout: 20_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
+    });
+    const settings = await api(`/api/projects/${project.id}/settings`, {
+      method: "PATCH",
+      token: user,
+      body: JSON.stringify({ threadEngine: "harness" }),
+    });
+    expect(((await settings.json()) as { settings: { threadEngine: string } }).settings.threadEngine).toBe("harness");
+
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "README'yi özetle" });
+    const thread = await projectAgent.createThread(root.id, "README özeti");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Summarize the README." });
+
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const starts = () => runnerSide.frames.filter((f): f is Start => f.type === "task.start");
+    const start = await until(() => starts()[0], "agent task.start");
+    expect(start.agent?.mcpPath).toBe(`/api/agent-mcp/${thread.id}`);
+    expect(start.prompt).toContain("running as Claude Code on the person's own computer");
+    expect(start.prompt).toContain("Summarize the README.");
+
+    const mcp = (body: unknown, bearer = start.agent!.token) =>
+      api(start.agent!.mcpPath, { method: "POST", headers: { authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+    expect((await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, "x".repeat(43))).status).toBe(401);
+    expect((await api(start.agent!.mcpPath)).status).toBe(405);
+
+    const init = (await (await mcp({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).json()) as {
+      result: { protocolVersion: string };
+    };
+    expect(init.result.protocolVersion).toBe("2025-06-18");
+    expect((await mcp({ jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
+    const list = (await (await mcp({ jsonrpc: "2.0", id: 2, method: "tools/list" })).json()) as { result: { tools: { name: string }[] } };
+    const names = list.result.tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(["reply", "update_plan", "ask_decision", "request_coordinator", "memory_read"]));
+    expect(names).not.toContain("run_task");
+
+    const call = (id: number, name: string, args: unknown) => mcp({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+    const planned = (await (await call(3, "update_plan", { title: "README", steps: [{ text: "Oku", state: "active" }] })).json()) as {
+      result: { isError: boolean };
+    };
+    expect(planned.result.isError).toBe(false);
+    await call(4, "reply", { text: "README'yi okuyorum." });
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
+    expect(await bodies()).toContain("README'yi okuyorum.");
+
+    // A message during the turn waits for it instead of starting a second agent.
+    const followUp = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: "u", body: "kısa tut" });
+    await threadAgent.wake({ kind: "message", messageId: followUp.id });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(starts()).toHaveLength(1);
+
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Summary posted." });
+    // The turn's token dies with it, and the waiting message gets the next turn.
+    await until(async () => (await mcp({ jsonrpc: "2.0", id: 5, method: "tools/list" })).status === 401, "token revoked");
+    const next = await until(() => starts()[1], "next agent turn");
+    expect(next.prompt).toContain("kısa tut");
+    expect(next.agent?.token).not.toBe(start.agent!.token);
+    // It replied itself, so its final message is not posted again.
+    expect((await bodies()).filter((b) => b === "Summary posted.")).toHaveLength(0);
+
+    runnerSide.send({ type: "task.done", taskId: next.taskId, ok: true, result: "Kısa özet: Altair bir proje asistanı." });
+    await until(async () => (await bodies()).includes("Kısa özet: Altair bir proje asistanı."), "final message as reply");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
+    runnerSide.ws.close();
+  });
+
+  it("keeps Altair's loop for runners that cannot host the agent", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/altair", cli: "claude" }),
+    });
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ threadEngine: "harness" }) });
+    const threadPrompts: string[] = [];
+    setFakeModel((req) => {
+      if (!req.system.includes("coordinator of a shared project chat")) threadPrompts.push(req.prompt);
+      return { text: "", toolCalls: [] };
+    });
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Eski runner");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+    await until(() => threadPrompts.length, "loop turn");
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    runnerSide.ws.close();
+  });
+
   it("runs tasks where the project's setting says and stops them on the computer", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
