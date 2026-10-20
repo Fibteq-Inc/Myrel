@@ -1,5 +1,5 @@
 import { type Artifact, type Message, planChecklist, type Reaction } from "@myrel/protocol";
-import { type ReactNode, useMemo } from "react";
+import { type ComponentRef, type ReactNode, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
@@ -52,47 +52,59 @@ export function Conversation({
   const answers = useMemo(() => decisionAnswers(messages), [messages]);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
   const data = useMemo(() => [...messages].reverse(), [messages]);
+  // KeyboardAvoidingView measures itself relative to its parent, so anything
+  // above it (the navigation header, the project tabs) would leave the
+  // composer under the keyboard. Its distance from the top of the window
+  // is the offset that makes up for that.
+  const frame = useRef<ComponentRef<typeof View>>(null);
+  const [top, setTop] = useState(0);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
-      {header}
-      <FlatList
-        inverted
-        data={data}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={styles.list}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
-        ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
-        renderItem={({ item }) => {
-          const checklist = item.authorKind === "agent" ? planChecklist(item.body) : null;
-          if (checklist !== null) {
-            const current = plan && item.id === plan.messageId ? plan : null;
-            return <PlanCard text={current?.text ?? checklist} live={current?.live ?? false} />;
-          }
-          return (
-            <MessageView
-              message={item}
-              me={me}
-              names={names}
-              reactions={reactions[item.id]}
-              artifacts={artifacts}
-              onLink={openLink}
-              onOpenArtifact={openArtifact}
-              decision={
-                item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
-              }
-            >
-              {footerFor?.(item)}
-            </MessageView>
-          );
-        }}
-      />
-      <View style={{ paddingBottom: Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
-        <Composer placeholder={placeholder} onSend={onSend} />
-      </View>
-    </KeyboardAvoidingView>
+    <View
+      ref={frame}
+      style={{ flex: 1 }}
+      onLayout={() => frame.current?.measureInWindow((_x, y) => setTop(y))}
+    >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={top}>
+        {header}
+        <FlatList
+          inverted
+          data={data}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={styles.list}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
+          ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
+          renderItem={({ item }) => {
+            const checklist = item.authorKind === "agent" ? planChecklist(item.body) : null;
+            if (checklist !== null) {
+              const current = plan && item.id === plan.messageId ? plan : null;
+              return <PlanCard text={current?.text ?? checklist} live={current?.live ?? false} />;
+            }
+            return (
+              <MessageView
+                message={item}
+                me={me}
+                names={names}
+                reactions={reactions[item.id]}
+                artifacts={artifacts}
+                onLink={openLink}
+                onOpenArtifact={openArtifact}
+                decision={
+                  item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
+                }
+              >
+                {footerFor?.(item)}
+              </MessageView>
+            );
+          }}
+        />
+        <View style={{ paddingBottom: Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
+          <Composer placeholder={placeholder} onSend={onSend} />
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
