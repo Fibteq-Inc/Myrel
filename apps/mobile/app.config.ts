@@ -5,6 +5,8 @@ import type { ExpoConfig } from "expo/config";
 const easProjectId = process.env.EAS_PROJECT_ID ?? "c4c8d3bc-48ec-4c79-b7c3-982877904746";
 const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
+
 const config: ExpoConfig = {
   name: "Altair",
   slug: "altair",
@@ -19,6 +21,9 @@ const config: ExpoConfig = {
   },
   android: {
     package: "io.fibteq.altair",
+    // Firebase config for FCM pushes: the path of google-services.json, which EAS provides
+    // through the GOOGLE_SERVICES_JSON file variable (the file itself stays out of git).
+    ...(googleServicesFile && { googleServicesFile }),
   },
   plugins: [
     "expo-router",

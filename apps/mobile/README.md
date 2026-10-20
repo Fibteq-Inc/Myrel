@@ -45,7 +45,9 @@ Mobile builds are separate from the Cloudflare deploy. One-time setup, done by t
    `eas init` itself).
 3. iOS: an Apple Developer account. EAS creates the certificates and the push key
    (`npx eas-cli credentials`).
-4. Android: a Firebase project's FCM V1 service account key, uploaded with `npx eas-cli credentials`.
+4. Android: a Firebase project with an Android app `io.fibteq.altair`. Upload its FCM V1
+   service account key with `npx eas-cli credentials`, and give builds its `google-services.json`:
+   `npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --visibility secret --environment production --environment preview --environment development`.
 
 Then:
 
