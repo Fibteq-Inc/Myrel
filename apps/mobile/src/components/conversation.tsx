@@ -47,7 +47,7 @@ export function Conversation({
   empty?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
-  const openLink = useOpenLink();
+  const openLink = useOpenLink(projectId);
   const openArtifact = useOpenArtifact(projectId);
   const answers = useMemo(() => decisionAnswers(messages), [messages]);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.

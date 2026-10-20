@@ -1,4 +1,4 @@
-import type { Message, Routine, Thread } from "@myrel/protocol";
+import { type Message, type Routine, type Thread, threadLink } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
@@ -45,7 +45,7 @@ For each new message in the project chat:
   - project_ack is the one line the person sees right under their message in the project chat, with the thread card under it. It only says, in a few natural words, that you got it and are starting ("Got it, starting now", "On it"). Word it differently each time, to fit the ask; it does not repeat the request or preview the work.
   - ack is the thread's opening line, saying what is being done first.
   - Do not also call post_message for it; project_ack is that post.
-- A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread ("Passed this on to the X thread"). A change to something a thread made or worked on ("make the calculator blue", "add a test to that fix") is a follow-up to that thread, even when the thread is resolved: message_thread reopens it, and that thread already has the files and the history. Start a new thread only for work no existing thread covers.
+- A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread, with the thread written as a link people can tap to open it: [thread title](#thread_id), for example "Passed this on to the [Calculator](#thr_…) thread". A change to something a thread made or worked on ("make the calculator blue", "add a test to that fix") is a follow-up to that thread, even when the thread is resolved: message_thread reopens it, and that thread already has the files and the history. Start a new thread only for work no existing thread covers.
 - A question about the project itself that the chat and thread list already answer (what threads exist, what one is waiting on): answer it with post_message, briefly.
 - A greeting or FYI with nothing to do: one short post_message, or a react.
 - Thanks or a sign-off: react with an emoji and nothing else.
@@ -64,7 +64,7 @@ You only route, so you can list files but not read or write them; that is thread
 
 Language: everything people read (posts, thread titles, acks) is in the language of the message you are handling. When it is too short to tell (an emoji, "ok"), use the language of the chat so far. These instructions being in English never sets the language. Write the brief in the person's language too, so the thread agent continues in it.
 
-Style: plain, warm, short sentences. No em dashes. Never show ids to people; ids are only for tool calls. When there is nothing to do, call no tools.`;
+Style: plain, warm, short sentences. No em dashes. Never show ids to people; ids are only for tool calls and inside a thread link [thread title](#thread_id), which people see as the title and can tap. Use a thread link whenever you name a thread in the project chat. Call a thread "thread" in every language (in Turkish "thread", never "dal" or "konu"). When there is nothing to do, call no tools.`;
 
 export function coordinatorPrompt(input: {
   projectName: string;
@@ -232,9 +232,12 @@ export function coordinatorTools(
           ),
       }),
       run: async ({ thread_id, note, project_ack }) => {
-        if (!host.getThread(thread_id)) throw new Error(`No thread ${thread_id}.`);
+        const thread = host.getThread(thread_id);
+        if (!thread) throw new Error(`No thread ${thread_id}.`);
         await host.messageThread(thread_id, note);
-        if (project_ack?.trim()) host.post(project_ack.trim());
+        const ack = project_ack?.trim();
+        // People should be one tap from the thread their message went to, even when the model forgot the link.
+        if (ack) host.post(ack.includes(`(#${thread.id})`) ? ack : `${ack} ${threadLink(thread)}`);
         return "Delivered.";
       },
     }),
