@@ -17,7 +17,7 @@ export const useShell = () => useContext(ShellContext);
  * App frame: the icon rail, then whatever the route puts beside it (usually a
  * sidebar and a main pane). On phones the rail and sidebar slide in as a drawer.
  */
-export function AppShell({ rail, children }: { rail: ReactNode; children: ReactNode }) {
+export function AppShell({ rail, banner, children }: { rail: ReactNode; banner?: ReactNode; children: ReactNode }) {
   const t = useT();
   const [navOpen, setNavOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -27,24 +27,27 @@ export function AppShell({ rail, children }: { rail: ReactNode; children: ReactN
 
   return (
     <ShellContext.Provider value={{ navOpen, setNavOpen }}>
-      <div className="flex h-full overflow-hidden">
-        <div
-          className={cn(
-            "fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:z-50 md:translate-x-0",
-            navOpen ? "translate-x-0" : "-translate-x-full",
+      <div className="flex h-full flex-col overflow-hidden">
+        {banner}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div
+            className={cn(
+              "fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:z-50 md:translate-x-0",
+              navOpen ? "translate-x-0" : "-translate-x-full",
+            )}
+          >
+            {rail}
+          </div>
+          {navOpen && (
+            <button
+              type="button"
+              aria-label={t("shell.closeMenu")}
+              onClick={() => setNavOpen(false)}
+              className="fixed inset-0 z-30 bg-black/60 md:hidden"
+            />
           )}
-        >
-          {rail}
+          <div className="flex min-w-0 flex-1">{children}</div>
         </div>
-        {navOpen && (
-          <button
-            type="button"
-            aria-label={t("shell.closeMenu")}
-            onClick={() => setNavOpen(false)}
-            className="fixed inset-0 z-30 bg-black/60 md:hidden"
-          />
-        )}
-        <div className="flex min-w-0 flex-1">{children}</div>
       </div>
     </ShellContext.Provider>
   );

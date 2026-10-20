@@ -17,6 +17,8 @@ export const ServerInfo = z.object({
     emailPassword: z.boolean(),
     /** Whether new accounts can be created. Older servers do not send it and always allowed it. */
     signUp: z.boolean().default(true),
+    /** Whether this server verifies email addresses: invitations, admin rights and the cloud sandbox wait for it. */
+    emailVerification: z.boolean().default(false),
   }),
   /** Whether this server sells plans (the hosted service); self-hosted servers have none. */
   billing: z.boolean().default(false),

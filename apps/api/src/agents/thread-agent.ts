@@ -39,6 +39,7 @@ import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
 import { localBackend, localCanceller, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
+import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
 import {
   ACCESS_LEVEL_DENIED,
@@ -428,6 +429,8 @@ export class ThreadAgent extends Agent<Env> {
         await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
       } else {
+        // The sandbox costs the service and holds the project's tokens: not for an address nobody has shown is theirs.
+        if (input.requester && !(await userVerified(this.env, input.requester))) throw new Error(UNVERIFIED_MESSAGE);
         const allowed = await canUseSandbox(this.env, projectId);
         if (!allowed.ok) throw new Error(allowed.reason);
         const origin = await project.publicOrigin();

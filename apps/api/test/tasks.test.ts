@@ -52,6 +52,25 @@ async function threadSetup() {
 afterEach(resetFakeModel);
 
 describe("the cloud agent", () => {
+  it("does not start a sandbox for someone who has not verified their address", async () => {
+    const { project, projectAgent } = await threadSetup();
+    const email = `x${crypto.randomUUID()}@example.com`;
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email, password: "correct-horse-battery", name: "X" }),
+    });
+    const { user } = (await signUp.json()) as { user: { id: string } };
+    await env.DB.prepare("UPDATE user SET email_verified = 0 WHERE id = ?").bind(user.id).run();
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: user.id, body: "çalıştır" });
+    const thread = await projectAgent.createThread(root.id, "Doğrulanmamış");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run it." });
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "failed", "failed");
+    const bodies = ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    expect(bodies.some((b) => b.includes("Verify your email address first"))).toBe(true);
+    expect(await threadAgent.getTasks()).toEqual([]);
+  });
+
   it("runs the thread's agent as OpenCode in its sandbox, connected to the thread's MCP endpoint", async () => {
     const { project, token, ws, events, projectAgent, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });

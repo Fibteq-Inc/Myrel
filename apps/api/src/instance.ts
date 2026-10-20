@@ -1,5 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import { eq, sql } from "drizzle-orm";
+import { isVerified } from "./verification";
 
 const { instanceSettings, projectInvites, user } = schema;
 
@@ -31,19 +32,22 @@ export function adminEmails(env: Env): string[] {
     .filter(Boolean);
 }
 
-/** Whether ADMIN_EMAILS names `email`; such accounts are admins whatever their stored role. */
-export function isListedAdmin(env: Env, email: string): boolean {
-  return adminEmails(env).includes(email.toLowerCase());
+/**
+ * Whether ADMIN_EMAILS names `email` and the account has verified it; such accounts are admins
+ * whatever their stored role. Unverified, anyone could claim a listed address by signing up first.
+ */
+export function isListedAdmin(env: Env, email: string, emailVerified: boolean | null | undefined): boolean {
+  return adminEmails(env).includes(email.toLowerCase()) && isVerified(env, emailVerified);
 }
 
 /**
  * Decides whether an account may be created for `email`, and with which instance role.
- * With ADMIN_EMAILS set, exactly those addresses become admins and may sign up while sign-ups are
- * closed; without it, the first account on a server is its admin. Invited people may sign up while
- * sign-ups are closed.
+ * With ADMIN_EMAILS set, those addresses may sign up while sign-ups are closed, and become admins
+ * once verified (isListedAdmin; their stored role stays "user"); without it, the first account on a
+ * server is its admin. Invited people may sign up while sign-ups are closed.
  */
 export async function admitNewUser(env: Env, email: string): Promise<{ ok: false } | { ok: true; role: "admin" | "user" }> {
-  if (isListedAdmin(env, email)) return { ok: true, role: "admin" };
+  if (adminEmails(env).includes(email.toLowerCase())) return { ok: true, role: "user" };
   const db = createDb(env.DB);
   const [{ users }] = (await db.select({ users: sql<number>`count(*)` }).from(user)) as [{ users: number }];
   const role = users === 0 && adminEmails(env).length === 0 ? "admin" : "user";

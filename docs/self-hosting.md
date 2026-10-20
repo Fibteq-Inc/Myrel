@@ -140,7 +140,9 @@ project chat says which secret to set instead of answering.
 Sign-ups are off by default, so nobody can register on a fresh public server.
 The simplest way in is to set the `ADMIN_EMAILS` secret to your address, then
 open your Myrel URL and create your account with it: that address may sign up
-while sign-ups are closed and is always an admin. Without `ADMIN_EMAILS`:
+while sign-ups are closed and is an admin. When the server sends email (the
+`EMAIL` binding), it becomes an admin once you follow the verification link
+Myrel sends, so nobody else can claim it by signing up first. Without `ADMIN_EMAILS`:
 
 1. Set `SIGNUP_ENABLED` to `"true"` in `apps/api/wrangler.jsonc` and push (or
    set it as a plain-text variable in the dashboard).
@@ -212,7 +214,8 @@ supply the D1 id.
 | `ARTIFACTS` | R2 bucket `myrel-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for its cloud agent (see [Code sandbox](#code-sandbox)) |
 | `WORKSPACES` | Artifacts namespace `myrel` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
-| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) |
+| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) and address verification: with it, invitations, the `ADMIN_EMAILS` admin role and the cloud sandbox wait until a person follows the link sent at sign-up. Without it, every address counts as verified. |
+| `AUTH_LIMIT` | Rate limiting (`ratelimits`) | Sign-up, sign-in and their emails: 10 a minute per client IP. Optional; its `namespace_id` must be unique in your Cloudflare account. |
 
 ## Optional features
 

@@ -7,6 +7,7 @@ import { deleteAccount } from "../delete-account";
 import { toApiKey } from "../keys";
 import { PROVIDERS, serverProviderId } from "../llm";
 import { type AppEnv, requireUser } from "../middleware";
+import { UNVERIFIED_MESSAGE } from "../verification";
 
 const { apiKeys, projectInvites, projectMembers, projects, user } = schema;
 
@@ -85,6 +86,8 @@ export const accountRoutes = new Hono<AppEnv>()
   // ---- Invitations addressed to me ----
 
   .get("/invites", async (c) => {
+    // An invitation is for whoever owns the address, which an unverified account has not shown.
+    if (!c.get("user").verified) return c.json({ invites: [] });
     const rows = await createDb(c.env.DB)
       .select({
         id: projectInvites.id,
@@ -104,6 +107,7 @@ export const accountRoutes = new Hono<AppEnv>()
   })
   .post("/invites/:id/accept", async (c) => {
     const me = c.get("user");
+    if (!me.verified) return c.json({ error: "email_not_verified", message: UNVERIFIED_MESSAGE }, 403);
     const db = createDb(c.env.DB);
     const invite = await myInvite(c.env, c.req.param("id"), me.email);
     if (!invite) return c.json({ error: "not_found" }, 404);

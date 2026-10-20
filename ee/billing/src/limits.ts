@@ -1,5 +1,5 @@
 import type { Extensions, LimitCheck } from "../../../apps/api/src/extensions";
-import { freeBudgetMicros, freeSpendMicros, projectOwner, standingOf, usageOf } from "./store";
+import { freeBudgetMicros, freeSpendMicros, projectOwner, type Standing, standingOf, usageOf } from "./store";
 
 const OK: LimitCheck = { ok: true };
 const refuse = (reason: string): LimitCheck => ({ ok: false, reason });
@@ -53,7 +53,7 @@ export const billingExtensions: Extensions = {
           `${UPGRADE}, or connect a folder on your computer to keep working there.`,
       );
     }
-    if (standing.plan === "free" && (await freeSpendMicros(env)) >= freeBudgetMicros(env)) {
+    if (unpaid(standing) && (await freeSpendMicros(env)) >= freeBudgetMicros(env)) {
       return refuse(`Free cloud sandbox time is used up for this month. ${UPGRADE}, or connect a folder on your computer.`);
     }
     return OK;
@@ -70,9 +70,17 @@ export const billingExtensions: Extensions = {
     if (max !== null && usage.modelMicros >= max) {
       return refuse(`This project's plan has used its included model usage this month. ${UPGRADE}, or ${KEY_HINT}.`);
     }
-    if (standing.plan === "free" && (await freeSpendMicros(env)) >= freeBudgetMicros(env)) {
+    if (unpaid(standing) && (await freeSpendMicros(env)) >= freeBudgetMicros(env)) {
       return refuse(`Free model usage is used up for this month. ${UPGRADE}, or ${KEY_HINT}.`);
     }
     return OK;
   },
 };
+
+/**
+ * Free plans and trials (no card asked) draw on the same monthly budget, so a stream of new
+ * accounts trying Pro cannot spend more than free use may.
+ */
+function unpaid(standing: Standing): boolean {
+  return standing.plan === "free" || standing.subscription?.status === "trialing";
+}

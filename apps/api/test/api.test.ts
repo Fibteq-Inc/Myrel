@@ -2,6 +2,8 @@ import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo } from
 import { getAgentByName } from "agents";
 import { createAuth } from "../src/auth";
 import { setExtensions } from "../src/extensions";
+import { isListedAdmin } from "../src/instance";
+import { verificationEmails } from "./fake-llm";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -198,12 +200,64 @@ describe("sign-up switch", () => {
       }),
     );
     expect(res.status).toBe(200);
+    // The listed address is an admin once verified, never by its stored role.
     const { user } = (await res.json()) as { user: { role: string } };
-    expect(user.role).toBe("admin");
+    expect(user.role).toBe("user");
+    const listed = { ...env, ADMIN_EMAILS: admin } as Env;
+    expect(isListedAdmin(listed, admin.toUpperCase(), true)).toBe(true);
+    expect(isListedAdmin(listed, admin, false)).toBe(false);
 
     // A regular account is not an admin, and its admin routes stay closed.
     const token = await signUp();
     expect((await api("/api/admin/settings", { token })).status).toBe(403);
+  });
+});
+
+describe("email verification", () => {
+  /** Signs up an account that has not followed its link yet (setup.ts verifies new accounts). */
+  async function verifyLater(email: string) {
+    const token = await signUp(email);
+    await env.DB.prepare("UPDATE user SET email_verified = 0 WHERE email = ?").bind(email).run();
+    return token;
+  }
+
+  it("holds back invitations and the sandbox until the address is verified", async () => {
+    const info = ServerInfo.parse(await (await api("/api/info")).json());
+    expect(info.auth.emailVerification).toBe(true);
+
+    const owner = await signUp();
+    const project = await createProject(owner);
+    const email = `v${crypto.randomUUID()}@example.com`;
+    const invited = await api(`/api/projects/${project.id}/invites`, { method: "POST", token: owner, body: JSON.stringify({ email }) });
+    const { invite } = (await invited.json()) as { invite: { id: string } };
+
+    // Someone signing up as the invited address sees nothing to accept until they show it is theirs.
+    const token = await verifyLater(email);
+    expect(await (await api("/api/account/invites", { token })).json()).toEqual({ invites: [] });
+    const refused = await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ error: "email_not_verified" });
+
+    const mail = verificationEmails.findLast((m) => m.to === email);
+    expect(mail?.subject).toBe("Confirm your email for Myrel");
+    const link = new URL(/https?:\/\/\S+verify-email\S+/.exec(mail!.text)![0]);
+    expect((await api(`${link.pathname}${link.search}`, { redirect: "manual" })).status).toBeLessThan(400);
+    expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token })).status).toBe(200);
+  });
+});
+
+describe("sign-in limit", () => {
+  it("refuses a client IP that keeps trying", async () => {
+    const attempt = () =>
+      api("/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "cf-connecting-ip": "203.0.113.7" },
+        body: JSON.stringify({ email: "nobody@example.com", password: "wrong-password-here" }),
+      });
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i++) statuses.push((await attempt()).status);
+    expect(statuses.slice(0, 10).every((s) => s === 401)).toBe(true);
+    expect(statuses.at(-1)).toBe(429);
   });
 });
 

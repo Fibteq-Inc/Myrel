@@ -68,7 +68,7 @@ export type ApiClientOptions = {
   credentials?: RequestCredentials;
 };
 
-export type SessionUser = { id: string; name: string; email: string; image?: string | null };
+export type SessionUser = { id: string; name: string; email: string; emailVerified?: boolean; image?: string | null };
 export type Session = { user: SessionUser; session: { id: string; expiresAt: string } };
 
 export class ApiError extends Error {
@@ -157,6 +157,11 @@ export class ApiClient {
 
   getSession() {
     return this.request<Session | null>("/api/auth/get-session");
+  }
+
+  /** Sends the signed-in person a new link to verify their address; it comes back to `callbackURL`. */
+  async sendVerificationEmail(email: string, callbackURL = "/") {
+    await this.request("/api/auth/send-verification-email", { method: "POST", body: { email, callbackURL } });
   }
 
   // --- projects ---

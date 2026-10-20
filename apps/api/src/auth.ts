@@ -6,6 +6,7 @@ import { bearer } from "better-auth/plugins/bearer";
 import { legalLinks } from "./extensions";
 import { admitNewUser } from "./instance";
 import { trustedOrigins } from "./origins";
+import { sendVerificationEmail, verificationRequired } from "./verification";
 
 export function createAuth(env: Env) {
   return betterAuth({
@@ -17,6 +18,16 @@ export function createAuth(env: Env) {
     // Sign-up is open at this layer; databaseHooks below decide who may create an account, because
     // the switch is an admin setting in D1 and invited people may join while it is off.
     emailAndPassword: { enabled: true },
+    // People can sign in before they verify; what an unverified address would let a stranger claim
+    // (invitations, ADMIN_EMAILS, the cloud sandbox) waits for it (see verification.ts).
+    ...(verificationRequired(env) && {
+      emailVerification: {
+        sendOnSignUp: true,
+        autoSignInAfterVerification: true,
+        expiresIn: 24 * 60 * 60,
+        sendVerificationEmail: async ({ user, url }) => sendVerificationEmail(env, user.email, url),
+      },
+    }),
     user: {
       additionalFields: {
         role: { type: "string", required: false, defaultValue: "user", input: false },

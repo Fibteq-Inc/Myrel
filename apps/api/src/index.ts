@@ -3,8 +3,10 @@ import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
+import { authLimit } from "./auth-limit";
 import { legalLinks, sellsPlans } from "./extensions";
 import { signUpEnabled } from "./instance";
+import { verificationRequired } from "./verification";
 import type { AppEnv } from "./middleware";
 import { trustedOrigins } from "./origins";
 import { accountRoutes } from "./routes/account";
@@ -47,11 +49,12 @@ const app = new Hono<AppEnv>()
       app: "myrel",
       apiVersion: API_VERSION,
       name: c.env.INSTANCE_NAME || "Myrel",
-      auth: { emailPassword: true, signUp: await signUpEnabled(c.env) },
+      auth: { emailPassword: true, signUp: await signUpEnabled(c.env), emailVerification: verificationRequired(c.env) },
       billing: sellsPlans(),
       legal: legalLinks(c.env, new URL(c.req.url).origin),
     } satisfies ServerInfo),
   )
+  .use("/auth/*", authLimit)
   .on(["GET", "POST"], "/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
   // MCP endpoint of a thread whose agent is the person's Claude Code (thread engine "harness"). No user
   // session: the bearer token is the one the thread gave that agent turn. Stateless JSON, so no SSE stream.

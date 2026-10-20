@@ -76,6 +76,9 @@
   // Compute > Email Service > Email Sending and the EMAIL_FROM var below. Locally, `wrangler dev`
   // only simulates sends. Remove the binding to run without email.
   "send_email": [{ "name": "EMAIL" }],
+  // Sign-up, sign-in and the emails they send, per client IP (see src/auth-limit.ts). The namespace id is
+  // any number unique within the Cloudflare account.
+  "ratelimits": [{ "name": "AUTH_LIMIT", "namespace_id": "4207", "simple": { "limit": 10, "period": 60 } }],
 
   // Secrets are set with `wrangler secret put` (or .dev.vars locally) and typed in src/env.d.ts:
   // BETTER_AUTH_SECRET (required), KEY_ENCRYPTION_SECRET (recommended: encrypts the model keys people
