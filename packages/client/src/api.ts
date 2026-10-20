@@ -24,6 +24,7 @@ import type {
   ProjectWorkspace,
   ProviderId,
   ProviderInfo,
+  PullRequest,
   PutMemoryInput,
   Runner,
   RunnerDirListing,
@@ -360,6 +361,12 @@ export class ApiClient {
   async listTasks(projectId: string, threadId: string) {
     const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/tasks`;
     return (await this.request<{ tasks: (Task & { log: TerminalLine[] })[] }>(path)).tasks;
+  }
+
+  /** Pull requests the thread's tasks opened, with their live state. */
+  async listPullRequests(projectId: string, threadId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests`;
+    return (await this.request<{ pullRequests: PullRequest[] }>(path)).pullRequests;
   }
 
   /** What the thread's cloud tasks saved: history and the folder or file at `path`. Null when nothing was saved. */

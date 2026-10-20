@@ -1,4 +1,4 @@
-import { threadMessages, threadTasks } from "@altair/client";
+import { threadMessages, threadPullRequests, threadTasks } from "@altair/client";
 import { useT } from "@altair/i18n/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CircleCheck, LoaderCircle, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
@@ -7,7 +7,16 @@ import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
-import { Checklist, Composer, decisionAnswers, MessageView, ScrollToEnd, Thinking } from "../chat";
+import {
+  Checklist,
+  Composer,
+  decisionAnswers,
+  mentionedPullRequests,
+  MessageView,
+  PullRequestCards,
+  ScrollToEnd,
+  Thinking,
+} from "../chat";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, WorkspacePanel } from "../workspace/workspace-panel";
@@ -276,6 +285,9 @@ function Conversation({
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
   const answers = decisionAnswers(messages);
+  // Each pull request shows under the message that links it; one no message linked yet shows at the end.
+  const pullRequests = threadPullRequests(state, thread.id);
+  const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
   const active = !!state.active[thread.id];
   const working = thread.status === "working" && !thread.resolved;
   return (
@@ -306,8 +318,10 @@ function Conversation({
                   openId={openArtifact}
                 />
               ) : null}
+              {m.authorKind === "agent" && <PullRequestCards pullRequests={mentionedPullRequests(m.body, pullRequests)} />}
             </MessageView>
           ))}
+          <PullRequestCards pullRequests={unmentioned} />
           {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
         </div>
       </ScrollToEnd>

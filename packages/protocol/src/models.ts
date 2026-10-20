@@ -226,6 +226,24 @@ export const ProjectRepo = z.object({
 });
 export type ProjectRepo = z.infer<typeof ProjectRepo>;
 
+/** A pull request a thread's task opened, with its live state from GitHub. */
+export const PullRequest = z.object({
+  /** owner/name. */
+  repo: z.string(),
+  number: z.number().int(),
+  url: z.string(),
+  threadId: ThreadId,
+  title: z.string(),
+  state: z.enum(["open", "closed", "merged"]),
+  draft: z.boolean(),
+  /** Combined CI result on the head commit; null when the repository runs no checks. */
+  checks: z.enum(["pending", "success", "failure"]).nullable(),
+  /** The latest decisive review; null when nobody approved or asked for changes. */
+  review: z.enum(["approved", "changes_requested"]).nullable(),
+  updatedAt: Timestamp,
+});
+export type PullRequest = z.infer<typeof PullRequest>;
+
 export const AddProjectRepoInput = z.object({
   installationId: z.number().int().positive(),
   repoId: z.number().int().positive(),

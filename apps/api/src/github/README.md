@@ -2,9 +2,10 @@
 
 Altair talks to GitHub through a **GitHub App**. Each Altair server needs its own app.
 People connect their GitHub account in a project's settings, pick repositories, and thread
-agents can then read the code in those repositories. Cloning, running code and opening pull
-requests build on the same app in a later phase, which is why the permissions below already
-include write access.
+agents can then read the code in those repositories. Their tasks clone, push and open pull
+requests through the same app, and the webhook keeps each pull request a thread opened up to
+date: the thread shows its CI, review and merge state live, and its agent is woken when CI
+fails, someone asks for changes or comments, or it is merged or closed.
 
 ## Quick setup
 
@@ -95,9 +96,12 @@ signed-in session. The desktop and mobile apps will get their own flow.
 - `app.ts`: the app JWT, installation tokens and REST calls (WebCrypto, no Octokit).
 - `state.ts`: the signed `state` for the round trip, and webhook signature checks.
 - `store.ts`: installations per user, repositories per project, and `projectRepoToken`, which
-  hands out a token limited to one project repository. Later phases clone and open pull
+  hands out a token limited to one project repository. Sandbox tasks clone and open pull
   requests with it.
 - `files.ts`: the thread agent's `repo_list_files` and `repo_read_file` tools.
+- `pulls.ts`: pull requests threads opened (`pull_requests` table). A finished task's pull
+  request is tracked; webhook events for it update its state, reach clients as `pr.updated`
+  and wake the thread's agent when something needs it.
 - `../routes/github.ts`: `/api/github` (status, connect, callback, repos, webhook).
 - `../routes/projects.ts`: `/api/projects/:id/repos`.
 

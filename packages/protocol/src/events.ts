@@ -3,7 +3,7 @@ import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
-import { MAX_MESSAGE_LENGTH, Message, Reaction, Task, TaskId, TerminalLine, Thread, ThreadId } from "./models";
+import { MAX_MESSAGE_LENGTH, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
@@ -78,6 +78,8 @@ export const ServerEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("task.updated"), task: Task }),
   /** New terminal output from a running task. Ephemeral: earlier output comes from the tasks endpoint. */
   z.object({ type: z.literal("task.output"), taskId: TaskId, threadId: ThreadId, lines: z.array(TerminalLine) }),
+  /** A pull request a thread opened changed on GitHub (CI, review, merge). */
+  z.object({ type: z.literal("pr.updated"), pullRequest: PullRequest }),
   z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
