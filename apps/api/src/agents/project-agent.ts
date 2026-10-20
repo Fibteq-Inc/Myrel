@@ -12,6 +12,7 @@ import {
   type ArtifactRef,
   nextCronRun,
   type NotificationKind,
+  type PullRequest,
   type Reaction,
   type Routine,
   type RoutineSchedule,
@@ -428,6 +429,11 @@ export class ProjectAgent extends Agent<Env> {
   /** A thread's task changed or printed output; relay it to clients. Callable over RPC. */
   broadcastTask(event: Extract<ServerEvent, { type: "task.updated" | "task.output" }>): void {
     this.emit(event);
+  }
+
+  /** A pull request a thread opened changed on GitHub; relay it to clients. Callable over RPC. */
+  broadcastPullRequest(pullRequest: PullRequest): void {
+    this.emit({ type: "pr.updated", pullRequest });
   }
 
   // ---- Routines ----------------------------------------------------------
@@ -865,7 +871,9 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 export type ThreadWake =
   | { kind: "message"; messageId: string }
   | { kind: "coordinator"; note: string }
-  | { kind: "routine"; name: string; prompt: string };
+  | { kind: "routine"; name: string; prompt: string }
+  /** Something happened on a pull request the thread opened (github/pulls.ts). */
+  | { kind: "github"; event: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

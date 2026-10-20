@@ -1,4 +1,4 @@
-import type { Artifact, Message, Reaction, Routine, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
+import type { Artifact, Message, PullRequest, Reaction, Routine, ServerEvent, Task, TerminalLine, Thread } from "@altair/protocol";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -19,6 +19,8 @@ export type ProjectState = {
   tasks: Record<string, Task>;
   /** Terminal output per task id, oldest first, capped at MAX_TERMINAL_LINES. */
   output: Record<string, TerminalLine[]>;
+  /** Pull requests threads opened, seen live or loaded with `applyPullRequests`, by URL. */
+  pullRequests: Record<string, PullRequest>;
 };
 
 export const emptyProjectState: ProjectState = {
@@ -31,6 +33,7 @@ export const emptyProjectState: ProjectState = {
   progress: {},
   tasks: {},
   output: {},
+  pullRequests: {},
 };
 
 /** Terminal lines kept per task on the client. */
@@ -46,6 +49,17 @@ export function applyTasks(state: ProjectState, tasks: (Task & { log?: TerminalL
   }
   return next;
 }
+
+/** Adds pull requests fetched from the pull requests endpoint. */
+export function applyPullRequests(state: ProjectState, pullRequests: PullRequest[]): ProjectState {
+  const next = { ...state.pullRequests };
+  // A live update that arrived while fetching is at least as new as the fetched copy.
+  for (const pr of pullRequests) if (!next[pr.url] || next[pr.url]!.updatedAt < pr.updatedAt) next[pr.url] = pr;
+  return { ...state, pullRequests: next };
+}
+
+export const threadPullRequests = (s: ProjectState, threadId: string) =>
+  Object.values(s.pullRequests).filter((pr) => pr.threadId === threadId);
 
 export const threadTasks = (s: ProjectState, threadId: string) =>
   Object.values(s.tasks)
@@ -83,6 +97,8 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
     }
     case "task.updated":
       return { ...state, tasks: { ...state.tasks, [event.task.id]: event.task } };
+    case "pr.updated":
+      return { ...state, pullRequests: { ...state.pullRequests, [event.pullRequest.url]: event.pullRequest } };
     case "task.output": {
       const lines = [...(state.output[event.taskId] ?? []), ...event.lines].slice(-MAX_TERMINAL_LINES);
       return { ...state, output: { ...state.output, [event.taskId]: lines } };

@@ -237,6 +237,34 @@ export const projectRepos = sqliteTable(
   (t) => [primaryKey({ columns: [t.projectId, t.repoId] }), index("project_repos_installation_id_idx").on(t.installationId)],
 );
 
+/**
+ * Pull requests a thread's tasks opened, kept current by the GitHub webhook so
+ * the thread shows their live state and its agent hears about CI and reviews.
+ */
+export const pullRequests = sqliteTable(
+  "pull_requests",
+  {
+    repoId: integer("repo_id").notNull(),
+    number: integer("number").notNull(),
+    fullName: text("full_name").notNull(),
+    installationId: integer("installation_id").notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").notNull(),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    state: text("state", { enum: ["open", "closed", "merged"] }).notNull(),
+    draft: integer("draft", { mode: "boolean" }).notNull().default(false),
+    headSha: text("head_sha").notNull(),
+    headRef: text("head_ref").notNull(),
+    checks: text("checks", { enum: ["pending", "success", "failure"] }),
+    review: text("review", { enum: ["approved", "changes_requested"] }),
+    ...timestamps,
+  },
+  (t) => [primaryKey({ columns: [t.repoId, t.number] }), index("pull_requests_project_id_idx").on(t.projectId, t.threadId)],
+);
+
 // --- Local runners (altair-runner on the user's computer) ---
 
 export const runners = sqliteTable(

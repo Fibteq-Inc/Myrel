@@ -19,6 +19,7 @@ import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
+import { listPullRequests } from "../github/pulls";
 import { canUseInstallation, listProjectRepos } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { deleteProject } from "../projects/delete";
@@ -309,6 +310,12 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!thread) return c.json({ error: "not_found" }, 404);
     const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
     return c.json({ tasks: await agent.getTasks() });
+  })
+  // Pull requests the thread's tasks opened, with their live state.
+  .get("/:id/threads/:threadId/pull-requests", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    return c.json({ pullRequests: await listPullRequests(c.env.DB, c.req.param("id"), thread) });
   })
   // What the thread's cloud tasks saved (its Artifacts workspace): history and one folder or file.
   .get("/:id/threads/:threadId/files", async (c) => {

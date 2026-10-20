@@ -9,6 +9,7 @@ import {
   installationRepos,
   userInstallations,
 } from "../github/app";
+import { handlePullEvent } from "../github/pulls";
 import { safeReturnTo, signState, verifyState, verifyWebhook } from "../github/state";
 import { listUserInstallations, syncUserInstallations } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
@@ -30,7 +31,11 @@ export const githubRoutes = new Hono<AppEnv>()
     if (!(await verifyWebhook(c.env.GITHUB_WEBHOOK_SECRET, body, c.req.header("x-hub-signature-256")))) {
       return c.json({ error: "bad_signature" }, 401);
     }
-    await handleWebhook(c.env.DB, c.req.header("x-github-event") ?? "", JSON.parse(body));
+    const event = c.req.header("x-github-event") ?? "";
+    const payload = JSON.parse(body);
+    await handleWebhook(c.env.DB, event, payload);
+    // A GitHub hiccup while reading CI must not fail the delivery; the next event catches up.
+    await handlePullEvent(c.env, event, payload).catch((err) => console.error("pull request event failed", event, err));
     return c.json({ ok: true });
   })
   .use(requireUser)
@@ -109,7 +114,7 @@ type WebhookPayload = {
   repository?: WebhookRepo;
 };
 
-/** Pull request and push events will drive thread agents in a later phase; for now only bookkeeping. */
+/** Installation and repository bookkeeping. Pull request events are handled in github/pulls.ts. */
 export async function handleWebhook(db: D1Database, event: string, payload: WebhookPayload) {
   const d = createDb(db);
   const installationId = payload.installation?.id;

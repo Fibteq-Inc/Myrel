@@ -1,0 +1,101 @@
+import { useT } from "@altair/i18n/react";
+import type { PullRequest } from "@altair/protocol";
+import {
+  CircleCheck,
+  CircleX,
+  ExternalLink,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  LoaderCircle,
+  MessageSquareWarning,
+} from "lucide-react";
+import { cn } from "../../lib/ui";
+
+/** The pull requests a message mentions by address. */
+export function mentionedPullRequests(body: string, pullRequests: PullRequest[]): PullRequest[] {
+  return pullRequests.filter((pr) => body.includes(pr.url));
+}
+
+/**
+ * Pull requests a thread opened, each a card with its live state: open,
+ * merged or closed, CI and review. The webhook keeps them current.
+ */
+export function PullRequestCards({ pullRequests }: { pullRequests: PullRequest[] }) {
+  if (pullRequests.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {pullRequests.map((pr) => (
+        <PullRequestCard key={pr.url} pr={pr} />
+      ))}
+    </div>
+  );
+}
+
+function PullRequestCard({ pr }: { pr: PullRequest }) {
+  const t = useT();
+  const state =
+    pr.state === "merged"
+      ? { icon: GitMerge, label: t("pr.merged"), className: "text-[#b49cff]" }
+      : pr.state === "closed"
+        ? { icon: GitPullRequestClosed, label: t("pr.closed"), className: "text-bad" }
+        : pr.draft
+          ? { icon: GitPullRequestDraft, label: t("pr.draft"), className: "text-subtle" }
+          : { icon: GitPullRequest, label: t("pr.open"), className: "text-ok" };
+  const StateIcon = state.icon;
+  return (
+    <a
+      href={pr.url}
+      target="_blank"
+      rel="noreferrer"
+      className="group flex max-w-md items-center gap-3 rounded-xl border border-[#26262b] bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover"
+    >
+      <span className={cn("flex size-9 flex-none items-center justify-center rounded-lg border border-edge bg-panel", state.className)}>
+        <StateIcon size={17} aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-semibold">{pr.title}</span>
+        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-subtle">
+          <span className="truncate">
+            {pr.repo}#{pr.number}
+          </span>
+          <span className={state.className}>{state.label}</span>
+          {pr.state === "open" && <Checks checks={pr.checks} />}
+          {pr.state === "open" && pr.review && (
+            <span className={cn("flex items-center gap-1", pr.review === "approved" ? "text-ok" : "text-warn")}>
+              {pr.review === "approved" ? (
+                <CircleCheck size={12} aria-hidden="true" />
+              ) : (
+                <MessageSquareWarning size={12} aria-hidden="true" />
+              )}
+              {pr.review === "approved" ? t("pr.approved") : t("pr.changesRequested")}
+            </span>
+          )}
+        </span>
+      </span>
+      <ExternalLink size={14} className="flex-none text-subtle group-hover:text-muted" aria-hidden="true" />
+    </a>
+  );
+}
+
+function Checks({ checks }: { checks: PullRequest["checks"] }) {
+  const t = useT();
+  if (checks === null) return null;
+  if (checks === "pending") {
+    return (
+      <span className="flex items-center gap-1 text-warn">
+        <LoaderCircle size={12} className="animate-spin" aria-hidden="true" />
+        {t("pr.checksPending")}
+      </span>
+    );
+  }
+  const ok = checks === "success";
+  const Icon = ok ? CircleCheck : CircleX;
+  return (
+    <span className={cn("flex items-center gap-1", ok ? "text-ok" : "text-bad")}>
+      <Icon size={12} aria-hidden="true" />
+      {ok ? t("pr.checksSuccess") : t("pr.checksFailure")}
+    </span>
+  );
+}

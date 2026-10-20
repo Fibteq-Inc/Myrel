@@ -1,6 +1,7 @@
 import {
   applyEvent,
   applyMessage,
+  applyPullRequests,
   applyTasks,
   emptyProjectState,
   ProjectSocket,
@@ -16,13 +17,15 @@ type Action =
   | { type: "reset" }
   | { type: "idle" }
   | { type: "message"; message: Parameters<typeof applyMessage>[1] }
-  | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] };
+  | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] }
+  | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "reset") return emptyProjectState;
   if (action.type === "idle") return { ...state, active: {}, progress: {} };
   if (action.type === "message") return applyMessage(state, action.message);
   if (action.type === "tasks") return applyTasks(state, action.tasks);
+  if (action.type === "pullRequests") return applyPullRequests(state, action.pullRequests);
   return applyEvent(state, action);
 }
 
@@ -64,7 +67,11 @@ export function useProject(projectId: string) {
     send: (body: string, threadId: string | null = null, attachments: string[] = []) =>
       socketRef.current?.sendMessage(body, { threadId, attachments }),
     emit: (event: ClientEventInput) => socketRef.current?.send(event),
-    /** Loads a thread's tasks and their earlier terminal output. */
-    loadTasks: async (threadId: string) => dispatch({ type: "tasks", tasks: await api.listTasks(projectId, threadId) }),
+    /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
+    loadTasks: async (threadId: string) => {
+      const [tasks, pullRequests] = await Promise.all([api.listTasks(projectId, threadId), api.listPullRequests(projectId, threadId)]);
+      dispatch({ type: "tasks", tasks });
+      dispatch({ type: "pullRequests", pullRequests });
+    },
   };
 }

@@ -79,7 +79,9 @@ export async function appJwt(env: GithubEnv): Promise<string> {
 
 // --- Installation tokens ---
 
-export type RepoPermissions = Partial<Record<"contents" | "pull_requests" | "issues" | "metadata", "read" | "write">>;
+export type RepoPermissions = Partial<
+  Record<"contents" | "pull_requests" | "issues" | "metadata" | "checks" | "statuses", "read" | "write">
+>;
 
 type AccessToken = { token: string; expires_at: string; repositories?: GithubApiRepo[] };
 

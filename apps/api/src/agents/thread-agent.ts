@@ -12,6 +12,7 @@ import {
 } from "@altair/runner-core";
 import { Agent, getAgentByName } from "agents";
 import { listRepoFiles, readRepoFile } from "../github/files";
+import { listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
 import { projectProvider, projectTaskModel } from "../keys";
 import { runLoop } from "../llm";
@@ -110,6 +111,12 @@ export class ThreadAgent extends Agent<Env> {
       stream TEXT NOT NULL,
       text TEXT NOT NULL
     )`;
+    this.sql`CREATE TABLE IF NOT EXISTS github_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      seen INTEGER NOT NULL DEFAULT 0
+    )`;
     this.sql`CREATE TABLE IF NOT EXISTS routine_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -127,10 +134,16 @@ export class ThreadAgent extends Agent<Env> {
     await this.markDirty();
   }
 
-  /** A person wrote in the thread, the coordinator sent a note, or a routine ran. Task results come through taskEvents. */
+  /**
+   * A person wrote in the thread, the coordinator sent a note, a routine ran, or one of the
+   * thread's pull requests changed on GitHub. Task results come through taskEvents.
+   */
   async wake(reason: ThreadWake): Promise<void> {
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
+    }
+    if (reason.kind === "github") {
+      this.sql`INSERT INTO github_events (body, created_at) VALUES (${reason.event}, ${new Date().toISOString()})`;
     }
     if (reason.kind === "routine") {
       this.sql`INSERT INTO routine_runs (name, prompt, created_at)
@@ -184,12 +197,17 @@ export class ThreadAgent extends Agent<Env> {
       createdAt: r.created_at,
       isNew: r.seen === 0,
     }));
+    // Only the last few events matter; the pull requests' current state is listed separately.
+    const githubRows = this.sql<NoteRow>`SELECT * FROM (SELECT * FROM github_events ORDER BY id DESC LIMIT 10) ORDER BY id`;
+    const githubEvents: CoordinatorNote[] = githubRows.map((g) => ({ body: g.body, createdAt: g.created_at, isNew: g.seen === 0 }));
+    const pullRequests = await listPullRequests(this.env.DB, projectId, threadId);
     // The newest task this turn reports on for the first time.
     const finishedTask = this.sql<TaskRow>`
       SELECT * FROM tasks WHERE status != 'running' AND reported = 0 ORDER BY created_at DESC LIMIT 1`[0];
     this.sql`UPDATE notes SET seen = 1`;
     this.sql`UPDATE tasks SET reported = 1 WHERE status != 'running'`;
     this.sql`UPDATE routine_runs SET seen = 1`;
+    this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
 
     // Set from tool callbacks; typed wide so TS does not narrow them to `false`.
@@ -230,6 +248,8 @@ export class ThreadAgent extends Agent<Env> {
           workspace,
           place,
           routineRuns,
+          githubEvents,
+          pullRequests,
           now: new Date(),
         }),
         tools: [
@@ -540,6 +560,12 @@ export class ThreadAgent extends Agent<Env> {
         await recordTaskUsage(this.env, ctx, progress.usage, ms).catch((err) => console.error("task usage", err));
       }
       await this.publishTask(taskId);
+      // From now on the webhook keeps the pull request's state current and wakes this thread on CI and reviews.
+      if (progress.prUrl) {
+        await trackPullRequest(this.env, projectId, threadId, progress.prUrl).catch((err) =>
+          console.error("tracking pull request failed", progress.prUrl, err),
+        );
+      }
       // The agent reads the result and tells the person.
       await this.markDirty();
     }
