@@ -89,11 +89,11 @@ export function Spinner({ size = 16, color = colors.accent }: { size?: number; c
   );
 }
 
-/** The Altair mark, as in the web app: a sparkle on a soft indigo tile. */
+/** The Myrel mark, as in the web app: a sparkle on a soft indigo tile. */
 /** The four-petal mark (same as the app icon). */
 const MARK_PETAL = "M512 512C512 360 600 250 700 250C760 250 790 300 770 350C740 430 620 470 512 512Z";
 
-export function AltairMark({ size = 28 }: { size?: number }) {
+export function MyrelMark({ size = 28 }: { size?: number }) {
   return (
     <View
       accessibilityElementsHidden

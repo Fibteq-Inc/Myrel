@@ -3,7 +3,7 @@ import { useI18n, useT } from "@myrel/i18n/react";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AltairMark, Button, errorMessage, Input } from "../components/ui";
+import { MyrelMark, Button, errorMessage, Input } from "../components/ui";
 import { useSession } from "../lib/session";
 import { colors } from "../theme";
 
@@ -17,7 +17,7 @@ export default function LoginScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
-            <AltairMark size={44} />
+            <MyrelMark size={44} />
             <Text style={styles.brandName}>Myrel</Text>
           </View>
           {session.offline && !editingServer ? (
@@ -66,7 +66,7 @@ function hostOf(origin: string) {
   return origin.replace(/^https?:\/\//, "");
 }
 
-/** Lets the user point the app at any Altair server, e.g. a self-hosted one. */
+/** Lets the user point the app at any Myrel server, e.g. a self-hosted one. */
 function ServerForm({ onDone }: { onDone: () => void }) {
   const t = useT();
   const session = useSession();
@@ -94,7 +94,7 @@ function ServerForm({ onDone }: { onDone: () => void }) {
       <Input
         value={value}
         onChangeText={setValue}
-        placeholder="altair.example.com"
+        placeholder="myrel.example.com"
         keyboardType="url"
         textContentType="URL"
         returnKeyType="go"

@@ -15,7 +15,7 @@ Shared values:
 | Privacy policy | https://myrel.fibteq.io/privacy/ |
 | Terms | https://myrel.fibteq.io/terms/ |
 | Account deletion | https://myrel.fibteq.io/delete-account/ |
-| Package / bundle id | io.fibteq.altair (fixed after the first upload) |
+| Package / bundle id | io.fibteq.myrel (fixed after the first upload) |
 
 ## Google Play: main store listing
 

@@ -1,16 +1,16 @@
 import type { ExpoConfig } from "expo/config";
 
-// The hosted Altair's EAS project (@fibteqs-organization/altair). Self-hosters who build their
+// The hosted Myrel EAS project (@fibteqs-organization/myrel). Self-hosters who build their
 // own app point these at their Expo project; setting EAS_PROJECT_ID to "" unlinks it.
-const easProjectId = process.env.EAS_PROJECT_ID ?? "c4c8d3bc-48ec-4c79-b7c3-982877904746";
+const easProjectId = process.env.EAS_PROJECT_ID ?? "e078b447-75b4-45d5-afa5-413a7c079de1";
 const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
 
 const config: ExpoConfig = {
   name: "Myrel",
-  slug: "altair",
-  scheme: "altair",
+  slug: "myrel",
+  scheme: "myrel",
   version: "0.1.0",
   orientation: "portrait",
   // Four-petal mark, rendered from assets/icon.svg; re-export the PNGs when it changes.
@@ -18,13 +18,13 @@ const config: ExpoConfig = {
   userInterfaceStyle: "dark",
   backgroundColor: "#0e0e10",
   ios: {
-    bundleIdentifier: "io.fibteq.altair",
+    bundleIdentifier: "io.fibteq.myrel",
     supportsTablet: true,
     // Only HTTPS/TLS, which is exempt from export compliance; saves the question on every upload.
     infoPlist: { ITSAppUsesNonExemptEncryption: false },
   },
   android: {
-    package: "io.fibteq.altair",
+    package: "io.fibteq.myrel",
     adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#5148e6" },
     // Firebase config for FCM pushes: the path of google-services.json, which EAS provides
     // through the GOOGLE_SERVICES_JSON file variable (the file itself stays out of git).
