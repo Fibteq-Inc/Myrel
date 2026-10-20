@@ -12,7 +12,7 @@ import { listDirs, shareableFolder } from "./folders";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.5.0";
+export const RUNNER_VERSION = "0.5.1";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
