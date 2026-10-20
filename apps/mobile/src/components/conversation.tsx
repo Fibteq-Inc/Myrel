@@ -1,6 +1,6 @@
 import { type Artifact, type Message, planChecklist, type Reaction } from "@myrel/protocol";
-import { type ComponentRef, type ReactNode, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
@@ -58,6 +58,18 @@ export function Conversation({
   // is the offset that makes up for that.
   const frame = useRef<ComponentRef<typeof View>>(null);
   const [top, setTop] = useState(0);
+  // The keyboard covers the home indicator and navigation bar, so their inset
+  // would only add a gap between the composer and the keyboard.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const ios = Platform.OS === "ios";
+    const show = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   return (
     <View
@@ -100,7 +112,7 @@ export function Conversation({
             );
           }}
         />
-        <View style={{ paddingBottom: Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
+        <View style={{ paddingBottom: keyboardOpen ? 8 : Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
           <Composer placeholder={placeholder} onSend={onSend} />
         </View>
       </KeyboardAvoidingView>
