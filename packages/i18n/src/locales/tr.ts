@@ -589,4 +589,18 @@ export const tr: Catalog = {
   "notifications.failed": "Başarısız",
   "notifications.email": "Bir thread bittiğinde ya da bana ihtiyaç duyduğunda e-posta gönder",
   "notifications.browser": "Bu cihazda tarayıcı bildirimleri",
+  // Mobil uygulama
+  "mobile.serverTitle": "Bir sunucuya bağlan",
+  "mobile.serverHint": "Altair sunucunun adresini gir: barındırılan ya da kendi kurduğun bir sunucu.",
+  "mobile.cancel": "Vazgeç",
+  "mobile.offlineTitle": "{host} adresine ulaşılamıyor",
+  "mobile.offlineBody": "Bağlantını kontrol edip tekrar dene.",
+  "mobile.retry": "Tekrar dene",
+  "mobile.signOutConfirm": "{email} hesabından çıkılsın mı?",
+  "mobile.openInBrowser": "Tarayıcıda aç",
+  "mobile.badLink": "Bu bağlantı açılamıyor.",
+  "mobile.showProgress": "İlerlemeyi göster",
+  "mobile.hideProgress": "İlerlemeyi gizle",
+  "mobile.noPreview": "Bu dosya türü için önizleme yok.",
+  "mobile.newProject": "Yeni proje",
 };
