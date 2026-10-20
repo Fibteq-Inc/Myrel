@@ -108,6 +108,8 @@
   // Sandbox (the cloud thread agent, OpenCode). Repository access comes from the project's GitHub connection.
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
   // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
+  // RUNNER_IMAGES: "true" or "false" when that model does or does not read images (screenshots);
+  // empty = guessed from its name.
   //
   // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
   //
@@ -134,6 +136,7 @@
     "GITHUB_APP_SLUG": "fibteq",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_MODEL": "",
+    "RUNNER_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
     "EMAIL_FROM": "Altair <altair@fibteq.app>",
     "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",

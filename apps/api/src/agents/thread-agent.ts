@@ -1,4 +1,4 @@
-import { type ArtifactRef, CLI_NAMES, createId, formatPlan, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
+import { type Attachment, type ArtifactRef, CLI_NAMES, createId, formatPlan, type Task, type TaskStatus, type TerminalLine } from "@altair/protocol";
 import {
   emptyProgress,
   reduceTask,
@@ -82,6 +82,9 @@ const LOCAL_PHASES: RunnerEvent[] = [
   { type: "phase", phase: "publish", state: "skipped" },
   { type: "phase", phase: "agent", state: "started" },
 ];
+/** Attached files a cloud turn downloads before the agent starts; older ones it fetches with read_file. */
+const PREFETCH_MAX_FILES = 20;
+const PREFETCH_MAX_BYTES = 200 * 1024 * 1024;
 /** Extra time after a run's own timeout before it is declared lost (its runner went away). */
 const WATCHDOG_GRACE_SEC = 300;
 
@@ -230,6 +233,7 @@ export class ThreadAgent extends Agent<Env> {
       place,
       timezone: ctx.defaultTimezone,
       language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
+      attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
     });
   }
 
@@ -251,6 +255,8 @@ export class ThreadAgent extends Agent<Env> {
     place: Exclude<TaskPlace, { kind: "error" }>;
     timezone: string;
     language: string;
+    /** Files attached to the thread's messages, oldest first: a cloud turn finds them already downloaded. */
+    attachments: Attachment[];
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -259,7 +265,7 @@ export class ThreadAgent extends Agent<Env> {
     const agentPlace: AgentPlace =
       place.kind === "local"
         ? { kind: "local", cli: place.workspace.cli, folder: place.workspace.path, computer: place.workspace.runnerName }
-        : { kind: "cloud" };
+        : { kind: "cloud", images: false };
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
@@ -289,10 +295,13 @@ export class ThreadAgent extends Agent<Env> {
         const model = await projectTaskModel(this.env, projectId);
         if (!model.ok) throw new Error(model.reason);
         spec.model = model.model;
+        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false }, context);
         spec.mcp = { url: `${origin}${mcpPath}` };
         const secrets: Record<string, string> = { ALTAIR_MODEL_API_KEY: model.apiKey, ALTAIR_MCP_TOKEN: token };
         const github = await projectGithubToken(this.env, projectId, spec.timeoutSec);
         if (github) secrets.GITHUB_TOKEN = github;
+        const files = await this.attachmentLinks(origin, input.attachments);
+        if (files.length) secrets.ALTAIR_FILES = JSON.stringify(files);
         const backend = sandboxBackend(this.env, threadId);
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
@@ -327,6 +336,25 @@ export class ThreadAgent extends Agent<Env> {
         await project.setActivity(threadId, false);
       }
     }
+  }
+
+  /**
+   * Download links for the files attached in the thread, for the sandbox to fetch before the agent
+   * starts (see ALTAIR_FILES in runner-core's task script). Newest first, within a count and size budget.
+   */
+  private async attachmentLinks(origin: string, attachments: Attachment[]): Promise<{ path: string; url: string }[]> {
+    const { projectId } = this.ids();
+    const picked: Attachment[] = [];
+    let bytes = 0;
+    for (const a of [...attachments].reverse()) {
+      if (picked.some((p) => p.path === a.path)) continue;
+      if (picked.length >= PREFETCH_MAX_FILES || bytes + a.size > PREFETCH_MAX_BYTES) break;
+      picked.push(a);
+      bytes += a.size;
+    }
+    return Promise.all(
+      picked.map(async (a) => ({ path: a.path, url: await signFileLink(this.env, origin, { projectId, path: a.path, mode: "get", by: THREAD_AGENT_ID }) })),
+    );
   }
 
   /** The agent's run ended: deliver what it left unsaid, settle the thread's state, and take any wakes that waited. */
@@ -393,10 +421,19 @@ export class ThreadAgent extends Agent<Env> {
     const track = (url: string) => trackPullRequest(this.env, projectId, threadId, url);
     return [
       ...threadTools({
-        reply: async (text, needs) => {
+        reply: async (text, needs, files) => {
+          // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
+          const attachments = files?.length ? await project.attachmentsFor(files) : [];
           const t = turn();
           save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs });
-          const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: text, artifacts: t.pending });
+          const m = await project.sendMessage({
+            threadId,
+            authorKind: "agent",
+            authorId: THREAD_AGENT_ID,
+            body: text,
+            attachments,
+            artifacts: t.pending,
+          });
           // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
           // A pull request it links to is followed even when it forgot track_pull_request.

@@ -101,7 +101,14 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
             npm: "@ai-sdk/openai-compatible",
             name: `Altair (${m.provider})`,
             options: { baseURL: m.baseUrl, apiKey },
-            models: { [m.id]: { name: m.id, tool_call: true } },
+            // OpenCode passes an image file it reads to the model only when the model says it takes images.
+            models: {
+              [m.id]: {
+                name: m.id,
+                tool_call: true,
+                ...(m.images && { attachment: true, modalities: { input: ["text", "image"], output: ["text"] } }),
+              },
+            },
           },
         };
   return config;

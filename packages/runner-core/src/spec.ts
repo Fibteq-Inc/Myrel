@@ -19,6 +19,8 @@ export const ModelConfig = z.object({
   /** The provider's model id, e.g. "accounts/fireworks/models/kimi-k2p6". */
   id: z.string().min(1),
   baseUrl: z.string().url().optional(),
+  /** The model reads images, so the harness may show it screenshots and photos. */
+  images: z.boolean().optional(),
 });
 export type ModelConfig = z.infer<typeof ModelConfig>;
 
