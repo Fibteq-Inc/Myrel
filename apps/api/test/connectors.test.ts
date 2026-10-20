@@ -198,6 +198,17 @@ describe("connectors API", () => {
       201,
     );
 
+    // A person's own connector starts off in each project until they turn it on there.
+    expect(await turnConnectors(env, { projectId: project.id, userId: me.id, place: "cloud" })).toEqual([]);
+    const personal = `/api/projects/${project.id}/personal`;
+    const listed = await json<{ connectors: (Connector & { inProject: boolean })[] }>(api(personal, { token: me.token }));
+    expect(listed.connectors.map((c) => [c.name, c.inProject])).toEqual([["Linear", false]]);
+    await json(api(`${personal}/connectors/${connector.id}`, { method: "PUT", token: me.token, body: { on: true } }));
+    // Someone else cannot turn it on in their project.
+    const other = await signUp();
+    const theirs = await json<{ project: { id: string } }>(api("/api/projects", { method: "POST", token: other.token, body: { name: "Q" } }), 201);
+    expect((await api(`/api/projects/${theirs.project.id}/personal/connectors/${connector.id}`, { method: "PUT", token: other.token, body: { on: true } })).status).toBe(404);
+
     const cloud = await turnConnectors(env, { projectId: project.id, userId: me.id, place: "cloud" });
     expect(cloud.map((c) => c.name)).toEqual(["linear"]);
     const local = await turnConnectors(env, { projectId: project.id, userId: me.id, place: "local" });

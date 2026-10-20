@@ -686,11 +686,11 @@ export const tr: Catalog = {
   // Connectors (MCP servers)
   "connectors.title": "Bağlayıcıların",
   "connectors.description":
-    "Ajanın başka servislerde çalışmasını sağlayan MCP sunucuları. Senin için çalışan konuşmalarda açıktır.",
+    "Ajanın başka servislerde çalışmasını sağlayan MCP sunucuları. Her projede kapalı başlar; proje ayarlarından açarsın.",
   "connectors.empty": "Henüz bir bağlayıcı eklemedin.",
   "connectors.projectTitle": "Bağlayıcılar",
   "connectors.projectDescription":
-    "Bu projenin tüm konuşmalarında ortaktır. Kişisel bağlayıcıların Ayarlar › Bağlayıcılar altındadır ve yalnızca senin için çalışan konuşmalarda kullanılır.",
+    "Bu projenin tüm konuşmalarında ortaktır. Kişisel bağlayıcılarını bu projede aşağıdan açarsın.",
   "connectors.projectEmpty": "Bu projede henüz bağlayıcı yok.",
   "connectors.presets": "Hazır bağlayıcılar",
   "connectors.presetsDescription": "Bir servisi tek tıkla ekle, sonra oturum aç.",
@@ -811,10 +811,10 @@ export const tr: Catalog = {
   // Skills (Agent Skills)
   "skills.title": "Skill'lerin",
   "skills.description":
-    "Ajanın belirli işlerde izlediği talimatlar, script'ler ve kaynaklar. Senin için çalışan konuşmalarda açıktır.",
+    "Ajanın belirli işlerde izlediği talimatlar, script'ler ve kaynaklar. Her projede kapalı başlar; proje ayarlarından açarsın.",
   "skills.projectTitle": "Skill'ler",
   "skills.projectDescription":
-    "Bu projenin tüm konuşmalarında ortaktır. Kişisel skill'lerin Ayarlar › Skill'ler altındadır ve yalnızca senin için çalışan konuşmalarda kullanılır.",
+    "Bu projenin tüm konuşmalarında ortaktır. Kişisel skill'lerini bu projede aşağıdan açarsın.",
   "skills.empty": "Henüz bir skill eklemedin.",
   "skills.projectEmpty": "Bu projede henüz skill yok.",
   "skills.browse": "skills.sh'te skill bul",
@@ -855,4 +855,17 @@ export const tr: Catalog = {
   "skills.source.write": "Burada yazıldı",
   "skills.source.upload": "Yüklendi",
   "skills.files": { other: "{count} dosya · {size}" },
+
+  // A person's own skills and connectors, turned on per project
+  "personalInProject.skillsTitle": "Bu projedeki skill'lerin",
+  "personalInProject.skillsDescription":
+    "Kişisel skill'lerin her projede kapalı başlar. Bu projede gerekenleri aç; yalnızca senin için çalışan konuşmalarda kullanılırlar.",
+  "personalInProject.connectorsTitle": "Bu projedeki bağlayıcıların",
+  "personalInProject.connectorsDescription":
+    "Kişisel bağlayıcıların her projede kapalı başlar. Bu projede gerekenleri aç; yalnızca senin için çalışan konuşmalarda kullanılırlar.",
+  "personalInProject.noSkills": "Kişisel bir skill'in yok.",
+  "personalInProject.noConnectors": "Kişisel bir bağlayıcın yok.",
+  "personalInProject.addInSettings": "Ayarlar'dan ekle",
+  "personalInProject.offEverywhere": "Ayarlarında her yerde kapalı",
+  "personalInProject.useHere": "{name} bu projede kullanılsın",
 };

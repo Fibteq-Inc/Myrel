@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b0eea1d8-1a96-4951-80b2-b0e9e5dd7e70",
+  "id": "4e2ee795-1329-483b-bd54-4662b4c59dd8",
   "prevId": "7d360bf9-8a94-4a4e-830c-1a57668c4e47",
   "tables": {
     "account": {
@@ -959,6 +959,81 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "project_connectors": {
+      "name": "project_connectors",
+      "columns": {
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "connector_id": {
+          "name": "connector_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {
+        "project_connectors_connector_idx": {
+          "name": "project_connectors_connector_idx",
+          "columns": [
+            "connector_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "project_connectors_project_id_projects_id_fk": {
+          "name": "project_connectors_project_id_projects_id_fk",
+          "tableFrom": "project_connectors",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_connectors_connector_id_connectors_id_fk": {
+          "name": "project_connectors_connector_id_connectors_id_fk",
+          "tableFrom": "project_connectors",
+          "tableTo": "connectors",
+          "columnsFrom": [
+            "connector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "project_connectors_project_id_connector_id_pk": {
+          "columns": [
+            "project_id",
+            "connector_id"
+          ],
+          "name": "project_connectors_project_id_connector_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "project_invites": {
       "name": "project_invites",
       "columns": {
@@ -1260,6 +1335,81 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "project_skills": {
+      "name": "project_skills",
+      "columns": {
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {
+        "project_skills_skill_idx": {
+          "name": "project_skills_skill_idx",
+          "columns": [
+            "skill_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "project_skills_project_id_projects_id_fk": {
+          "name": "project_skills_project_id_projects_id_fk",
+          "tableFrom": "project_skills",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_skills_skill_id_skills_id_fk": {
+          "name": "project_skills_skill_id_skills_id_fk",
+          "tableFrom": "project_skills",
+          "tableTo": "skills",
+          "columnsFrom": [
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "project_skills_project_id_skill_id_pk": {
+          "columns": [
+            "project_id",
+            "skill_id"
+          ],
+          "name": "project_skills_project_id_skill_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "project_workspaces": {
       "name": "project_workspaces",
       "columns": {
@@ -1283,14 +1433,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "folders": {
-          "name": "folders",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
         },
         "cli": {
           "name": "cli",

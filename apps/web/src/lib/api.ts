@@ -80,6 +80,10 @@ export const connectorsQuery = (projectId?: string) =>
     queryFn: () => api.listConnectors(projectId),
   });
 
+/** The caller's own skills and connectors, and which are on in this project. */
+export const personalInProjectQuery = (projectId: string) =>
+  queryOptions({ queryKey: ["projects", projectId, "personal"], queryFn: () => api.getPersonalInProject(projectId) });
+
 /** A person's own skills, or a project's. */
 export const skillsQuery = (projectId?: string) =>
   queryOptions({

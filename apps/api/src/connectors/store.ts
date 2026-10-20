@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret } from "../crypto";
 import { probeConnector } from "./client";
 import { accessToken } from "./oauth";
 
-const { connectors } = schema;
+const { connectors, projectConnectors } = schema;
 
 export type ConnectorRow = typeof connectors.$inferSelect;
 
@@ -91,7 +91,7 @@ export type TurnConnector = {
 
 /**
  * The connectors a thread's agent gets this turn: the project's, then those of the person the
- * thread works for. A person's own connectors never work for someone else's thread. stdio servers
+ * thread works for that they turned on in this project. A person's own connectors never work for someone else's thread. stdio servers
  * only where they may start.
  */
 export async function turnConnectors(
@@ -103,11 +103,18 @@ export async function turnConnectors(
     .select()
     .from(connectors)
     .where(and(eq(connectors.projectId, where.projectId), eq(connectors.enabled, true)));
+  // A person's own connectors only where they turned them on for this project.
   const own = where.userId
-    ? await db
-        .select()
-        .from(connectors)
-        .where(and(eq(connectors.ownerId, where.userId), eq(connectors.enabled, true)))
+    ? (
+        await db
+          .select({ connector: connectors })
+          .from(connectors)
+          .innerJoin(
+            projectConnectors,
+            and(eq(projectConnectors.connectorId, connectors.id), eq(projectConnectors.projectId, where.projectId)),
+          )
+          .where(and(eq(connectors.ownerId, where.userId), eq(connectors.enabled, true)))
+      ).map((r) => r.connector)
     : [];
   const used = new Set(["myrel"]);
   const out: TurnConnector[] = [];
