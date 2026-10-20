@@ -16,13 +16,16 @@ export const opencode: Harness = {
 
   command(spec) {
     const model = opencodeModel(spec);
-    return ["opencode run --format json", model ? `--model ${shellQuote(model)}` : "", '"$MYREL_PROMPT"']
-      .filter(Boolean)
-      .join(" ");
+    const run = ["opencode run --format json", model ? `--model ${shellQuote(model)}` : "", '"$MYREL_PROMPT"'].filter(Boolean).join(" ");
+    // The plan plugin is a file OpenCode imports; its source comes in the environment.
+    return spec.mcp ? `mkdir -p "$(dirname "${PLAN_PLUGIN_FILE}")" && printf '%s' "$MYREL_PLAN_PLUGIN" > "${PLAN_PLUGIN_FILE}" && ${run}` : run;
   },
 
   env(spec) {
-    return { OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(spec)) };
+    return {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(spec)),
+      ...(spec.mcp && { MYREL_PLAN_PLUGIN: PLAN_PLUGIN }),
+    };
   },
 
   parse(line) {
@@ -60,7 +63,9 @@ export const opencode: Harness = {
         const ms = num(time.end) - num(time.start);
         const events: RunnerEvent[] = [{ type: "tool", name: tool, title: title.slice(0, 500), ...(num(time.start) > 0 && ms >= 0 && { ms }) }];
         const output = str(state.output);
-        if (tool === "bash" && output) events.push(log(settleProgress(output).trimEnd()));
+        // The plan plugin's reminder is for the agent, not for people watching the terminal.
+        const shown = output?.replace(PLAN_REMINDER, "");
+        if (tool === "bash" && shown) events.push(log(settleProgress(shown).trimEnd()));
         return events;
       }
       case "step_finish": {
@@ -77,6 +82,38 @@ export const opencode: Harness = {
     }
   },
 };
+
+/** The reminder PLAN_PLUGIN appends to a tool's output. */
+const PLAN_REMINDER = /\n\n\[Myrel\] Your plan still shows [\s\S]*$/;
+
+/** Where the task writes the plan plugin ($HOME is the task's own home). */
+const PLAN_PLUGIN_FILE = "$HOME/.cache/myrel/opencode-plan.js";
+
+/**
+ * An OpenCode plugin that keeps the plan honest while the agent works. Weaker models set the plan
+ * up front and then tick every step at the very end, so people watch a plan that never moves.
+ * Once a few tool calls went by since the plan last changed, the next tool result tells the agent
+ * which step is still active and asks it to mark that step done if its work is.
+ */
+export const PLAN_PLUGIN = `export const MyrelPlan = async () => {
+  let active = null;
+  let since = 0;
+  return {
+    "tool.execute.after": async (input, output) => {
+      if (input.tool === "myrel_update_plan") {
+        const steps = Array.isArray(input.args?.steps) ? input.args.steps : [];
+        active = steps.find((s) => s && s.state === "active")?.text ?? null;
+        since = 0;
+        return;
+      }
+      if (!active || input.tool.startsWith("myrel_") || typeof output?.output !== "string") return;
+      since++;
+      if (since % 3 !== 2) return;
+      output.output += "\\n\\n[Myrel] Your plan still shows \\"" + active + "\\" as the active step. If its work is done, call myrel_update_plan now to mark it done and the next step active, then go on. If not, carry on.";
+    },
+  };
+};
+`;
 
 export function opencodeModel(spec: TaskSpec): string | null {
   const m = spec.model;
@@ -109,6 +146,7 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
             };
     }
     config.mcp = servers;
+    config.plugin = [`file://${PLAN_PLUGIN_FILE.replace("$HOME", "{env:HOME}")}`];
   }
   const m = spec.model;
   if (!m) return config;

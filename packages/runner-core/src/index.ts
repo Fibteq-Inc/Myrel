@@ -11,7 +11,7 @@ export * from "./script";
 export * from "./spec";
 export * from "./state";
 export { claudeCode, opencode, shell };
-export { opencodeConfig, opencodeModel } from "./harnesses/opencode";
+export { opencodeConfig, opencodeModel, PLAN_PLUGIN } from "./harnesses/opencode";
 
 export const HARNESSES: Record<HarnessId, Harness> = {
   opencode,
