@@ -136,7 +136,11 @@ export function threadTools(host: ThreadHost): Tool[] {
       run: async (plan) => {
         await host.setPlan(plan);
         const active = plan.steps.filter((s) => s.state === "active").length;
-        return active > 1 ? "Plan updated. Note: more than one step is active; keep only the one you are on active." : "Plan updated.";
+        if (active > 1) return "Plan updated. Note: more than one step is active; keep only the one you are on active.";
+        // Weaker models set the plan up front and then tick every step at the very end.
+        if (plan.steps.some((s) => s.state === "todo" || s.state === "active"))
+          return "Plan updated. As soon as the active step's work is done, call update_plan again to mark it done and the next one active, before you start that next step.";
+        return "Plan updated.";
       },
     }),
     tool({
