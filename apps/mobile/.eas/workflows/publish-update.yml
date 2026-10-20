@@ -1,7 +1,8 @@
 name: Publish update
 
 # Run by hand (eas workflow:run publish-update.yml) to ship a JavaScript-only
-# change to installed builds of the same app version.
+# change to installed builds of the same app version. It publishes to the
+# channel the builds read, so it doesn't depend on a channel-branch mapping.
 on:
   workflow_dispatch:
     inputs:
@@ -26,7 +27,7 @@ jobs:
       EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
     params:
       platform: android
-      branch: ${{ inputs.channel || 'production' }}
+      channel: ${{ inputs.channel || 'production' }}
       message: ${{ inputs.message || github.commit_message }}
   publish_ios:
     name: Publish iOS update
@@ -36,5 +37,5 @@ jobs:
       EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
     params:
       platform: ios
-      branch: ${{ inputs.channel || 'production' }}
+      channel: ${{ inputs.channel || 'production' }}
       message: ${{ inputs.message || github.commit_message }}
