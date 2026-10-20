@@ -216,6 +216,11 @@ export class ApiClient {
     return (await this.request<{ user: Me }>("/api/account")).user;
   }
 
+  /** Deletes the signed-in account for good; projects only this person owns go with it. */
+  async deleteAccount() {
+    await this.request("/api/account", { method: "DELETE" });
+  }
+
   /** Better Auth endpoint. */
   async updateProfile(input: { name: string }) {
     await this.request("/api/auth/update-user", { method: "POST", body: input });

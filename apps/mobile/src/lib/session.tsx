@@ -40,6 +40,7 @@ type SessionValue = {
   signIn(input: { email: string; password: string }): Promise<void>;
   signUp(input: { email: string; password: string; name: string }): Promise<void>;
   signOut(): Promise<void>;
+  deleteAccount(): Promise<void>;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -130,6 +131,12 @@ export function SessionProvider({ children, onSignOut }: { children: ReactNode; 
     },
     async signOut() {
       await onSignOut?.(api).catch(() => {});
+      await api.signOut().catch(() => {});
+      setUser(null);
+    },
+    async deleteAccount() {
+      // The server drops the sessions and push devices with the account; this clears the local token.
+      await api.deleteAccount();
       await api.signOut().catch(() => {});
       setUser(null);
     },

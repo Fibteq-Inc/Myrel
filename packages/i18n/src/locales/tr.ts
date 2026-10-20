@@ -274,6 +274,16 @@ export const tr: Catalog = {
   "deleteProject.confirm": "Kalıcı olarak sil",
   "deleteProject.cancel": "Vazgeç",
   "deleteProject.deleting": "Siliniyor…",
+  "deleteAccount.title": "Hesabı sil",
+  "deleteAccount.description": "Hesabını siler ve her yerde oturumunu kapatır. Yalnızca senin sahip olduğun projeler de silinir; ortak projeler başka bir üyeye geçer.",
+  "deleteAccount.button": "Hesabı sil",
+  "deleteAccount.confirmTitle": "Hesabın silinsin mi?",
+  "deleteAccount.confirmBody": "{email} hesabın, anahtarların, cihazların, bildirimlerin ve yalnızca senin sahip olduğun tüm projeler kalıcı olarak silinir. Geri alınamaz.",
+  "deleteAccount.confirm": "Hesabımı sil",
+  "deleteAccount.deleting": "Siliniyor…",
+  "settings.legal": "Yasal",
+  "legal.privacy": "Gizlilik politikası",
+  "legal.terms": "Kullanım şartları",
 
   // Usage
   "usage.title": "Kullanım",
