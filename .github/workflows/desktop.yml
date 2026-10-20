@@ -9,6 +9,8 @@ name: Desktop
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY  macOS code signing
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID                                macOS notarization
 #   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD          updater signatures
+# APPLE_SIGNING_IDENTITY may be the certificate's SHA-1 fingerprint, which stays unambiguous on a Mac that
+# also has an older certificate with the same name.
 # Optional variables:
 #   TAURI_UPDATER_PUBKEY   public half of TAURI_SIGNING_PRIVATE_KEY
 #   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
@@ -50,7 +52,10 @@ jobs:
           - os: ubuntu-22.04
             args: ""
             rust-targets: ""
-    runs-on: ${{ matrix.os }}
+    # Releases and manual runs build macOS on the org's self-hosted Mac, because GitHub's hosted macOS
+    # runners often never pick up the job. Pull requests stay on hosted runners so code from a PR never
+    # runs on that Mac.
+    runs-on: ${{ matrix.os == 'macos-latest' && github.event_name != 'pull_request' && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
