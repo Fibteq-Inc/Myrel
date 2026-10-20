@@ -18,9 +18,9 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "altair",
-      // Replace with the id printed by `wrangler d1 create altair` before deploying.
-      "database_id": "0fdc232a-4bf4-4674-a1cc-a5f14e18911a",
+      "database_name": "myrel",
+      // Replace with the id printed by `wrangler d1 create myrel` before deploying.
+      "database_id": "99b4a472-b3d3-42b2-a94f-ffef351634a5",
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
@@ -29,8 +29,8 @@
   // FILES: project files and message uploads, under projects/<projectId>/files/.
   // ARTIFACTS: artifact versions (HTML); the artifact Worker (apps/artifacts) serves them from its own domain.
   "r2_buckets": [
-    { "binding": "FILES", "bucket_name": "altair-files" },
-    { "binding": "ARTIFACTS", "bucket_name": "altair-artifacts" }
+    { "binding": "FILES", "bucket_name": "myrel-files" },
+    { "binding": "ARTIFACTS", "bucket_name": "myrel-artifacts" }
   ],
 
   "durable_objects": {
@@ -55,7 +55,7 @@
   // once and snapshotted (src/sandbox/setup.ts).
   "containers": [
     {
-      "name": "altair-sandbox",
+      "name": "myrel-sandbox",
       "class_name": "Sandbox",
       "scheduling_policy": "durable_object"
     }
@@ -64,7 +64,7 @@
   // Cloudflare Artifacts (beta): one git repository per thread, where the sandbox saves each task's
   // work so the next task continues from it. Optional: without this binding nothing is saved between
   // tasks except what a task pushes to GitHub.
-  "artifacts": [{ "binding": "WORKSPACES", "namespace": "altair" }],
+  "artifacts": [{ "binding": "WORKSPACES", "namespace": "myrel" }],
 
   // Cloudflare Email Service (Email Sending) for notification emails. Needs a domain onboarded under
   // Compute > Email Service > Email Sending and the EMAIL_FROM var below. Locally, `wrangler dev`
@@ -77,7 +77,7 @@
   // and the model keys below. There is no `secrets.required` list on
   // purpose: with one, `wrangler dev` drops every .dev.vars secret not on it, so the optional
   // model keys could not be used locally.
-  // BETTER_AUTH_URL: public origin, e.g. https://altair.example.com (inferred from the request if empty).
+  // BETTER_AUTH_URL: public origin, e.g. https://myrel.example.com (inferred from the request if empty).
   // TRUSTED_ORIGINS: extra comma-separated origins allowed to call the API cross-origin
   // (the desktop app origins are always allowed, see src/origins.ts).
   // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Myrel".

@@ -19,7 +19,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "db:generate": "pnpm --filter @altair/db generate",
-    "db:migrate:local": "pnpm --filter @altair/api exec wrangler d1 migrations apply altair --local"
+    "db:migrate:local": "pnpm --filter @altair/api exec wrangler d1 migrations apply myrel --local"
   },
   "devDependencies": {
     "turbo": "2.11.9",

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Serves published artifacts. Runs on its own domain (e.g. altair-usercontent.dev), never
+  // Serves published artifacts. Runs on its own domain (e.g. myrel-usercontent.dev), never
   // under the app's domain: an artifact is untrusted HTML and must not share the app's origin,
   // cookies or storage. It can only read the artifact bucket; it has no database or auth.
   "name": "myrel-artifacts",
