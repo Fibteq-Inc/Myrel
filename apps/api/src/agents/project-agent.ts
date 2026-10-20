@@ -197,7 +197,7 @@ export class ProjectAgent extends Agent<Env> {
     )`;
   }
 
-  // Our clients speak the Altair protocol only; skip the SDK's state/identity frames.
+  // Our clients speak the Myrel protocol only; skip the SDK's state/identity frames.
   override shouldSendProtocolMessages(): boolean {
     return false;
   }

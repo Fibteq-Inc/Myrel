@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Creates the GitHub App an Altair server needs (GitHub's manifest flow) from your own browser.
+// Creates the GitHub App a Myrel server needs (GitHub's manifest flow) from your own browser.
 //
 //   node scripts/create-github-app.mjs [--origin https://altair.example.com] [--org my-org] [--port 8765]
 //
@@ -13,7 +13,7 @@ const args = Object.fromEntries(
 );
 const port = Number(args.port ?? 8765);
 const local = `http://localhost:${port}`;
-const defaults = { origin: args.origin ?? "https://altair.fibteq.io", org: args.org ?? "Fibteq-Inc", name: args.name ?? "Fibteq Altair" };
+const defaults = { origin: args.origin ?? "https://myrel.fibteq.io", org: args.org ?? "Fibteq-Inc", name: args.name ?? "Fibteq Myrel" };
 
 // Must match apps/api/src/github/README.md and src/routes/github.ts.
 function manifest(origin, name, isPublic) {
@@ -34,7 +34,7 @@ function manifest(origin, name, isPublic) {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 const page = (body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Altair GitHub App</title><style>
+<title>Myrel GitHub App</title><style>
 :root{--bg:#f6f7fb;--panel:#fff;--fg:#17181f;--muted:#5d6070;--line:#dfe1ea;--accent:#3b4fd8;--accent-fg:#fff;--ok:#137a4b;--bad:#b42318;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#0e0e10;--panel:#15161a;--fg:#ececee;--muted:#a1a1aa;--line:#2a2a30;--accent:#8b9bff;--accent-fg:#0e0e10;--ok:#4fcb8d;--bad:#ff7b72;color-scheme:dark}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding:40px 16px}
@@ -47,11 +47,11 @@ button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)
 .ok{color:var(--ok);font-weight:600}.err{color:var(--bad)}table{width:100%;border-collapse:collapse;font-size:13px}
 td{border-top:1px solid var(--line);padding:8px 6px}td.v{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}pre{margin:0;overflow-x:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;font-size:12.5px}
-</style></head><body><main><div><h1>Altair GitHub App</h1><p class="muted">Creates the GitHub App your Altair server needs, with every address, permission and event filled in.</p></div>${body}</main></body></html>`;
+</style></head><body><main><div><h1>Myrel GitHub App</h1><p class="muted">Creates the GitHub App your Myrel server needs, with every address, permission and event filled in.</p></div>${body}</main></body></html>`;
 
 function formPage() {
   return page(`<section><form id="f" style="display:grid;gap:12px">
-<label>Altair address <span>The public address of your Altair server.</span><input id="origin" type="url" required value="${esc(defaults.origin)}"></label>
+<label>Myrel address <span>The public address of your Myrel server.</span><input id="origin" type="url" required value="${esc(defaults.origin)}"></label>
 <label>GitHub organization <span>Empty = your personal account.</span><input id="org" type="text" value="${esc(defaults.org)}"></label>
 <label>App name <span>Must be unique on GitHub.</span><input id="name" type="text" required value="${esc(defaults.name)}"></label>
 <label style="display:flex;gap:8px;font-weight:400"><input id="pub" type="checkbox"> Anyone can install it (people outside this account will connect repositories)</label>
@@ -92,7 +92,7 @@ function secretsPage(app) {
   return page(`<section><p class="ok">The app ${esc(app.slug)} was created. These keys are shown only now.</p>
 <p class="muted">Add each one in Cloudflare as a secret: Workers &amp; Pages → altair → Settings → Variables and Secrets → Add, type <b>Secret</b>. Then redeploy.</p>
 <div style="overflow-x:auto"><table>${rows}</table></div>
-<p class="muted">Then connect repositories from a project's settings in Altair. <a href="${esc(app.html_url)}" target="_blank" rel="noreferrer">Open the app on GitHub</a></p></section>
+<p class="muted">Then connect repositories from a project's settings in Myrel. <a href="${esc(app.html_url)}" target="_blank" rel="noreferrer">Open the app on GitHub</a></p></section>
 <script>
 for (const b of document.querySelectorAll("button[data-v]")) b.addEventListener("click", () =>
   navigator.clipboard.writeText(b.dataset.v).then(() => { b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1500); }, () => (b.textContent = "Copy failed")));
@@ -113,7 +113,7 @@ createServer(async (req, res) => {
     } catch {
       return send(400, "{}", "application/json");
     }
-    return send(200, JSON.stringify(manifest(origin, url.searchParams.get("name") || "Altair", url.searchParams.get("public") === "true")), "application/json");
+    return send(200, JSON.stringify(manifest(origin, url.searchParams.get("name") || "Myrel", url.searchParams.get("public") === "true")), "application/json");
   }
   if (url.pathname === "/callback") {
     const code = url.searchParams.get("code") ?? "";
@@ -129,5 +129,5 @@ createServer(async (req, res) => {
   }
   send(404, "Not found", "text/plain");
 }).listen(port, "127.0.0.1", () => {
-  console.log(`Open ${local} in your browser to create the Altair GitHub App.`);
+  console.log(`Open ${local} in your browser to create the Myrel GitHub App.`);
 });

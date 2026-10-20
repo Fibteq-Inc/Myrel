@@ -1,6 +1,6 @@
-name: Release altair-runner
+name: Release myrel-runner
 
-# Publishes @fibteq/altair-runner and the short name altair-runner to npm when
+# Publishes @fibteq/myrel-runner and the short name myrel-runner to npm when
 # their version on main is not on npm yet: bump the versions in a PR, merge it,
 # and this does the rest. Also runs by hand from the Actions tab.
 #
@@ -11,8 +11,8 @@ on:
   push:
     branches: [main]
     paths:
-      - packages/altair-runner/package.json
-      - packages/altair-runner-alias/package.json
+      - packages/myrel-runner/package.json
+      - packages/myrel-runner-alias/package.json
   workflow_dispatch:
 
 concurrency:
@@ -41,7 +41,7 @@ jobs:
         id: versions
         run: |
           set -euo pipefail
-          for dir in altair-runner altair-runner-alias; do
+          for dir in myrel-runner myrel-runner-alias; do
             name=$(node -p "require('./packages/$dir/package.json').name")
             version=$(node -p "require('./packages/$dir/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
@@ -56,18 +56,18 @@ jobs:
       - name: Test and build
         if: steps.versions.outputs.altair-runner || steps.versions.outputs.altair-runner-alias
         run: |
-          pnpm --filter @fibteq/altair-runner test
-          pnpm --filter @fibteq/altair-runner build
+          pnpm --filter @fibteq/myrel-runner test
+          pnpm --filter @fibteq/myrel-runner build
 
       # pnpm pack swaps workspace: versions for real ones; npm publish does the trusted-publishing login.
-      - name: Publish @fibteq/altair-runner
+      - name: Publish @fibteq/myrel-runner
         if: steps.versions.outputs.altair-runner
         run: |
-          pnpm --filter @fibteq/altair-runner pack --pack-destination "$RUNNER_TEMP/pkg"
-          npm publish "$RUNNER_TEMP"/pkg/fibteq-altair-runner-*.tgz --access public
+          pnpm --filter @fibteq/myrel-runner pack --pack-destination "$RUNNER_TEMP/pkg"
+          npm publish "$RUNNER_TEMP"/pkg/fibteq-myrel-runner-*.tgz --access public
 
-      - name: Publish altair-runner
+      - name: Publish myrel-runner
         if: steps.versions.outputs.altair-runner-alias
         run: |
-          pnpm --filter altair-runner pack --pack-destination "$RUNNER_TEMP/alias"
-          npm publish "$RUNNER_TEMP"/alias/altair-runner-*.tgz --access public
+          pnpm --filter myrel-runner pack --pack-destination "$RUNNER_TEMP/alias"
+          npm publish "$RUNNER_TEMP"/alias/myrel-runner-*.tgz --access public

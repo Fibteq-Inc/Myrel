@@ -11,7 +11,7 @@ import { isNewer } from "../src/update";
 
 let home: string;
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), "altair-runner-"));
+  home = await mkdtemp(join(tmpdir(), "myrel-runner-"));
   process.env.ALTAIR_RUNNER_HOME = home;
 });
 
@@ -153,7 +153,7 @@ describe.skipIf(process.platform === "win32")("TaskRunner", () => {
     for (let i = 0; i < 100 && !runner.runningIds().includes(taskId); i++) await new Promise((r) => setTimeout(r, 10));
     runner.cancel(taskId);
     await done;
-    expect(frames.at(-1)).toEqual({ type: "task.done", taskId, ok: false, cancelled: true, result: "Stopped from Altair." });
+    expect(frames.at(-1)).toEqual({ type: "task.done", taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
     expect(runner.runningIds()).toEqual([]);
   });
 
@@ -228,7 +228,7 @@ echo "args: $*" >&2`,
 describe("package", () => {
   it("reports the version it is published as", async () => {
     const versions = await Promise.all(
-      ["../package.json", "../../altair-runner-alias/package.json"].map(async (p) => {
+      ["../package.json", "../../myrel-runner-alias/package.json"].map(async (p) => {
         const pkg = JSON.parse(await readFile(new URL(p, import.meta.url), "utf8")) as { version: string };
         return pkg.version;
       }),

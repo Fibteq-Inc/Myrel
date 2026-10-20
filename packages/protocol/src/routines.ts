@@ -56,7 +56,7 @@ export const Routine = z.object({
   nextRunAt: Timestamp.nullable(),
   lastRunAt: Timestamp.nullable(),
   runCount: z.number().int().nonnegative(),
-  /** A member's user id, or "agent" when Altair created it. */
+  /** A member's user id, or "agent" when Myrel created it. */
   createdBy: z.string(),
   createdAt: Timestamp,
 });

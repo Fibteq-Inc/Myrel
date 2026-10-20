@@ -34,12 +34,12 @@ const app = new Hono<AppEnv>()
     })(c, next),
   )
   .get("/health", (c) => c.json({ ok: true }))
-  // Lets desktop and mobile apps check that an address is an Altair server they can talk to.
+  // Lets desktop and mobile apps check that an address is a Myrel server they can talk to.
   .get("/info", async (c) =>
     c.json({
       app: "altair",
       apiVersion: API_VERSION,
-      name: c.env.INSTANCE_NAME || "Altair",
+      name: c.env.INSTANCE_NAME || "Myrel",
       auth: { emailPassword: true, signUp: await signUpEnabled(c.env) },
     } satisfies ServerInfo),
   )

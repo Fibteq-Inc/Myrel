@@ -2,8 +2,8 @@ import { z } from "zod";
 
 /**
  * The coding harness a task runs. Each one is a CLI agent that edits code and
- * runs commands on its own; Altair only starts it and reads its output.
- * - opencode: OpenCode, any model (the default, since Altair is multi-model).
+ * runs commands on its own; Myrel only starts it and reads its output.
+ * - opencode: OpenCode, any model (the default, since Myrel is multi-model).
  * - claude-code: Claude Code (`claude -p`), Claude models only.
  * - shell: no model; the prompt is a bash script. For running tests or a build.
  */
@@ -14,7 +14,7 @@ export type HarnessId = z.infer<typeof HarnessId>;
 export const ModelConfig = z.object({
   /** Wire format: OpenAI-compatible chat or Anthropic messages. */
   kind: z.enum(["openai", "anthropic"]),
-  /** Altair's provider id, e.g. "fireworks". */
+  /** Myrel's provider id, e.g. "fireworks". */
   provider: z.string().min(1),
   /** The provider's model id, e.g. "accounts/fireworks/models/kimi-k2p6". */
   id: z.string().min(1),
@@ -58,7 +58,7 @@ export const TaskSpec = z.object({
   model: ModelConfig.optional(),
   /**
    * The thread's MCP endpoint, when the harness runs as the thread's agent and talks to people
-   * through Altair's tools. Its bearer token is a secret (ALTAIR_MCP_TOKEN).
+   * through Myrel's tools. Its bearer token is a secret (ALTAIR_MCP_TOKEN).
    */
   mcp: z.object({ url: z.string().url() }).optional(),
   timeoutSec: z
@@ -80,7 +80,7 @@ export type TodoStatus = z.infer<typeof TodoStatus>;
 
 /**
  * What a runner reports while a task runs. Every runner (the cloud sandbox,
- * the local `altair-runner`) speaks this, whatever harness it starts.
+ * the local `myrel-runner`) speaks this, whatever harness it starts.
  */
 export const RunnerEvent = z.discriminatedUnion("type", [
   z.object({

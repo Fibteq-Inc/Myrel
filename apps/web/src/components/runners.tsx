@@ -81,13 +81,13 @@ export function PairingSteps({ pairing, server }: { pairing: RunnerPairingCode; 
   return (
     <ol className="flex flex-col gap-4">
       <Step n={1} title={t("runners.step1")}>
-        <Command>{`npx altair-runner pair ${pairing.code} --server ${server}`}</Command>
+        <Command>{`npx myrel-runner pair ${pairing.code} --server ${server}`}</Command>
         <p className="text-xs text-subtle">
           {left > 0 ? t("runners.codeExpiresIn", { time: formatSeconds(left) }) : t("runners.codeExpired")}
         </p>
       </Step>
       <Step n={2} title={t("runners.step2")}>
-        <Command>npx altair-runner service install</Command>
+        <Command>npx myrel-runner service install</Command>
         <p className="text-xs text-subtle">
           {t("runners.step2Body")}
         </p>

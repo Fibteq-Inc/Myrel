@@ -1,0 +1,36 @@
+{
+  "name": "myrel-runner",
+  "version": "0.5.1",
+  "description": "Short name for @fibteq/myrel-runner, so `npx myrel-runner` works.",
+  "license": "AGPL-3.0-only",
+  "author": "Fibteq",
+  "homepage": "https://github.com/Fibteq-Inc/myrel/tree/main/packages/myrel-runner#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fibteq-Inc/myrel.git",
+    "directory": "packages/myrel-runner-alias"
+  },
+  "bugs": "https://github.com/Fibteq-Inc/myrel/issues",
+  "type": "module",
+  "bin": {
+    "myrel-runner": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm LICENSE"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@fibteq/myrel-runner": "workspace:^"
+  }
+}

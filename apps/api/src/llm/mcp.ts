@@ -10,7 +10,7 @@ export type McpServerInfo = { name: string; version: string; instructions?: stri
 /**
  * A minimal, stateless MCP server over Streamable HTTP: one JSON-RPC message
  * per POST, answered with one JSON response (no SSE). Enough for coding CLIs
- * such as Claude Code to list and call Altair's tools. Returns null for
+ * such as Claude Code to list and call Myrel's tools. Returns null for
  * notifications, which get an empty 202.
  */
 export async function handleMcp(tools: Tool[], info: McpServerInfo, body: unknown): Promise<object | null> {

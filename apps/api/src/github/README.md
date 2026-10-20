@@ -1,6 +1,6 @@
 # GitHub integration
 
-Altair talks to GitHub through a **GitHub App**. Each Altair server needs its own app.
+Myrel talks to GitHub through a **GitHub App**. Each Myrel server needs its own app.
 People connect their GitHub account in a project's settings, pick repositories, and thread
 agents can then read the code in those repositories. Their tasks clone, push and open pull
 requests through the same app, and the webhook keeps each pull request a thread opened up to
@@ -10,8 +10,8 @@ fails, someone asks for changes or comments, or it is merged or closed.
 ## Quick setup
 
 From the repository root run `node scripts/create-github-app.mjs` (Node 18+, no install) and open
-http://localhost:8765. The Altair address, organization and app name are prefilled; change them
-with `--origin`, `--org` and `--name`. **Create on GitHub** sends Altair's settings to GitHub as a
+http://localhost:8765. The Myrel address, organization and app name are prefilled; change them
+with `--origin`, `--org` and `--name`. **Create on GitHub** sends Myrel's settings to GitHub as a
 [manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest),
 so GitHub only asks you to confirm, then sends you back to the local page with the six values to
 add as Worker secrets (step 2). The keys are shown once, so copy them before stopping the script.
@@ -26,11 +26,11 @@ Replace `https://altair.example.com` with your server's public address.
 
 | Field | Value |
 | --- | --- |
-| GitHub App name | Anything, e.g. `Fibteq Altair`. Its URL name becomes the slug. |
+| GitHub App name | Anything, e.g. `Fibteq Myrel`. Its URL name becomes the slug. |
 | Homepage URL | `https://altair.example.com` |
 | Callback URL | `https://altair.example.com/api/github/callback` |
-| Expire user authorization tokens | Either. Altair does not keep user tokens. |
-| Request user authorization (OAuth) during installation | **On** (Altair uses it to check who installed the app) |
+| Expire user authorization tokens | Either. Myrel does not keep user tokens. |
+| Request user authorization (OAuth) during installation | **On** (Myrel uses it to check who installed the app) |
 | Setup URL | Leave empty (GitHub disables it when the option above is on) |
 | Redirect on update | On |
 | Webhook → Active | On |

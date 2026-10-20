@@ -15,11 +15,11 @@ export const platform: Platform =
 
 /**
  * Server origin: the user's saved choice (desktop/mobile can point at any
- * self-hosted Altair), else VITE_API_URL, else same origin ("").
+ * self-hosted Myrel), else VITE_API_URL, else same origin ("").
  */
 export const server = await currentServer(platform.storage, (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, ""));
 
-/** Apps that are not served by an Altair server let the user pick one. */
+/** Apps that are not served by a Myrel server let the user pick one. */
 export const canChooseServer = platform.name !== "web";
 
 export const api = new ApiClient({ baseUrl: server, tokens: tokenStoreFor(platform, server) });

@@ -1,4 +1,4 @@
-// Altair service worker: shows Web Push notifications and opens the thread on click.
+// Myrel service worker: shows Web Push notifications and opens the thread on click.
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
@@ -7,10 +7,10 @@ self.addEventListener("push", (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {
-    data = { title: "Altair", body: event.data ? event.data.text() : "" };
+    data = { title: "Myrel", body: event.data ? event.data.text() : "" };
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || "Altair", {
+    self.registration.showNotification(data.title || "Myrel", {
       body: data.body || "",
       tag: data.tag,
       renotify: Boolean(data.tag),

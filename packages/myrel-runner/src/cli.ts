@@ -9,27 +9,27 @@ import { installService, type ServiceInfo, serviceStatus, uninstallService } fro
 import { isNewer, latestVersion, runVersion } from "./update";
 import { listWorktrees, pruneWorktrees, removeWorktree, worktreeState } from "./worktrees";
 
-const HELP = `altair-runner ${RUNNER_VERSION}
-Connects this computer to Altair, so projects can work in folders you share
+const HELP = `myrel-runner ${RUNNER_VERSION}
+Connects this computer to Myrel, so projects can work in folders you share
 using your own Claude Code, Codex or Gemini CLI. Your CLI logins never leave
 this computer.
 
 Usage:
-  altair-runner pair <code> --server <url> [--name <name>]
-                                 Pair with your account (code from Altair > Devices)
-  altair-runner share [folder]   Share a folder (default: the current one)
-  altair-runner unshare <folder> Stop sharing a folder
-  altair-runner status           Show the server, shared folders and installed CLIs
-  altair-runner service install  Run in the background now and at every login
-  altair-runner service uninstall
+  myrel-runner pair <code> --server <url> [--name <name>]
+                                 Pair with your account (code from Myrel > Devices)
+  myrel-runner share [folder]   Share a folder (default: the current one)
+  myrel-runner unshare <folder> Stop sharing a folder
+  myrel-runner status           Show the server, shared folders and installed CLIs
+  myrel-runner service install  Run in the background now and at every login
+  myrel-runner service uninstall
                                  Stop the background runner and remove it from login
-  altair-runner service status   Show whether the background runner is installed and running
-  altair-runner start [--access read|edit|full] [--json]
+  myrel-runner service status   Show whether the background runner is installed and running
+  myrel-runner start [--access read|edit|full] [--json]
                                  Connect and run tasks in this terminal until stopped (Ctrl+C)
-  altair-runner worktrees [on|off|prune|remove <path> [--force]]
+  myrel-runner worktrees [on|off|prune|remove <path> [--force]]
                                  List, turn on or off, or clean up the threads' git worktrees
-  altair-runner update           Update to the newest version and restart the background runner
-  altair-runner logout           Forget the pairing on this computer
+  myrel-runner update           Update to the newest version and restart the background runner
+  myrel-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
 edit (change files; the default) or full (also run any command). It is saved,
@@ -66,10 +66,10 @@ async function main(argv: string[]) {
   switch (command) {
     case "pair": {
       const server = values.server ?? (await loadConfig()).server;
-      if (!arg || !server) throw new Error("Usage: altair-runner pair <code> --server <url>");
+      if (!arg || !server) throw new Error("Usage: myrel-runner pair <code> --server <url>");
       const config = await pair({ server, code: arg, name: values.name });
       console.log(`Paired with ${config.server}.`);
-      console.log("Next: `altair-runner service install` to keep it running in the background, then add folders in Altair > Devices.");
+      console.log("Next: `myrel-runner service install` to keep it running in the background, then add folders in Myrel > Devices.");
       return;
     }
     case "share": {
@@ -80,7 +80,7 @@ async function main(argv: string[]) {
       return;
     }
     case "unshare": {
-      if (!arg) throw new Error("Usage: altair-runner unshare <folder>");
+      if (!arg) throw new Error("Usage: myrel-runner unshare <folder>");
       const config = await loadConfig();
       const removed = unshareFolder(config, arg);
       await saveConfig(config);
@@ -94,7 +94,7 @@ async function main(argv: string[]) {
         const { token, ...rest } = config;
         return console.log(JSON.stringify({ ...rest, paired: Boolean(token && config.server), pairing, clis }));
       }
-      const pairingText = { ok: "", invalid: " (not paired any more: run altair-runner pair)", unknown: " (could not reach it)" };
+      const pairingText = { ok: "", invalid: " (not paired any more: run myrel-runner pair)", unknown: " (could not reach it)" };
       console.log(`Server:  ${config.server ? `${config.server}${pairingText[pairing]}` : "(not paired)"}`);
       console.log(`Config:  ${configPath()}`);
       console.log(`Access:  ${config.access}`);
@@ -117,10 +117,10 @@ async function main(argv: string[]) {
     case "service": {
       if (arg === "install") {
         const config = await loadConfig();
-        if (!config.server || !config.token) throw new Error("Pair this computer first: altair-runner pair <code> --server <url>");
+        if (!config.server || !config.token) throw new Error("Pair this computer first: myrel-runner pair <code> --server <url>");
         if ((await checkPairing(config)) === "invalid") {
           throw new Error(
-            `${config.server} does not know this computer any more. Get a new code in Altair > Devices and run \`altair-runner pair <code> --server ${config.server}\` first.`,
+            `${config.server} does not know this computer any more. Get a new code in Myrel > Devices and run \`myrel-runner pair <code> --server ${config.server}\` first.`,
           );
         }
         if (values.access) await saveAccess(values.access);
@@ -129,7 +129,7 @@ async function main(argv: string[]) {
       }
       if (arg === "uninstall") return printService(await uninstallService(), values.json);
       if (arg === "status" || !arg) return printService(await serviceStatus(), values.json);
-      throw new Error("Usage: altair-runner service install|uninstall|status");
+      throw new Error("Usage: myrel-runner service install|uninstall|status");
     }
     case "update": {
       // Set when an older version handed the update over to this one.
@@ -137,13 +137,13 @@ async function main(argv: string[]) {
       const latest = handedOver ? null : await latestVersion();
       if (!handedOver && !latest) console.log("Could not reach npm to look for a newer version.");
       if (latest && isNewer(latest, RUNNER_VERSION)) {
-        console.log(`Updating altair-runner ${RUNNER_VERSION} to ${latest}…`);
+        console.log(`Updating myrel-runner ${RUNNER_VERSION} to ${latest}…`);
         process.exitCode = await runVersion(latest, argv);
         return;
       }
-      if (!handedOver && latest) console.log(`altair-runner ${RUNNER_VERSION} is the newest version.`);
+      if (!handedOver && latest) console.log(`myrel-runner ${RUNNER_VERSION} is the newest version.`);
       if (!(await serviceStatus().catch(() => null))?.installed) {
-        console.log("The background runner is not installed, so there is nothing to restart. Install it with `altair-runner service install`.");
+        console.log("The background runner is not installed, so there is nothing to restart. Install it with `myrel-runner service install`.");
         return;
       }
       if (values.access) await saveAccess(values.access);
@@ -174,12 +174,12 @@ async function main(argv: string[]) {
       if (arg === "remove") {
         const target = positionals[2];
         const w = all.find((x) => x.path === target || x.branch === target);
-        if (!w) throw new Error("Usage: altair-runner worktrees remove <path or branch> [--force] (see altair-runner worktrees)");
+        if (!w) throw new Error("Usage: myrel-runner worktrees remove <path or branch> [--force] (see myrel-runner worktrees)");
         await removeWorktree(w, { force: values.force });
         console.log(`Removed ${w.path}. The branch ${w.branch} is kept unless it was merged.`);
         return;
       }
-      if (arg) throw new Error("Usage: altair-runner worktrees [on|off|prune|remove <path>]");
+      if (arg) throw new Error("Usage: myrel-runner worktrees [on|off|prune|remove <path>]");
       const states = await Promise.all(all.map((w) => worktreeState(w).catch(() => null)));
       if (values.json) return console.log(JSON.stringify(all.map((w, i) => ({ ...w, ...states[i] }))));
       const on = (await loadConfig()).worktrees !== false;
@@ -197,11 +197,11 @@ async function main(argv: string[]) {
       delete config.token;
       delete config.runnerId;
       await saveConfig(config);
-      console.log("Forgot this computer's pairing. Remove it in Altair > Devices too.");
+      console.log("Forgot this computer's pairing. Remove it in Myrel > Devices too.");
       return;
     }
     default:
-      throw new Error(`Unknown command "${command}". Run altair-runner --help.`);
+      throw new Error(`Unknown command "${command}". Run myrel-runner --help.`);
   }
 }
 
@@ -214,7 +214,7 @@ async function saveAccess(access: string) {
 
 function printService(info: ServiceInfo, json?: boolean) {
   if (json) return console.log(JSON.stringify(info));
-  if (!info.installed) return console.log("The background runner is not installed. Install it with `altair-runner service install`.");
+  if (!info.installed) return console.log("The background runner is not installed. Install it with `myrel-runner service install`.");
   const state = info.running === null ? "installed" : info.running ? "running" : "installed, not running";
   console.log(`Background runner: ${state}. It starts at every login.`);
   console.log(`Service: ${info.file}`);

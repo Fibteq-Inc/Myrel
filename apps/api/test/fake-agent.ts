@@ -3,8 +3,8 @@ import { exports } from "cloudflare:workers";
 import { fakeModel } from "./fake-llm";
 
 /**
- * Plays a thread's agent the way altair-runner and the person's CLI would: a paired computer
- * with a shared folder connected to a project, whose CLI answers each turn by calling Altair's
+ * Plays a thread's agent the way myrel-runner and the person's CLI would: a paired computer
+ * with a shared folder connected to a project, whose CLI answers each turn by calling Myrel's
  * tools over the thread's MCP endpoint, then finishes the run.
  */
 
@@ -33,9 +33,9 @@ export type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 export type Turn = {
   start: TaskStart;
   threadId: string;
-  /** What the CLI got on stdin: Altair's instructions and the thread. */
+  /** What the CLI got on stdin: Myrel's instructions and the thread. */
   prompt: string;
-  /** Calls one of Altair's tools, as the CLI would through MCP. */
+  /** Calls one of Myrel's tools, as the CLI would through MCP. */
   call(name: string, args?: unknown): Promise<{ isError: boolean; text: string }>;
 };
 
@@ -44,7 +44,7 @@ export type Play = (turn: Turn, index: number) => Promise<string | void | { fail
 
 /**
  * Plays each turn with the fake model (fake-llm.ts), as a CLI driven by that model would: it gets
- * the turn's prompt, and its tool calls go to Altair's tools over MCP. Its text is the final message.
+ * the turn's prompt, and its tool calls go to Myrel's tools over MCP. Its text is the final message.
  */
 export const modelAgent: Play = async (turn) => {
   const res = fakeModel()({ system: "", prompt: turn.prompt, turns: 1 });
@@ -116,7 +116,7 @@ export async function agentProject(token: string, play: Play, opts: { features?:
   });
   await until(() => frames.some((f) => f.type === "welcome"), "welcome");
 
-  const created = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Altair" }) });
+  const created = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Myrel" }) });
   const { project } = (await created.json()) as { project: Project };
   // The hello may still be on its way when the folder is picked.
   await until(async () => {

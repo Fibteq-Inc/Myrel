@@ -50,11 +50,11 @@ type TaskRow = {
 
 /**
  * A run's spec as stored. Runs on the person's computer name their CLI (claude, codex…) as the harness.
- * agent: the run was one turn of the thread's agent. Older runs were tasks Altair's own loop handed out.
+ * agent: the run was one turn of the thread's agent. Older runs were tasks Myrel's own loop handed out.
  */
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; agent?: boolean };
 
-/** What the thread's agent did through Altair's tools during its turn, kept until the turn ends. */
+/** What the thread's agent did through Myrel's tools during its turn, kept until the turn ends. */
 type AgentTurn = {
   pending: ArtifactRef[];
   replied: boolean;
@@ -91,7 +91,7 @@ const WATCHDOG_GRACE_SEC = 300;
 /**
  * One instance per thread (named by thread id). Each wake queues a turn of the
  * thread's agent: a coding harness (see harness-agent.ts) that gets the thread
- * as its prompt and acts through Altair's tools over MCP (agentMcp). Messages
+ * as its prompt and acts through Myrel's tools over MCP (agentMcp). Messages
  * themselves live in the ProjectAgent; this DO keeps the brief, coordinator
  * notes, a read cursor, and each turn's run (on the person's computer or in
  * the sandbox) with its progress and terminal output.
@@ -192,7 +192,7 @@ export class ThreadAgent extends Agent<Env> {
     const needs = place.kind === "local" && place.workspace.cli !== "claude" ? "agent-clis" : "agent";
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, needs))) {
       return this.cannotWork(
-        `altair-runner on "${place.workspace.runnerName}" is too old to work this thread. Update it with \`npx altair-runner@latest update\`, then write here again.`,
+        `myrel-runner on "${place.workspace.runnerName}" is too old to work this thread. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
       );
     }
 
@@ -412,7 +412,7 @@ export class ThreadAgent extends Agent<Env> {
     return { ok: true, answer };
   }
 
-  /** Altair's thread tools for the agent, acting on this thread and recording what the turn did. */
+  /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
   private async agentToolset(): Promise<Tool[]> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -508,7 +508,7 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
-   * Progress from a runner (the sandbox, or a person's altair-runner). Callable
+   * Progress from a runner (the sandbox, or a person's myrel-runner). Callable
    * over RPC. Events after the task finished are ignored.
    */
   async taskEvents(taskId: string, events: RunnerEvent[]): Promise<void> {

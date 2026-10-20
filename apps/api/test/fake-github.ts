@@ -1,7 +1,7 @@
 /**
  * A tiny in-memory GitHub for tests: one installation (42, org "acme") that
  * covers repos 7 (acme/app) and 8 (acme/docs). Requests are recorded so tests
- * can check what Altair asked for.
+ * can check what Myrel asked for.
  */
 export const fakeGithub = {
   installations: [{ id: 42, account: { login: "acme", type: "Organization", avatar_url: "https://avatars.test/acme" } }],

@@ -73,7 +73,7 @@ export const verification = sqliteTable(
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
 
-// --- Altair ---
+// --- Myrel ---
 
 /**
  * Bring-your-own model keys. `ownerId` is a user id, or null for instance keys that admins
@@ -202,7 +202,7 @@ export const githubInstallations = sqliteTable("github_installations", {
   ...timestamps,
 });
 
-/** Altair users GitHub confirmed can reach an installation (checked with their GitHub sign-in). */
+/** Myrel users GitHub confirmed can reach an installation (checked with their GitHub sign-in). */
 export const githubInstallationUsers = sqliteTable(
   "github_installation_users",
   {
@@ -265,7 +265,7 @@ export const pullRequests = sqliteTable(
   (t) => [primaryKey({ columns: [t.repoId, t.number] }), index("pull_requests_project_id_idx").on(t.projectId, t.threadId)],
 );
 
-// --- Local runners (altair-runner on the user's computer) ---
+// --- Local runners (myrel-runner on the user's computer) ---
 
 export const runners = sqliteTable(
   "runners",
@@ -285,7 +285,7 @@ export const runners = sqliteTable(
   (t) => [index("runners_user_id_idx").on(t.userId)],
 );
 
-/** Short-lived codes shown in the web app and typed into `altair-runner pair`. */
+/** Short-lived codes shown in the web app and typed into `myrel-runner pair`. */
 export const runnerPairings = sqliteTable("runner_pairings", {
   /** SHA-256 of the normalized code, hex. */
   codeHash: text("code_hash").primaryKey(),

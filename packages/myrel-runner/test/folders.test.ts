@@ -91,7 +91,7 @@ describe("an unpaired computer", () => {
       const runner = await startRunner({ log: (l) => lines.push(l), onStatus: (s) => statuses.push(s) });
       await runner.done;
       expect(statuses.at(-1)).toEqual({ state: "stopped", reason: "revoked" });
-      expect(lines.join("\n")).toContain("not paired with Altair any more");
+      expect(lines.join("\n")).toContain("not paired with Myrel any more");
     } finally {
       server.close();
     }

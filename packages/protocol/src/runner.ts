@@ -3,7 +3,7 @@ import { idPattern } from "./ids";
 import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
 
 /**
- * altair-runner: a small daemon on the user's own computer. It opens an
+ * myrel-runner: a small daemon on the user's own computer. It opens an
  * outbound WebSocket to the server and runs tasks with the user's own CLI
  * (Claude Code, Codex, Gemini CLI) in folders the user shared on that
  * computer. The CLI keeps its own login; no subscription token ever reaches
@@ -24,7 +24,7 @@ export const CLI_NAMES: Record<CliId, string> = {
   gemini: "Gemini CLI",
 };
 
-/** A folder the user shared from their computer with `altair-runner share`. */
+/** A folder the user shared from their computer with `myrel-runner share`. */
 export const RunnerFolder = z.object({ path: z.string().min(1).max(1024), name: z.string().max(255) });
 export type RunnerFolder = z.infer<typeof RunnerFolder>;
 
@@ -35,7 +35,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
 /**
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
- * "agent": run Claude Code as the thread's agent, with Altair's tools over MCP (task.start's `agent`).
+ * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
  * "agent-clis": the same for Codex CLI and Gemini CLI.
  */
 export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis"]);
@@ -119,7 +119,7 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     /**
      * Present when the CLI runs as the thread's agent instead of doing one task for it: the
      * runner connects the CLI to the thread's MCP endpoint (server origin + mcpPath) with this
-     * token, so it talks to people through Altair's tools. Needs feature "agent".
+     * token, so it talks to people through Myrel's tools. Needs feature "agent".
      */
     agent: z
       .object({ mcpPath: z.string().regex(/^\/api\/[\w/-]+$/).max(300), token: z.string().min(20).max(200) })
@@ -150,11 +150,11 @@ export const Runner = RunnerInfo.extend({
 });
 export type Runner = z.infer<typeof Runner>;
 
-/** Shown in the web app; typed into `altair-runner pair` within a few minutes. */
+/** Shown in the web app; typed into `myrel-runner pair` within a few minutes. */
 export const RunnerPairingCode = z.object({ code: z.string(), expiresAt: Timestamp });
 export type RunnerPairingCode = z.infer<typeof RunnerPairingCode>;
 
-/** Sent by `altair-runner pair`, without a user session: the code is the proof. */
+/** Sent by `myrel-runner pair`, without a user session: the code is the proof. */
 export const PairRunnerInput = z.object({
   code: z.string().trim().min(4).max(20),
   name: z.string().trim().min(1).max(80),

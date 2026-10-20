@@ -19,13 +19,13 @@ describe("normalizeServerUrl", () => {
 });
 
 describe("probeServer", () => {
-  it("returns info for a compatible Altair server", async () => {
+  it("returns info for a compatible Myrel server", async () => {
     expect(await probeServer("https://a.test", respond(info))).toEqual(info);
   });
 
   it("rejects other apps, unreachable servers and other API versions", async () => {
-    await expect(probeServer("https://a.test", respond({ hello: 1 }))).rejects.toThrow(/not an Altair server/);
-    await expect(probeServer("https://a.test", respond(info, 404))).rejects.toThrow(/not an Altair server/);
+    await expect(probeServer("https://a.test", respond({ hello: 1 }))).rejects.toThrow(/not a Myrel server/);
+    await expect(probeServer("https://a.test", respond(info, 404))).rejects.toThrow(/not a Myrel server/);
     await expect(probeServer("https://a.test", (async () => Promise.reject(new TypeError())) as typeof fetch)).rejects.toThrow(
       /reach/,
     );
