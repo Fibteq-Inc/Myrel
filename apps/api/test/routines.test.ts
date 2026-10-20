@@ -172,7 +172,7 @@ describe("routines", () => {
           ? {
               text: "",
               toolCalls: [
-                call("start_thread", { message_id: id, title: "Reminder", instructions: "Remind me in an hour." }),
+                call("start_thread", { message_id: id, title: "Reminder", instructions: "Remind me in an hour.", project_ack: "On it." }),
               ],
             }
           : { text: "", toolCalls: [] };

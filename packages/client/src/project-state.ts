@@ -140,6 +140,14 @@ export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
 }
 
+/**
+ * Threads keyed by the project-chat message their card sits under: the coordinator's acknowledgement
+ * line when there is one, so the chat reads ask, "on it", card. Otherwise the root message.
+ */
+export function threadByCard(s: ProjectState): Map<string, Thread> {
+  return new Map(Object.values(s.threads).map((t) => [t.ackMessageId ?? t.rootMessageId, t]));
+}
+
 export type ChecklistItem = {
   state: "done" | "active" | "todo" | "skipped" | "failed";
   text: string;

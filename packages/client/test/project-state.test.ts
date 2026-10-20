@@ -9,6 +9,7 @@ import {
   emptyProjectState,
   parseChecklist,
   projectChat,
+  threadByCard,
   threadByRoot,
   threadMessages,
   threadTasks,
@@ -30,6 +31,7 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
   id: createId("thread"),
   projectId,
   rootMessageId,
+  ackMessageId: null,
   title: "T",
   status: "working",
   statusText: null,
@@ -41,6 +43,17 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
 });
 
 describe("project state", () => {
+  it("puts a thread card under the coordinator's acknowledgement when there is one", () => {
+    const ask = msg(1);
+    const ack = msg(2);
+    const withAck = thread(ask.id, { ackMessageId: ack.id });
+    const older = thread(msg(3).id);
+    const s = { ...emptyProjectState, threads: { [withAck.id]: withAck, [older.id]: older } };
+    expect(threadByCard(s).get(ack.id)?.id).toBe(withAck.id);
+    expect(threadByCard(s).has(ask.id)).toBe(false);
+    expect(threadByCard(s).get(older.rootMessageId)?.id).toBe(older.id);
+  });
+
   it("keeps artifacts from sync and live updates, newest first", () => {
     const art = (title: string, updatedAt: string, version = 1) => ({
       id: createId("artifact"),

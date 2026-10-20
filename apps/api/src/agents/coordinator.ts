@@ -19,7 +19,13 @@ export type CoordinatorHost = {
   threadForRoot(messageId: string): Thread | null;
   post(body: string): Message;
   react(messageId: string, emoji: string): void;
-  startThread(input: { rootMessageId: string; title: string; brief: string; ack?: string }): Promise<Thread>;
+  startThread(input: {
+    rootMessageId: string;
+    title: string;
+    brief: string;
+    ack?: string;
+    projectAck?: string;
+  }): Promise<Thread>;
   messageThread(threadId: string, note: string): Promise<void>;
 };
 
@@ -28,14 +34,17 @@ export const COORDINATOR_SYSTEM = `You are Altair, the coordinator of a shared p
 Your only job is routing. You never research, answer substantive questions, write content or do the work yourself, even when it looks quick. You decide where each message goes, and you keep the project chat calm.
 
 For each new message in the project chat:
-- A new ask (work, research, writing, a question that needs thought): call start_thread on that message. Give it a short title in the person's own words (a few words, not a sentence), a brief for the thread agent (the ask in your own words plus any context from the chat it needs, and the reasonable default you picked where the ask is unclear), and an ack: one short line, in the person's language, that reads as the thread's opening line saying what is being done first. Do not also post in the project chat for it; the thread card is the receipt.
-- A follow-up about an existing thread: call message_thread with the person's words and what they want, then post one short line saying it went to that thread.
+- A new ask (work, research, writing, a question that needs thought): call start_thread on that message. Give it a short title in the person's own words (a few words, not a sentence), a brief for the thread agent (the ask in your own words plus any context from the chat it needs, and the reasonable default you picked where the ask is unclear), a project_ack and an ack.
+  - project_ack is the one line the person sees right under their message in the project chat, with the thread card under it. It only says, in a few natural words, that you got it and are starting ("Got it, starting now", "On it"). Word it differently each time, to fit the ask; it does not repeat the request or preview the work.
+  - ack is the thread's opening line, saying what is being done first.
+  - Do not also call post_message for it; project_ack is that post.
+- A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread ("Passed this on to the X thread").
 - A question about the project itself that the chat and thread list already answer (what threads exist, what one is waiting on): answer it with post_message, briefly.
 - A greeting or FYI with nothing to do: one short post_message, or a react.
 - Thanks or a sign-off: react with an emoji and nothing else.
 - People talking among themselves: do nothing.
 
-Several unrelated asks in one message: start a thread on that message for the first ask. For each other ask, post one line naming it with post_message, then start a thread on that post.
+Several unrelated asks in one message: start a thread on that message for the first ask, with a project_ack. For each other ask, post one line naming it with post_message, then start a thread on that post (no project_ack needed; your post is the receipt).
 
 ${ROUTINE_GUIDE} A routine that targets the project chat posts its prompt there as a ⏰ notice when it runs; treat that notice as a new ask and start a thread on it. Creating, pausing and deleting routines is part of routing, so you do it yourself.
 
@@ -109,13 +118,25 @@ export function coordinatorTools(host: CoordinatorHost, knowledge: KnowledgeHost
         title: z.string().min(1).max(80).describe("A few words naming what the thread is about."),
         instructions: z.string().min(1).max(8000).describe("The brief for the thread agent."),
         ack: z.string().max(400).optional().describe("One line posted as the thread's opening message."),
+        project_ack: z
+          .string()
+          .max(200)
+          .optional()
+          .describe(
+            "One short line posted in the project chat under the person's message, saying you got it and are starting. Required when the message is a person's.",
+          ),
       }),
-      run: async ({ message_id, title, instructions, ack }) => {
+      run: async ({ message_id, title, instructions, ack, project_ack }) => {
         const root = host.getMessage(message_id);
         if (!root || root.threadId) throw new Error(`${message_id} is not a project-chat message.`);
         const existing = host.threadForRoot(message_id);
         if (existing) throw new Error(`That message already has thread ${existing.id}; use message_thread.`);
-        const thread = await host.startThread({ rootMessageId: message_id, title, brief: instructions, ack });
+        // A person's ask always gets a visible "on it" line, not just a card.
+        const projectAck = project_ack?.trim() || undefined;
+        if (root.authorKind === "user" && !projectAck) {
+          throw new Error("Add project_ack: one short line telling the person you got their message and are starting.");
+        }
+        const thread = await host.startThread({ rootMessageId: message_id, title, brief: instructions, ack, projectAck });
         return `Started thread ${thread.id}.`;
       },
     }),
@@ -123,10 +144,21 @@ export function coordinatorTools(host: CoordinatorHost, knowledge: KnowledgeHost
       name: "message_thread",
       description:
         "Send a note to a thread's agent (not shown to people): forward a follow-up, or answer its request.",
-      input: z.object({ thread_id: z.string(), note: z.string().min(1).max(8000) }),
-      run: async ({ thread_id, note }) => {
+      input: z.object({
+        thread_id: z.string(),
+        note: z.string().min(1).max(8000),
+        project_ack: z
+          .string()
+          .max(200)
+          .optional()
+          .describe(
+            "When forwarding a person's follow-up: one short line posted in the project chat saying it went to that thread. Leave out when answering a thread's request.",
+          ),
+      }),
+      run: async ({ thread_id, note, project_ack }) => {
         if (!host.getThread(thread_id)) throw new Error(`No thread ${thread_id}.`);
         await host.messageThread(thread_id, note);
+        if (project_ack?.trim()) host.post(project_ack.trim());
         return "Delivered.";
       },
     }),

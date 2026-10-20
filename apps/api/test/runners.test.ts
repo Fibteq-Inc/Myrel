@@ -228,7 +228,7 @@ describe("local workspace", () => {
       if (req.system.includes("coordinator of a shared project chat")) {
         const id = /\[(cmsg_[0-9A-Z]{26})\][^\n]*· NEW/.exec(req.prompt)?.[1];
         return id
-          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Testler", instructions: "Run the tests." })] }
+          ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Testler", instructions: "Run the tests.", project_ack: "On it." })] }
           : { text: "", toolCalls: [] };
       }
       threadPrompts.push(req.prompt);

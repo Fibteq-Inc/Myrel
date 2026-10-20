@@ -111,7 +111,7 @@ describe("agents and project knowledge", () => {
         return {
           text: "",
           toolCalls: [
-            call("start_thread", { message_id: newMessageId(req.prompt), title: "Summary", instructions: "Summarize the CSV." }),
+            call("start_thread", { message_id: newMessageId(req.prompt), title: "Summary", instructions: "Summarize the CSV.", project_ack: "On it." }),
           ],
         };
       }

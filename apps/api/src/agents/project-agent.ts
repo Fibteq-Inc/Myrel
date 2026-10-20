@@ -58,6 +58,7 @@ type MessageRow = {
 type ThreadRow = {
   id: string;
   root_message_id: string;
+  ack_message_id: string | null;
   title: string;
   status: ThreadStatus;
   status_text: string | null;
@@ -155,6 +156,9 @@ export class ProjectAgent extends Agent<Env> {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`;
+    // Added with the coordinator's acknowledgement line.
+    const threadColumns = this.sql<{ name: string }>`PRAGMA table_info(threads)`;
+    if (!threadColumns.some((c) => c.name === "ack_message_id")) this.sql`ALTER TABLE threads ADD COLUMN ack_message_id TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -336,11 +340,11 @@ export class ProjectAgent extends Agent<Env> {
   // ---- Threads -----------------------------------------------------------
 
   /** Opens a thread under a project-chat message. Callable over RPC. */
-  createThread(rootMessageId: string, title: string): Thread {
+  createThread(rootMessageId: string, title: string, ackMessageId: string | null = null): Thread {
     const id = createId("thread");
     const now = new Date().toISOString();
-    this.sql`INSERT INTO threads (id, root_message_id, title, status, status_text, resolved, label, created_at, updated_at)
-      VALUES (${id}, ${rootMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
+    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, created_at, updated_at)
+      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
     return thread;
@@ -698,21 +702,24 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   private coordinatorHost(meter?: TurnMeter): CoordinatorHost {
+    const post = (body: string) =>
+      this.sendMessage({
+        threadId: null,
+        authorKind: "agent",
+        authorId: COORDINATOR_ID,
+        body,
+        ...(meter && { stats: meter.take() ?? undefined }),
+      });
     return {
       getMessage: (id) => this.getMessage(id),
       getThread: (id) => this.getThread(id),
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
-      post: (body) =>
-        this.sendMessage({
-          threadId: null,
-          authorKind: "agent",
-          authorId: COORDINATOR_ID,
-          body,
-          ...(meter && { stats: meter.take() ?? undefined }),
-        }),
+      post,
       react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
-      startThread: async ({ rootMessageId, title, brief, ack }) => {
-        const thread = this.createThread(rootMessageId, title);
+      startThread: async ({ rootMessageId, title, brief, ack, projectAck }) => {
+        // The project-chat line goes first so the card can sit under it: ask, "on it", card.
+        const ackMessage = projectAck ? post(projectAck) : null;
+        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null);
         if (ack) this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: ack });
         const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
         await agent.start({ projectId: this.name, threadId: thread.id, brief });
@@ -832,6 +839,7 @@ export class ProjectAgent extends Agent<Env> {
       id: r.id,
       projectId: this.name,
       rootMessageId: r.root_message_id,
+      ackMessageId: r.ack_message_id ?? null,
       title: r.title,
       status: r.status,
       statusText: r.status_text,
