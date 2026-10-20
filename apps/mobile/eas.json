@@ -10,14 +10,24 @@
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_ALTAIR_SERVER": "https://myrel.fibteq.io"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_ALTAIR_SERVER": "https://myrel.fibteq.io"
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "metadataPath": "./store.config.js"
+      }
+    }
   }
 }

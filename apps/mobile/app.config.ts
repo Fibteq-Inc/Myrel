@@ -8,7 +8,7 @@ const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
 
 const config: ExpoConfig = {
-  name: "Altair",
+  name: "Myrel",
   slug: "altair",
   scheme: "altair",
   version: "0.1.0",

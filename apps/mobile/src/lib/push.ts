@@ -29,7 +29,7 @@ export async function registerForPush(api: ApiClient): Promise<void> {
   if (!Device.isDevice) return;
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
-      name: "Altair",
+      name: "Myrel",
       importance: Notifications.AndroidImportance.HIGH,
     });
   }
