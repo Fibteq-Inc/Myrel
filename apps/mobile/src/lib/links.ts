@@ -1,20 +1,24 @@
-import { useRouter } from "expo-router";
+import { threadIdFromHref } from "@myrel/protocol";
+import { type Href, useRouter } from "expo-router";
 import { useCallback } from "react";
 import { Linking } from "react-native";
 
 /**
  * Links in messages: web pages (artifacts above all) open in the in-app
  * viewer so the user stays in the conversation; anything else (mailto:,
- * tel:) goes to the OS.
+ * tel:) goes to the OS. A thread link ([Title](#thr_…)) opens that thread.
  */
-export function useOpenLink() {
+export function useOpenLink(projectId?: string) {
   const router = useRouter();
   return useCallback(
     (href: string) => {
-      if (/^https?:\/\//i.test(href)) router.push({ pathname: "/artifact", params: { url: href } });
+      const threadId = threadIdFromHref(href);
+      if (threadId) {
+        if (projectId) router.push(`/projects/${projectId}/threads/${threadId}` as Href);
+      } else if (/^https?:\/\//i.test(href)) router.push({ pathname: "/artifact", params: { url: href } });
       else void Linking.openURL(href).catch(() => {});
     },
-    [router],
+    [router, projectId],
   );
 }
 

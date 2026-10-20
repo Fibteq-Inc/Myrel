@@ -175,6 +175,40 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("forwards a follow-up to a resolved thread, reopens it and links it in the project chat", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      if (!id) return { text: "", toolCalls: [] };
+      const existing = /\[(thr_[0-9A-Z]{26})\] "Calculator"/.exec(req.prompt)?.[1];
+      return {
+        text: "",
+        toolCalls: [
+          existing
+            ? call("message_thread", { thread_id: existing, note: "Make it orange.", project_ack: "Passed this on." })
+            : call("start_thread", { message_id: id, title: "Calculator", instructions: "Build it.", project_ack: "On it." }),
+        ],
+      };
+    });
+    const play: Play = async (turn) => {
+      if (turn.prompt.includes("Make it orange.")) return;
+      await turn.call("reply", { text: "Here it is." });
+      await turn.call("resolve_thread");
+    };
+    const { ws, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "Build a calculator" }));
+    const thread: Thread = await until(async () => ((await agent.listThreads())[0]?.resolved ? (await agent.listThreads())[0] : null), "resolved");
+
+    ws.send(JSON.stringify({ type: "message.send", body: "Make the calculator orange" }));
+    const forwarded = await until(async () => {
+      const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+      return chat.find((m: Message) => m.body.startsWith("Passed this on.")) ?? null;
+    }, "forward line");
+    expect(forwarded.body).toBe(`Passed this on. [Calculator](#${thread.id})`);
+    expect(await agent.getThread(thread.id)).toMatchObject({ resolved: false });
+    ws.close();
+  });
+
   it("passes what one thread delivers on to another open thread it affects", async () => {
     const coordinator: string[] = [];
     setFakeModel((req) => {

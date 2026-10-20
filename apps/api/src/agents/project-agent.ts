@@ -277,7 +277,13 @@ export class ProjectAgent extends Agent<Env> {
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
         }
-        if (message.threadId) await this.wakeThread(message.threadId, { kind: "message", messageId: message.id });
+        if (message.threadId) {
+          // Writing in a finished thread picks it up again.
+          if (this.getThread(message.threadId)?.resolved) {
+            this.updateThread(message.threadId, { resolved: false, status: "working" });
+          }
+          await this.wakeThread(message.threadId, { kind: "message", messageId: message.id });
+        }
         else await this.notifyCoordinator({ kind: "message", messageId: message.id });
         return;
       }
@@ -823,7 +829,8 @@ export class ProjectAgent extends Agent<Env> {
       },
       messageThread: async (threadId, note) => {
         const thread = this.getThread(threadId);
-        if (thread?.resolved) this.updateThread(threadId, { resolved: false });
+        // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
+        if (thread?.resolved) this.updateThread(threadId, { resolved: false, status: "working" });
         await this.wakeThread(threadId, { kind: "coordinator", note });
       },
       relay: async (fromThreadId, toThreadId, note) => {
