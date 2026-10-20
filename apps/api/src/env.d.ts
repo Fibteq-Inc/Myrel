@@ -21,4 +21,9 @@ interface Env {
   VAPID_PRIVATE_KEY?: string;
   /** Only needed when Expo enhanced push security is enabled. */
   EXPO_ACCESS_TOKEN?: string;
+  // Optional vars. TERMS_URL and PRIVACY_URL: when both are set, signing up requires accepting them.
+  // LEGAL_VERSION: recorded with each acceptance, e.g. the documents' effective date (default "1").
+  TERMS_URL?: string;
+  PRIVACY_URL?: string;
+  LEGAL_VERSION?: string;
 }

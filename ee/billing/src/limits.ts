@@ -10,6 +10,8 @@ const KEY_HINT = "add your own model key in the project's settings";
 /** The hosted service's plan limits, plugged into the core (see apps/api/src/extensions.ts). */
 export const billingExtensions: Extensions = {
   billing: true,
+  // Fibteq's policies, served by the web app (apps/web/public). Change the version with their effective date.
+  legal: { terms: "/terms/", privacy: "/privacy/", version: "2026-10-20" },
 
   async canCreateProject(env, userId) {
     const standing = await standingOf(env.DB, userId);

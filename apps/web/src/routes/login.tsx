@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
+import { Checkbox } from "../components/ui/controls";
 import { LanguageSelect } from "../components/ui/language-select";
 import { ServerPicker } from "../lib/server-picker";
 import { Button, errorMessage, Input } from "../lib/ui";
@@ -34,7 +35,9 @@ function LoginPage() {
     setPending(true);
     setError(null);
     try {
-      if (mode === "signup") await api.signUp({ email, password, name: String(form.get("name")) });
+      if (mode === "signup") {
+        await api.signUp({ email, password, name: String(form.get("name")), acceptTerms: form.get("acceptTerms") === "on" });
+      }
       else await api.signIn({ email, password });
       // Refetch now: the app layout reads the cached session, and invalidating alone keeps the old null.
       await queryClient.fetchQuery({ ...sessionQuery, staleTime: 0 });
@@ -66,6 +69,22 @@ function LoginPage() {
             minLength={8}
             autoComplete={mode === "signin" ? "current-password" : "new-password"}
           />
+          {mode === "signup" && info?.legal && (
+            <label className="flex items-start gap-2.5 text-sm text-muted">
+              <Checkbox name="acceptTerms" required className="mt-0.5" />
+              <span>
+                {t("login.accept.before")}
+                <a href={info.legal.terms} target="_blank" rel="noreferrer" className="text-fg underline">
+                  {t("legal.terms")}
+                </a>
+                {t("login.accept.and")}
+                <a href={info.legal.privacy} target="_blank" rel="noreferrer" className="text-fg underline">
+                  {t("legal.privacy")}
+                </a>
+                {t("login.accept.after")}
+              </span>
+            </label>
+          )}
           {error && <p className="text-sm text-bad">{error}</p>}
           <Button type="submit" disabled={pending} className="w-full">
             {mode === "signin" ? t("login.signIn") : t("login.signUp")}

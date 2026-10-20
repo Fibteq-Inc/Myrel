@@ -20,7 +20,7 @@ async function signUp() {
   const email = `u${crypto.randomUUID()}@example.com`;
   const res = await api("/api/auth/sign-up/email", {
     method: "POST",
-    body: JSON.stringify({ email, password: "correct-horse-battery", name: "Test" }),
+    body: JSON.stringify({ email, password: "correct-horse-battery", name: "Test", acceptTerms: true }),
   });
   const token = res.headers.get("set-auth-token")!;
   const me = (await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } };
@@ -70,8 +70,22 @@ afterEach(() => {
 });
 
 describe("hosted billing", () => {
-  it("tells clients this server sells plans", async () => {
-    expect(await (await api("/api/info")).json()).toMatchObject({ billing: true });
+  it("tells clients this server sells plans and which terms sign-up accepts", async () => {
+    expect(await (await api("/api/info")).json()).toMatchObject({
+      billing: true,
+      legal: { terms: `${BASE}/terms/`, privacy: `${BASE}/privacy/`, version: "2026-10-20" },
+    });
+  });
+
+  it("requires accepting the terms at sign-up and records which version", async () => {
+    const body = { email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "Test" };
+    const refused = await api("/api/auth/sign-up/email", { method: "POST", body: JSON.stringify(body) });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ code: "TERMS_NOT_ACCEPTED" });
+    const { userId } = await signUp();
+    const row = await env.DB.prepare("SELECT terms_accepted_at, terms_version FROM user WHERE id = ?").bind(userId).first();
+    expect(row).toMatchObject({ terms_version: "2026-10-20" });
+    expect(row?.terms_accepted_at).toBeGreaterThan(Date.now() - 60_000);
   });
 
   it("limits Free to three projects and lifts it when a Pro subscription arrives", async () => {

@@ -38,7 +38,7 @@ type SessionValue = {
   retry(): void;
   chooseServer(input: string): Promise<void>;
   signIn(input: { email: string; password: string }): Promise<void>;
-  signUp(input: { email: string; password: string; name: string }): Promise<void>;
+  signUp(input: { email: string; password: string; name: string; acceptTerms?: boolean }): Promise<void>;
   signOut(): Promise<void>;
   deleteAccount(): Promise<void>;
 };

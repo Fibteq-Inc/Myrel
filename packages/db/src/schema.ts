@@ -21,6 +21,10 @@ export const user = sqliteTable("user", {
   image: text("image"),
   /** Instance role: admins manage server settings and shared model keys. */
   role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
+  /** When the person accepted the server's terms and privacy policy at sign-up (null: none asked). */
+  termsAcceptedAt: integer("terms_accepted_at", { mode: "timestamp_ms" }),
+  /** The version of those documents (ServerInfo.legal.version); a newer one can ask again. */
+  termsVersion: text("terms_version"),
   ...timestamps,
 });
 
