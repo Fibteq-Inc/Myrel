@@ -25,7 +25,7 @@ import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
-import { proxyModel } from "./llm";
+import { modelCallAllowed, proxyModel } from "./llm";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -95,8 +95,14 @@ const app = new Hono<AppEnv>()
     const model = await projectTaskModel(c.env, caller.projectId);
     if (!model.ok || !model.model.baseUrl) return c.json({ error: { message: model.ok ? "The project's model has no address" : model.reason } }, 502);
     const rest = new URL(c.req.url).pathname.split("/model/").slice(1).join("/model/");
+    if (!modelCallAllowed(model.model.kind, c.req.method, rest)) return c.json({ error: { message: "Only model calls go through here." } }, 403);
     const url = `${model.model.baseUrl.replace(/\/+$/, "")}/${rest}`;
-    return proxyModel(c.req.raw, { url, apiKey: model.apiKey, kind: model.model.kind }, (usd) => thread.modelCost(caller.taskId, usd), (p) => c.executionCtx.waitUntil(p));
+    return proxyModel(
+      c.req.raw,
+      { url, apiKey: model.apiKey, kind: model.model.kind, model: model.model.id },
+      (usd) => thread.modelCost(caller.taskId, usd),
+      (p) => c.executionCtx.waitUntil(p),
+    );
   })
   // The skills of the running turn (see turnSkills), for the sandbox or the runner to put next to the agent.
   .get("/agent-mcp/:threadId/skills", async (c) => {

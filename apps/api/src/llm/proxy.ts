@@ -3,6 +3,21 @@ import { reportedCost } from "./openai";
 /** Response headers worth passing back to the harness; the rest describe the provider's own plumbing. */
 const PASSED_HEADERS = ["content-type", "cache-control", "retry-after", "x-request-id"];
 
+/**
+ * The provider paths (under the model's base address) a harness's turn may call: inference only.
+ * The key added here usually opens much more (files, batches, fine-tuning, the account), none of it
+ * the turn's business.
+ */
+const MODEL_PATHS: Record<"openai" | "anthropic", string[]> = {
+  openai: ["chat/completions"],
+  anthropic: ["v1/messages", "v1/messages/count_tokens"],
+};
+
+/** Whether a harness may make this call through the model proxy: a POST to an inference path. */
+export function modelCallAllowed(kind: "openai" | "anthropic", method: string, path: string): boolean {
+  return method === "POST" && MODEL_PATHS[kind].includes(path);
+}
+
 /** Request headers a harness's model call keeps; its own credentials are replaced. */
 const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta"];
 
@@ -15,7 +30,7 @@ const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-
  */
 export async function proxyModel(
   req: Request,
-  target: { url: string; apiKey: string; kind: "openai" | "anthropic" },
+  target: { url: string; apiKey: string; kind: "openai" | "anthropic"; model?: string },
   onCost: (usd: number) => Promise<void>,
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
@@ -26,6 +41,10 @@ export async function proxyModel(
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const text = hasBody ? await req.text() : undefined;
+  // An OpenAI-compatible call names its model in the body: only the project's model is paid for here.
+  if (target.model && target.kind === "openai" && bodyModel(text) !== target.model) {
+    return Response.json({ error: { message: `This turn can only use ${target.model}.` } }, { status: 403 });
+  }
   const sent = text !== undefined && target.kind === "openai" ? withStreamUsage(text) : text;
   const upstream = await fetch(target.url, { method: req.method, headers, body: sent });
   const out = new Headers();
@@ -61,6 +80,14 @@ export async function proxyModel(
     }),
   );
   return new Response(body, { status: upstream.status, headers: out });
+}
+
+function bodyModel(body: string | undefined): unknown {
+  try {
+    return (JSON.parse(body ?? "") as { model?: unknown }).model;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Asks a streamed call for its usage chunk, which is where the provider puts the cost. */

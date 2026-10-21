@@ -597,12 +597,15 @@ export class ThreadAgent extends Agent<Env> {
 
   /**
    * Who a model call from the running turn bills (/api/agent-mcp/:threadId/model/*): the project
-   * whose key the call uses and the turn's task. Only the running turn's token opens it. Callable over RPC.
+   * whose key the call uses and the turn's task. Only the running turn's token opens it, and only for
+   * a cloud turn: a turn on someone's computer runs their own CLI with their own login, and its token
+   * (which that person can read) must not spend the project's or the server's key, unchecked by the
+   * plan limits that only a cloud turn passes. Callable over RPC.
    */
   async modelCaller(token: string): Promise<{ projectId: string; taskId: string } | null> {
     const hash = this.getMeta("agent_token");
     const task = this.runningTask();
-    if (!hash || !task || !sameHash(hash, await hashAgentToken(token))) return null;
+    if (!hash || !task || task.backend !== "sandbox" || !sameHash(hash, await hashAgentToken(token))) return null;
     return { projectId: this.ids().projectId, taskId: task.id };
   }
 
