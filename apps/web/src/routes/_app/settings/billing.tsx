@@ -26,6 +26,11 @@ function BillingSettings() {
   // Stripe pages open in this tab and come back to this page.
   const go = ({ url }: { url: string }) => location.assign(url);
   const portal = useMutation({ mutationFn: () => api.openBillingPortal(), onSuccess: go });
+  const queryClient = useQueryClient();
+  const leave = useMutation({
+    mutationFn: () => api.leaveTeam(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: billingQuery.queryKey }),
+  });
 
   if (error) return <Notice>{errorMessage(error, t)}</Notice>;
   if (!billing) return null;
@@ -56,7 +61,15 @@ function BillingSettings() {
               </GhostButton>
             )}
           </div>
-          {!billing.owner && <p className="mt-2 text-[13px] text-subtle">{t("billing.memberNote")}</p>}
+          {!billing.owner && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-subtle">
+              <p>{t("billing.memberNote")}</p>
+              <GhostButton type="button" disabled={leave.isPending} onClick={() => leave.mutate()}>
+                {t("billing.leaveTeam")}
+              </GhostButton>
+            </div>
+          )}
+          {leave.error && <Notice>{errorMessage(leave.error, t)}</Notice>}
           <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 lg:grid-cols-4">
             <Meter
               label={t("billing.projects")}

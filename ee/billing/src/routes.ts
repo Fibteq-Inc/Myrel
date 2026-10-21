@@ -5,7 +5,16 @@ import { type AppEnv, requireUser } from "../../../apps/api/src/middleware";
 import { UNVERIFIED_MESSAGE } from "../../../apps/api/src/verification";
 import { isPaid, PRICE_KEYS, planOfPrice, TEAM_MIN_SEATS, TRIAL_DAYS } from "./plans";
 import { standingOf, usageOf } from "./store";
-import { type StripeEnv, StripeError, type StripeEvent, type StripeInvoice, type StripeSubscription, stripe, verifyWebhook } from "./stripe";
+import {
+  hmacHex,
+  type StripeEnv,
+  StripeError,
+  type StripeEvent,
+  type StripeInvoice,
+  type StripeSubscription,
+  stripe,
+  verifyWebhook,
+} from "./stripe";
 
 type BillingEnv = { Bindings: Env & StripeEnv; Variables: AppEnv["Variables"] };
 
@@ -83,7 +92,7 @@ export const billingRoutes = new Hono<BillingEnv>()
       trialEnd: iso(sub?.trial_end),
       periodEnd: iso(sub?.current_period_end),
       cancelAtPeriodEnd: Boolean(sub?.cancel_at_period_end),
-      trialAvailable: !customer?.trial_used,
+      trialAvailable: !customer?.trial_used && !(await hadTrial(c.env, user.email)),
       limits: standing.limits,
       usage,
       members,
@@ -109,7 +118,7 @@ export const billingRoutes = new Hono<BillingEnv>()
     const price = prices.data[0];
     if (!price) return c.json({ error: "not_configured", message: "This plan is not on sale yet." }, 503);
     const origin = new URL(c.req.url).origin;
-    const trial = !customer.trialUsed;
+    const trial = !customer.trialUsed && !(await hadTrial(c.env, user.email));
     const session = await stripe<{ url: string }>(c.env, "POST", "/checkout/sessions", {
       mode: "subscription",
       customer: customer.id,
@@ -150,11 +159,26 @@ export const billingRoutes = new Hono<BillingEnv>()
     const person = await c.env.DB.prepare("SELECT id FROM user WHERE email = ?").bind(email.data.toLowerCase()).first<{ id: string }>();
     if (!person) return c.json({ error: "not_found", message: "No Myrel account uses that email. Ask them to sign up first." }, 404);
     if (person.id === owner.id) return c.json({ error: "invalid_input", message: "You are already on your plan." }, 400);
+    // Their own plan would still come first (see standingOf), so the seat would cover nobody.
+    const theirs = await standingOf(c.env, person.id);
+    if (theirs.plan !== "free" && theirs.ownerId === person.id) {
+      return c.json({ error: "conflict", message: "That person pays for a plan of their own." }, 409);
+    }
     const added = await c.env.DB.prepare("INSERT OR IGNORE INTO billing_team_members (owner_id, user_id, created_at) VALUES (?, ?, ?)")
       .bind(owner.id, person.id, Date.now())
       .run();
     if (added.meta.changes === 0) return c.json({ error: "conflict", message: "That person is already on a team." }, 409);
     await syncSeats(c.env, owner.id, sub.id);
+    return c.body(null, 204);
+  })
+  /** A member leaves the Team they were added to; they go back to their own plan. */
+  .delete("/team/membership", async (c) => {
+    const me = c.get("user");
+    const row = await c.env.DB.prepare("SELECT owner_id FROM billing_team_members WHERE user_id = ?").bind(me.id).first<{ owner_id: string }>();
+    if (!row) return c.json({ error: "not_found" }, 404);
+    await c.env.DB.prepare("DELETE FROM billing_team_members WHERE owner_id = ? AND user_id = ?").bind(row.owner_id, me.id).run();
+    const team = await ownTeam(c.env, row.owner_id);
+    if (team) await syncSeats(c.env, row.owner_id, team.id);
     return c.body(null, 204);
   })
   .delete("/team/members/:userId", async (c) => {
@@ -165,6 +189,22 @@ export const billingRoutes = new Hono<BillingEnv>()
     await syncSeats(c.env, owner.id, sub.id);
     return c.body(null, 204);
   });
+
+/**
+ * A one-way key for an address, the same for its case and +tag variants (one mailbox), keyed with
+ * the server's secret so the stored keys say nothing about addresses on their own.
+ */
+export async function trialKey(env: Env, email: string): Promise<string> {
+  const address = email.trim().toLowerCase();
+  const at = address.lastIndexOf("@");
+  const local = (at < 0 ? address : address.slice(0, at)).split("+")[0];
+  return hmacHex(env.BETTER_AUTH_SECRET, `trial:${local}${at < 0 ? "" : address.slice(at)}`);
+}
+
+/** Whether the address had a trial before, on this account or one deleted since. */
+async function hadTrial(env: Env, email: string): Promise<boolean> {
+  return Boolean(await env.DB.prepare("SELECT 1 AS y FROM billing_trials WHERE email_hash = ?").bind(await trialKey(env, email)).first());
+}
 
 /** The person's Stripe customer, created on first use. */
 async function customerFor(env: Env & StripeEnv, user: { id: string; email: string; name: string }) {
@@ -270,6 +310,15 @@ export async function saveSubscription(env: Env, sub: StripeSubscription): Promi
     // One trial per person.
     env.DB.prepare("UPDATE billing_customers SET trial_used = 1 WHERE user_id = ? AND ?").bind(userId, sub.trial_end ? 1 : 0),
   ]);
+  // And per address: an account deleted and made again with it gets none.
+  if (sub.trial_end) {
+    const person = await env.DB.prepare("SELECT email FROM user WHERE id = ?").bind(userId).first<{ email: string }>();
+    if (person) {
+      await env.DB.prepare("INSERT OR IGNORE INTO billing_trials (email_hash, created_at) VALUES (?, ?)")
+        .bind(await trialKey(env, person.email), Date.now())
+        .run();
+    }
+  }
   // A Team that lapses keeps its member list, so renewing restores it; members fall back to their own plan meanwhile.
   if (!isPaid(sub.status)) console.log("billing: subscription ended", sub.id, sub.status);
   return userId;

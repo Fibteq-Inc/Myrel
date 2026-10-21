@@ -113,7 +113,7 @@ describe("hosted billing", () => {
   });
 
   it("never limits the server's admins and leaves their use out of the Free budget", async () => {
-    const { token } = await signUp("admin@example.com");
+    const { token, userId: adminId } = await signUp("admin@example.com");
     const summary = (await (await api("/api/billing", { token })).json()) as BillingSummary;
     expect(summary).toMatchObject({
       plan: "admin",
@@ -125,18 +125,13 @@ describe("hosted billing", () => {
     const before = await freeSpendMicros(workerEnv);
     const now = Date.now();
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds) VALUES (?, ?, ?, ?, ?, ?)").bind(
-        `task_${crypto.randomUUID()}`,
-        project.id,
-        "thread_1",
-        now - 360_000_000,
-        now,
-        360_000,
-      ),
       env.DB.prepare(
-        `INSERT INTO usage_events (id, created_at, project_id, agent, turn_id, provider, model, input_tokens, output_tokens, cost_micros, latency_ms)
-         VALUES (?, ?, ?, 'thread', 't', 'fireworks', 'm', 1, 1, 100000000, 1)`,
-      ).bind(`usage_${crypto.randomUUID()}`, now, project.id),
+        "INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds, billed_to) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(`task_${crypto.randomUUID()}`, project.id, "thread_1", now - 360_000_000, now, 360_000, adminId),
+      env.DB.prepare(
+        `INSERT INTO usage_events (id, created_at, project_id, agent, turn_id, provider, model, input_tokens, output_tokens, cost_micros, latency_ms, billed_to, service_key)
+         VALUES (?, ?, ?, 'thread', 't', 'fireworks', 'm', 1, 1, 100000000, 1, ?, 1)`,
+      ).bind(`usage_${crypto.randomUUID()}`, now, project.id, adminId),
     ]);
     expect(await billingExtensions.canUseSandbox!(workerEnv, project.id)).toEqual({ ok: true });
     expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
@@ -155,8 +150,8 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
 
     const now = Date.now();
-    await env.DB.prepare("INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(`task_${crypto.randomUUID()}`, project.id, "thread_1", now - 7200_000, now, 7200)
+    await env.DB.prepare("INSERT INTO sandbox_runs (id, project_id, thread_id, started_at, ended_at, seconds, billed_to) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(`task_${crypto.randomUUID()}`, project.id, "thread_1", now - 7200_000, now, 7200, userId)
       .run();
     const sandbox = await billingExtensions.canUseSandbox!(workerEnv, project.id);
     expect(sandbox.ok || sandbox.reason).toContain("2 hours");
@@ -164,21 +159,27 @@ describe("hosted billing", () => {
 
     // The cloud thread agent's model calls on the service's key count too: $1 is Free's allowance.
     await env.DB.prepare(
-      `INSERT INTO usage_events (id, created_at, project_id, agent, turn_id, provider, model, input_tokens, output_tokens, cost_micros, latency_ms)
-       VALUES (?, ?, ?, 'thread', 't', 'fireworks', 'm', 1, 1, 1000000, 1)`,
+      `INSERT INTO usage_events (id, created_at, project_id, agent, turn_id, provider, model, input_tokens, output_tokens, cost_micros, latency_ms, billed_to, service_key)
+       VALUES (?, ?, ?, 'thread', 't', 'fireworks', 'm', 1, 1, 1000000, 1, ?, 1)`,
     )
-      .bind(`usage_${crypto.randomUUID()}`, now, project.id)
+      .bind(`usage_${crypto.randomUUID()}`, now, project.id, userId)
       .run();
     const coordinator = await billingExtensions.canUseCoordinator!(workerEnv, project.id);
     expect(coordinator.ok || coordinator.reason).toContain("model usage");
+
+    // Deleting the project that used it does not give the month back.
+    const fresh = ((await (await createProject(token, "Fresh")).json()) as { project: Project }).project;
+    expect((await api(`/api/projects/${project.id}`, { method: "DELETE", token })).status).toBe(204);
+    const after = await billingExtensions.canUseCoordinator!(workerEnv, fresh.id);
+    expect(after.ok || after.reason).toContain("model usage");
 
     // A project with its own model key pays for its coordinator itself.
     const keyId = `key_${crypto.randomUUID()}`;
     await env.DB.batch([
       env.DB.prepare("INSERT INTO api_keys (id, owner_id, provider, label, secret, hint) VALUES (?, ?, 'fireworks', 'Own', 'x', 'x')").bind(keyId, userId),
-      env.DB.prepare("UPDATE projects SET llm_key_id = ? WHERE id = ?").bind(keyId, project.id),
+      env.DB.prepare("UPDATE projects SET llm_key_id = ? WHERE id = ?").bind(keyId, fresh.id),
     ]);
-    expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
+    expect(await billingExtensions.canUseCoordinator!(workerEnv, fresh.id)).toEqual({ ok: true });
   });
 
   it("sets a Team switched to in the billing portal to at least two seats", async () => {
@@ -240,6 +241,40 @@ describe("hosted billing", () => {
     expect(refused.ok || refused.reason).toContain("2 connectors");
     await webhook(subscriptionEvent(userId, "myrel_pro_monthly"));
     expect(await billingExtensions.canAddConnector!(workerEnv, { userId })).toEqual({ ok: true });
+  });
+
+  it("keeps a person's own plan first when a Team owner adds them, and lets them leave", async () => {
+    const owner = await signUp();
+    await webhook(subscriptionEvent(owner.userId, "myrel_team_monthly"));
+    const stripeCalls: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      stripeCalls.push(url);
+      return Response.json(subscriptionEvent(owner.userId, "myrel_team_monthly").data.object);
+    };
+    const addMember = (email: string) => api("/api/billing/team/members", { method: "POST", token: owner.token, body: JSON.stringify({ email }) });
+    const paying = await signUp();
+    await webhook(subscriptionEvent(paying.userId, "myrel_pro_monthly"));
+    expect((await addMember(paying.email)).status).toBe(409);
+
+    const free = await signUp();
+    expect((await addMember(free.email)).status).toBe(204);
+    const plan = async (token: string) => ((await (await api("/api/billing", { token })).json()) as BillingSummary).plan;
+    expect(await plan(free.token)).toBe("team");
+    expect((await api("/api/billing/team/membership", { method: "DELETE", token: free.token })).status).toBe(204);
+    expect(await plan(free.token)).toBe("free");
+  });
+
+  it("gives no second trial to an address whose account was deleted", async () => {
+    const first = await signUp();
+    const trial = subscriptionEvent(first.userId, "myrel_pro_monthly", "trialing", { trial_end: Math.floor(Date.now() / 1000) + 7 * 86400 });
+    expect((await webhook(trial)).status).toBe(200);
+    expect((await api("/api/account", { method: "DELETE", token: first.token })).status).toBe(204);
+
+    const again = await signUp(first.email.replace("@", "+again@").toUpperCase());
+    const summary = (await (await api("/api/billing", { token: again.token })).json()) as BillingSummary;
+    expect(summary.trialAvailable).toBe(false);
   });
 
   it("offers a trial only to a verified address", async () => {

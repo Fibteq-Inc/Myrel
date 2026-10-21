@@ -200,6 +200,7 @@ export const en = {
   "billing.pastDue": "Payment failed. Update your card to keep your plan.",
   "billing.manage": "Manage billing",
   "billing.memberNote": "Your team's owner manages this plan.",
+  "billing.leaveTeam": "Leave this team",
   "billing.projects": "Projects",
   "billing.connectors": "Connectors",
   "billing.sandbox": "Cloud sandbox",

@@ -198,6 +198,7 @@ export const tr: Catalog = {
   "billing.pastDue": "Ödeme alınamadı. Planını korumak için kartını güncelle.",
   "billing.manage": "Faturalandırmayı yönet",
   "billing.memberNote": "Bu planı ekibinin sahibi yönetiyor.",
+  "billing.leaveTeam": "Ekipten ayrıl",
   "billing.projects": "Projeler",
   "billing.connectors": "Bağlayıcılar",
   "billing.sandbox": "Bulut sandbox",
