@@ -135,8 +135,10 @@ export function SessionProvider({ children, onSignOut }: { children: ReactNode; 
       setUser(null);
     },
     async deleteAccount() {
-      // The server drops the sessions and push devices with the account; this clears the local token.
+      // The server drops the sessions and push devices with the account; this clears the local token
+      // and, like signing out, what the app cached for the account.
       await api.deleteAccount();
+      await onSignOut?.(api).catch(() => {});
       await api.signOut().catch(() => {});
       setUser(null);
     },

@@ -23,8 +23,12 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <SessionProvider
             onSignOut={async (api) => {
-              await unregisterPush(api);
-              queryClient.clear();
+              // The cached data is the account's: cleared even when unregistering push fails.
+              try {
+                await unregisterPush(api);
+              } finally {
+                queryClient.clear();
+              }
             }}
           >
             <StatusBar style="light" />
