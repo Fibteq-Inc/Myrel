@@ -429,11 +429,14 @@ export const billingTrials = sqliteTable("billing_trials", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
-/** A Stripe subscription as its webhooks last described it. */
+/**
+ * A paid subscription: a Stripe one as its webhooks last described it, or an App Store / Google Play
+ * one as RevenueCat last described it.
+ */
 export const billingSubscriptions = sqliteTable(
   "billing_subscriptions",
   {
-    /** Stripe's subscription id. */
+    /** Stripe's subscription id, or `rc:<store>:<product>:<user>` for a store subscription. */
     id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
     plan: text("plan", { enum: ["pro", "team"] }).notNull(),
@@ -446,6 +449,10 @@ export const billingSubscriptions = sqliteTable(
     cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" }).notNull().default(false),
     /** When the subscription last became past_due; the plan holds for a grace period from then. */
     pastDueSince: integer("past_due_since", { mode: "timestamp_ms" }),
+    /** Who bills it: Stripe (web), or Apple or Google (bought in the mobile app, through RevenueCat). */
+    source: text("source", { enum: ["stripe", "app_store", "play_store"] }).notNull().default("stripe"),
+    /** The store's product id, for a store subscription. */
+    storeProductId: text("store_product_id"),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [index("billing_subscriptions_user_idx").on(t.userId)],

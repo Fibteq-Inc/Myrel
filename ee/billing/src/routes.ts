@@ -4,6 +4,7 @@ import { z } from "zod";
 import { type AppEnv, requireUser } from "../../../apps/api/src/middleware";
 import { UNVERIFIED_MESSAGE } from "../../../apps/api/src/verification";
 import { isPaid, PRICE_KEYS, planOfPrice, TEAM_MIN_SEATS, TRIAL_DAYS } from "./plans";
+import { type RevenueCatEnv, RevenueCatError, type RevenueCatEvent, eventUserIds, sellsInStores, syncStoreSubscriptions, verifyAuthorization } from "./revenuecat";
 import { standingOf, usageOf } from "./store";
 import {
   hmacHex,
@@ -16,7 +17,7 @@ import {
   verifyWebhook,
 } from "./stripe";
 
-type BillingEnv = { Bindings: Env & StripeEnv; Variables: AppEnv["Variables"] };
+type BillingEnv = { Bindings: Env & StripeEnv & RevenueCatEnv; Variables: AppEnv["Variables"] };
 
 const Checkout = z.object({
   plan: z.enum(["pro", "team"]),
@@ -60,9 +61,20 @@ export const billingRoutes = new Hono<BillingEnv>()
     }
     return c.json({ received: true });
   })
+  // RevenueCat calls this for App Store and Google Play subscriptions bought in the mobile app.
+  .post("/revenuecat", async (c) => {
+    if (!sellsInStores(c.env)) return c.json({ error: "not_configured" }, 503);
+    if (!verifyAuthorization(c.req.header("authorization"), c.env.REVENUECAT_WEBHOOK_AUTH)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => null)) as { event?: RevenueCatEvent } | null;
+    if (!body?.event) return c.json({ error: "invalid_input" }, 400);
+    // A failure answers 500, so RevenueCat retries; syncing again is harmless.
+    for (const userId of eventUserIds(body.event)) await syncStoreSubscriptions(c.env, userId);
+    return c.json({ received: true });
+  })
   .use(requireUser)
   .onError((err, c) => {
     if (err instanceof StripeError) return c.json({ error: "stripe", message: err.message }, err.status === 503 ? 503 : 502);
+    if (err instanceof RevenueCatError) return c.json({ error: "revenuecat", message: err.message }, err.status === 503 ? 503 : 502);
     throw err;
   })
   .get("/", async (c) => {
@@ -92,6 +104,8 @@ export const billingRoutes = new Hono<BillingEnv>()
       trialEnd: iso(sub?.trial_end),
       periodEnd: iso(sub?.current_period_end),
       cancelAtPeriodEnd: Boolean(sub?.cancel_at_period_end),
+      source: sub?.source ?? null,
+      storeSales: sellsInStores(c.env),
       trialAvailable: !customer?.trial_used && !(await hadTrial(c.env, user.email)),
       limits: standing.limits,
       usage,
@@ -108,7 +122,8 @@ export const billingRoutes = new Hono<BillingEnv>()
     if (!user.verified) return c.json({ error: "email_not_verified", message: UNVERIFIED_MESSAGE }, 403);
     const standing = await standingOf(c.env, user.id);
     if (standing.plan !== "free") {
-      return c.json({ error: "already_subscribed", message: "You already have a plan. Change it from the billing portal." }, 409);
+      const where = storeName(standing.subscription?.source) ?? "the billing portal";
+      return c.json({ error: "already_subscribed", message: `You already have a plan. Change it from ${where}.` }, 409);
     }
     const customer = await customerFor(c.env, user);
     const prices = await stripe<{ data: { id: string }[] }>(c.env, "GET", "/prices", {
@@ -135,9 +150,17 @@ export const billingRoutes = new Hono<BillingEnv>()
     });
     return c.json({ url: session.url });
   })
+  /** Asks RevenueCat right after a purchase in the mobile app, instead of waiting for its webhook. */
+  .post("/store/sync", async (c) => {
+    if (!sellsInStores(c.env)) return c.json({ error: "not_configured" }, 503);
+    await syncStoreSubscriptions(c.env, c.get("user").id);
+    return c.body(null, 204);
+  })
   /** Stripe's billing portal: change plan or card, cancel, invoices. */
   .post("/portal", async (c) => {
     const user = c.get("user");
+    const store = storeName((await standingOf(c.env, user.id)).subscription?.source);
+    if (store) return c.json({ error: "store_managed", message: `Your plan was bought in the mobile app. Manage it in ${store}.` }, 409);
     const row = await c.env.DB.prepare("SELECT stripe_customer_id FROM billing_customers WHERE user_id = ?")
       .bind(user.id)
       .first<{ stripe_customer_id: string }>();
@@ -204,6 +227,11 @@ export async function trialKey(env: Env, email: string): Promise<string> {
 /** Whether the address had a trial before, on this account or one deleted since. */
 async function hadTrial(env: Env, email: string): Promise<boolean> {
   return Boolean(await env.DB.prepare("SELECT 1 AS y FROM billing_trials WHERE email_hash = ?").bind(await trialKey(env, email)).first());
+}
+
+/** The store that bills a subscription bought in the mobile app, by name; null for Stripe. */
+function storeName(source: string | null | undefined): string | null {
+  return source === "app_store" ? "the App Store" : source === "play_store" ? "Google Play" : null;
 }
 
 /** The person's Stripe customer, created on first use. */

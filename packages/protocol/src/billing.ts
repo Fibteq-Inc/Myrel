@@ -4,7 +4,7 @@ export type BillingPlan = "free" | "pro" | "team" | "admin";
 
 export type BillingSummary = {
   plan: BillingPlan;
-  /** Stripe's subscription status; null on Free. */
+  /** The subscription's status (Stripe's, or trialing/active/expired for a store one); null on Free. */
   status: string | null;
   interval: "month" | "year" | null;
   seats: number;
@@ -13,6 +13,10 @@ export type BillingSummary = {
   trialEnd: string | null;
   periodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  /** Who bills the plan: Stripe (bought on the web), or the App Store or Google Play (bought in the mobile app). */
+  source: "stripe" | "app_store" | "play_store" | null;
+  /** Whether the mobile app may sell Pro through the App Store and Google Play here. */
+  storeSales: boolean;
   /** Whether a first checkout would start with a free trial. */
   trialAvailable: boolean;
   /** This calendar month (UTC). Projects: the caller's own. Sandbox and model spend on the service's keys: pooled across a Team. */

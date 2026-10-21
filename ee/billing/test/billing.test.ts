@@ -4,6 +4,7 @@ import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { billingExtensions } from "../src/limits";
 import { freeSpendMicros } from "../src/store";
+import { eventUserIds, type RevenueCatSubscription, storeSubscriptions } from "../src/revenuecat";
 import { encodeForm, hmacHex, verifyWebhook } from "../src/stripe";
 
 const BASE = "http://myrel.test";
@@ -309,6 +310,101 @@ describe("hosted billing", () => {
     expect(session.get("subscription_data[trial_period_days]")).toBe("7");
     expect(session.get("automatic_tax[enabled]")).toBe("true");
     expect(session.get("payment_method_collection")).toBe("if_required");
+  });
+});
+
+describe("in-app purchases", () => {
+  const DAY = 86400_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const appStoreMonthly = (extra: Partial<RevenueCatSubscription> = {}): Record<string, RevenueCatSubscription> => ({
+    "io.fibteq.myrel.pro.monthly": { store: "app_store", expires_date: iso(Date.now() + 30 * DAY), period_type: "normal", ...extra },
+  });
+
+  /** RevenueCat's REST API, answering with the given subscriptions per person. */
+  function fakeRevenueCat(byUser: Record<string, Record<string, RevenueCatSubscription>>) {
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (url.hostname !== "api.revenuecat.com") return realFetch(input, init);
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk_rc_test");
+      const userId = decodeURIComponent(url.pathname.split("/").pop()!);
+      calls.push(userId);
+      return Response.json({ subscriber: { subscriptions: byUser[userId] ?? {} } });
+    }) as typeof fetch;
+    return calls;
+  }
+
+  const rcWebhook = (event: unknown, auth = "Bearer rc-hook-test") =>
+    api("/api/billing/revenuecat", { method: "POST", body: JSON.stringify({ event }), headers: { authorization: auth } });
+
+  it("grants Pro for an App Store purchase and leaves it to the store to manage", async () => {
+    const { token, userId } = await signUp();
+    const subs: Record<string, Record<string, RevenueCatSubscription>> = { [userId]: appStoreMonthly({ period_type: "trial" }) };
+    fakeRevenueCat(subs);
+
+    expect((await rcWebhook({ type: "INITIAL_PURCHASE", app_user_id: userId }, "Bearer wrong")).status).toBe(401);
+    expect((await rcWebhook({ type: "INITIAL_PURCHASE", app_user_id: userId })).status).toBe(200);
+
+    const summary = (await (await api("/api/billing", { token })).json()) as BillingSummary;
+    expect(summary).toMatchObject({ plan: "pro", status: "trialing", interval: "month", source: "app_store", storeSales: true });
+    expect(summary.trialEnd).not.toBeNull();
+
+    // No second plan on the web, and no Stripe portal for a store plan.
+    const checkout = await api("/api/billing/checkout", { method: "POST", token, body: JSON.stringify({ plan: "pro" }) });
+    expect(checkout.status).toBe(409);
+    expect(((await checkout.json()) as { message: string }).message).toContain("App Store");
+    expect((await api("/api/billing/portal", { method: "POST", token })).status).toBe(409);
+
+    // Expired: back to Free on the next sync.
+    subs[userId] = appStoreMonthly({ expires_date: iso(Date.now() - DAY), unsubscribe_detected_at: iso(Date.now() - 2 * DAY) });
+    expect((await api("/api/billing/store/sync", { method: "POST", token })).status).toBe(204);
+    expect(((await (await api("/api/billing", { token })).json()) as BillingSummary).plan).toBe("free");
+  });
+
+  it("follows a purchase moved to another account by a restore", async () => {
+    const a = await signUp();
+    const b = await signUp();
+    const subs: Record<string, Record<string, RevenueCatSubscription>> = { [a.userId]: appStoreMonthly() };
+    const calls = fakeRevenueCat(subs);
+    await rcWebhook({ type: "RENEWAL", app_user_id: a.userId });
+    expect(((await (await api("/api/billing", { token: a.token })).json()) as BillingSummary).plan).toBe("pro");
+
+    subs[b.userId] = subs[a.userId]!;
+    delete subs[a.userId];
+    expect((await rcWebhook({ type: "TRANSFER", transferred_from: [a.userId], transferred_to: [b.userId, "$RCAnonymousID:x"] })).status).toBe(200);
+    expect(calls).not.toContain("$RCAnonymousID:x");
+    expect(((await (await api("/api/billing", { token: a.token })).json()) as BillingSummary).plan).toBe("free");
+    expect(((await (await api("/api/billing", { token: b.token })).json()) as BillingSummary).plan).toBe("pro");
+  });
+
+  it("gives Pro for test purchases only to the listed review accounts", async () => {
+    const other = await signUp();
+    const review = await signUp("Review@example.com");
+    const sandbox = appStoreMonthly({ is_sandbox: true });
+    fakeRevenueCat({ [other.userId]: sandbox, [review.userId]: sandbox });
+    await rcWebhook({ type: "INITIAL_PURCHASE", app_user_id: other.userId });
+    await rcWebhook({ type: "INITIAL_PURCHASE", app_user_id: review.userId });
+    expect(((await (await api("/api/billing", { token: other.token })).json()) as BillingSummary).plan).toBe("free");
+    expect(((await (await api("/api/billing", { token: review.token })).json()) as BillingSummary).plan).toBe("pro");
+  });
+
+  it("reads Google Play base plans, the store's grace period and refunds", () => {
+    const now = Date.now();
+    const subs = storeSubscriptions(
+      "u1",
+      {
+        pro: { store: "play_store", product_plan_identifier: "yearly", expires_date: iso(now - DAY), grace_period_expires_date: iso(now + 3 * DAY), period_type: "normal" },
+        "io.fibteq.myrel.pro.monthly": { store: "app_store", expires_date: iso(now + DAY), period_type: "normal", refunded_at: iso(now) },
+        "other.product": { store: "app_store", expires_date: iso(now + DAY), period_type: "normal" },
+        "pro:monthly": { store: "stripe", expires_date: iso(now + DAY), period_type: "normal" },
+      },
+      now,
+    );
+    expect(subs).toEqual([
+      expect.objectContaining({ id: "rc:play_store:pro:yearly:u1", interval: "year", status: "active" }),
+      expect.objectContaining({ id: "rc:app_store:io.fibteq.myrel.pro.monthly:u1", status: "expired" }),
+    ]);
+    expect(eventUserIds({ type: "X", app_user_id: "u1", original_app_user_id: "u1", aliases: ["$RCAnonymousID:1", "u2"] })).toEqual(["u1", "u2"]);
   });
 });
 
