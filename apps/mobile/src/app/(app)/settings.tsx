@@ -48,7 +48,8 @@ export default function SettingsScreen() {
         <Text style={styles.hint}>{t("settings.signedInAs", { email: user?.email ?? "" })}</Text>
       </Section>
 
-      {info?.billing && <PlanSection />}
+      {/* Only once this build can sell in the stores: until then the app says nothing about plans. */}
+      {info?.billing && purchases.canSell && <PlanSection />}
 
       <Section title={t("settings.language")} hint={t("settings.languageHint")}>
         {LOCALES.map((l) => (
