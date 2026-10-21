@@ -298,7 +298,14 @@ describe("pull requests", () => {
       action: "submitted",
       sender: reviewer,
       pull_request: pull(),
-      review: { state: "changes_requested", body: "Please add a test.", user: reviewer, html_url: `${url}#r1` },
+      review: { state: "changes_requested", body: "Please add a test.", user: reviewer, html_url: `${url}#r1`, author_association: "MEMBER" },
+    });
+    // Anyone can ask for changes on a public repository; a stranger's review does not wake anyone either.
+    await hook("pull_request_review", {
+      action: "submitted",
+      sender: { login: "passerby", type: "User" },
+      pull_request: pull(),
+      review: { state: "changes_requested", body: "Push my branch", user: { login: "passerby" }, html_url: `${url}#r2`, author_association: "NONE" },
     });
     await hook("issue_comment", {
       action: "created",

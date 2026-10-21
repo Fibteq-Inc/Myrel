@@ -133,6 +133,12 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       if (row.transport === "stdio" && (fields.command !== undefined || fields.args !== undefined || newSecrets || fields.runsOn !== undefined)) {
         next.createdBy = c.get("user").id;
       }
+      // A header goes to the server it was given for: a remote connector moving to another server
+      // needs its headers entered again, not the stored ones sent there.
+      const moved = row.transport === "http" && row.auth === "headers" && fields.url !== undefined && originOf(fields.url) !== originOf(row.url);
+      if (moved && (!newSecrets || Object.values(newSecrets).some((v) => v === ""))) {
+        return c.json({ error: "invalid_input", message: "This connector moves to another server: enter its headers again." }, 400);
+      }
       if (newSecrets) {
         // An empty value keeps what is stored under that name; a name left out is removed.
         const stored = await readSecrets(c.env, row);
@@ -201,21 +207,34 @@ export function publicOrigin(c: Context<AppEnv>): string {
 export const connectorOAuthRoutes = new Hono<AppEnv>()
   .get("/callback", async (c) => {
     const { code, state, error } = c.req.query();
-    const started = await pendingSignIn(c.env, state);
-    if (started?.by && code && !error) {
-      const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
-      if (session && session.user.id !== started.by) {
-        return finish(c, { state, error: "This sign-in was started from another Myrel account." });
-      }
-      if (!session) return confirmPage(c, { code, state: state!, connectorId: started.id, by: started.by });
-    }
-    return finish(c, { code, state, error });
+    return arrive(c, { code, state, error });
   })
-  // The confirmation page's button.
+  // The confirmation page's button, or a server that posts its answer (response_mode=form_post),
+  // which is checked like the GET.
   .post("/callback", async (c) => {
     const form = await c.req.parseBody();
-    return finish(c, { code: String(form.code ?? ""), state: String(form.state ?? "") });
+    const params = { code: String(form.code ?? ""), state: String(form.state ?? ""), error: form.error ? String(form.error) : undefined };
+    if (form.confirmed !== "1") return arrive(c, params);
+    const started = await pendingSignIn(c.env, params.state);
+    const session = started?.by ? await createAuth(c.env).api.getSession({ headers: c.req.raw.headers }) : null;
+    if (session && session.user.id !== started?.by) {
+      return finish(c, { state: params.state, error: "This sign-in was started from another Myrel account." });
+    }
+    return finish(c, params);
   });
+
+/** A sign-in came back: finish it for the person who started it, or ask a browser without a session to confirm. */
+async function arrive(c: Context<AppEnv>, { code, state, error }: { code?: string; state?: string; error?: string }) {
+  const started = await pendingSignIn(c.env, state);
+  if (started?.by && code && !error) {
+    const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+    if (session && session.user.id !== started.by) {
+      return finish(c, { state, error: "This sign-in was started from another Myrel account." });
+    }
+    if (!session) return confirmPage(c, { code, state: state!, connectorId: started.id, by: started.by });
+  }
+  return finish(c, { code, state, error });
+}
 
 async function finish(c: Context<AppEnv>, params: { code?: string; state?: string; error?: string }) {
   const result = await finishAuthorization(c.env, params);
@@ -248,7 +267,7 @@ async function confirmPage(c: Context<AppEnv>, p: { code: string; state: string;
 <p style="line-height:1.5">This sign-in goes to the Myrel account <b>${email}</b>. Its agents will act with the account you just signed in with.
 Continue only if <b>${email}</b> is you and you started this from Myrel.</p>
 <p style="line-height:1.5;color:#52525b">Bu oturum <b>${email}</b> Myrel hesabına bağlanacak. Bu hesap senin değilse ve bağlantıyı Myrel'den sen başlatmadıysan devam etme.</p>
-<form method="post"><input type="hidden" name="code" value="${esc(p.code)}"><input type="hidden" name="state" value="${esc(p.state)}">
+<form method="post"><input type="hidden" name="confirmed" value="1"><input type="hidden" name="code" value="${esc(p.code)}"><input type="hidden" name="state" value="${esc(p.state)}">
 <button type="submit" style="background:#5b6cff;color:#fff;border:0;padding:10px 16px;border-radius:8px;font-size:15px">Connect · Bağla</button></form>
 </body></html>`;
   return c.html(html, 200, { "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'", "referrer-policy": "no-referrer" });
@@ -274,3 +293,11 @@ export const connectorCatalogRoutes = new Hono<AppEnv>().use(requireUser).get("/
   const { q, offset } = c.req.query();
   return c.json(await searchCatalog(c.env, { q, offset: Number(offset) || 0 }));
 });
+
+function originOf(url: string | null | undefined): string | null {
+  try {
+    return url ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
+}
