@@ -141,14 +141,18 @@ async function serveBuiltAsset(request: Request, env: Env): Promise<Response> {
 // app's index.html, so the browser fails the import and the page can reload itself.
 const root = new Hono<AppEnv>().get("/assets/*", (c) => serveBuiltAsset(c.req.raw, c.env)).route("/", app);
 
-/** Cron triggers (wrangler.jsonc): every hour, copy what changed in the MCP Registry to the connector catalog. */
-async function scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-  ctx.waitUntil(
-    syncCatalog(env).then(
-      (r) => console.log(`connector catalog: read ${r.read}, kept ${r.kept}`),
-      (err) => console.error("connector catalog sync failed", err),
-    ),
-  );
+/**
+ * Cron triggers (wrangler.jsonc): every hour, copy what changed in the MCP Registry to the connector
+ * catalog. Awaited rather than left to waitUntil, so the run gets the cron's full time; one that
+ * still stops early continues from its saved page next hour.
+ */
+async function scheduled(_controller: ScheduledController, env: Env) {
+  try {
+    const r = await syncCatalog(env);
+    console.log(`connector catalog: read ${r.read}, kept ${r.kept}`);
+  } catch (err) {
+    console.error("connector catalog sync failed", err);
+  }
 }
 
 export default {

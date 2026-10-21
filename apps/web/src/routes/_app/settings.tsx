@@ -1,9 +1,10 @@
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { BookMarked, ChevronLeft, CreditCard, Folder, KeyRound, Mail, Plug, Server, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { meQuery, myInvitesQuery, projectsQuery, serverInfoQuery } from "../../lib/api";
+import { cn } from "../../lib/ui";
 
 export const Route = createFileRoute("/_app/settings")({
   loader: ({ context }) => context.queryClient.ensureQueryData(meQuery),
@@ -16,6 +17,8 @@ function SettingsLayout() {
   const { data: projects = [] } = useQuery(projectsQuery);
   const { data: invites = [] } = useQuery(myInvitesQuery);
   const { data: info } = useQuery(serverInfoQuery);
+  // The connector catalog is a grid of cards; it gets more room than the forms.
+  const wide = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings/connectors") });
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
@@ -81,7 +84,7 @@ function SettingsLayout() {
         )}
       </nav>
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-2xl space-y-10 px-4 py-6 sm:px-8 sm:py-8">
+        <div className={cn("mx-auto w-full space-y-10 px-4 py-6 sm:px-8 sm:py-8", wide ? "max-w-5xl" : "max-w-2xl")}>
           <Outlet />
         </div>
       </div>

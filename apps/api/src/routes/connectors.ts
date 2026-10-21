@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { createId, CreateConnectorInput, UpdateConnectorInput } from "@myrel/protocol";
+import { CatalogCategory, createId, CreateConnectorInput, UpdateConnectorInput } from "@myrel/protocol";
 import { and, asc, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
@@ -271,6 +271,7 @@ export const projectConnectorRoutes = connectorRoutes(async (c) => {
 
 /** Mounted at /api/connectors/catalog: search the connector catalog (a copy of the official MCP Registry). */
 export const connectorCatalogRoutes = new Hono<AppEnv>().use(requireUser).get("/", async (c) => {
-  const { q, offset } = c.req.query();
-  return c.json(await searchCatalog(c.env, { q, offset: Number(offset) || 0 }));
+  const { q, offset, category } = c.req.query();
+  const parsed = CatalogCategory.safeParse(category);
+  return c.json(await searchCatalog(c.env, { q, offset: Number(offset) || 0, category: parsed.success ? parsed.data : undefined }));
 });
