@@ -479,7 +479,7 @@ export class ThreadAgent extends Agent<Env> {
         ]);
         if (github) secrets.GITHUB_TOKEN = github;
         if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
-        const backend = sandboxBackend(this.env, threadId);
+        const backend = sandboxBackend(this.env, threadId, input.requester ?? "");
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         if (workspace) {

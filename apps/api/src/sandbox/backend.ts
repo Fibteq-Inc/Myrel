@@ -7,8 +7,8 @@ import { githubConfigured, installationToken } from "../github/app";
 import { listProjectRepos } from "../github/store";
 import { getWorkspace } from "../runners";
 
-/** The cloud backend: the thread's own container (see sandbox.ts). */
-export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
+/** The cloud backend: the thread's own container (see sandbox.ts), for a task that works for `principal`. */
+export function sandboxBackend(env: Env, threadId: string, principal = ""): RunnerBackend {
   return {
     id: "sandbox",
     unavailable: () =>
@@ -16,7 +16,7 @@ export function sandboxBackend(env: Env, threadId: string): RunnerBackend {
         ? null
         : "This server has no sandbox. Its admin needs to enable Cloudflare Containers (the SANDBOX binding).",
     start: async (spec: TaskSpec, secrets: Record<string, string>) => {
-      await env.SANDBOX!.getByName(threadId).run({ threadId, spec, secrets });
+      await env.SANDBOX!.getByName(threadId).run({ threadId, spec, secrets, principal });
     },
     cancel: async (taskId: string) => {
       await env.SANDBOX?.getByName(threadId).cancel(taskId);
