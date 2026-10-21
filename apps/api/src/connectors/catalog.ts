@@ -1,6 +1,13 @@
 import { createDb, schema } from "@myrel/db";
-import { type CatalogConnector, type CatalogPage, POPULAR_CATALOG_IDS } from "@myrel/protocol";
-import { asc, count, desc, eq, inArray, type SQLWrapper, sql } from "drizzle-orm";
+import {
+  type CatalogCategory,
+  type CatalogConnector,
+  type CatalogPage,
+  guessCatalogCategory,
+  POPULAR_CATALOG,
+  POPULAR_CATALOG_IDS,
+} from "@myrel/protocol";
+import { and, asc, count, desc, eq, inArray, type SQLWrapper, sql } from "drizzle-orm";
 import { blockedUrl } from "./client";
 
 const { connectorCatalog, connectorCatalogSync } = schema;
@@ -47,17 +54,21 @@ export function catalogRow(entry: RegistryEntry, now: Date): CatalogRow | null {
   const remote = s.remotes?.find((r) => r.type === "streamable-http" && !/[{}]/.test(r.url) && !r.variables && !blockedUrl(r.url));
   if (!remote) return null;
   const header = remote.headers?.find((h) => h.isRequired);
+  const title = clip(cleanTitle(s.title?.trim() || titleFromName(s.name)), 80);
+  const description = clip(s.description?.trim() ?? "", 300);
   const icon = s.icons?.find((i) => i.src.startsWith("https://") && i.theme !== "dark") ?? s.icons?.find((i) => i.src.startsWith("https://"));
   return {
     id: s.name,
-    title: clip(s.title?.trim() || titleFromName(s.name), 80),
-    description: clip(s.description?.trim() ?? "", 300),
+    title,
+    description,
     websiteUrl: s.websiteUrl?.startsWith("https://") ? clip(s.websiteUrl, 500) : null,
     iconUrl: icon ? clip(icon.src, 500) : null,
     url: remote.url,
     auth: header ? "headers" : "oauth",
     headerName: header?.name ?? null,
     headerPlaceholder: header ? clip(header.placeholder || header.description || "", 200) : null,
+    // The namespace (often io.github.<someone>) says who published it, not what it does.
+    category: POPULAR_CATALOG.find((p) => p.id === s.name)?.category ?? guessCatalogCategory(`${title} ${s.name.split("/")[1] ?? ""} ${description}`),
     version: s.version,
     registryUpdatedAt: meta?.updatedAt ?? now.toISOString(),
     syncedAt: now,
@@ -74,6 +85,12 @@ export function titleFromName(name: string): string {
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (ch) => ch.toUpperCase())
     .trim();
+}
+
+/** "Figma MCP Server" → "Figma", "Vercel Mcp" → "Vercel": every catalog entry is an MCP server. */
+export function cleanTitle(title: string): string {
+  const short = title.replace(/[\s:–—-]*\b(remote\s+)?mcp(\s+server)?\s*$/i, "").trim();
+  return short || title;
 }
 
 function clip(text: string, max: number) {
@@ -122,7 +139,7 @@ export async function syncCatalog(env: Env, fetcher: typeof fetch = fetch, now =
 }
 
 async function saveRows(db: ReturnType<typeof createDb>, rows: CatalogRow[], drop: string[]) {
-  // D1 takes up to 100 bound values per statement; a row has 12.
+  // D1 takes up to 100 bound values per statement; a row has 13.
   const statements = [];
   for (let i = 0; i < rows.length; i += 8) {
     const chunk = rows.slice(i, i + 8);
@@ -133,7 +150,7 @@ async function saveRows(db: ReturnType<typeof createDb>, rows: CatalogRow[], dro
         .onConflictDoUpdate({
           target: connectorCatalog.id,
           set: Object.fromEntries(
-            ["title", "description", "website_url", "icon_url", "url", "auth", "header_name", "header_placeholder", "version", "registry_updated_at", "synced_at"].map((c) => [
+            ["title", "description", "website_url", "icon_url", "url", "auth", "header_name", "header_placeholder", "category", "version", "registry_updated_at", "synced_at"].map((c) => [
               toCamel(c),
               sql.raw(`excluded.${c}`),
             ]),
@@ -158,7 +175,10 @@ async function saveState(db: ReturnType<typeof createDb>, state: { since: string
  * Searches the catalog. Without a query the well-known services come first, in their order, then
  * servers with an icon and a website (usually real products) before the rest.
  */
-export async function searchCatalog(env: Env, opts: { q?: string; offset?: number; limit?: number }): Promise<CatalogPage> {
+export async function searchCatalog(
+  env: Env,
+  opts: { q?: string; category?: CatalogCategory; offset?: number; limit?: number },
+): Promise<CatalogPage> {
   const db = createDb(env.DB);
   const limit = Math.min(Math.max(opts.limit ?? 30, 1), 60);
   const offset = Math.max(opts.offset ?? 0, 0);
@@ -174,17 +194,28 @@ export async function searchCatalog(env: Env, opts: { q?: string; offset?: numbe
   const rows = await db
     .select()
     .from(connectorCatalog)
-    .where(pattern ? sql`(${like(connectorCatalog.title)} or ${like(connectorCatalog.id)} or ${like(connectorCatalog.description)})` : undefined)
+    .where(
+      and(
+        pattern ? sql`(${like(connectorCatalog.title)} or ${like(connectorCatalog.id)} or ${like(connectorCatalog.description)})` : undefined,
+        opts.category ? eq(connectorCatalog.category, opts.category) : undefined,
+      ),
+    )
     .orderBy(
       popularRank,
       ...titleMatch,
       desc(sql`${connectorCatalog.iconUrl} is not null and ${connectorCatalog.websiteUrl} is not null`),
+      // Names that start with a letter before "00Widget", ".prompts" and emoji.
+      desc(sql`lower(substr(${connectorCatalog.title}, 1, 1)) between 'a' and 'z'`),
       asc(sql`lower(${connectorCatalog.title})`),
       asc(connectorCatalog.id),
     )
     .limit(limit + 1)
     .offset(offset);
   const [state] = await db.select().from(connectorCatalogSync).where(eq(connectorCatalogSync.id, SYNC_ID));
+  const counts = await db
+    .select({ id: connectorCatalog.category, count: count() })
+    .from(connectorCatalog)
+    .groupBy(connectorCatalog.category);
   const popular = new Set(POPULAR_CATALOG_IDS);
   return {
     connectors: rows.slice(0, limit).map(
@@ -197,12 +228,14 @@ export async function searchCatalog(env: Env, opts: { q?: string; offset?: numbe
         url: r.url,
         auth: r.auth,
         headerHint: r.headerName ? { name: r.headerName, placeholder: r.headerPlaceholder ?? "" } : null,
+        category: r.category as CatalogCategory,
         popular: popular.has(r.id),
       }),
     ),
     nextOffset: rows.length > limit ? offset + limit : null,
     // A finished run leaves `since`; until the first one finishes the catalog is still filling.
     syncedAt: state?.since ? state.updatedAt.toISOString() : null,
+    categories: counts.map((c) => ({ id: c.id as CatalogCategory, count: c.count })),
   };
 }
 
