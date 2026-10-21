@@ -20,13 +20,36 @@ export async function listUserInstallations(db: D1Database, userId: string): Pro
     .orderBy(githubInstallations.accountLogin);
 }
 
-export async function canUseInstallation(db: D1Database, userId: string, installationId: number): Promise<boolean> {
+/**
+ * How long what GitHub reported at the person's last sign-in is trusted for picking repositories.
+ * Myrel keeps no GitHub token of theirs, so access they lost on GitHub (left the organization, say)
+ * shows only at the next sign-in; after this long they sign in again, which GitHub does without a
+ * prompt for an app they already authorized.
+ */
+export const GITHUB_GRANT_TTL_MS = 8 * 60 * 60 * 1000;
+
+/**
+ * Whether the person may pick repositories of the installation: "ok", "stale" when their last
+ * GitHub sign-in is too old to go by (see GITHUB_GRANT_TTL_MS), or "no".
+ */
+export async function canUseInstallation(db: D1Database, userId: string, installationId: number, now = Date.now()): Promise<"ok" | "stale" | "no"> {
   const [row] = await createDb(db)
-    .select({ id: githubInstallationUsers.installationId })
+    .select({ at: githubInstallationUsers.createdAt })
     .from(githubInstallationUsers)
     .where(and(eq(githubInstallationUsers.userId, userId), eq(githubInstallationUsers.installationId, installationId)))
     .limit(1);
-  return !!row;
+  if (!row) return "no";
+  return now - row.at.getTime() > GITHUB_GRANT_TTL_MS ? "stale" : "ok";
+}
+
+/** Whether the person's last GitHub sign-in is too old to list repositories by (see GITHUB_GRANT_TTL_MS). */
+export async function githubGrantStale(db: D1Database, userId: string, now = Date.now()): Promise<boolean> {
+  const [row] = await createDb(db)
+    .select({ at: githubInstallationUsers.createdAt })
+    .from(githubInstallationUsers)
+    .where(eq(githubInstallationUsers.userId, userId))
+    .limit(1);
+  return Boolean(row && now - row.at.getTime() > GITHUB_GRANT_TTL_MS);
 }
 
 /**

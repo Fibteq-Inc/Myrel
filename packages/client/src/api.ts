@@ -559,6 +559,11 @@ export class ApiClient {
     return this.request<null>(`/api/billing/team/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
+  /** Leaves the Team plan someone added this person to. */
+  leaveTeam() {
+    return this.request<null>("/api/billing/team/membership", { method: "DELETE" });
+  }
+
   // --- local computers (myrel-runner) ---
 
   async listRunners() {

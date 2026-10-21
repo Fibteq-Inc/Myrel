@@ -5,6 +5,7 @@ import { IconRail } from "../components/shell/icon-rail";
 import { AppShell } from "../components/shell/shell";
 import { useState } from "react";
 import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
+import { disableWebPush } from "../lib/push";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ context }) => {
@@ -22,6 +23,8 @@ function AppLayout() {
   const navigate = useNavigate();
 
   async function signOut() {
+    // This browser's push subscription is the account's: a shared browser must not keep getting its notifications.
+    await disableWebPush().catch(() => {});
     await api.signOut();
     queryClient.clear();
     await navigate({ to: "/login" });

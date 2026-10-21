@@ -158,6 +158,12 @@ describe("connectors API", () => {
     const blocked = await api("/api/account/connectors", { method: "POST", token: me.token, body: { transport: "http", name: "Box", url: "https://127.0.0.1/mcp" } });
     expect(blocked.status).toBe(400);
 
+    // Moving it to another server needs its headers again: the stored ones are not sent there.
+    const patch = (body: object) => api(`/api/account/connectors/${connector.id}`, { method: "PATCH", token: me.token, body });
+    expect((await patch({ url: "https://evil.example.net/mcp" })).status).toBe(400);
+    expect((await patch({ url: "https://evil.example.net/mcp", secrets: { Authorization: "" } })).status).toBe(400);
+    expect((await patch({ url: "https://mcp.example.com/v2/mcp" })).status).toBe(200);
+
     // Someone else cannot see or change it.
     const other = await signUp();
     expect((await json<{ connectors: Connector[] }>(api("/api/account/connectors", { token: other.token }))).connectors).toEqual([]);
@@ -317,10 +323,29 @@ describe("connectors API", () => {
       new Request(`${BASE}/api/connectors/oauth/callback`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ code: "good-code", state }),
+        body: new URLSearchParams({ confirmed: "1", code: "good-code", state }),
         redirect: "manual",
       }),
     );
     expect(confirmed.headers.get("location")).toContain("result=ok");
+  });
+
+  it("asks to confirm a sign-in a server posts back (form_post), as it does for one that comes back in the address", async () => {
+    const me = await signUp();
+    const created = await json<{ connector: Connector; authorizeUrl: string }>(
+      api("/api/account/connectors", { method: "POST", token: me.token, body: { transport: "http", name: "Flow", url: "https://oauth.example.com/mcp", auth: "oauth" } }),
+      201,
+    );
+    const state = new URL(created.authorizeUrl).searchParams.get("state")!;
+    const posted = await exports.default.fetch(
+      new Request(`${BASE}/api/connectors/oauth/callback`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ code: "good-code", state }),
+        redirect: "manual",
+      }),
+    );
+    expect(posted.status).toBe(200);
+    expect(await posted.text()).toContain("Finish connecting");
   });
 });

@@ -444,9 +444,22 @@ describe("local workspace", () => {
     await answer("İzin verme");
     expect((await refused).behavior).toBe("deny");
 
+    // Two folders at once: one card at a time, and an answer is for that card's folder only.
+    const first = ask("Read", { file_path: "/Users/ismail/a/x.md" });
+    await until(async () => (await cards()).length === 3, "first of two cards");
+    const second = ask("Read", { file_path: "/Users/ismail/b/y.md" });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await cards()).toHaveLength(3);
+    await answer("Bu sefer izin ver");
+    expect((await first).behavior).toBe("allow");
+    await until(async () => (await cards()).length === 4, "second of two cards");
+    expect((await cards())[3]!.body).toContain("/Users/ismail/b");
+    await answer("İzin verme");
+    expect((await second).behavior).toBe("deny");
+
     // Added to the project: shared on the computer and listed in the project's settings.
     const always = ask("Glob", { pattern: "/Users/ismail/code/site/**/*.md" });
-    await until(async () => (await cards()).length === 3, "third card");
+    await until(async () => (await cards()).length === 5, "fifth card");
     await answer("Projeye ekle");
     expect((await always).behavior).toBe("allow");
     expect((await workspace()).folders).toEqual(["/Users/ismail/docs", "/Users/ismail/code/site"]);

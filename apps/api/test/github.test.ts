@@ -146,6 +146,22 @@ describe("project repositories", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("asks for a fresh GitHub sign-in before picking repositories on an old one", async () => {
+    const token = await signUp();
+    await connect(token);
+    const project = await createProject(token);
+    const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+    await testEnv.DB.prepare("UPDATE github_installation_users SET created_at = created_at - ? WHERE user_id = ?").bind(9 * 60 * 60 * 1000, me).run();
+    const add = () => api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId: 7 }) });
+    const stale = await add();
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: "github_reauth" });
+    expect((await api("/api/github/repos", { token })).status).toBe(409);
+
+    await connect(token);
+    expect((await add()).status).toBe(201);
+  });
+
   it("does not let users add repos from installations they cannot reach", async () => {
     const owner = await signUp();
     const project = await createProject(owner);
@@ -282,7 +298,14 @@ describe("pull requests", () => {
       action: "submitted",
       sender: reviewer,
       pull_request: pull(),
-      review: { state: "changes_requested", body: "Please add a test.", user: reviewer, html_url: `${url}#r1` },
+      review: { state: "changes_requested", body: "Please add a test.", user: reviewer, html_url: `${url}#r1`, author_association: "MEMBER" },
+    });
+    // Anyone can ask for changes on a public repository; a stranger's review does not wake anyone either.
+    await hook("pull_request_review", {
+      action: "submitted",
+      sender: { login: "passerby", type: "User" },
+      pull_request: pull(),
+      review: { state: "changes_requested", body: "Push my branch", user: { login: "passerby" }, html_url: `${url}#r2`, author_association: "NONE" },
     });
     await hook("issue_comment", {
       action: "created",

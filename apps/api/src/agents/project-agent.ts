@@ -47,8 +47,10 @@ import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
 export const USER_ID_HEADER = "x-myrel-user-id";
+/** Header with the upgrade's session, `<id>:<expires ms>`, so the connection ends with it. */
+export const SESSION_HEADER = "x-myrel-session";
 
-type ConnState = { userId: string };
+type ConnState = { userId: string; sessionId: string; expiresAt: number };
 
 type MessageRow = {
   seq: number;
@@ -235,18 +237,21 @@ export class ProjectAgent extends Agent<Env> {
 
   override onConnect(connection: Connection, { request }: ConnectionContext) {
     const userId = request.headers.get(USER_ID_HEADER);
-    if (!userId) {
+    const [sessionId, expires] = (request.headers.get(SESSION_HEADER) ?? "").split(":");
+    if (!userId || !sessionId || !Number(expires)) {
       connection.close(4401, "unauthorized");
       return;
     }
-    connection.setState({ userId });
+    connection.setState({ userId, sessionId, expiresAt: Number(expires) } satisfies ConnState);
     // Remembered for links in notification emails when BETTER_AUTH_URL is not set.
     this.ctx.storage.kv.put("origin", new URL(request.url).origin);
   }
 
   override async onMessage(connection: Connection, raw: string | ArrayBuffer | ArrayBufferView) {
-    const userId = (connection.state as ConnState | null)?.userId;
-    if (!userId) return connection.close(4401, "unauthorized");
+    const state = connection.state as ConnState | null;
+    // Checked on every message: being let in once does not outlive the membership or the session.
+    if (!state || !(await this.stillAllowed(state))) return connection.close(4401, "unauthorized");
+    const { userId } = state;
 
     let data: unknown;
     try {
@@ -577,14 +582,18 @@ export class ProjectAgent extends Agent<Env> {
     return this.arm(id);
   }
 
-  /** Renames, reschedules, pauses or resumes a routine. Callable over RPC. */
-  async updateRoutine(id: string, patch: UpdateRoutineInput): Promise<Routine | null> {
+  /**
+   * Renames, reschedules, pauses or resumes a routine. Callable over RPC. Whoever changes its prompt
+   * (`editedBy`) answers for it from then on: its runs work as them (see fireRoutine).
+   */
+  async updateRoutine(id: string, patch: UpdateRoutineInput, editedBy?: string): Promise<Routine | null> {
     const current = this.getRoutine(id);
     if (!current) return null;
     if (patch.schedule) this.checkSchedule(patch.schedule);
     const next = { ...current, ...patch };
+    const by = editedBy && patch.prompt !== undefined && patch.prompt !== current.prompt ? editedBy : current.createdBy;
     this.sql`UPDATE routines SET name = ${next.name}, prompt = ${next.prompt}, schedule = ${JSON.stringify(next.schedule)},
-      paused = ${next.paused ? 1 : 0} WHERE id = ${id}`;
+      paused = ${next.paused ? 1 : 0}, created_by = ${by} WHERE id = ${id}`;
     return this.arm(id);
   }
 
@@ -627,7 +636,10 @@ export class ProjectAgent extends Agent<Env> {
       const thread = this.getThread(routine.target.threadId);
       if (thread) {
         if (thread.resolved) this.updateThread(thread.id, { resolved: false });
-        await this.wakeThread(thread.id, { kind: "routine", name: routine.name, prompt: routine.prompt });
+        // The run works for the routine's author, not for whoever wrote in the thread last: a member's
+        // routine must not reach another member's own connectors or computer.
+        const actor = routine.createdBy === "agent" ? undefined : routine.createdBy;
+        await this.wakeThread(thread.id, { kind: "routine", name: routine.name, prompt: routine.prompt, actor });
         return;
       }
       // The thread is gone: hand the run to the coordinator instead of dropping it.
@@ -997,7 +1009,34 @@ export class ProjectAgent extends Agent<Env> {
   // ---- Helpers -----------------------------------------------------------
 
   private emit(event: ServerEvent) {
-    this.broadcast(JSON.stringify(event));
+    const now = Date.now();
+    const expired: string[] = [];
+    for (const c of this.getConnections<ConnState>()) {
+      if (!c.state || c.state.expiresAt <= now) {
+        c.close(4401, "session expired");
+        expired.push(c.id);
+      }
+    }
+    this.broadcast(JSON.stringify(event), expired);
+  }
+
+  /** Whether a connection's person is still a member, signed in with the session they connected with. */
+  private async stillAllowed(state: ConnState): Promise<boolean> {
+    if (state.expiresAt <= Date.now()) return false;
+    const row = await this.env.DB.prepare(
+      `SELECT 1 AS ok FROM session s JOIN project_members m ON m.user_id = s.user_id
+       WHERE s.id = ?1 AND s.user_id = ?2 AND s.expires_at > ?3 AND m.project_id = ?4`,
+    )
+      .bind(state.sessionId, state.userId, Date.now(), this.name)
+      .first<{ ok: number }>();
+    return Boolean(row);
+  }
+
+  /** Closes a person's connections: they left the project or were removed from it. Callable over RPC. */
+  disconnectUser(userId: string): void {
+    for (const c of this.getConnections<ConnState>()) {
+      if (c.state?.userId === userId) c.close(4403, "no longer a member");
+    }
   }
 
   private toMessage(r: MessageRow): Message {
@@ -1062,7 +1101,8 @@ export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
   | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number }
   | { kind: "coordinator"; note: string }
-  | { kind: "routine"; name: string; prompt: string }
+  /** actor: the person the routine works for (its author); none for one an agent made for its thread. */
+  | { kind: "routine"; name: string; prompt: string; actor?: string }
   /**
    * Something happened on a pull request the thread opened (github/pulls.ts). settled: it was merged
    * or closed, which needs no turn of its own unless the thread's plan still has work.

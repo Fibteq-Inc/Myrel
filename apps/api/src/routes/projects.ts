@@ -20,7 +20,7 @@ import {
 import { getAgentByName } from "agents";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { USER_ID_HEADER } from "../agents/project-agent";
+import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
 import { listPullRequests } from "../github/pulls";
 import { canUseInstallation, listProjectRepos } from "../github/store";
@@ -182,6 +182,8 @@ export const projectRoutes = new Hono<AppEnv>()
     await createDb(c.env.DB)
       .delete(projectMembers)
       .where(and(eq(projectMembers.projectId, id), eq(projectMembers.userId, userId)));
+    // An open connection was let in as a member: it ends with the membership.
+    await (await getAgentByName(c.env.PROJECT_AGENT, id)).disconnectUser(userId);
     return c.body(null, 204);
   })
 
@@ -273,7 +275,9 @@ export const projectRoutes = new Hono<AppEnv>()
     const input = AddProjectRepoInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     const { installationId, repoId } = input.data;
-    if (!(await canUseInstallation(c.env.DB, userId, installationId))) return c.json({ error: "forbidden" }, 403);
+    const grant = await canUseInstallation(c.env.DB, userId, installationId);
+    if (grant === "no") return c.json({ error: "forbidden" }, 403);
+    if (grant === "stale") return c.json({ error: "github_reauth", message: "Sign in to GitHub again to pick repositories." }, 409);
 
     // Narrowing a token to the repo fails unless the installation really covers it.
     let repo;
@@ -444,6 +448,8 @@ export const projectRoutes = new Hono<AppEnv>()
     // The DO trusts this header; it is always overwritten here, never taken from the client.
     const headers = new Headers(c.req.raw.headers);
     headers.set(USER_ID_HEADER, user.id);
+    const session = c.get("session");
+    headers.set(SESSION_HEADER, `${session.id}:${session.expiresAt}`);
     const agent = await getAgentByName(c.env.PROJECT_AGENT, id);
     return agent.fetch(new Request(c.req.raw, { headers }));
   });

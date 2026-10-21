@@ -12,7 +12,7 @@ import {
 } from "../github/app";
 import { handlePullEvent } from "../github/pulls";
 import { safeReturnTo, signState, verifyState, verifyWebhook } from "../github/state";
-import { listUserInstallations, syncUserInstallations } from "../github/store";
+import { githubGrantStale, listUserInstallations, syncUserInstallations } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 
 const { githubInstallations, projectRepos } = schema;
@@ -88,6 +88,9 @@ export const githubRoutes = new Hono<AppEnv>()
   /** Every repository the user's installations can reach, for the project repo picker. */
   .get("/repos", async (c) => {
     if (!githubConfigured(c.env)) return c.json({ repos: [] });
+    if (await githubGrantStale(c.env.DB, c.get("user").id)) {
+      return c.json({ error: "github_reauth", message: "Sign in to GitHub again to pick repositories." }, 409);
+    }
     const installs = await listUserInstallations(c.env.DB, c.get("user").id);
     const lists = await Promise.all(
       installs.map(async (i) =>

@@ -163,10 +163,19 @@ export const usageEvents = sqliteTable(
     /** Estimated cost in millionths of a US dollar; null when the model has no known price. */
     costMicros: integer("cost_micros"),
     latencyMs: integer("latency_ms").notNull(),
+    /**
+     * Whose plan the call counts against: the project's owner when it was made. Written with the
+     * row, so deleting the project, or changing its key or its owner later, does not take the spend
+     * off anyone's limits.
+     */
+    billedTo: text("billed_to"),
+    /** Whether the call ran on the service's key (no key of the project's own). Set with billedTo. */
+    serviceKey: integer("service_key", { mode: "boolean" }),
   },
   (t) => [
     index("usage_events_project_created_idx").on(t.projectId, t.createdAt),
     index("usage_events_user_created_idx").on(t.userId, t.createdAt),
+    index("usage_events_billed_created_idx").on(t.billedTo, t.createdAt),
   ],
 );
 
@@ -185,8 +194,10 @@ export const sandboxRuns = sqliteTable(
     startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }).notNull(),
     seconds: integer("seconds").notNull(),
+    /** Whose plan the run counts against: the project's owner when it ran (see usageEvents.billedTo). */
+    billedTo: text("billed_to"),
   },
-  (t) => [index("sandbox_runs_project_ended_idx").on(t.projectId, t.endedAt)],
+  (t) => [index("sandbox_runs_project_ended_idx").on(t.projectId, t.endedAt), index("sandbox_runs_billed_ended_idx").on(t.billedTo, t.endedAt)],
 );
 
 /** Pending invitations to a project. The invitee accepts after signing in with `email`. */
@@ -406,6 +417,15 @@ export const billingCustomers = sqliteTable("billing_customers", {
   stripeCustomerId: text("stripe_customer_id").notNull().unique(),
   /** Set once the person started a trial, so they get only one. */
   trialUsed: integer("trial_used", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * Addresses that had a trial, as a hash of the normalized address, so deleting the account and
+ * signing up again with the same address does not bring another one. Outlives the account on purpose.
+ */
+export const billingTrials = sqliteTable("billing_trials", {
+  emailHash: text("email_hash").primaryKey(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 

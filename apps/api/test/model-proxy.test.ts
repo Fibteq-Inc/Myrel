@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { proxyModel, streamCostScanner } from "../src/llm";
+import { modelCallAllowed, proxyModel, streamCostScanner } from "../src/llm";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -22,7 +22,34 @@ function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "o
   return { res, seen, costs, settle: () => Promise.all(waits) };
 }
 
+describe("modelCallAllowed", () => {
+  it("lets through inference calls only", () => {
+    expect(modelCallAllowed("openai", "POST", "chat/completions")).toBe(true);
+    expect(modelCallAllowed("anthropic", "POST", "v1/messages")).toBe(true);
+    expect(modelCallAllowed("openai", "GET", "chat/completions")).toBe(false);
+    expect(modelCallAllowed("openai", "POST", "files")).toBe(false);
+    expect(modelCallAllowed("openai", "DELETE", "files/file-1")).toBe(false);
+    expect(modelCallAllowed("openai", "POST", "chat/completions/../../files")).toBe(false);
+    expect(modelCallAllowed("anthropic", "POST", "v1/files")).toBe(false);
+  });
+});
+
 describe("proxyModel", () => {
+  it("refuses an OpenAI-compatible call for another model without calling the provider", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(url);
+      return Response.json({});
+    });
+    const req = new Request("https://myrel.test/api/agent-mcp/t/model/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: "accounts/fireworks/models/very-expensive", messages: [] }),
+    });
+    const out = await proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "k", kind: "openai", model: "firerouter/opus" }, async () => {}, () => {});
+    expect(out.status).toBe(403);
+    expect(seen).toEqual([]);
+  });
+
   it("swaps the turn's token for the real key and reads a JSON call's cost header", async () => {
     const upstream = Response.json({ usage: { prompt_tokens: 1 } }, { headers: { "x-litellm-response-cost": "0.002", "x-litellm-key-spend": "5" } });
     const { res, seen, costs, settle } = run(upstream, { model: "firerouter/opus", messages: [] });

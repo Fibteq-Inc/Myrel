@@ -6,6 +6,7 @@ import { type FormEvent, useState } from "react";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { api, meQuery, sessionQuery } from "../../../lib/api";
+import { currentPushSubscription } from "../../../lib/push";
 import { Button, errorMessage, Input } from "../../../lib/ui";
 
 type SettingsSearch = { section?: string; connector?: string; result?: string; project?: string };
@@ -136,6 +137,8 @@ function DeleteAccount({ email }: { email: string }) {
   const remove = useMutation({
     mutationFn: async () => {
       await api.deleteAccount();
+      // The server dropped the account's push devices; the browser's subscription goes too.
+      await (await currentPushSubscription().catch(() => null))?.unsubscribe().catch(() => false);
       await api.signOut().catch(() => {});
     },
     onSuccess: async () => {

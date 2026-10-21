@@ -1,6 +1,6 @@
 import type { Notification, Project, Routine, ServerEvent, Thread } from "@myrel/protocol";
 import { getAgentByName } from "agents";
-import { env } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentProject, modelAgent } from "./fake-agent";
@@ -194,8 +194,10 @@ describe("routines", () => {
 
     const routine: Routine = await until(async () => (await agent.listRoutines())[0], "routine from the thread agent");
     const thread: Thread = (await agent.listThreads())[0]!;
+    // It works for the person the turn worked for.
+    const me = (await json<{ user: { id: string } }>(api("/api/auth/get-session", { token }))).user.id;
     expect(routine).toMatchObject({
-      createdBy: "agent",
+      createdBy: me,
       target: { kind: "thread", threadId: thread.id },
       nextRunAt: at,
     });
@@ -231,4 +233,44 @@ describe("routines", () => {
     expect((await list()).unread).toBe(0);
     ws.close();
   });
+
+  it("runs a member's routine on someone else's thread as that member, not as the thread's person", async () => {
+    const { token, project, ws, agent } = await setup();
+    ws.close();
+    const owner = (await json<{ user: { id: string } }>(api("/api/auth/get-session", { token }))).user.id;
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: owner, body: "my thread" });
+    const thread = await agent.createThread(root.id, "Mine");
+
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `m${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "M" }),
+    });
+    const member = signUp.headers.get("set-auth-token")!;
+    const memberId = (await json<{ user: { id: string } }>(api("/api/auth/get-session", { token: member }))).user.id;
+    await env.DB.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
+      .bind(project.id, memberId, Date.now())
+      .run();
+    const { routine } = await json<{ routine: Routine }>(
+      api(`/api/projects/${project.id}/routines`, {
+        method: "POST",
+        token: member,
+        body: JSON.stringify({
+          name: "Sneaky",
+          prompt: "Use their connectors.",
+          target: { kind: "thread", threadId: thread.id },
+          schedule: { kind: "once", at: new Date(Date.now() + 3600_000).toISOString() },
+        }),
+      }),
+    );
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Keep notes." });
+    const requester = () =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
+        const rows = state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'requester'").toArray();
+        return rows[0]?.value ?? null;
+      });
+    expect(await until(async () => (await requester()) === owner, "the thread's first turn")).toBe(true);
+    await agent.runRoutineNow(routine.id);
+    expect(await until(async () => (await requester()) === memberId, "the routine's turn")).toBe(true);
+  }, 20_000);
 });

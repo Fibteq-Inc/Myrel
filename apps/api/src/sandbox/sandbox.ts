@@ -12,7 +12,8 @@ import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
 import { SANDBOX_HOME, SANDBOX_USER } from "./setup";
 
-export type SandboxRun = { threadId: string; spec: TaskSpec; secrets: Record<string, string> };
+/** principal: the person the task works for ("" for nobody in particular), see `execute`. */
+export type SandboxRun = { threadId: string; spec: TaskSpec; secrets: Record<string, string>; principal?: string };
 
 /** The image every thread's container starts from (`containers[].images.base` in wrangler.jsonc). */
 const IMAGE = "base";
@@ -23,6 +24,8 @@ const IDLE_MS = 10 * 60_000;
 /** Events are sent to the thread in batches, at most this often. */
 const FLUSH_MS = 750;
 const MAX_BATCH = 200;
+/** Storage key: who the running container's last task worked for. */
+const PRINCIPAL_KEY = "principal";
 
 /**
  * One per thread (named by thread id): the thread's Linux container. It runs
@@ -47,7 +50,7 @@ export class Sandbox extends DurableObject<Env> {
     const spec = TaskSpec.parse(input.spec);
     const abort = new AbortController();
     this.current = { taskId: spec.taskId, abort };
-    this.ctx.waitUntil(this.execute(input.threadId, spec, input.secrets, abort.signal));
+    this.ctx.waitUntil(this.execute(input.threadId, spec, input.secrets, abort.signal, input.principal ?? ""));
   }
 
   /** Starts the container ahead of a task, while the thread still prepares the turn, so the task finds it running. */
@@ -97,7 +100,7 @@ export class Sandbox extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
   }
 
-  private async execute(threadId: string, spec: TaskSpec, secrets: Record<string, string>, signal: AbortSignal) {
+  private async execute(threadId: string, spec: TaskSpec, secrets: Record<string, string>, signal: AbortSignal, principal: string) {
     const thread = await getAgentByName(this.env.THREAD_AGENT, threadId);
     const harness = HARNESSES[spec.harness];
     let pending: RunnerEvent[] = [];
@@ -124,8 +127,17 @@ export class Sandbox extends DurableObject<Env> {
       // Which kind of start it was, so a slow one can be told apart: a fresh container (the image
       // still has to reach the machine), one a warm-up was starting, or one already running.
       // A warm-up in flight counts as running as soon as it called start(), so ask about it first.
+      // A warm container keeps what the last task left in it (its home, git config and hooks, processes).
+      // A task for someone else must not run next to that with their own connectors' secrets: it
+      // gets a fresh container. One started since (see startFrom) has nothing in it yet.
+      const last = await this.ctx.storage.get<string>(PRINCIPAL_KEY);
+      if (!this.starting && this.ctx.container?.running && last !== undefined && last !== principal) {
+        await this.ctx.container.destroy();
+        push({ type: "log", stream: "system", text: "Starting a fresh sandbox: this turn works for someone else than the last one." });
+      }
       const state = this.starting ? "warming up" : this.ctx.container?.running ? "already running" : "new";
       const container = await this.container(signal);
+      await this.ctx.storage.put(PRINCIPAL_KEY, principal);
       const start = state !== "already running" && this.lastStart ? `, first command after ${clock(this.lastStart.ms)} and ${this.lastStart.tries} tries` : "";
       push({ type: "log", stream: "system", text: `Sandbox ready (${state}${start})`, ms: Date.now() - opening });
       const timeout = AbortSignal.timeout(spec.timeoutSec * 1000);
@@ -213,6 +225,8 @@ export class Sandbox extends DurableObject<Env> {
 
   private async startFrom(container: Container) {
     if (container.running) await container.destroy();
+    // A new container has run nobody's task yet.
+    await this.ctx.storage.delete(PRINCIPAL_KEY);
     const image = container.images[IMAGE];
     if (!image) throw new Error("This server's sandbox image is missing. Its admin needs to deploy with `wrangler deploy` (see containers in wrangler.jsonc).");
     const started = Date.now();

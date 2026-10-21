@@ -190,12 +190,15 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
     const state = payload.review.state.toLowerCase();
     if (payload.action === "dismissed") {
       await save(env, row, { review: null });
+    } else if (!trusted(payload.review.author_association)) {
+      // On a public repository anyone can review, even ask for changes: their words do not reach the agent.
+      return;
     } else if (payload.action === "submitted" && (state === "approved" || state === "changes_requested")) {
       await save(env, row, { review: state });
       if (state === "changes_requested") {
         await wake(env, row, `got a review from ${payload.review.user.login} asking for changes:\n${quote(payload.review.body)}`);
       }
-    } else if (payload.action === "submitted" && payload.review.body?.trim() && trusted(payload.review.author_association)) {
+    } else if (payload.action === "submitted" && payload.review.body?.trim()) {
       await wake(env, row, `got a review comment from ${payload.review.user.login}:\n${quote(payload.review.body)}`);
     }
     return;

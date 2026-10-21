@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { hashAgentToken } from "../src/agents/harness-agent";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { readWorkspace, threadWorkspace } from "../src/sandbox/workspace";
 import { resetFakeModel } from "./fake-llm";
@@ -140,6 +141,29 @@ describe("the cloud agent", () => {
     const task = (await threadAgent.getTasks()).find((t) => t.id === "task_check")!;
     expect(task.status).toBe("failed");
     expect(task.summary).toContain("new version of Myrel was deployed");
+  });
+
+  it("opens the model proxy to a cloud turn's token only, never a local turn's", async () => {
+    const { project, thread, threadAgent } = await threadSetup();
+    const running = (backend: string) =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, async (_, state) => {
+        const sql = state.storage.sql;
+        sql.exec("DELETE FROM tasks");
+        const spec = { taskId: `task_${backend}`, title: "x", prompt: "x", harness: "opencode", openPr: false, timeoutSec: 60 };
+        sql.exec(
+          "INSERT INTO tasks (id, spec, backend, status, progress, language, created_at) VALUES (?, ?, ?, 'running', '{}', 'en', ?)",
+          spec.taskId, JSON.stringify(spec), backend, new Date().toISOString(),
+        );
+        const meta = { agent_token: await hashAgentToken("tok"), project_id: project.id, thread_id: thread.id };
+        for (const [key, value] of Object.entries(meta)) {
+          sql.exec("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+        }
+      });
+    await running("local");
+    expect(await threadAgent.modelCaller("tok")).toBeNull();
+    await running("sandbox");
+    expect(await threadAgent.modelCaller("tok")).toMatchObject({ taskId: "task_sandbox" });
+    expect(await threadAgent.modelCaller("other")).toBeNull();
   });
 
   it("learns the address the sandbox calls back on when someone opens the project", async () => {

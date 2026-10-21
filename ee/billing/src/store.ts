@@ -55,17 +55,22 @@ async function isAdmin(env: Env, userId: string): Promise<boolean> {
   return Boolean(row && (row.role === "admin" || isListedAdmin(env, row.email, Boolean(row.email_verified))));
 }
 
-/** The plan a person works under. The server's admins are never limited. */
+/**
+ * The plan a person works under. The server's admins are never limited. A plan the person pays for
+ * themselves comes first: a Team owner adding them (which takes no yes from them) never puts their
+ * own plan's use into someone else's pool.
+ */
 export async function standingOf(env: Env, userId: string): Promise<Standing> {
   if (await isAdmin(env, userId)) return standing("admin", userId, null);
   const db = env.DB;
+  const own = await paidSubscription(db, userId);
+  if (own) return standing(own.plan, userId, own);
   const member = await db.prepare("SELECT owner_id FROM billing_team_members WHERE user_id = ?").bind(userId).first<{ owner_id: string }>();
   if (member) {
     const sub = await paidSubscription(db, member.owner_id);
     if (sub?.plan === "team") return standing("team", member.owner_id, sub);
   }
-  const own = await paidSubscription(db, userId);
-  return own ? standing(own.plan, userId, own) : standing("free", userId, null);
+  return standing("free", userId, null);
 }
 
 function standing(plan: PlanId, ownerId: string, sub: SubscriptionRow | null): Standing {
@@ -82,9 +87,6 @@ export async function projectOwner(db: D1Database, projectId: string): Promise<{
   return row ? { owner: row.created_by, ownKey: row.key_owner !== null } : null;
 }
 
-/** Projects that run on the service's keys: no key of their own (a server-wide key is the service's). */
-const ON_SERVICE_KEY = `(p.llm_key_id IS NULL OR p.llm_key_id IN (SELECT id FROM api_keys WHERE owner_id IS NULL))`;
-
 /** Everyone whose usage pools under a standing: the owner, plus their Team members on a Team plan. */
 const GROUP = `SELECT ?1 UNION SELECT user_id FROM billing_team_members WHERE owner_id = ?1 AND ?2 = 'team'`;
 
@@ -97,15 +99,17 @@ export async function usageOf(env: Env, standing: Standing, userId: string, now 
   const args = [standing.ownerId, standing.plan];
   const [projects, sandbox, model, connectors] = await env.DB.batch<{ n: number }>([
     env.DB.prepare("SELECT COUNT(*) AS n FROM projects WHERE created_by = ?").bind(userId),
+    // Usage counts against whoever owned the project when it was used (billed_to, written with the
+    // row), so deleting a project or changing its key later does not take it off the month.
     env.DB.prepare(
-      `SELECT COALESCE(SUM(r.seconds), 0) AS n FROM sandbox_runs r JOIN projects p ON p.id = r.project_id
-       WHERE p.created_by IN (${GROUP}) AND r.ended_at >= ?3`,
+      `SELECT COALESCE(SUM(r.seconds), 0) AS n FROM sandbox_runs r
+       WHERE r.billed_to IN (${GROUP}) AND r.ended_at >= ?3`,
     ).bind(...args, from),
     // Model spend on the service's keys, coordinator and cloud thread agent alike: a project with
     // its own key pays its own way.
     env.DB.prepare(
-      `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?4)), 0) AS n FROM usage_events u JOIN projects p ON p.id = u.project_id
-       WHERE ${ON_SERVICE_KEY} AND p.created_by IN (${GROUP}) AND u.created_at >= ?3`,
+      `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?4)), 0) AS n FROM usage_events u
+       WHERE u.service_key = 1 AND u.billed_to IN (${GROUP}) AND u.created_at >= ?3`,
     ).bind(...args, from, unpricedCallMicros(env)),
     // A person's own connectors and those on the projects they own.
     env.DB.prepare(
@@ -138,13 +142,14 @@ export async function freeSpendMicros(env: Env, now = new Date()): Promise<numbe
       WHERE s.plan = 'team' AND ${payingSql("s", now.getTime())}
     UNION SELECT id FROM user WHERE role = 'admin' OR (lower(email) IN (SELECT value FROM json_each(${emails}))${verified})`;
   const [model, sandbox] = await env.DB.batch<{ n: number }>([
+    // Usage of a project that was already gone when it was recorded (billed to nobody) is free use too.
     env.DB.prepare(
-      `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?2)), 0) AS n FROM usage_events u JOIN projects p ON p.id = u.project_id
-       WHERE ${ON_SERVICE_KEY} AND u.created_at >= ?1 AND p.created_by NOT IN (${paid("?3")})`,
+      `SELECT COALESCE(SUM(COALESCE(u.cost_micros, ?2)), 0) AS n FROM usage_events u
+       WHERE u.service_key = 1 AND u.created_at >= ?1 AND COALESCE(u.billed_to, '') NOT IN (${paid("?3")})`,
     ).bind(from, unpricedCallMicros(env), admins),
     env.DB.prepare(
-      `SELECT COALESCE(SUM(r.seconds), 0) AS n FROM sandbox_runs r JOIN projects p ON p.id = r.project_id
-       WHERE r.ended_at >= ?1 AND p.created_by NOT IN (${paid("?2")})`,
+      `SELECT COALESCE(SUM(r.seconds), 0) AS n FROM sandbox_runs r
+       WHERE r.ended_at >= ?1 AND COALESCE(r.billed_to, '') NOT IN (${paid("?2")})`,
     ).bind(from, admins),
   ]);
   return Number(model!.results[0]?.n ?? 0) + Number(sandbox!.results[0]?.n ?? 0) * SANDBOX_MICROS_PER_SECOND;
