@@ -2,7 +2,7 @@ import type { CatalogPage } from "@myrel/protocol";
 import { env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { catalogRow, catalogSize, syncCatalog, titleFromName } from "../src/connectors/catalog";
+import { catalogRow, catalogSize, cleanTitle, syncCatalog, titleFromName } from "../src/connectors/catalog";
 
 const BASE = "http://myrel.test";
 const env = testEnv as unknown as Env;
@@ -52,6 +52,7 @@ describe("connector catalog", () => {
     expect(catalogRow(entry("com.notion/mcp", { remotes: [{ type: "streamable-http", url: "https://mcp.notion.com/mcp" }] }), now)).toMatchObject({
       id: "com.notion/mcp",
       title: "Notion",
+      category: "productivity",
       auth: "oauth",
       url: "https://mcp.notion.com/mcp",
     });
@@ -72,9 +73,13 @@ describe("connector catalog", () => {
       }),
       now,
     );
-    expect(keyed).toMatchObject({ title: "PayPal", url: "https://mcp.paypal.com/mcp", auth: "headers", headerName: "Authorization", headerPlaceholder: "Bearer <token>" });
+    expect(keyed).toMatchObject({ category: "finance", title: "PayPal", url: "https://mcp.paypal.com/mcp", auth: "headers", headerName: "Authorization", headerPlaceholder: "Bearer <token>" });
     expect(titleFromName("io.github.acme/weather-tools")).toBe("Weather Tools");
     expect(titleFromName("com.figma.mcp/mcp")).toBe("Figma");
+    expect(cleanTitle("Figma MCP Server")).toBe("Figma");
+    expect(cleanTitle("Vercel Mcp")).toBe("Vercel");
+    expect(cleanTitle("Atlassian Rovo MCP Server")).toBe("Atlassian Rovo");
+    expect(cleanTitle("MCP")).toBe("MCP");
   });
 
   it("copies the registry, then only what changed, and searches the copy", async () => {
@@ -113,6 +118,11 @@ describe("connector catalog", () => {
     expect(registry.calls).toHaveLength(1);
     expect(registry.calls[0]!.searchParams.get("updated_since")).toBeTruthy();
     expect(await catalogSize(env)).toBe(3);
+
+    // Categories: guessed from the text, counted over the whole catalog, and filterable.
+    expect(all.categories).toEqual(expect.arrayContaining([{ id: "productivity", count: 3 }]));
+    expect((await search(token, "?category=productivity")).connectors).toHaveLength(3);
+    expect((await search(token, "?category=finance")).connectors).toEqual([]);
 
     const notes = await search(token, "?q=notes");
     expect(notes.connectors.map((c) => c.id)).toEqual(["com.example/new"]);

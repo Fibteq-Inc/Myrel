@@ -124,13 +124,17 @@ export function connectorSlug(name: string): string {
 /** Answer to adding an OAuth connector, or to asking to sign in again: open this link in the browser. */
 export const ConnectorAuthorize = z.object({ authorizeUrl: z.url() });
 
-/** Ready-made connectors the settings offer with one click. */
+/**
+ * Ready-made connectors the settings offer with one click. Featured ones are listed first as
+ * recommended; the rest sit in the catalog under their category (they are not in the MCP Registry).
+ */
 export type ConnectorPreset = {
   id: string;
   name: string;
   description: string;
-  /** Shown first and marked as Fibteq's own. */
+  /** Shown first, as recommended, and marked as Fibteq's own. */
   featured?: boolean;
+  category: CatalogCategory;
 } & (
   | { transport: "http"; url: string; auth: "oauth" | "headers"; headerHint?: { name: string; placeholder: string } }
   | { transport: "stdio"; command: string; args: string[]; envHint?: { name: string; placeholder: string }[]; runsOn: ConnectorRunsOn }
@@ -142,6 +146,7 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
     name: "Fibteq Flow",
     description: "Design and start Flow workflows, forms, dashboards and reports.",
     featured: true,
+    category: "productivity",
     transport: "http",
     url: "https://astral.fibteq.io/api/external-ai/mcp",
     auth: "oauth",
@@ -151,17 +156,17 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
     name: "Fibteq Flow Apps",
     description: "Create and publish Flow apps, and grant them tables, processes and datasources.",
     featured: true,
+    category: "productivity",
     transport: "http",
     url: "https://astral.fibteq.io/api/external-ai/apps/mcp",
     auth: "oauth",
   },
-  { id: "linear", name: "Linear", description: "Issues, projects and cycles.", transport: "http", url: "https://mcp.linear.app/mcp", auth: "oauth" },
-  { id: "notion", name: "Notion", description: "Pages and databases.", transport: "http", url: "https://mcp.notion.com/mcp", auth: "oauth" },
-  { id: "sentry", name: "Sentry", description: "Errors, issues and releases.", transport: "http", url: "https://mcp.sentry.dev/mcp", auth: "oauth" },
+  { id: "sentry", name: "Sentry", description: "Errors, issues and releases.", category: "developer", transport: "http", url: "https://mcp.sentry.dev/mcp", auth: "oauth" },
   {
     id: "postgres",
     name: "PostgreSQL",
     description: "Read a PostgreSQL database. Runs as a command next to the agent.",
+    category: "data",
     transport: "stdio",
     // The server takes the address as an argument; a shell reads it from the variable so it stays secret.
     command: "sh",
@@ -170,6 +175,40 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
     runsOn: "both",
   },
 ];
+
+/** What a catalog server is for. The registry has no categories; Myrel guesses one from the name and description. */
+export const CATALOG_CATEGORIES = [
+  "developer",
+  "productivity",
+  "communication",
+  "design",
+  "data",
+  "sales",
+  "finance",
+  "search",
+  "ai",
+  "other",
+] as const;
+export const CatalogCategory = z.enum(CATALOG_CATEGORIES);
+export type CatalogCategory = z.infer<typeof CatalogCategory>;
+
+/** Keywords per category, tried in order; the first category whose pattern matches wins. */
+const CATEGORY_PATTERNS: [CatalogCategory, RegExp][] = [
+  ["design", /\b(design|figma|canva|ui\/ux|sketch|illustrat|icon|font|color palette|image edit|photo|video edit|webflow|wix|framer)/i],
+  ["communication", /\b(e-?mail|gmail|outlook|inbox|slack|discord|telegram|whatsapp|microsoft teams|messaging|sms|meeting|zoom)/i],
+  ["finance", /\b(payment|invoice|billing|stripe|paypal|accounting|bookkeep|finance|financial|bank|tax|expense|payroll|crypto|wallet|blockchain|defi|trading|stock market|x402)/i],
+  ["sales", /\b(crm|sales|lead|marketing|seo|ads?\b|advertis|campaign|e-?commerce|shopify|store|shop|customer|support desk|helpdesk|ticket|hubspot|salesforce|newsletter)/i],
+  ["developer", /\b(github|gitlab|git\b|code|coding|developer|devops|deploy|ci\/cd|kubernetes|docker|cloud|serverless|hosting|api testing|sdk|debug|error|monitor|observab|logs?\b|vercel|netlify|railway|cloudflare|aws|azure|gcp|sentry|posthog|database|postgres|mysql|sqlite|mongo|redis|supabase|neon)/i],
+  ["data", /\b(analytics|data|dataset|sql|bigquery|warehouse|spreadsheet|sheets|excel|airtable|csv|metrics|dashboard|statistic|bi\b|report)/i],
+  ["search", /\b(search|scrap|crawl|browser|web page|websites?|fetch|serp|news|wikipedia|research|knowledge base|docs? lookup|documentation)/i],
+  ["ai", /\b(llm|ai models?|image generat|video generat|text-to|speech|embedding|prompt|inference|openai|anthropic|gpt|hugging ?face|machine learning)/i],
+  ["productivity", /\b(notes?|notion|docs?\b|document|wiki|task|todo|project|issue|linear|jira|asana|trello|monday|calendar|schedul|workflow|automation|zapier|forms?\b|pdf|files?\b|drive|storage)/i],
+];
+
+/** A catalog server's category, guessed from its name and description. */
+export function guessCatalogCategory(text: string): CatalogCategory {
+  return CATEGORY_PATTERNS.find(([, re]) => re.test(text))?.[0] ?? "other";
+}
 
 /**
  * A remote MCP server from the connector catalog: the official MCP Registry
@@ -187,6 +226,7 @@ export const CatalogConnector = z.object({
   /** "headers": the server asks for a key (headerHint names it); "oauth": it signs in, or needs nothing. */
   auth: z.enum(["oauth", "headers"]),
   headerHint: z.object({ name: z.string(), placeholder: z.string() }).nullable(),
+  category: CatalogCategory,
   /** One of the well-known services Myrel lists first. */
   popular: z.boolean(),
 });
@@ -198,34 +238,38 @@ export const CatalogPage = z.object({
   nextOffset: z.number().nullable(),
   /** When the catalog was last copied from the registry; null before the first copy. */
   syncedAt: z.iso.datetime().nullable(),
+  /** How many servers each category has (the whole catalog, not just this search). */
+  categories: z.array(z.object({ id: CatalogCategory, count: z.number() })),
 });
 export type CatalogPage = z.infer<typeof CatalogPage>;
 
 /**
- * Registry names of the services' own servers, listed first in this order. The registry has
- * thousands of entries, many of them tests or unofficial copies, so these are picked by hand.
+ * Registry names of the services' own servers, listed first in this order, with their category.
+ * The registry has thousands of entries, many of them tests or unofficial copies, so these are
+ * picked by hand.
  */
-export const POPULAR_CATALOG_IDS = [
-  "com.notion/mcp",
-  "app.linear/linear",
-  "com.atlassian/atlassian-mcp-server",
-  "com.figma.mcp/mcp",
-  "com.stripe/mcp",
-  "com.canva.mcp/mcp",
-  "com.vercel/vercel-mcp",
-  "com.gitlab/mcp",
-  "io.github.PostHog/mcp",
-  "com.zapier/mcp",
-  "com.airtable/mcp",
-  "com.monday/monday.com",
-  "com.paypal.mcp/mcp",
-  "com.webflow/mcp",
-  "com.wix/mcp",
-  "com.neon/mcp",
-  "com.railway/mcp",
-  "co.huggingface/hf-mcp-server",
-  "com.cloudflare.mcp/mcp",
-  "com.apify/apify-mcp-server",
-  "ai.exa/exa",
-  "com.microsoft/microsoft-learn-mcp",
+export const POPULAR_CATALOG: { id: string; category: CatalogCategory }[] = [
+  { id: "com.notion/mcp", category: "productivity" },
+  { id: "app.linear/linear", category: "productivity" },
+  { id: "com.atlassian/atlassian-mcp-server", category: "productivity" },
+  { id: "com.figma.mcp/mcp", category: "design" },
+  { id: "com.stripe/mcp", category: "finance" },
+  { id: "com.canva.mcp/mcp", category: "design" },
+  { id: "com.vercel/vercel-mcp", category: "developer" },
+  { id: "com.gitlab/mcp", category: "developer" },
+  { id: "io.github.PostHog/mcp", category: "data" },
+  { id: "com.zapier/mcp", category: "productivity" },
+  { id: "com.airtable/mcp", category: "data" },
+  { id: "com.monday/monday.com", category: "productivity" },
+  { id: "com.paypal.mcp/mcp", category: "finance" },
+  { id: "com.webflow/mcp", category: "design" },
+  { id: "com.wix/mcp", category: "design" },
+  { id: "com.neon/mcp", category: "developer" },
+  { id: "com.railway/mcp", category: "developer" },
+  { id: "co.huggingface/hf-mcp-server", category: "ai" },
+  { id: "com.cloudflare.mcp/mcp", category: "developer" },
+  { id: "com.apify/apify-mcp-server", category: "search" },
+  { id: "ai.exa/exa", category: "search" },
+  { id: "com.microsoft/microsoft-learn-mcp", category: "search" },
 ];
+export const POPULAR_CATALOG_IDS = POPULAR_CATALOG.map((p) => p.id);

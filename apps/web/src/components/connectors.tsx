@@ -2,6 +2,8 @@ import { ApiError } from "@myrel/client";
 import type { MessageKey, Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import {
+  CATALOG_CATEGORIES,
+  type CatalogCategory,
   type CatalogConnector,
   CONNECTOR_PRESETS,
   type Connector,
@@ -45,8 +47,6 @@ import { Menu, MenuItem, MenuSeparator } from "./ui/menu";
 const PRESET_DESCRIPTIONS: Record<string, MessageKey> = {
   "fibteq-flow": "connectors.preset.fibteqFlow",
   "fibteq-flow-apps": "connectors.preset.fibteqFlowApps",
-  linear: "connectors.preset.linear",
-  notion: "connectors.preset.notion",
   sentry: "connectors.preset.sentry",
   postgres: "connectors.preset.postgres",
 };
@@ -103,26 +103,14 @@ export function Connectors({
     if (adding) formRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [adding]);
 
+  const catalog = canManage && <Catalog connectors={connectors} projectId={projectId} onRefresh={refresh} onSetUp={setAdding} />;
+
   return (
     <>
       {result && <SignInResult ok={result === "ok"} name={connectors.find((c) => c.id === connectorId)?.name} />}
 
-      {!projectId && canManage && (
-        <Presets
-          connectors={connectors}
-          onRefresh={refresh}
-          onSetUp={(preset) => setAdding(draftFromPreset(preset))}
-        />
-      )}
-
-      {canManage && (
-        <Catalog
-          connectors={connectors}
-          projectId={projectId}
-          onRefresh={refresh}
-          onSetUp={(entry) => setAdding(draftFromCatalog(entry))}
-        />
-      )}
+      {/* Added connectors come first once there are some; until then the catalog leads. */}
+      {connectors.length === 0 && catalog}
 
       <Section
         title={projectId ? t("connectors.projectTitle") : t("connectors.title")}
@@ -166,6 +154,8 @@ export function Connectors({
           </div>
         )}
       </Section>
+
+      {connectors.length > 0 && catalog}
     </>
   );
 }
@@ -206,97 +196,25 @@ function SignInResult({ ok, name }: { ok: boolean; name?: string }) {
   );
 }
 
-// --- presets ---
+// --- adding from the catalog: recommended, then the MCP Registry by category ---
 
-function Presets({
-  connectors,
-  onRefresh,
-  onSetUp,
-}: {
-  connectors: Connector[];
-  onRefresh: () => Promise<unknown>;
-  onSetUp: (preset: ConnectorPreset) => void;
-}) {
-  const t = useT();
-  const presets = [...CONNECTOR_PRESETS].sort((a, b) => Number(!!b.featured) - Number(!!a.featured));
-  const connect = useMutation({
-    mutationFn: (preset: ConnectorPreset & { transport: "http" }) =>
-      api.createConnector({ transport: "http", name: preset.name, url: preset.url, auth: preset.auth }),
-    onSuccess: async (res) => {
-      if (res.authorizeUrl) return goToSignIn(res.authorizeUrl);
-      await onRefresh();
-    },
-  });
+const CATEGORY_LABELS: Record<CatalogCategory, MessageKey> = {
+  developer: "connectors.category.developer",
+  productivity: "connectors.category.productivity",
+  communication: "connectors.category.communication",
+  design: "connectors.category.design",
+  data: "connectors.category.data",
+  sales: "connectors.category.sales",
+  finance: "connectors.category.finance",
+  search: "connectors.category.search",
+  ai: "connectors.category.ai",
+  other: "connectors.category.other",
+};
 
-  return (
-    <Section title={t("connectors.presets")} description={t("connectors.presetsDescription")}>
-      <div className="grid gap-2.5 sm:grid-cols-2">
-        {presets.map((p) => {
-          const added = p.transport === "http" && connectors.some((c) => c.url === p.url);
-          const busy = connect.isPending && connect.variables?.id === p.id;
-          const description = PRESET_DESCRIPTIONS[p.id] ? t(PRESET_DESCRIPTIONS[p.id]!) : p.description;
-          return (
-            <div
-              key={p.id}
-              className={cn(
-                "flex flex-col gap-3 rounded-xl border p-3.5",
-                p.featured ? "border-accent/40 bg-accent-soft/40" : "border-edge bg-panel",
-              )}
-            >
-              <div className="flex items-start gap-3">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "flex size-9 flex-none items-center justify-center rounded-lg text-sm font-semibold",
-                    p.featured ? "bg-accent text-ground" : "bg-hover text-muted",
-                  )}
-                >
-                  {p.transport === "stdio" ? <SquareTerminal size={17} /> : p.name.slice(0, 1)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{p.name}</span>
-                    {p.featured && (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium text-accent">
-                        <Sparkles size={11} aria-hidden="true" />
-                        {t("connectors.featured")}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-xs leading-relaxed text-subtle">{description}</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] text-subtle">
-                  {p.transport === "http" ? t("connectors.type.http") : t("connectors.type.stdio")}
-                </span>
-                {added ? (
-                  <span className="inline-flex h-8 items-center gap-1.5 px-1 text-[13px] text-ok">
-                    <Check size={14} aria-hidden="true" />
-                    {t("connectors.added")}
-                  </span>
-                ) : p.transport === "http" && p.auth === "oauth" ? (
-                  <GhostButton type="button" disabled={connect.isPending} onClick={() => connect.mutate(p)}>
-                    {busy ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <LogIn size={14} aria-hidden="true" />}
-                    {t("connectors.connect")}
-                  </GhostButton>
-                ) : (
-                  <GhostButton type="button" onClick={() => onSetUp(p)}>
-                    <Plus size={14} aria-hidden="true" />
-                    {t("connectors.setUp")}
-                  </GhostButton>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {connect.error && <Notice tone="bad">{connectorError(connect.error, t)}</Notice>}
-    </Section>
-  );
-}
-
-// --- the catalog (official MCP Registry) ---
+/** A card in the catalog: a preset of Myrel's own or a server from the registry. */
+type Offer =
+  | { kind: "preset"; preset: ConnectorPreset }
+  | { kind: "registry"; entry: CatalogConnector };
 
 function Catalog({
   connectors,
@@ -307,18 +225,19 @@ function Catalog({
   connectors: Connector[];
   projectId?: string;
   onRefresh: () => Promise<unknown>;
-  onSetUp: (entry: CatalogConnector) => void;
+  onSetUp: (draft: Draft) => void;
 }) {
   const t = useT();
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
+  const [category, setCategory] = useState<CatalogCategory | null>(null);
   useEffect(() => {
     const timer = setTimeout(() => setQ(text.trim()), 250);
     return () => clearTimeout(timer);
   }, [text]);
   const query = useInfiniteQuery({
-    queryKey: ["connector-catalog", q],
-    queryFn: ({ pageParam }) => api.searchConnectorCatalog(q, pageParam),
+    queryKey: ["connector-catalog", q, category],
+    queryFn: ({ pageParam }) => api.searchConnectorCatalog(q, pageParam, category ?? undefined),
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextOffset ?? undefined,
     placeholderData: keepPreviousData,
@@ -326,15 +245,110 @@ function Catalog({
   });
   const entries = query.data?.pages.flatMap((p) => p.connectors) ?? [];
   const syncedAt = query.data?.pages[0]?.syncedAt;
+  const counts = new Map(query.data?.pages[0]?.categories.map((c) => [c.id, c.count]));
+
+  // Myrel's own presets: the featured ones are recommended above everything; the others join the
+  // registry's servers in their category (they are not in the registry).
+  const matches = (p: ConnectorPreset) =>
+    !q || `${p.name} ${p.description}`.toLowerCase().includes(q.toLowerCase());
+  const recommended = !category ? CONNECTOR_PRESETS.filter((p) => p.featured && matches(p)) : [];
+  const extras = CONNECTOR_PRESETS.filter((p) => !p.featured && (!category || p.category === category) && matches(p));
+  const offers: Offer[] = [
+    ...entries.filter((e) => e.popular).map((entry): Offer => ({ kind: "registry", entry })),
+    ...extras.map((preset): Offer => ({ kind: "preset", preset })),
+    ...entries.filter((e) => !e.popular).map((entry): Offer => ({ kind: "registry", entry })),
+  ];
+
   const connect = useMutation({
-    mutationFn: (entry: CatalogConnector) =>
-      api.createConnector({ transport: "http", name: entry.title.slice(0, 60), url: entry.url, auth: "oauth" }, projectId),
+    mutationFn: (o: { key: string; name: string; url: string }) =>
+      api.createConnector({ transport: "http", name: o.name.slice(0, 60), url: o.url, auth: "oauth" }, projectId),
     onSuccess: async (res) => {
       if (res.authorizeUrl) return goToSignIn(res.authorizeUrl);
       await onRefresh();
     },
   });
 
+  const card = (o: Offer) => {
+    const p = o.kind === "preset" ? o.preset : null;
+    const e = o.kind === "registry" ? o.entry : null;
+    const key = p ? `preset:${p.id}` : e!.id;
+    const name = p ? p.name : e!.title;
+    const url = p ? (p.transport === "http" ? p.url : null) : e!.url;
+    const description = p ? (PRESET_DESCRIPTIONS[p.id] ? t(PRESET_DESCRIPTIONS[p.id]!) : p.description) : e!.description || e!.id;
+    const signsIn = p ? p.transport === "http" && p.auth === "oauth" : e!.auth === "oauth";
+    const added = !!url && connectors.some((c) => c.url === url);
+    const busy = connect.isPending && connect.variables?.key === key;
+    return (
+      <div
+        key={key}
+        className={cn(
+          "flex flex-col gap-3 rounded-xl border p-3.5",
+          p?.featured ? "border-accent/40 bg-accent-soft/40" : "border-edge bg-panel",
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <OfferIcon name={name} featured={p?.featured} terminal={p?.transport === "stdio"} iconUrl={e?.popular ? e.iconUrl : null} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="truncate font-medium" title={e?.id}>
+                {name}
+              </span>
+              {p?.featured && (
+                <span className="inline-flex flex-none items-center gap-1 rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium text-accent">
+                  <Sparkles size={11} aria-hidden="true" />
+                  {t("connectors.featured")}
+                </span>
+              )}
+              {e?.popular && (
+                <span className="flex-none rounded-md bg-hover px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                  {t("connectors.catalogPopular")}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-subtle">{description}</p>
+          </div>
+        </div>
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-2 text-[11px] text-subtle">
+            {p?.transport === "stdio" ? (
+              <span>{t("connectors.type.stdio")}</span>
+            ) : (
+              !signsIn && (
+                <span className="inline-flex items-center gap-1">
+                  <KeyRound size={11} aria-hidden="true" />
+                  {t("connectors.catalogNeedsKey")}
+                </span>
+              )
+            )}
+            {e?.websiteUrl && (
+              <a href={e.websiteUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 truncate hover:text-fg">
+                <ExternalLink size={11} aria-hidden="true" />
+                {t("connectors.catalogWebsite")}
+              </a>
+            )}
+          </span>
+          {added ? (
+            <span className="inline-flex h-8 items-center gap-1.5 px-1 text-[13px] text-ok">
+              <Check size={14} aria-hidden="true" />
+              {t("connectors.added")}
+            </span>
+          ) : signsIn && url ? (
+            <GhostButton type="button" disabled={connect.isPending} onClick={() => connect.mutate({ key, name, url })}>
+              {busy ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <LogIn size={14} aria-hidden="true" />}
+              {t("connectors.connect")}
+            </GhostButton>
+          ) : (
+            <GhostButton type="button" onClick={() => onSetUp(p ? draftFromPreset(p) : draftFromCatalog(e!))}>
+              <Plus size={14} aria-hidden="true" />
+              {t("connectors.setUp")}
+            </GhostButton>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const grid = "grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3";
   return (
     <Section title={t("connectors.catalog")} description={t("connectors.catalogDescription")}>
       <div className="relative">
@@ -342,88 +356,43 @@ function Catalog({
         <Input
           type="search"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(ev) => setText(ev.target.value)}
           placeholder={t("connectors.catalogSearch")}
           aria-label={t("connectors.catalogSearch")}
           className="pl-9"
         />
       </div>
-      {query.isPending ? (
-        <Loading />
-      ) : query.error ? (
-        <Notice tone="bad">{connectorError(query.error, t)}</Notice>
-      ) : entries.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-edge px-4 py-6 text-center text-[13px] text-subtle">
-          {!syncedAt && !q ? t("connectors.catalogFilling") : t("connectors.catalogEmpty", { q })}
-        </div>
-      ) : (
-        <div className="grid gap-2.5 sm:grid-cols-2">
-          {entries.map((e) => {
-            const added = connectors.some((c) => c.url === e.url);
-            const busy = connect.isPending && connect.variables?.id === e.id;
-            return (
-              <div key={e.id} className="flex flex-col gap-3 rounded-xl border border-edge bg-panel p-3.5">
-                <div className="flex items-start gap-3">
-                  <CatalogIcon entry={e} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate font-medium" title={e.id}>
-                        {e.title}
-                      </span>
-                      {e.popular && (
-                        <span className="flex-none rounded-md bg-hover px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                          {t("connectors.catalogPopular")}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-subtle">{e.description || e.id}</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-2 text-[11px] text-subtle">
-                    {e.auth === "headers" && (
-                      <span className="inline-flex items-center gap-1">
-                        <KeyRound size={11} aria-hidden="true" />
-                        {t("connectors.catalogNeedsKey")}
-                      </span>
-                    )}
-                    {e.websiteUrl && (
-                      <a
-                        href={e.websiteUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 truncate hover:text-fg"
-                      >
-                        <ExternalLink size={11} aria-hidden="true" />
-                        {t("connectors.catalogWebsite")}
-                      </a>
-                    )}
-                  </span>
-                  {added ? (
-                    <span className="inline-flex h-8 items-center gap-1.5 px-1 text-[13px] text-ok">
-                      <Check size={14} aria-hidden="true" />
-                      {t("connectors.added")}
-                    </span>
-                  ) : e.auth === "oauth" ? (
-                    <GhostButton type="button" disabled={connect.isPending} onClick={() => connect.mutate(e)}>
-                      {busy ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <LogIn size={14} aria-hidden="true" />}
-                      {t("connectors.connect")}
-                    </GhostButton>
-                  ) : (
-                    <GhostButton type="button" onClick={() => onSetUp(e)}>
-                      <Plus size={14} aria-hidden="true" />
-                      {t("connectors.setUp")}
-                    </GhostButton>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+      <div role="group" aria-label={t("connectors.categories")} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible">
+        <CategoryChip active={!category} onClick={() => setCategory(null)} label={t("connectors.category.all")} />
+        {CATALOG_CATEGORIES.map((c) => (
+          <CategoryChip key={c} active={category === c} onClick={() => setCategory(c)} label={t(CATEGORY_LABELS[c])} count={counts.get(c)} />
+        ))}
+      </div>
+
+      {recommended.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-medium text-muted">{t("connectors.recommended")}</h3>
+          <div className={grid}>{recommended.map((preset) => card({ kind: "preset", preset }))}</div>
         </div>
       )}
+
+      <div className="space-y-2">
+        {recommended.length > 0 && <h3 className="text-xs font-medium text-muted">{t("connectors.catalogAll")}</h3>}
+        {query.isPending ? (
+          <Loading />
+        ) : query.error ? (
+          <Notice tone="bad">{connectorError(query.error, t)}</Notice>
+        ) : offers.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-edge px-4 py-6 text-center text-[13px] text-subtle">
+            {!syncedAt && !q && !category ? t("connectors.catalogFilling") : t("connectors.catalogEmpty", { q })}
+          </div>
+        ) : (
+          <div className={cn(grid, query.isPlaceholderData && "opacity-60")}>{offers.map(card)}</div>
+        )}
+      </div>
       {connect.error && <Notice tone="bad">{connectorError(connect.error, t)}</Notice>}
       {query.hasNextPage && (
-        <GhostButton type="button" onClick={() => void query.fetchNextPage()} disabled={query.isFetchingNextPage} className="h-9 self-start px-3">
+        <GhostButton type="button" onClick={() => void query.fetchNextPage()} disabled={query.isFetchingNextPage} className="h-9 px-3">
           {query.isFetchingNextPage && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
           {t("connectors.catalogMore")}
         </GhostButton>
@@ -432,21 +401,44 @@ function Catalog({
   );
 }
 
+function CategoryChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 flex-none items-center gap-1.5 rounded-full border px-3 text-[13px] whitespace-nowrap transition-colors",
+        active ? "border-fg bg-fg text-ground" : "border-edge text-muted hover:bg-hover hover:text-fg",
+      )}
+    >
+      {label}
+      {count !== undefined && <span className={cn("text-[11px] tabular-nums", active ? "text-ground/70" : "text-subtle")}>{count.toLocaleString()}</span>}
+    </button>
+  );
+}
+
 /**
- * Only the well-known services show their own icon: the rest come from anyone who publishes to
- * the registry, and loading their images would tell those hosts who opened the settings.
+ * Only Myrel's presets and the well-known services show an icon of their own: the rest come from
+ * anyone who publishes to the registry, and loading their images would tell those hosts who opened
+ * the settings.
  */
-function CatalogIcon({ entry }: { entry: CatalogConnector }) {
+function OfferIcon({ name, featured, terminal, iconUrl }: { name: string; featured?: boolean; terminal?: boolean; iconUrl?: string | null }) {
   const [failed, setFailed] = useState(false);
   return (
     <span
       aria-hidden="true"
-      className="flex size-9 flex-none items-center justify-center overflow-hidden rounded-lg bg-hover text-sm font-semibold text-muted"
+      className={cn(
+        "flex size-9 flex-none items-center justify-center overflow-hidden rounded-lg text-sm font-semibold",
+        featured ? "bg-accent text-ground" : "bg-hover text-muted",
+      )}
     >
-      {entry.popular && entry.iconUrl && !failed ? (
-        <img src={entry.iconUrl} alt="" referrerPolicy="no-referrer" loading="lazy" className="size-6 object-contain" onError={() => setFailed(true)} />
+      {terminal ? (
+        <SquareTerminal size={17} />
+      ) : iconUrl && !failed ? (
+        <img src={iconUrl} alt="" referrerPolicy="no-referrer" loading="lazy" className="size-6 object-contain" onError={() => setFailed(true)} />
       ) : (
-        entry.title.slice(0, 1).toUpperCase()
+        name.slice(0, 1).toUpperCase()
       )}
     </span>
   );

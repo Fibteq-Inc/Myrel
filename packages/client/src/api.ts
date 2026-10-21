@@ -6,6 +6,7 @@ import type {
   AdminSettings,
   BillingSummary,
   ApiKey,
+  CatalogCategory,
   CatalogPage,
   Connector,
   CreateApiKeyInput,
@@ -286,8 +287,8 @@ export class ApiClient {
   }
 
   /** Searches the connector catalog (remote servers from the official MCP Registry). */
-  searchConnectorCatalog(q = "", offset = 0) {
-    const params = new URLSearchParams({ q, offset: String(offset) });
+  searchConnectorCatalog(q = "", offset = 0, category?: CatalogCategory) {
+    const params = new URLSearchParams({ q, offset: String(offset), ...(category && { category }) });
     return this.request<CatalogPage>(`/api/connectors/catalog?${params}`);
   }
 

@@ -524,12 +524,14 @@ export const connectorCatalog = sqliteTable(
     auth: text("auth", { enum: ["oauth", "headers"] }).notNull(),
     headerName: text("header_name"),
     headerPlaceholder: text("header_placeholder"),
+    /** What it is for (CATALOG_CATEGORIES in @myrel/protocol), guessed from its name and description. */
+    category: text("category").notNull().default("other"),
     version: text("version").notNull(),
     /** When the registry last changed this entry. */
     registryUpdatedAt: text("registry_updated_at").notNull(),
     syncedAt: integer("synced_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (t) => [index("connector_catalog_title_idx").on(t.title)],
+  (t) => [index("connector_catalog_title_idx").on(t.title), index("connector_catalog_category_idx").on(t.category)],
 );
 
 /** Where the catalog sync stands: one row ("registry"). */

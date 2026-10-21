@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "99c5b723-ad3b-4c57-a89b-a3c404b73e46",
+  "id": "51cdc454-6c26-41e4-966b-7951f2c94e48",
   "prevId": "4be2afc4-d4f0-4021-a5a4-a9e72406f799",
   "tables": {
     "account": {
@@ -410,30 +410,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "billing_trials": {
-      "name": "billing_trials",
-      "columns": {
-        "email_hash": {
-          "name": "email_hash",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "connector_catalog": {
       "name": "connector_catalog",
       "columns": {
@@ -500,6 +476,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'other'"
+        },
         "version": {
           "name": "version",
           "type": "text",
@@ -527,6 +511,13 @@
           "name": "connector_catalog_title_idx",
           "columns": [
             "title"
+          ],
+          "isUnique": false
+        },
+        "connector_catalog_category_idx": {
+          "name": "connector_catalog_category_idx",
+          "columns": [
+            "category"
           ],
           "isUnique": false
         }
@@ -2249,13 +2240,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "billed_to": {
-          "name": "billed_to",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -2263,14 +2247,6 @@
           "name": "sandbox_runs_project_ended_idx",
           "columns": [
             "project_id",
-            "ended_at"
-          ],
-          "isUnique": false
-        },
-        "sandbox_runs_billed_ended_idx": {
-          "name": "sandbox_runs_billed_ended_idx",
-          "columns": [
-            "billed_to",
             "ended_at"
           ],
           "isUnique": false
@@ -2673,20 +2649,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "billed_to": {
-          "name": "billed_to",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "service_key": {
-          "name": "service_key",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -2702,14 +2664,6 @@
           "name": "usage_events_user_created_idx",
           "columns": [
             "user_id",
-            "created_at"
-          ],
-          "isUnique": false
-        },
-        "usage_events_billed_created_idx": {
-          "name": "usage_events_billed_created_idx",
-          "columns": [
-            "billed_to",
             "created_at"
           ],
           "isUnique": false
