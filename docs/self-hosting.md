@@ -142,7 +142,10 @@ The simplest way in is to set the `ADMIN_EMAILS` secret to your address, then
 open your Myrel URL and create your account with it: that address may sign up
 while sign-ups are closed and is an admin. When the server sends email (the
 `EMAIL` binding), it becomes an admin once you follow the verification link
-Myrel sends, so nobody else can claim it by signing up first. Without `ADMIN_EMAILS`:
+Myrel sends, so nobody else can claim it by signing up first. Without the
+`EMAIL` binding nothing checks the address, so anyone who reaches the sign-up
+page before you could register it: create your account right after the first
+deploy, or keep the Worker behind Cloudflare Access until you have. Without `ADMIN_EMAILS`:
 
 1. Set `SIGNUP_ENABLED` to `"true"` in `apps/api/wrangler.jsonc` and push (or
    set it as a plain-text variable in the dashboard).

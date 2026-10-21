@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 
 export const PACKAGE_NAME = "@fibteq/myrel-runner";
 
+const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
 /** The version npm installs as latest, or null when npm cannot be reached. */
 export async function latestVersion(registry = "https://registry.npmjs.org"): Promise<string | null> {
   try {
@@ -10,7 +12,8 @@ export async function latestVersion(registry = "https://registry.npmjs.org"): Pr
     });
     if (!res.ok) return null;
     const { version } = (await res.json()) as { version?: unknown };
-    return typeof version === "string" ? version : null;
+    // Only a plain version goes into the npx command line (a shell on Windows), whatever the registry sent.
+    return typeof version === "string" && VERSION.test(version) ? version : null;
   } catch {
     return null;
   }

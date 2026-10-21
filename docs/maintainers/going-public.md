@@ -10,8 +10,21 @@ off in the pull request that flips visibility, or keep this file updated.
       all 101 commits on every branch and pull request ref: one false positive,
       the RSA key `apps/api/vitest.config.ts` generates for tests; re-run again
       2026-10-20 over all 294 commits on every branch and pull request ref, same
-      single false positive). The `Secret scan` workflow keeps scanning every
+      single false positive; re-run 2026-10-21 with 8.28.0 over all 368 commits
+      on every branch, tag and pull request ref, plus the working tree: no
+      findings. A pattern search of the whole history for Fireworks, Anthropic,
+      OpenAI, Stripe, GitHub, AWS, Slack, Resend and RevenueCat keys and JWTs
+      found nothing either). The `Secret scan` workflow keeps scanning every
       pull request and push to `main`.
+- [x] Workflows hardened (2026-10-21): third-party actions that hold secrets or
+      a write token (`contributor-assistant/github-action`,
+      `tauri-apps/tauri-action`) are pinned to commits, CI runs with a read-only
+      token, and the gitleaks download is checked against its SHA-256. The CLA
+      workflow uses `pull_request_target` but never checks out pull request
+      code. Pull requests never run on the self-hosted Mac, and once the
+      repository is public nothing does (`desktop.yml`).
+- [x] Application review on `main` (2026-10-21) after #121, #125 and #132:
+      no open finding blocks going public.
 - [x] AGPL-3.0 `LICENSE`, `ee/LICENSE` for enterprise code, `CLA.md`.
 - [x] README, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
       issue and pull request templates.
@@ -47,13 +60,34 @@ off in the pull request that flips visibility, or keep this file updated.
       `apps/api/wrangler.jsonc`. It is not a secret, but forks cannot use it;
       the self-hosting guide tells them to replace it.
 
+- [ ] Org Settings → Actions → Runner groups: the group with the self-hosted
+      Mac keeps **Allow public repositories** off. A fork pull request can edit
+      `desktop.yml` to ask for that runner; this setting is what stops it.
+- [ ] Repository (or org) Settings → Actions → General → *Fork pull request
+      workflows from outside collaborators*: **Require approval for all
+      external contributors**.
+- [ ] Same page, *Workflow permissions*: **Read repository contents and
+      packages permissions** as the default (the workflows ask for more where
+      they need it).
+- [ ] Cloudflare → Workers & Pages → `myrel` and `myrel-artifacts` → Settings →
+      Build: check which branches get preview builds. Previews run with the
+      production secrets and the production D1 database. Workers Builds only
+      builds branches pushed to this repository, not forks, so only people with
+      write access can trigger one; keep it that way (no outside collaborators
+      with write access).
+
 ## Right after going public
 
 - [ ] Settings → Code security: turn on **Private vulnerability reporting**,
-      **Secret scanning** and **Push protection**.
+      **Secret scanning**, **Push protection**, **Dependabot alerts** and
+      **Dependabot security updates**.
 - [ ] Settings → General: enable **Discussions** (the issue template links to it).
-- [ ] Branch protection on `main`: require the `CI`, `Secret scan` and `CLA`
-      checks and one review.
+- [ ] Ruleset on `main` (it has no protection today): block force pushes and
+      deletion, require the `CI` and `Secret scan` checks (and `CLA`). Do not
+      require an approving review while there is a single maintainer: GitHub
+      does not let an author approve their own pull request, so it would block
+      every merge; add it when a second maintainer joins.
+- [ ] Delete merged `claude/*` branches; keep `cla-signatures`.
 - [ ] Add topics and a description to the repository: `ai-agents`, `cloudflare-workers`,
       `durable-objects`, `self-hosted`, `claude`, `llm`.
 - [ ] Deploy to Cloudflare button: test it on the public repository. The

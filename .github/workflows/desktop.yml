@@ -77,7 +77,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Pull requests build unsigned: the signing and notarization secrets only reach tag and manual runs.
       - name: Use signing secrets when present
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -106,7 +108,8 @@ jobs:
           fi
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        # Pinned to a commit: this step holds the signing secrets and a token that can write releases.
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_API_URL: ${{ vars.MYREL_DESKTOP_API_URL || 'https://myrel.fibteq.io' }}
