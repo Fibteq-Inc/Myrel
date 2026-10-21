@@ -7,7 +7,7 @@ import {
   POPULAR_CATALOG,
   POPULAR_CATALOG_IDS,
 } from "@myrel/protocol";
-import { and, asc, count, desc, eq, inArray, type SQLWrapper, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, inArray, type SQLWrapper, sql } from "drizzle-orm";
 import { blockedUrl } from "./client";
 
 const { connectorCatalog, connectorCatalogSync } = schema;
@@ -139,10 +139,12 @@ export async function syncCatalog(env: Env, fetcher: typeof fetch = fetch, now =
 }
 
 async function saveRows(db: ReturnType<typeof createDb>, rows: CatalogRow[], drop: string[]) {
-  // D1 takes up to 100 bound values per statement; a row has 13.
+  // D1 takes up to 100 bound values per statement (local SQLite takes more, so tests can't catch
+  // an overflow): fit as many rows as the column count allows.
+  const perStatement = Math.floor(100 / Object.keys(getTableColumns(connectorCatalog)).length);
   const statements = [];
-  for (let i = 0; i < rows.length; i += 8) {
-    const chunk = rows.slice(i, i + 8);
+  for (let i = 0; i < rows.length; i += perStatement) {
+    const chunk = rows.slice(i, i + perStatement);
     statements.push(
       db
         .insert(connectorCatalog)
