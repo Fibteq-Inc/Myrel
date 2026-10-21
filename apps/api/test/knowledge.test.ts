@@ -200,7 +200,8 @@ describe("binary files and harness agents", () => {
     const base = `/api/projects/${project.id}`;
     const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
 
-    const res = await api(`${base}/uploads?name=shot.png`, { token, method: "POST", body: png, headers: { "content-type": "image/png" } });
+    // Whoever uploads names the file: a name meant to run in a shell stays a name.
+    const res = await api(`${base}/uploads?name=${encodeURIComponent("$(id)`id`shot.png")}`, { token, method: "POST", body: png, headers: { "content-type": "image/png" } });
     const { file } = (await res.json()) as { file: ProjectFile };
     // Opening the project teaches it its public address, which the links point at.
     const ws = (await api(`${base}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
@@ -209,12 +210,15 @@ describe("binary files and harness agents", () => {
     await until(() => upload, "the agent turn");
 
     // read_file on a binary file gives a curl command whose link serves the bytes.
-    const get = /curl -fsSL -o "shot\.png" "(http[^"]+)"/.exec(out[0]!)![1]!;
+    const get = /curl -fsSL -o '\.\/\$\(id\)`id`shot\.png' '(http[^']+)'/.exec(out[0]!)![1]!;
     const downloaded = await exports.default.fetch(new Request(get));
     expect(downloaded.status).toBe(200);
     expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(png);
     // The link is for that file and for reading only.
-    expect((await exports.default.fetch(new Request(get.replace(encodeURIComponent(file.path), "uploads%2Fother.png")))).status).toBe(403);
+    const other = new URL(get);
+    for (const [k, v] of other.searchParams) if (v === file.path) other.searchParams.set(k, "uploads/other.png");
+    expect(other.href).not.toBe(get);
+    expect((await exports.default.fetch(new Request(other))).status).toBe(403);
     expect((await exports.default.fetch(new Request(get, { method: "PUT", body: "x" }))).status).toBe(403);
     expect((await exports.default.fetch(new Request(get.replace(/sig=[^&]+/, "sig=AAAA")))).status).toBe(403);
 

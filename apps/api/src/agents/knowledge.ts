@@ -13,6 +13,7 @@ import {
   UPLOADS_FOLDER,
 } from "@myrel/protocol";
 import { z } from "zod";
+import { shellQuote } from "@myrel/runner-core";
 import { type Tool, tool } from "../llm";
 
 type Value = string | number | boolean | null;
@@ -361,9 +362,10 @@ export function knowledgeTools(host: KnowledgeHost): Tool[] {
           const link = await host.fileLink?.(clean, "get");
           // Uploads carry a time stamp prefix; the original name is the useful one locally.
           const base = clean.split("/").at(-1)!;
-          const name = (clean.startsWith(`${UPLOADS_FOLDER}/`) ? base.replace(/^[0-9a-z]+-/, "") : base).replaceAll('"', "");
+          // The name is whoever uploaded the file's: quoted for the shell, never run as part of the command.
+          const name = (clean.startsWith(`${UPLOADS_FOLDER}/`) ? base.replace(/^[0-9a-z]+-/, "") : base).replace(/[\u0000-\u001f\u007f]/g, "");
           return link
-            ? `${clean} is a binary file (${formatSize(size)}). Download it into your working folder to use it (the link works for ${FILE_LINK_MINUTES} minutes):\ncurl -fsSL -o "${name}" "${link}"`
+            ? `${clean} is a binary file (${formatSize(size)}). Download it into your working folder to use it (the link works for ${FILE_LINK_MINUTES} minutes):\ncurl -fsSL -o ${shellQuote(`./${name}`)} ${shellQuote(link)}`
             : `${clean} is a binary file (${formatSize(size)}); it cannot be read as text.`;
         }
         const lines = text.split("\n");
