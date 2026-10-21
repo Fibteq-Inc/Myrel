@@ -739,6 +739,13 @@ export class ThreadAgent extends Agent<Env> {
   private async askAccess(folder: string, what: string): Promise<AccessAnswer | null> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const until = Date.now() + ACCESS_WAIT_MS;
+    // One card at a time: a card's answer is only its label, so with two open it could not tell
+    // which folder it was about. A second folder waits for the first card to be answered.
+    while (Date.now() < until && this.runningTask() && this.accessRequests().some((r) => r.folder !== folder && !r.answer)) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    if (!this.runningTask() || Date.now() >= until) return null;
     let request = this.accessRequests().find((r) => r.folder === folder && !r.answer);
     if (!request) {
       request = { id: crypto.randomUUID(), folder };
@@ -752,7 +759,6 @@ export class ThreadAgent extends Agent<Env> {
       await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
     }
     const id = request.id;
-    const until = Date.now() + ACCESS_WAIT_MS;
     while (Date.now() < until && this.runningTask()) {
       const answer = this.accessRequests().find((r) => r.id === id)?.answer;
       if (answer) {
@@ -767,7 +773,8 @@ export class ThreadAgent extends Agent<Env> {
   /** A person answered the running turn's folder cards. Returns false when the message is not such an answer. */
   private async answerAccess(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
     const answer = accessAnswer(reason.body ?? "");
-    const open = this.accessRequests().filter((r) => !r.answer);
+    // Only one card is open at a time (see askAccess); the answer is for that one alone.
+    const open = this.accessRequests().filter((r) => !r.answer).slice(0, 1);
     if (!answer || !open.length || !this.runningTask()) return false;
     const { projectId } = this.ids();
     // The folders are on someone's own computer: only they answer for it. Anyone else's
