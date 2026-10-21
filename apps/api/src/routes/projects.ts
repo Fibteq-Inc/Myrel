@@ -275,7 +275,9 @@ export const projectRoutes = new Hono<AppEnv>()
     const input = AddProjectRepoInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     const { installationId, repoId } = input.data;
-    if (!(await canUseInstallation(c.env.DB, userId, installationId))) return c.json({ error: "forbidden" }, 403);
+    const grant = await canUseInstallation(c.env.DB, userId, installationId);
+    if (grant === "no") return c.json({ error: "forbidden" }, 403);
+    if (grant === "stale") return c.json({ error: "github_reauth", message: "Sign in to GitHub again to pick repositories." }, 409);
 
     // Narrowing a token to the repo fails unless the installation really covers it.
     let repo;

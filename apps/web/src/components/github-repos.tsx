@@ -1,3 +1,4 @@
+import { ApiError } from "@myrel/client";
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import type { GithubRepo, ProjectRepo } from "@myrel/protocol";
@@ -15,7 +16,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Section } from "./settings";
 import { api, githubReposQuery, githubStatusQuery, projectReposQuery } from "../lib/api";
 import { errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
@@ -62,7 +63,7 @@ export function GithubRepos({
           <RepoList projectId={projectId} repos={repos.data ?? []} loading={repos.isPending} canEdit={canManage} />
           {canManage &&
             (status.data?.installations.length ? (
-              <RepoPicker projectId={projectId} connected={repos.data ?? []} />
+              <RepoPicker projectId={projectId} connected={repos.data ?? []} returnTo={returnTo} />
             ) : (
               <ConnectCard returnTo={returnTo} />
             ))}
@@ -185,16 +186,26 @@ function RepoList({
   );
 }
 
-function RepoPicker({ projectId, connected }: { projectId: string; connected: ProjectRepo[] }) {
+/** The server wants a fresh GitHub sign-in before repositories are picked (see GITHUB_GRANT_TTL_MS). */
+function needsGithubSignIn(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && (err.body as { error?: string } | null)?.error === "github_reauth";
+}
+
+function RepoPicker({ projectId, connected, returnTo }: { projectId: string; connected: ProjectRepo[]; returnTo: string }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const queryClient = useQueryClient();
-  const available = useQuery({ ...githubReposQuery, enabled: open });
+  const available = useQuery({ ...githubReposQuery, enabled: open, retry: (n, err) => !needsGithubSignIn(err) && n < 3 });
   const add = useMutation({
     mutationFn: (repo: GithubRepo) => api.addProjectRepo(projectId, { installationId: repo.installationId, repoId: repo.id }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: projectReposQuery(projectId).queryKey }),
   });
+  // GitHub signs an app's known user back in without asking, so this is a quick round trip.
+  const signIn = needsGithubSignIn(available.error) || needsGithubSignIn(add.error);
+  useEffect(() => {
+    if (signIn) window.location.assign(api.githubConnectUrl("authorize", returnTo));
+  }, [signIn, returnTo]);
 
   if (!open) {
     return (

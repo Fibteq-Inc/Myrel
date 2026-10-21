@@ -146,6 +146,22 @@ describe("project repositories", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("asks for a fresh GitHub sign-in before picking repositories on an old one", async () => {
+    const token = await signUp();
+    await connect(token);
+    const project = await createProject(token);
+    const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+    await testEnv.DB.prepare("UPDATE github_installation_users SET created_at = created_at - ? WHERE user_id = ?").bind(9 * 60 * 60 * 1000, me).run();
+    const add = () => api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId: 7 }) });
+    const stale = await add();
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: "github_reauth" });
+    expect((await api("/api/github/repos", { token })).status).toBe(409);
+
+    await connect(token);
+    expect((await add()).status).toBe(201);
+  });
+
   it("does not let users add repos from installations they cannot reach", async () => {
     const owner = await signUp();
     const project = await createProject(owner);
