@@ -21,4 +21,4 @@ const app = new Hono<{ Bindings: Env }>()
   .route("/api/billing", billingRoutes)
   .all("*", (c) => core.fetch(c.req.raw, c.env, c.executionCtx));
 
-export default app satisfies ExportedHandler<Env>;
+export default { fetch: app.fetch, scheduled: core.scheduled } satisfies ExportedHandler<Env>;

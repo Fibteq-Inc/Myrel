@@ -6,6 +6,7 @@ import type {
   AdminSettings,
   BillingSummary,
   ApiKey,
+  CatalogPage,
   Connector,
   CreateApiKeyInput,
   CreateConnectorInput,
@@ -282,6 +283,12 @@ export class ApiClient {
   /** A person's own connectors, or a project's when `projectId` is given. */
   private connectorsPath(projectId?: string) {
     return projectId ? `/api/projects/${encodeURIComponent(projectId)}/connectors` : "/api/account/connectors";
+  }
+
+  /** Searches the connector catalog (remote servers from the official MCP Registry). */
+  searchConnectorCatalog(q = "", offset = 0) {
+    const params = new URLSearchParams({ q, offset: String(offset) });
+    return this.request<CatalogPage>(`/api/connectors/catalog?${params}`);
   }
 
   async listConnectors(projectId?: string) {

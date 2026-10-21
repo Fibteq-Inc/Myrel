@@ -19,7 +19,8 @@ import { usageRoutes } from "./routes/usage";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
-import { accountConnectorRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
+import { accountConnectorRoutes, connectorCatalogRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
+import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
@@ -108,6 +109,7 @@ const app = new Hono<AppEnv>()
   })
   .route("/file-links", fileLinkRoutes)
   .route("/connectors/oauth", connectorOAuthRoutes)
+  .route("/connectors/catalog", connectorCatalogRoutes)
   .route("/account/connectors", accountConnectorRoutes)
   .route("/account/skills", accountSkillRoutes)
   .route("/account", accountRoutes)
@@ -139,6 +141,17 @@ async function serveBuiltAsset(request: Request, env: Env): Promise<Response> {
 // app's index.html, so the browser fails the import and the page can reload itself.
 const root = new Hono<AppEnv>().get("/assets/*", (c) => serveBuiltAsset(c.req.raw, c.env)).route("/", app);
 
+/** Cron triggers (wrangler.jsonc): every hour, copy what changed in the MCP Registry to the connector catalog. */
+async function scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+  ctx.waitUntil(
+    syncCatalog(env).then(
+      (r) => console.log(`connector catalog: read ${r.read}, kept ${r.kept}`),
+      (err) => console.error("connector catalog sync failed", err),
+    ),
+  );
+}
+
 export default {
   fetch: root.fetch,
+  scheduled,
 } satisfies ExportedHandler<Env>;

@@ -192,6 +192,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
+| `CONNECTOR_REGISTRY_URL` | (empty) | Where the connector catalog is copied from every hour (a Worker cron trigger). Empty means the official MCP Registry, `https://registry.modelcontextprotocol.io`; any server with the same `/v0/servers` API works. |
 | `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |
 | `GITHUB_APP_ID` | Fibteq's GitHub App | Your GitHub App's id. Its URL name is read from GitHub. GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |

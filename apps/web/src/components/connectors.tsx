@@ -2,6 +2,7 @@ import { ApiError } from "@myrel/client";
 import type { MessageKey, Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import {
+  type CatalogConnector,
   CONNECTOR_PRESETS,
   type Connector,
   type ConnectorPreset,
@@ -9,19 +10,22 @@ import {
   type CreateConnectorInput,
   type UpdateConnectorInput,
 } from "@myrel/protocol";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
+  ExternalLink,
   CircleAlert,
   CircleCheck,
   Globe,
+  KeyRound,
   LoaderCircle,
   LogIn,
   MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Sparkles,
   SquareTerminal,
@@ -108,6 +112,15 @@ export function Connectors({
           connectors={connectors}
           onRefresh={refresh}
           onSetUp={(preset) => setAdding(draftFromPreset(preset))}
+        />
+      )}
+
+      {canManage && (
+        <Catalog
+          connectors={connectors}
+          projectId={projectId}
+          onRefresh={refresh}
+          onSetUp={(entry) => setAdding(draftFromCatalog(entry))}
         />
       )}
 
@@ -280,6 +293,162 @@ function Presets({
       </div>
       {connect.error && <Notice tone="bad">{connectorError(connect.error, t)}</Notice>}
     </Section>
+  );
+}
+
+// --- the catalog (official MCP Registry) ---
+
+function Catalog({
+  connectors,
+  projectId,
+  onRefresh,
+  onSetUp,
+}: {
+  connectors: Connector[];
+  projectId?: string;
+  onRefresh: () => Promise<unknown>;
+  onSetUp: (entry: CatalogConnector) => void;
+}) {
+  const t = useT();
+  const [text, setText] = useState("");
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(text.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [text]);
+  const query = useInfiniteQuery({
+    queryKey: ["connector-catalog", q],
+    queryFn: ({ pageParam }) => api.searchConnectorCatalog(q, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.nextOffset ?? undefined,
+    placeholderData: keepPreviousData,
+    staleTime: 5 * 60_000,
+  });
+  const entries = query.data?.pages.flatMap((p) => p.connectors) ?? [];
+  const syncedAt = query.data?.pages[0]?.syncedAt;
+  const connect = useMutation({
+    mutationFn: (entry: CatalogConnector) =>
+      api.createConnector({ transport: "http", name: entry.title.slice(0, 60), url: entry.url, auth: "oauth" }, projectId),
+    onSuccess: async (res) => {
+      if (res.authorizeUrl) return goToSignIn(res.authorizeUrl);
+      await onRefresh();
+    },
+  });
+
+  return (
+    <Section title={t("connectors.catalog")} description={t("connectors.catalogDescription")}>
+      <div className="relative">
+        <Search size={15} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-subtle" />
+        <Input
+          type="search"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={t("connectors.catalogSearch")}
+          aria-label={t("connectors.catalogSearch")}
+          className="pl-9"
+        />
+      </div>
+      {query.isPending ? (
+        <Loading />
+      ) : query.error ? (
+        <Notice tone="bad">{connectorError(query.error, t)}</Notice>
+      ) : entries.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-edge px-4 py-6 text-center text-[13px] text-subtle">
+          {!syncedAt && !q ? t("connectors.catalogFilling") : t("connectors.catalogEmpty", { q })}
+        </div>
+      ) : (
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          {entries.map((e) => {
+            const added = connectors.some((c) => c.url === e.url);
+            const busy = connect.isPending && connect.variables?.id === e.id;
+            return (
+              <div key={e.id} className="flex flex-col gap-3 rounded-xl border border-edge bg-panel p-3.5">
+                <div className="flex items-start gap-3">
+                  <CatalogIcon entry={e} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate font-medium" title={e.id}>
+                        {e.title}
+                      </span>
+                      {e.popular && (
+                        <span className="flex-none rounded-md bg-hover px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                          {t("connectors.catalogPopular")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-subtle">{e.description || e.id}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-2 text-[11px] text-subtle">
+                    {e.auth === "headers" && (
+                      <span className="inline-flex items-center gap-1">
+                        <KeyRound size={11} aria-hidden="true" />
+                        {t("connectors.catalogNeedsKey")}
+                      </span>
+                    )}
+                    {e.websiteUrl && (
+                      <a
+                        href={e.websiteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 truncate hover:text-fg"
+                      >
+                        <ExternalLink size={11} aria-hidden="true" />
+                        {t("connectors.catalogWebsite")}
+                      </a>
+                    )}
+                  </span>
+                  {added ? (
+                    <span className="inline-flex h-8 items-center gap-1.5 px-1 text-[13px] text-ok">
+                      <Check size={14} aria-hidden="true" />
+                      {t("connectors.added")}
+                    </span>
+                  ) : e.auth === "oauth" ? (
+                    <GhostButton type="button" disabled={connect.isPending} onClick={() => connect.mutate(e)}>
+                      {busy ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <LogIn size={14} aria-hidden="true" />}
+                      {t("connectors.connect")}
+                    </GhostButton>
+                  ) : (
+                    <GhostButton type="button" onClick={() => onSetUp(e)}>
+                      <Plus size={14} aria-hidden="true" />
+                      {t("connectors.setUp")}
+                    </GhostButton>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {connect.error && <Notice tone="bad">{connectorError(connect.error, t)}</Notice>}
+      {query.hasNextPage && (
+        <GhostButton type="button" onClick={() => void query.fetchNextPage()} disabled={query.isFetchingNextPage} className="h-9 self-start px-3">
+          {query.isFetchingNextPage && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
+          {t("connectors.catalogMore")}
+        </GhostButton>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * Only the well-known services show their own icon: the rest come from anyone who publishes to
+ * the registry, and loading their images would tell those hosts who opened the settings.
+ */
+function CatalogIcon({ entry }: { entry: CatalogConnector }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-9 flex-none items-center justify-center overflow-hidden rounded-lg bg-hover text-sm font-semibold text-muted"
+    >
+      {entry.popular && entry.iconUrl && !failed ? (
+        <img src={entry.iconUrl} alt="" referrerPolicy="no-referrer" loading="lazy" className="size-6 object-contain" onError={() => setFailed(true)} />
+      ) : (
+        entry.title.slice(0, 1).toUpperCase()
+      )}
+    </span>
   );
 }
 
@@ -609,6 +778,16 @@ function draftFromPreset(p: ConnectorPreset): Draft {
     args: p.args.join("\n"),
     env: (p.envHint ?? []).map((h) => pair(h.name, "", { placeholder: h.placeholder })),
     runsOn: p.runsOn,
+  };
+}
+
+function draftFromCatalog(e: CatalogConnector): Draft {
+  return {
+    ...emptyDraft(),
+    name: e.title.slice(0, 60),
+    url: e.url,
+    auth: "headers",
+    headers: [pair(e.headerHint?.name ?? "Authorization", "", { placeholder: e.headerHint?.placeholder })],
   };
 }
 
