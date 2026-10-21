@@ -31,7 +31,7 @@ export const routineRoutes = new Hono<AppEnv>()
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     const agent = await getAgentByName(c.env.PROJECT_AGENT, c.req.param("projectId")!);
     try {
-      const routine = await agent.updateRoutine(c.req.param("routineId"), input.data);
+      const routine = await agent.updateRoutine(c.req.param("routineId"), input.data, c.get("user").id);
       return routine ? c.json({ routine }) : c.json({ error: "not_found" }, 404);
     } catch (err) {
       return c.json({ error: "invalid_input", message: err instanceof Error ? err.message : String(err) }, 400);

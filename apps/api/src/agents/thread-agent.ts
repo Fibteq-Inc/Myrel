@@ -204,6 +204,10 @@ export class ThreadAgent extends Agent<Env> {
       created_at TEXT NOT NULL,
       seen INTEGER NOT NULL DEFAULT 0
     )`;
+    // Who a run works for came later; older threads gain the column.
+    if (!this.sql<{ name: string }>`PRAGMA table_info(routine_runs)`.some((c) => c.name === "actor")) {
+      this.sql`ALTER TABLE routine_runs ADD COLUMN actor TEXT`;
+    }
   }
 
   /** Called by the ProjectAgent when the coordinator opens this thread. */
@@ -233,8 +237,8 @@ export class ThreadAgent extends Agent<Env> {
       this.sql`INSERT INTO github_events (body, created_at) VALUES (${reason.event}, ${new Date().toISOString()})`;
     }
     if (reason.kind === "routine") {
-      this.sql`INSERT INTO routine_runs (name, prompt, created_at)
-        VALUES (${reason.name}, ${reason.prompt}, ${new Date().toISOString()})`;
+      this.sql`INSERT INTO routine_runs (name, prompt, created_at, actor)
+        VALUES (${reason.name}, ${reason.prompt}, ${new Date().toISOString()}, ${reason.actor ?? null})`;
     }
     await this.markDirty();
   }
@@ -285,7 +289,15 @@ export class ThreadAgent extends Agent<Env> {
     if (!ctx) return;
 
     // The person the thread works for: their own connectors are on for it, and only their own computer.
-    const requester = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null;
+    // A routine's run works for the routine's author instead, unless someone wrote since the last turn.
+    const lastSeen = Number(this.getMeta("last_seen_seq") ?? 0);
+    const wroteSince = ctx.messages.some((m) => m.authorKind === "user" && m.seq > lastSeen);
+    const [routineActor] = this.sql<{ actor: string }>`SELECT actor FROM routine_runs WHERE seen = 0 AND actor IS NOT NULL ORDER BY id DESC LIMIT 1`;
+    const requester =
+      !wroteSince && routineActor
+        ? (await isMember(this.env, projectId, routineActor.actor)) ? routineActor.actor : null
+        : ([ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null);
+    this.setMeta("requester", requester ?? "");
     const place = await taskPlace(this.env, projectId, requester);
     if (place.kind === "error") return this.cannotWork(place.message);
     // The container takes the longest to be ready, so it starts while the turn is put together.
@@ -888,7 +900,8 @@ export class ThreadAgent extends Agent<Env> {
       }),
       ...routineTools({
         listRoutines: () => project.listRoutines(),
-        createRoutine: (input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, "agent"),
+        // A routine the agent sets up works for the person this turn works for.
+        createRoutine: (input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, this.getMeta("requester") || "agent"),
         setPaused: (id: string, paused: boolean) => project.updateRoutine(id, { paused }),
         deleteRoutine: (id: string) => project.deleteRoutine(id),
         defaultTimezone: turn()?.timezone ?? "UTC",
@@ -1306,4 +1319,11 @@ function taskReport(title: string, row: TaskRow, log: TerminalLine[]): string {
   const tail = log.map((l) => l.text).join("\n").trim();
   if (tail) parts.push(`${tr ? "Son çıktı" : "Last output"}:\n\n\`\`\`\n${tail.slice(-3000)}\n\`\`\``);
   return parts.join("\n\n");
+}
+
+/** Whether the person is (still) a member of the project. */
+async function isMember(env: Env, projectId: string, userId: string): Promise<boolean> {
+  return Boolean(
+    await env.DB.prepare("SELECT 1 AS y FROM project_members WHERE project_id = ? AND user_id = ?").bind(projectId, userId).first(),
+  );
 }
