@@ -286,19 +286,7 @@ export class ProjectAgent extends Agent<Env> {
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
         }
-        if (message.threadId) {
-          // Writing in a finished thread picks it up again.
-          if (this.getThread(message.threadId)?.resolved) {
-            this.updateThread(message.threadId, { resolved: false, status: "working" });
-          }
-          await this.wakeThread(message.threadId, {
-            kind: "message",
-            messageId: message.id,
-            body: message.body,
-            authorId: userId,
-            seq: message.seq,
-          });
-        }
+        if (message.threadId) await this.threadMessageArrived(message, userId);
         else await this.notifyCoordinator({ kind: "message", messageId: message.id });
         return;
       }
@@ -366,6 +354,25 @@ export class ProjectAgent extends Agent<Env> {
     this.emit({ type: "message.created", message });
     if (this.observable(message)) this.ctx.waitUntil(this.observeThread(message));
     return message;
+  }
+
+  /**
+   * A line Myrel writes in a thread for a person, after something they did there other than
+   * writing (connecting a connector from a card, say). It wakes the thread like their own message.
+   * Callable over RPC.
+   */
+  async sendAsUser(threadId: string, userId: string, body: string): Promise<Message | null> {
+    if (!this.getThread(threadId)) return null;
+    const message = this.sendMessage({ threadId, authorKind: "user", authorId: userId, body });
+    await this.threadMessageArrived(message, userId);
+    return message;
+  }
+
+  /** A person's message in a thread: a finished thread picks up again, and its agent wakes. */
+  private async threadMessageArrived(message: Message, userId: string) {
+    const threadId = message.threadId!;
+    if (this.getThread(threadId)?.resolved) this.updateThread(threadId, { resolved: false, status: "working" });
+    await this.wakeThread(threadId, { kind: "message", messageId: message.id, body: message.body, authorId: userId, seq: message.seq });
   }
 
   /** Messages with seq > afterSeq, oldest first. Callable over RPC. */

@@ -22,6 +22,7 @@ import { routineRoutes } from "./routes/routines";
 import { accountConnectorRoutes, connectorCatalogRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
 import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
+import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
@@ -125,6 +126,7 @@ const app = new Hono<AppEnv>()
   .route("/projects/:id/connectors", projectConnectorRoutes)
   .route("/projects/:id/skills", projectSkillRoutes)
   .route("/projects/:id/personal", personalInProjectRoutes)
+  .route("/projects/:id/threads/:threadId/connector-suggestions", connectorSuggestionRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)

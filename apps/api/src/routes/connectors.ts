@@ -1,5 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import { CatalogCategory, createId, CreateConnectorInput, UpdateConnectorInput } from "@myrel/protocol";
+import { getAgentByName } from "agents";
 import { and, asc, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { createAuth } from "../auth";
@@ -244,6 +245,17 @@ async function finish(c: Context<AppEnv>, params: { code?: string; state?: strin
       const checked = await checkConnector(c.env, row);
       await createDb(c.env.DB).update(connectors).set(checked).where(eq(connectors.id, row.id));
     }
+  }
+  // Started from a card in a thread: the card learns the result, and the person goes back to the thread.
+  if (result.back) {
+    const { projectId, threadId, suggestionId, offerId } = result.back;
+    if (result.ok && row?.ownerId) {
+      const thread = await getAgentByName(c.env.THREAD_AGENT, threadId);
+      await thread.suggestionConnected(suggestionId, offerId, row.ownerId).catch((err) => console.error("suggestion connected", err));
+    }
+    const to = new URL(`/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`, publicOrigin(c));
+    to.searchParams.set("connector", result.ok ? "ok" : "error");
+    return c.redirect(to.toString(), 302);
   }
   const back = new URL("/settings", publicOrigin(c));
   back.searchParams.set("section", "connectors");
