@@ -68,3 +68,7 @@ come from `APP_REVIEW_*` environment variables listed at the top of that file, s
 Screenshots are in `store/screenshots/`; the Google Play texts and the privacy and content forms of both
 stores are in `store/forms.md`. Store builds open on `https://myrel.fibteq.io` (`EXPO_PUBLIC_MYREL_SERVER`
 in `eas.json`).
+
+Pro is sold in the app (Settings > Plan and billing) through RevenueCat when the build has
+`EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY` and the server has RevenueCat
+set up (see `ee/billing/README.md`). Expo Go cannot buy; use a development or store build.

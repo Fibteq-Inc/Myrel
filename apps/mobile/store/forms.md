@@ -95,7 +95,7 @@ Terms: https://myrel.fibteq.io/terms/
 **Content rating (IARC questionnaire):** category *All Other App Types*. Answer No to violence, fear,
 sexuality, gambling, language, controlled substances and crude humor. *Users can interact or exchange
 content:* Yes (project members chat with each other and with AI agents). *Shares user's location:* No.
-*Allows purchases of digital goods:* No. Expected result: Everyone / PEGI 3 with "Users Interact".
+*Allows purchases of digital goods:* Yes (the Pro subscription). Expected result: Everyone / PEGI 3 with "Users Interact".
 
 **Target audience and content:** 18 and over only. Not designed for children. Not in Designed for Families.
 
@@ -120,8 +120,9 @@ content:* Yes (project members chat with each other and with AI agents). *Shares
 | App activity | Other user-generated content | App functionality |
 | App activity | Other actions (usage and cost per model call) | App functionality, Analytics |
 | Device or other IDs | Device or other IDs (push token) | App functionality |
+| Financial info | Purchase history (the Pro subscription, through Google Play and RevenueCat) | App functionality |
 
-Not collected: location, financial info, health, contacts, calendar, photos/videos, audio, web
+Not collected: location, other financial info, health, contacts, calendar, photos/videos, audio, web
 history, installed apps, crash logs, diagnostics.
 
 **Account deletion:** URL https://myrel.fibteq.io/delete-account/ . In-app path: Projects > gear icon >
@@ -156,9 +157,20 @@ Data collection: **Yes**. Tracking: **No** for every type (no ads, no data broke
 | User Content > Customer Support | Yes | App Functionality |
 | Identifiers > User ID | Yes | App Functionality |
 | Usage Data > Other Usage Data (usage and cost per model call) | Yes | App Functionality, Analytics |
+| Purchases > Purchase History (the Pro subscription, through RevenueCat) | Yes | App Functionality |
 
 Not collected: Health, Financial, Location, Sensitive Info, Contacts, Browsing/Search History,
-Purchases, Diagnostics, Device ID.
+Diagnostics, Device ID.
+
+## In-app purchases (Pro)
+
+Pro is sold in the app through RevenueCat (see `ee/billing/README.md`, "In-app purchases"):
+App Store products `io.fibteq.myrel.pro.monthly` ($17.99) and `io.fibteq.myrel.pro.yearly` ($179.99)
+in one subscription group, Google Play subscription `pro` with base plans `monthly` and `yearly`,
+each with a 7-day free trial. The build needs `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and
+`EXPO_PUBLIC_REVENUECAT_ANDROID_KEY` in the EAS environment; without them the app shows no purchase
+buttons. Review note for Apple: "Pro can be bought in Settings > Plan and billing. The demo account
+is on Free."
 
 ## App Store: things `metadata:push` does not set
 

@@ -18,13 +18,14 @@ and hands everything else to the core Worker. The core never imports this packag
 | `src/limits.ts` | The hooks: refuse a new project, a cloud turn or a coordinator turn over the plan |
 | `src/routes.ts` | `GET /api/billing`, Checkout, billing portal, Team members, the Stripe webhook |
 | `src/stripe.ts` | A small fetch-based Stripe client and webhook signature check |
+| `src/revenuecat.ts` | Pro bought in the mobile app (App Store, Google Play), mirrored from RevenueCat |
 | `scripts/setup-stripe.mjs` | Creates products, prices, the portal configuration and the webhook endpoint |
 
 ## Plans
 
 | | Free | Pro | Team |
 | --- | --- | --- | --- |
-| Price | $0 | $15/month, $144/year | $25/person/month, $240/person/year, at least 2 |
+| Price | $0 | $15/month, $144/year (in the mobile app: $17.99/month, $179.99/year) | $25/person/month, $240/person/year, at least 2 |
 | Projects owned | 3 | Unlimited | Unlimited |
 | Cloud sandbox | 2 h/month | 100 h/month | 150 h/person/month, pooled |
 | Included model usage | $1/month | $5/month | $5/person/month, pooled |
@@ -62,6 +63,41 @@ and coordinator turns over the Free limits are refused.
    charges no tax.
 5. Change the Workers Builds deploy command to `pnpm run deploy:hosted` and the preview command
    to `pnpm run deploy:hosted:preview`. Until then the core Worker deploys and nothing is limited.
+
+## In-app purchases (mobile)
+
+The mobile app sells Pro (monthly and yearly) through Apple In-App Purchase and Google Play
+Billing, by way of RevenueCat. Team and Enterprise are sold on the web only. The store price is
+higher than the web price because it includes tax and the store's 15% commission.
+
+- The app logs in to RevenueCat with the person's Myrel user id, so a purchase belongs to the
+  account that made it. After a purchase it calls `POST /api/billing/store/sync`.
+- RevenueCat posts every event to `POST /api/billing/revenuecat`. Myrel then reads the person's
+  subscriptions from RevenueCat's REST API and stores them in `billing_subscriptions` with
+  `source` `app_store` or `play_store`, so plans and limits work as for Stripe. The store's own
+  billing grace period applies, not Myrel's 14 days.
+- Someone with a plan cannot buy another: Checkout refuses, the app hides its purchase buttons,
+  and a store plan is managed in the store, not in the Stripe portal.
+- Store products (`STORE_PRODUCTS` in `src/revenuecat.ts`): App Store
+  `io.fibteq.myrel.pro.monthly` and `io.fibteq.myrel.pro.yearly` in one subscription group;
+  Google Play subscription `pro` with base plans `monthly` and `yearly`. Both with a 7-day
+  free trial. In RevenueCat: entitlement `pro`, default offering with the monthly and yearly
+  packages.
+
+Setting it up:
+
+1. In RevenueCat, add the iOS and Android apps (App Store In-App Purchase key; Play service
+   account), then a webhook to `https://myrel.fibteq.io/api/billing/revenuecat` with an
+   Authorization header value of your choosing.
+2. `wrangler secret put REVENUECAT_WEBHOOK_AUTH` (that value) and
+   `wrangler secret put REVENUECAT_API_KEY` (a secret v1 API key of the RevenueCat project).
+   Until both are set, the app shows no purchase buttons.
+   Test purchases (TestFlight, App Review, Play license testers) are free, so they grant Pro only
+   to accounts in `REVENUECAT_SANDBOX_EMAILS` (comma separated; put the App Review demo account
+   there), or to everyone when `REVENUECAT_ALLOW_SANDBOX=1` (staging servers only).
+3. Point App Store Server Notifications (V2) and Google RTDN at RevenueCat.
+4. The app's public SDK keys go into the EAS environment as `EXPO_PUBLIC_REVENUECAT_IOS_KEY`
+   and `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`, then a new store build.
 
 ## Tests
 

@@ -11,7 +11,7 @@ const config: ExpoConfig = {
   name: "Myrel",
   slug: "myrel",
   scheme: "myrel",
-  version: "0.1.0",
+  version: "0.2.0",
   orientation: "portrait",
   // Four-petal mark, rendered from assets/icon.svg; re-export the PNGs when it changes.
   icon: "./assets/icon.png",

@@ -573,6 +573,11 @@ export class ApiClient {
     return this.request<{ url: string }>("/api/billing/portal", { method: "POST", body: {} });
   }
 
+  /** Reads the caller's App Store / Google Play subscriptions again, right after a purchase in the mobile app. */
+  syncStorePurchases() {
+    return this.request<null>("/api/billing/store/sync", { method: "POST", body: {} });
+  }
+
   addTeamMember(email: string) {
     return this.request<null>("/api/billing/team/members", { method: "POST", body: { email } });
   }

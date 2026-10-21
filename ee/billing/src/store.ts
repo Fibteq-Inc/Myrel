@@ -23,6 +23,8 @@ export type SubscriptionRow = {
   trial_end: number | null;
   cancel_at_period_end: number;
   past_due_since: number | null;
+  source: "stripe" | "app_store" | "play_store";
+  store_product_id: string | null;
 };
 
 export type Usage = { projects: number; sandboxSeconds: number; modelMicros: number; connectors: number };
