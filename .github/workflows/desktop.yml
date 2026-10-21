@@ -106,7 +106,8 @@ jobs:
           fi
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        # Pinned to a commit: this step holds the signing secrets and a token that can write releases.
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_API_URL: ${{ vars.MYREL_DESKTOP_API_URL || 'https://myrel.fibteq.io' }}
