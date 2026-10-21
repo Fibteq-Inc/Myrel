@@ -157,6 +157,25 @@ describe("ProjectAgent", () => {
     ws.close();
   });
 
+  it("closes a removed member's open WebSocket and refuses what it sends after", async () => {
+    const owner = await signUp();
+    const project = await createProject(owner);
+    const member = await signUp();
+    const memberId = ((await (await api("/api/auth/get-session", { token: member })).json()) as { user: { id: string } }).user.id;
+    await env.DB.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
+      .bind(project.id, memberId, Date.now())
+      .run();
+    const res = await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(member)}`, { headers: { upgrade: "websocket" } });
+    expect(res.status).toBe(101);
+    const ws = res.webSocket!;
+    const closed = new Promise<number>((r) => ws.addEventListener("close", (e) => r(e.code)));
+    ws.accept();
+    expect((await api(`/api/projects/${project.id}/members/${memberId}`, { method: "DELETE", token: owner })).status).toBe(204);
+    expect(await closed).toBe(4403);
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    expect((await agent.getMessagesAfter(0)).messages).toEqual([]);
+  });
+
   it("refuses WebSocket for non-members", async () => {
     const project = await createProject(await signUp());
     const stranger = await signUp();

@@ -6,7 +6,9 @@ import { isVerified } from "./verification";
 
 /** `verified`: the address is the person's (see verification.ts). */
 export type SessionUser = { id: string; name: string; email: string; role: InstanceRole; verified: boolean };
-export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
+/** The signed-in session itself, for a WebSocket that must end with it. */
+export type SessionInfo = { id: string; expiresAt: number };
+export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; session: SessionInfo } };
 
 /**
  * Resolves the Better Auth session from cookies or `Authorization: Bearer`.
@@ -23,6 +25,7 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const { id, name, email, role, emailVerified } = session.user;
   const admin = role === "admin" || isListedAdmin(c.env, email, emailVerified);
   c.set("user", { id, name, email, role: admin ? "admin" : "user", verified: isVerified(c.env, emailVerified) });
+  c.set("session", { id: session.session.id, expiresAt: new Date(session.session.expiresAt).getTime() });
   await next();
 });
 

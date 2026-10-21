@@ -1,5 +1,6 @@
 import { createDb, schema } from "@myrel/db";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { getAgentByName } from "agents";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { deleteProject } from "./projects/delete";
 import { deleteOwnerFiles } from "./skills/store";
 
@@ -68,4 +69,13 @@ export async function deleteAccount(env: Env, userId: string): Promise<void> {
     db.update(usageEvents).set({ userId: null }).where(eq(usageEvents.userId, userId)),
     db.delete(user).where(eq(user.id, userId)),
   ]);
+  // Connections the person still has open to shared projects end with the account.
+  const shared = mine.length
+    ? await db.select({ projectId: projects.id }).from(projects).where(inArray(projects.id, mine.map((m) => m.projectId)))
+    : [];
+  for (const { projectId } of shared) {
+    await (await getAgentByName(env.PROJECT_AGENT, projectId))
+      .disconnectUser(userId)
+      .catch((err: unknown) => console.error("account delete: connections", projectId, err));
+  }
 }
