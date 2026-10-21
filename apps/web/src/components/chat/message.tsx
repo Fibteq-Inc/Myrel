@@ -1,9 +1,10 @@
 import { useT } from "@myrel/i18n/react";
-import type { Message, Reaction } from "@myrel/protocol";
+import { type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
 import { AlarmClock, CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { MyrelMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
+import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
 
@@ -57,18 +58,23 @@ export function MessageView({
   }
 
   if (message.authorKind === "agent") {
+    const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
     return (
       <div className="group flex gap-3.5">
         <MyrelMark size={28} />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
-          <MessageMarkdown body={message.body} decision={decision} />
+          {suggestion ? (
+            <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
+          ) : (
+            <MessageMarkdown body={message.body} decision={decision} />
+          )}
           <AttachmentList attachments={message.attachments} />
           {children}
           {message.stats && <MessageStatsLine stats={message.stats} />}
           <div className="-ml-1.5 -mt-1 flex items-center gap-1">
             <Reactions reactions={reactions} />
             <span className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-              <CopyButton text={message.body} label={t("message.copy")} />
+              {!suggestion && <CopyButton text={message.body} label={t("message.copy")} />}
               <time dateTime={message.createdAt} className="px-1 text-xs text-subtle">
                 {relativeTime(message.createdAt)}
               </time>

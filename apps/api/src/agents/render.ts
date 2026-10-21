@@ -1,4 +1,4 @@
-import { type Message, planChecklist, type Thread } from "@myrel/protocol";
+import { type Message, parseConnectorSuggestion, planChecklist, type Thread } from "@myrel/protocol";
 
 /** How a message's author reads in a prompt. */
 export function authorLabel(m: Message, names: Record<string, string>): string {
@@ -12,6 +12,17 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
   // A plan card's steps are in the prompt's own plan section; its title is enough here.
   const plan = planChecklist(m.body);
   if (plan !== null) return `${head}\n${indent(`(plan card: ${plan.split("\n", 1)[0]})`)}`;
+  const card = parseConnectorSuggestion(m.body);
+  if (card) {
+    const names = card.offers.map((o) => o.name).join(", ");
+    const state =
+      card.state === "connected"
+        ? `connected ${card.offers.find((o) => o.id === card.connected)?.name ?? ""}`
+        : card.state === "dismissed"
+          ? "the person said not now"
+          : "waiting for the person";
+    return `${head}\n${indent(`(connector card offering ${names}: ${state})`)}`;
+  }
   const files = (m.attachments ?? []).map((a) => `📎 attached: ${a.path} (${a.contentType}, ${a.size} bytes)`);
   return `${head}\n${indent([m.body, ...files].filter(Boolean).join("\n"))}`;
 }

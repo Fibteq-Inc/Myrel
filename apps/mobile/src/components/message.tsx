@@ -1,10 +1,11 @@
 import { useT } from "@myrel/i18n/react";
-import type { Artifact, Attachment, Message, Reaction } from "@myrel/protocol";
+import { type Artifact, type Attachment, type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
 import { CircleAlert, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { colors, radius } from "../theme";
 import { ArtifactCards } from "./artifact-card";
+import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
 import { MyrelMark, Spinner, useRelativeTime } from "./ui";
@@ -52,11 +53,16 @@ export function MessageView({
   }
 
   if (message.authorKind === "agent") {
+    const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
     return (
       <View style={styles.agent}>
         <MyrelMark size={28} />
         <View style={{ flex: 1, minWidth: 0, gap: 8, paddingTop: 2 }}>
-          {!!message.body && <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />}
+          {suggestion ? (
+            <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
+          ) : (
+            !!message.body && <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />
+          )}
           <Attachments attachments={message.attachments} />
           {!!message.artifacts?.length && (
             <ArtifactCards refs={message.artifacts} artifacts={artifacts} onOpen={onOpenArtifact} />

@@ -4,7 +4,10 @@ import {
   type ArtifactRef,
   CLI_NAMES,
   type CliUsage,
+  type ConnectorOffer,
+  type ConnectorSuggestion,
   createId,
+  formatConnectorSuggestion,
   formatPlan,
   type MessageStats,
   type SkillBundle,
@@ -28,6 +31,7 @@ import { Agent, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
+import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest";
 import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
@@ -55,6 +59,7 @@ import {
   insideAny,
 } from "./folder-access";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
+import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
@@ -65,6 +70,9 @@ import { type CoordinatorNote, type ReplyNeeds, type RoutineRun, threadPrompt, t
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
 export type ThreadStart = { projectId: string; threadId: string; brief: string };
+
+/** A connector card the agent posted, and the message that shows it. */
+type StoredSuggestion = ConnectorSuggestion & { messageId: string };
 
 type NoteRow = { id: number; body: string; created_at: string; seen: number };
 
@@ -821,6 +829,77 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("access_requests");
   }
 
+  // ---- Connector suggestions -------------------------------------------------
+
+  /** The connector cards this thread's agent posted, newest last. */
+  private suggestions(): StoredSuggestion[] {
+    return JSON.parse(this.getMeta("connector_suggestions") ?? "[]") as StoredSuggestion[];
+  }
+
+  /** Posts a connector card for the person; false while another one waits for an answer. */
+  private async postSuggestion(reason: string, offers: ConnectorOffer[]): Promise<boolean> {
+    const all = this.suggestions();
+    if (all.some((s) => s.state === "open")) return false;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const suggestion: ConnectorSuggestion = { id: createId("suggestion"), reason, offers, state: "open" };
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatConnectorSuggestion(suggestion) });
+    // Not news for the next turn, unless someone wrote in between.
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    // Older answered cards are kept only as far as the card's message needs them.
+    this.setMeta("connector_suggestions", JSON.stringify([...all.slice(-19), { ...suggestion, messageId: m.id }]));
+    return true;
+  }
+
+  /** One offer of a card still waiting for an answer, for the person to connect. Callable over RPC. */
+  openOffer(suggestionId: string, offerId: string): ConnectorOffer | null {
+    const s = this.suggestions().find((x) => x.id === suggestionId);
+    return s?.state === "open" ? (s.offers.find((o) => o.id === offerId) ?? null) : null;
+  }
+
+  /**
+   * A card's offer was connected (at once, or after signing in): the card says so, and a line from
+   * the person wakes the agent, whose next turn has the connector. Callable over RPC.
+   */
+  async suggestionConnected(suggestionId: string, offerId: string, userId: string): Promise<void> {
+    const s = this.suggestions().find((x) => x.id === suggestionId);
+    const offer = s?.offers.find((o) => o.id === offerId);
+    if (!s || !offer || s.state !== "open") return;
+    await this.settleSuggestion(s, { state: "connected", connected: offerId });
+    const tr = this.getMeta("language") === "tr";
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    await project.sendAsUser(threadId, userId, tr ? `${offer.name} bağlandı, devam edebilirsin.` : `I connected ${offer.name}. Carry on.`);
+  }
+
+  /** Not now: the card closes, its offers are not made again in this thread, and the agent carries on without them. Callable over RPC. */
+  async dismissSuggestion(suggestionId: string, userId: string): Promise<boolean> {
+    const s = this.suggestions().find((x) => x.id === suggestionId);
+    if (!s || s.state !== "open") return false;
+    await this.settleSuggestion(s, { state: "dismissed" });
+    const declined = new Set(JSON.parse(this.getMeta("declined_connectors") ?? "[]") as string[]);
+    for (const o of s.offers) {
+      declined.add(o.id);
+      declined.add(o.url);
+    }
+    this.setMeta("declined_connectors", JSON.stringify([...declined].slice(-100)));
+    const tr = this.getMeta("language") === "tr";
+    const names = s.offers.map((o) => o.name).join(", ");
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    await project.sendAsUser(threadId, userId, tr ? `${names} şimdilik bağlamıyorum, onsuz devam et.` : `Not connecting ${names} for now. Carry on without it.`);
+    return true;
+  }
+
+  private async settleSuggestion(s: StoredSuggestion, patch: Pick<ConnectorSuggestion, "state" | "connected">) {
+    const next = { ...s, ...patch };
+    this.setMeta("connector_suggestions", JSON.stringify(this.suggestions().map((x) => (x.id === s.id ? next : x))));
+    const { projectId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const { messageId: _, ...card } = next;
+    await project.editMessage(s.messageId, formatConnectorSuggestion(card));
+  }
+
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
   private async agentToolset(): Promise<Tool[]> {
     const { projectId, threadId } = this.ids();
@@ -891,6 +970,13 @@ export class ThreadAgent extends Agent<Env> {
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
           return `Following ${pr.repo}#${pr.number}: its state shows in the thread, and CI failures, reviews and the merge will wake you.`;
         },
+      }),
+      ...suggestionTools({
+        search: (q) => searchOffers(this.env, q),
+        find: (ids) => findOffers(this.env, ids),
+        known: () => knownConnectors(this.env, projectId, this.getMeta("requester") || null),
+        declined: () => new Set(JSON.parse(this.getMeta("declined_connectors") ?? "[]") as string[]),
+        post: (reason, offers) => this.postSuggestion(reason, offers),
       }),
       ...knowledgeTools({
         memoryRead: (name: string) => project.getMemory(name),

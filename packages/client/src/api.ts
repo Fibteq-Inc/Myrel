@@ -9,6 +9,8 @@ import type {
   CatalogCategory,
   CatalogPage,
   Connector,
+  ConnectSuggestionInput,
+  ConnectSuggestionResult,
   CreateApiKeyInput,
   CreateConnectorInput,
   CreateSkillInput,
@@ -341,6 +343,26 @@ export class ApiClient {
       method: "PUT",
       body: { on },
     });
+  }
+
+  // --- connector suggestions in a thread ---
+
+  private suggestionPath(projectId: string, threadId: string, suggestionId: string) {
+    return `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/connector-suggestions/${encodeURIComponent(suggestionId)}`;
+  }
+
+  /**
+   * Connects one of a suggestion card's offers as the caller's own connector, on in this project.
+   * An answer with `authorizeUrl` needs a sign-in, which comes back to the thread. A Free plan at
+   * its limit fails with 402 (`error: "limit_reached"`).
+   */
+  connectSuggestion(projectId: string, threadId: string, suggestionId: string, input: ConnectSuggestionInput) {
+    return this.request<ConnectSuggestionResult>(`${this.suggestionPath(projectId, threadId, suggestionId)}/connect`, { method: "POST", body: input });
+  }
+
+  /** Not now: the card closes and the agent does not offer these connectors again in this thread. */
+  async dismissSuggestion(projectId: string, threadId: string, suggestionId: string) {
+    await this.request(`${this.suggestionPath(projectId, threadId, suggestionId)}/dismiss`, { method: "POST", body: {} });
   }
 
   // --- skills ---

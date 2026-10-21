@@ -17,3 +17,4 @@ export * from "./billing";
 export * from "./links";
 export * from "./connectors";
 export * from "./skills";
+export * from "./connector-suggestion";

@@ -187,3 +187,17 @@ describe("Routine inputs", () => {
     expect(CreateRoutineInput.safeParse({ ...input, schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Mars/Base" } }).success).toBe(false);
   });
 });
+
+describe("connector suggestion cards", () => {
+  it("round-trips through a message body and rejects anything else", async () => {
+    const { formatConnectorSuggestion, parseConnectorSuggestion } = await import("../src/connector-suggestion");
+    const body = formatConnectorSuggestion({
+      id: "sug_1",
+      reason: "DNS kaydını eklemek için",
+      offers: [{ id: "com.cloudflare.mcp/mcp", name: "Cloudflare", url: "https://mcp.cloudflare.com/mcp", auth: "oauth" }],
+    });
+    expect(parseConnectorSuggestion(body)).toMatchObject({ state: "open", offers: [{ name: "Cloudflare", headerHint: null, featured: false }] });
+    expect(parseConnectorSuggestion("```connectors\n{}\n```")).toBeNull();
+    expect(parseConnectorSuggestion(`Look:\n${body}`)).toBeNull();
+  });
+});

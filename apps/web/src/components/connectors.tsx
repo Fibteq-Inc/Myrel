@@ -423,7 +423,7 @@ function CategoryChip({ active, onClick, label, count }: { active: boolean; onCl
  * anyone who publishes to the registry, and loading their images would tell those hosts who opened
  * the settings.
  */
-function OfferIcon({ name, featured, terminal, iconUrl }: { name: string; featured?: boolean; terminal?: boolean; iconUrl?: string | null }) {
+export function OfferIcon({ name, featured, terminal, iconUrl }: { name: string; featured?: boolean; terminal?: boolean; iconUrl?: string | null }) {
   const [failed, setFailed] = useState(false);
   return (
     <span
