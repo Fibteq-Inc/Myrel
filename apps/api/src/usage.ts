@@ -83,6 +83,22 @@ export function callCostMicros(call: CallRecord, prices: Record<string, Price>):
   return price ? costMicros(call.usage, price) : null;
 }
 
+/**
+ * Whose plan a project's usage counts against right now, written with each usage row: its owner,
+ * and whether it runs on the service's key (no key of its own; a server-wide key is the service's).
+ * A project that is gone counts as on the service's key, billed to nobody in particular.
+ */
+async function billing(d1: D1Database, projectId: string): Promise<{ billedTo: string | null; serviceKey: boolean }> {
+  const row = await d1
+    .prepare(
+      `SELECT p.created_by AS owner, (p.llm_key_id IS NULL OR p.llm_key_id IN (SELECT id FROM api_keys WHERE owner_id IS NULL)) AS service
+       FROM projects p WHERE p.id = ?`,
+    )
+    .bind(projectId)
+    .first<{ owner: string; service: number }>();
+  return row ? { billedTo: row.owner, serviceKey: Boolean(row.service) } : { billedTo: null, serviceKey: true };
+}
+
 async function recordUsage(d1: D1Database, ctx: UsageContext & { turnId: string }, call: CallRecord, cost: number | null) {
   await createDb(d1)
     .insert(schema.usageEvents)
@@ -90,6 +106,7 @@ async function recordUsage(d1: D1Database, ctx: UsageContext & { turnId: string 
       id: createId("usage"),
       createdAt: new Date(),
       ...ctx,
+      ...(await billing(d1, ctx.projectId)),
       provider: call.provider,
       model: call.model,
       servedModel: call.servedModel,
@@ -119,6 +136,7 @@ export async function recordTaskUsage(
       id: createId("usage"),
       createdAt: new Date(),
       projectId: ctx.projectId,
+      ...(await billing(env.DB, ctx.projectId)),
       threadId: ctx.threadId,
       userId: null,
       agent: "thread",
@@ -142,7 +160,15 @@ export async function recordSandboxRun(
   const seconds = Math.max(0, Math.round((run.endedAt.getTime() - run.startedAt.getTime()) / 1000));
   await createDb(d1)
     .insert(schema.sandboxRuns)
-    .values({ id: run.taskId, projectId: run.projectId, threadId: run.threadId, startedAt: run.startedAt, endedAt: run.endedAt, seconds })
+    .values({
+      id: run.taskId,
+      projectId: run.projectId,
+      threadId: run.threadId,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt,
+      seconds,
+      billedTo: (await billing(d1, run.projectId)).billedTo,
+    })
     .onConflictDoNothing();
 }
 
