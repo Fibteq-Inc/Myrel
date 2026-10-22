@@ -27,10 +27,12 @@ function fakeWindow() {
   const win = {
     location: { origin: APP },
     open: nativeOpen,
-    document: {
-      addEventListener: (type: string, fn: (e: MouseEvent) => void) => listeners.set(type, fn),
-      removeEventListener: (type: string) => listeners.delete(type),
+    addEventListener: (type: string, fn: (e: MouseEvent) => void, capture?: boolean) => {
+      // Capture phase, so it runs before the link handlers plugins add to the page.
+      expect(capture).toBe(true);
+      listeners.set(type, fn);
     },
+    removeEventListener: (type: string) => listeners.delete(type),
   };
   const click = (href: string, init: { button?: number; download?: boolean; prevented?: boolean } = {}) => {
     const anchor = {
@@ -42,6 +44,7 @@ function fakeWindow() {
       defaultPrevented: !!init.prevented,
       target: { closest: () => anchor },
       preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
     };
     listeners.get(event.button === 1 ? "auxclick" : "click")?.(event as unknown as MouseEvent);
     return event;
@@ -57,6 +60,7 @@ describe("openLinksExternally", () => {
 
     const event = click("https://github.com/Fibteq-Inc/myrel/pull/1");
     expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
     expect(open).toHaveBeenCalledWith("https://github.com/Fibteq-Inc/myrel/pull/1");
 
     click("https://example.com", { button: 1 });
@@ -68,7 +72,9 @@ describe("openLinksExternally", () => {
     const open = vi.fn();
     openLinksExternally(win, open);
 
-    expect(click("/projects/1").preventDefault).not.toHaveBeenCalled();
+    const own = click("/projects/1");
+    expect(own.preventDefault).not.toHaveBeenCalled();
+    expect(own.stopPropagation).not.toHaveBeenCalled();
     click("https://example.com/file.pdf", { download: true });
     click("https://example.com", { prevented: true });
     click("https://example.com", { button: 2 });
