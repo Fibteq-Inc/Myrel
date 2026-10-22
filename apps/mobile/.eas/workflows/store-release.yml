@@ -1,8 +1,11 @@
 name: Store release
-# Run by hand: builds both store binaries from main and uploads them to TestFlight
-# and Play internal testing. Sending a version for review stays a manual step.
+# Runs when the mobile Release PR is merged (release-please tags mobile-vX.Y.Z), or by hand.
+# Builds both store binaries and uploads them to TestFlight and Play internal testing.
+# Sending a version for review stays a manual step.
 
 on:
+  push:
+    tags: ['mobile-v*']
   workflow_dispatch: {}
 
 jobs:

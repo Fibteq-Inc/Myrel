@@ -11,7 +11,7 @@ const config: ExpoConfig = {
   name: "Myrel",
   slug: "myrel",
   scheme: "myrel",
-  version: "0.2.0",
+  version: "0.2.0", // x-release-please-version
   orientation: "portrait",
   // Four-petal mark, rendered from assets/icon.svg; re-export the PNGs when it changes.
   icon: "./assets/icon.png",
@@ -36,8 +36,8 @@ const config: ExpoConfig = {
     ["expo-notifications", { color: "#8b9bff", icon: "./assets/notification-icon.png" }],
   ],
   experiments: { typedRoutes: true },
-  // OTA updates only reach builds of the same app version (bump `version` for native changes).
-  runtimeVersion: { policy: "appVersion" },
+  // OTA updates reach every build with the same native fingerprint; a version bump alone keeps them flowing.
+  runtimeVersion: { policy: "fingerprint" },
   extra: easProjectId ? { eas: { projectId: easProjectId } } : {},
   ...(easProjectId && { owner: easOwner, updates: { url: `https://u.expo.dev/${easProjectId}` } }),
 };
