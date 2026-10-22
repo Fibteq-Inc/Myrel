@@ -210,8 +210,19 @@ describe("members and invites", () => {
     const pending = await json<{ invites: Invite[] }>(api(`${base}/invites`, { token: alice.token }));
     expect(pending.invites.map((i) => i.email)).toEqual([carol]);
     expect((await api(`${base}/invites/${pending.invites[0]!.id}`, { method: "DELETE", token: alice.token })).status).toBe(204);
+    // Bob, an admin, puts the project on his own key; leaving takes the key with him.
+    const { key: bobKey } = await json<{ key: ApiKey }>(
+      api("/api/account/keys", { method: "POST", token: bob.token, body: { provider: "anthropic", label: "k", key: "sk-ant-bob-1234567" } }),
+      201,
+    );
+    await json(api(`${base}/settings`, { method: "PATCH", token: bob.token, body: { keyId: bobKey.id } }));
     expect((await api(`${base}/members/${bob.id}`, { method: "DELETE", token: bob.token })).status).toBe(204);
     expect((await api(base, { token: bob.token })).status).toBe(404);
+    const keyId = await env.DB.prepare("SELECT llm_key_id AS k FROM projects WHERE id = ?").bind(project.id).first<{ k: string | null }>();
+    expect(keyId?.k).toBeNull();
+    // Even if it were still attached, a former member's key is not used.
+    await env.DB.prepare("UPDATE projects SET llm_key_id = ? WHERE id = ?").bind(bobKey.id, project.id).run();
+    expect(await projectProvider(env, project.id)).toMatchObject({ ok: false });
   });
 });
 

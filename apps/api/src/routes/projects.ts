@@ -179,9 +179,18 @@ export const projectRoutes = new Hono<AppEnv>()
     if (target === "owner" && (await ownerCount(c.env, id)) <= 1) {
       return c.json({ error: "last_owner", message: "A project needs at least one owner." }, 409);
     }
-    await createDb(c.env.DB)
-      .delete(projectMembers)
-      .where(and(eq(projectMembers.projectId, id), eq(projectMembers.userId, userId)));
+    const db = createDb(c.env.DB);
+    await db.batch([
+      db.delete(projectMembers).where(and(eq(projectMembers.projectId, id), eq(projectMembers.userId, userId))),
+      // What they brought ends with them: the project no longer works on their computer or spends their model key.
+      db
+        .delete(projectWorkspaces)
+        .where(and(eq(projectWorkspaces.projectId, id), sql`${projectWorkspaces.runnerId} IN (SELECT id FROM runners WHERE user_id = ${userId})`)),
+      db
+        .update(projects)
+        .set({ llmKeyId: null })
+        .where(and(eq(projects.id, id), sql`${projects.llmKeyId} IN (SELECT id FROM api_keys WHERE owner_id = ${userId})`)),
+    ]);
     // An open connection was let in as a member: it ends with the membership.
     await (await getAgentByName(c.env.PROJECT_AGENT, id)).disconnectUser(userId);
     return c.body(null, 204);

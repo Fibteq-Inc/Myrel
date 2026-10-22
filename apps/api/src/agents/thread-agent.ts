@@ -369,7 +369,8 @@ export class ThreadAgent extends Agent<Env> {
         : null
       : !wroteSince && routineActor
         ? await member(routineActor.actor)
-        : lastWriter;
+        : // Someone who has left the project since writing here gets no more turns.
+          await member(lastWriter);
     this.setMeta("requester", requester ?? "");
     const place = await taskPlace(this.env, projectId, requester);
     if (place.kind === "error") return this.cannotWork(place.message);
