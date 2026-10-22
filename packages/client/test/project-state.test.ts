@@ -8,6 +8,7 @@ import {
   artifactList,
   checklistProgress,
   emptyProjectState,
+  freshSteps,
   parseChecklist,
   projectChat,
   threadByCard,
@@ -163,6 +164,14 @@ describe("project state", () => {
     ]);
     // Only the plan's own steps count, and a skipped step is not work left.
     expect(checklistProgress(items)).toEqual({ done: 1, total: 3 });
+  });
+
+  it("finds the plan steps added since the person last looked, not the ones only ticked", () => {
+    const before = parseChecklist("Fix\n\n✓ Read code\n✱ Fix bug\n○ Reply").items;
+    const seen = new Set(before.map((i) => i.text));
+    const after = parseChecklist("Fix\n\n✓ Read code\n✓ Fix bug\n  ✱ Agent working\n✱ Test on mobile\n○ Reply").items;
+    expect(freshSteps(after, seen)).toEqual(new Set(["Test on mobile"]));
+    expect(freshSteps(before, seen).size).toBe(0);
   });
 });
 

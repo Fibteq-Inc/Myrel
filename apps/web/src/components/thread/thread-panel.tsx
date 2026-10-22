@@ -352,12 +352,15 @@ function Conversation({
   const planAnchor = (id: string) => `plan-${id}`;
   return (
     <section aria-label={t("thread.messages")} className={cn("min-w-0 flex-1 flex-col", className)}>
-      {thread.statusText && !thread.resolved && (
+      {/* Stays once the work is done, so the finished plan is still one click away. */}
+      {thread.statusText && (
         <div className="flex-none border-b border-line bg-[#111114] px-5 py-2.5">
           <PlanProgress
+            key={thread.id}
+            planKey={`${thread.id}\n${thread.statusText.split("\n", 1)[0]}`}
             text={thread.statusText}
             live={working}
-            onOpen={
+            onJump={
               currentPlan
                 ? () => document.getElementById(planAnchor(currentPlan.id))?.scrollIntoView({ behavior: "smooth", block: "start" })
                 : undefined
