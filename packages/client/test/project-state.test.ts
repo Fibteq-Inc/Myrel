@@ -1,4 +1,4 @@
-import { createId, formatPlan, type Message, planChecklist, type Task, type Thread } from "@myrel/protocol";
+import { createId, formatPlan, type Message, planChecklist, type PullRequest, type Task, type Thread } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,
@@ -8,6 +8,7 @@ import {
   artifactList,
   checklistProgress,
   emptyProjectState,
+  foldPullRequests,
   freshSteps,
   parseChecklist,
   projectChat,
@@ -213,5 +214,38 @@ describe("tasks", () => {
     s = applyEvent(s, { type: "task.updated", task: { ...task, status: "done", prUrl: "https://github.com/a/b/pull/1" } });
     expect(threadTasks(s, threadId).map((t) => [t.status, t.prUrl])).toEqual([["done", "https://github.com/a/b/pull/1"]]);
     expect(parseChecklist("T\n\n✓ a\n✗ b failed").items.map((i) => i.state)).toEqual(["done", "failed"]);
+  });
+});
+
+describe("pull request folding", () => {
+  const pr = (number: number, state: PullRequest["state"], updatedAt = now): PullRequest => ({
+    repo: "a/b",
+    number,
+    url: `https://github.com/a/b/pull/${number}`,
+    threadId: "thr",
+    title: `PR ${number}`,
+    state,
+    draft: false,
+    checks: null,
+    review: null,
+    conflict: false,
+    updatedAt,
+  });
+  const numbers = (prs: PullRequest[]) => prs.map((p) => p.number);
+
+  it("shows two or fewer as they are", () => {
+    const { shown, folded } = foldPullRequests([pr(1, "merged"), pr(2, "merged")]);
+    expect([numbers(shown), folded]).toEqual([[1, 2], []]);
+  });
+
+  it("keeps open ones out and folds the finished ones", () => {
+    const { shown, folded } = foldPullRequests([pr(1, "merged"), pr(2, "open"), pr(3, "closed"), pr(4, "open")]);
+    expect([numbers(shown), numbers(folded)]).toEqual([[2, 4], [1, 3]]);
+  });
+
+  it("keeps the one updated last when none is open", () => {
+    const prs = [pr(1, "merged", "2026-10-22T10:00:00Z"), pr(2, "merged", "2026-10-22T12:00:00Z"), pr(3, "merged", "2026-10-22T11:00:00Z")];
+    const { shown, folded } = foldPullRequests(prs);
+    expect([numbers(shown), numbers(folded)]).toEqual([[2], [1, 3]]);
   });
 });

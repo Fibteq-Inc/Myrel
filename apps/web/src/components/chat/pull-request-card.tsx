@@ -1,6 +1,9 @@
+import { foldPullRequests } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { PullRequest } from "@myrel/protocol";
 import {
+  ChevronDown,
+  ChevronUp,
   CircleCheck,
   CircleX,
   ExternalLink,
@@ -12,6 +15,7 @@ import {
   MessageSquareWarning,
   TriangleAlert,
 } from "lucide-react";
+import { useState } from "react";
 import { cn } from "../../lib/ui";
 
 /** The pull requests a message mentions by address. */
@@ -21,15 +25,41 @@ export function mentionedPullRequests(body: string, pullRequests: PullRequest[])
 
 /**
  * Pull requests a thread opened, each a card with its live state: open,
- * merged or closed, CI and review. The webhook keeps them current.
+ * merged or closed, CI and review. The webhook keeps them current. In the
+ * conversation a run of several folds the finished ones behind one line, so
+ * they do not stack up under the last reply; `fold={false}` lists them all.
  */
-export function PullRequestCards({ pullRequests }: { pullRequests: PullRequest[] }) {
+export function PullRequestCards({ pullRequests, fold = true }: { pullRequests: PullRequest[]; fold?: boolean }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
   if (pullRequests.length === 0) return null;
+  const { shown, folded } = fold ? foldPullRequests(pullRequests) : { shown: pullRequests, folded: [] };
+  const merged = folded.filter((pr) => pr.state === "merged").length;
+  const closed = folded.filter((pr) => pr.state === "closed").length;
   return (
     <div className="flex flex-col gap-2">
-      {pullRequests.map((pr) => (
+      {(open ? pullRequests : shown).map((pr) => (
         <PullRequestCard key={pr.url} pr={pr} />
       ))}
+      {folded.length > 0 && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="flex max-w-md items-center gap-1.5 rounded-xl border border-dashed border-[#26262b] px-3 py-2 text-left text-xs text-subtle transition-colors hover:border-edge hover:text-fg"
+        >
+          {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          {open ? (
+            t("pr.showLess")
+          ) : (
+            <>
+              <span className="font-medium text-muted">{t("pr.more", { count: folded.length })}</span>
+              {merged > 0 && <span className="text-[#b49cff]">· {t("pr.mergedCount", { count: merged })}</span>}
+              {closed > 0 && <span className="text-bad">· {t("pr.closedCount", { count: closed })}</span>}
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 }
