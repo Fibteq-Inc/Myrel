@@ -1,7 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import type { GithubInstallation, ProjectRepo } from "@myrel/protocol";
 import { and, eq } from "drizzle-orm";
-import { type GithubEnv, installationToken, type RepoPermissions, type UserInstallation } from "./app";
+import { type GithubApiRepo, type GithubEnv, githubConfigured, installationRepos, installationToken, type RepoPermissions, type UserInstallation } from "./app";
 
 const { githubAccounts, githubInstallations, githubInstallationUsers, githubUserRepos, projectRepos } = schema;
 
@@ -166,8 +166,66 @@ export async function projectRepoToken(
   const repo = repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
   if (!repo) {
     const names = repos.map((r) => r.fullName).join(", ") || "none";
-    throw new Error(`${fullName} is not connected to this project (connected: ${names})`);
+    throw new Error(
+      `${fullName} is not connected to this project (connected: ${names}). If it is the right repository, ask for it with request_repo_connection.`,
+    );
   }
   const { token } = await installationToken(env, repo.installationId, { repositoryIds: [repo.repoId], permissions }, minValidMs);
   return { token, repo };
+}
+
+/** Why a repository could not be connected by name (see connectRepoByName). */
+export type ConnectRepoResult =
+  | { ok: true; repo: ProjectRepo; already: boolean }
+  | { ok: false; reason: "not_configured" | "forbidden" | "github_reauth" | "not_installed" };
+
+/**
+ * Connects a repository to a project by its name, for a project owner or admin, through one of the
+ * GitHub App installations their last GitHub sign-in showed them: what the repo picker in the
+ * project's settings does, in one step. github_reauth: they never signed in to GitHub here, or it
+ * was too long ago; not_installed: none of their installations covers the repository.
+ */
+export async function connectRepoByName(
+  env: GithubEnv & { DB: D1Database },
+  projectId: string,
+  userId: string,
+  fullName: string,
+): Promise<ConnectRepoResult> {
+  if (!githubConfigured(env)) return { ok: false, reason: "not_configured" };
+  const d = createDb(env.DB);
+  const [member] = await d
+    .select({ role: schema.projectMembers.role })
+    .from(schema.projectMembers)
+    .where(and(eq(schema.projectMembers.projectId, projectId), eq(schema.projectMembers.userId, userId)));
+  if (member?.role !== "owner" && member?.role !== "admin") return { ok: false, reason: "forbidden" };
+  const name = fullName.trim().toLowerCase();
+  const existing = (await listProjectRepos(env.DB, projectId)).find((r) => r.fullName.toLowerCase() === name);
+  if (existing) return { ok: true, repo: existing, already: true };
+  const installs = await listUserInstallations(env.DB, userId);
+  if (!installs.length || (await githubGrantStale(env.DB, userId))) return { ok: false, reason: "github_reauth" };
+  for (const install of installs) {
+    const repos = await installationRepos(env, install.id).catch((err) => {
+      console.warn("listing installation repos failed", install.id, err);
+      return [] as GithubApiRepo[];
+    });
+    const repo = repos.find((r) => r.full_name.toLowerCase() === name);
+    // The installation may cover repositories this person cannot see on GitHub.
+    if (!repo || !(await userCanReachRepo(env.DB, userId, install.id, repo.id))) continue;
+    await d
+      .insert(projectRepos)
+      .values({
+        projectId,
+        repoId: repo.id,
+        installationId: install.id,
+        fullName: repo.full_name,
+        defaultBranch: repo.default_branch,
+        private: repo.private,
+        addedBy: userId,
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing();
+    const connected = (await listProjectRepos(env.DB, projectId)).find((r) => r.repoId === repo.id)!;
+    return { ok: true, repo: connected, already: false };
+  }
+  return { ok: false, reason: "not_installed" };
 }

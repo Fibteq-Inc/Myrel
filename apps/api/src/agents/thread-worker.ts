@@ -29,6 +29,8 @@ export type ThreadHost = {
   resolve(): Promise<void>;
   /** Follows a pull request on a connected repository; says what happened. */
   trackPullRequest(url: string): Promise<string>;
+  /** Asks the person, with a card, to connect a GitHub repository to the project; says what happened. */
+  requestRepo(repo: string, reason: string): Promise<string>;
   /** Opens a pull request on a connected repository through Myrel's GitHub App; says what happened. */
   openPullRequest(input: { repo: string; head: string; base?: string; title: string; body?: string; draft?: boolean }): Promise<string>;
   /** Directory listing of a connected repository. */
@@ -198,6 +200,16 @@ export function threadTools(host: ThreadHost): Tool[] {
         ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
       }),
       run: ({ repo, path, ref }) => host.readRepoFile(repo, path, ref),
+    }),
+    tool({
+      name: "request_repo_connection",
+      description:
+        "Ask the person to connect a GitHub repository this project has not connected (to push to it or open a pull request). Posts a card; one tap by a project owner or admin connects it through Myrel's GitHub App, and you are woken to carry on. End your turn after calling it.",
+      input: z.object({
+        repo: z.string().min(3).max(200).regex(/^[\w.-]+\/[\w.-]+$/).describe("owner/name"),
+        reason: z.string().min(1).max(300).describe("One sentence, in the person's language, on what you need it for."),
+      }),
+      run: ({ repo, reason }) => host.requestRepo(repo, reason),
     }),
     tool({
       name: "open_pull_request",
