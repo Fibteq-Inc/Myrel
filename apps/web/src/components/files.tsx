@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { ApiError } from "@myrel/client";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
+import { Check, Copy, Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -159,6 +159,7 @@ export function FilePreview({
         <span className="min-w-0 flex-1 truncate font-medium" title={path}>
           {path}
         </span>
+        {text !== null && <CopyFileButton text={text} />}
         {url && (
           <a
             href={url}
@@ -198,6 +199,46 @@ export function FilePreview({
         )}
       </div>
     </div>
+  );
+}
+
+/** Past this, copying the whole file can stall the page and is rarely what people want; they download it. */
+const COPY_LIMIT = 2 * 1024 * 1024;
+
+/** Copies a text file's full content, not just what the preview shows. */
+function CopyFileButton({ text }: { text: string }) {
+  const t = useT();
+  const [state, setState] = useState<"idle" | "copied" | "failed" | "tooLarge">("idle");
+  useEffect(() => {
+    if (state === "idle") return;
+    const timer = setTimeout(() => setState("idle"), state === "copied" ? 1500 : 4000);
+    return () => clearTimeout(timer);
+  }, [state]);
+  const message = state === "copied" ? t("common.copied") : state === "failed" ? t("files.copyFailed") : state === "tooLarge" ? t("files.copyTooLarge") : null;
+  return (
+    <>
+      {message && (
+        <span role="status" className={`min-w-0 truncate text-xs ${state === "copied" ? "text-ok" : "text-bad"}`} title={message}>
+          {message}
+        </span>
+      )}
+      <IconButton
+        type="button"
+        aria-label={t("files.copy")}
+        title={t("files.copy")}
+        onClick={async () => {
+          if (text.length > COPY_LIMIT) return setState("tooLarge");
+          try {
+            await navigator.clipboard.writeText(text);
+            setState("copied");
+          } catch {
+            setState("failed");
+          }
+        }}
+      >
+        {state === "copied" ? <Check size={16} className="text-ok" /> : <Copy size={16} />}
+      </IconButton>
+    </>
   );
 }
 
