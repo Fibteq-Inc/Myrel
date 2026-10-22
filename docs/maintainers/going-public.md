@@ -60,7 +60,7 @@ off in the pull request that flips visibility, or keep this file updated.
 - [ ] Have a lawyer review `ee/LICENSE` and `CLA.md`. Both are reasonable
       starting points, not legal advice.
 - [x] `VAPID_SUBJECT` in `apps/api/wrangler.jsonc` is the team address
-      `myrel@fibteq.app` (it was a personal one). Six early commits are
+      `myrel@fibteq.io` (it was a personal one). Six early commits are
       authored with a `fibteq.com` address, which stays in public history.
 - [ ] Decide what to do with the production D1 `database_id` in
       `apps/api/wrangler.jsonc`. It is not a secret, but forks cannot use it;
