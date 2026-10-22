@@ -12,7 +12,7 @@ before the app loads:
 | File picker | native open dialog |
 | Links | opened in the default browser |
 | `myrel://` links | `myrel://connect?server=https://myrel.example.com` switches server after a confirmation; any other path opens that page, e.g. `myrel://projects/<id>` |
-| Updates | checks GitHub releases at startup and offers to install |
+| Updates | checks GitHub releases at startup and every six hours while open, and offers to install; Settings → Account → App version shows the version and has a **Check for updates** button |
 | Local folders | the bundled `myrel-runner` (see below) |
 
 The app is not tied to one server: on first launch it asks for an Myrel address (hosted or self-hosted)
@@ -63,15 +63,16 @@ release's installers. Then publish the draft.
 Manual runs without a tag (Actions → Desktop → Run workflow on main) upload the installers as workflow
 artifacts. Pull requests don't build the app; CI's typecheck and build cover its TypeScript.
 
-While the repository is private, macOS builds on the org's self-hosted Mac runner (labels `self-hosted`,
-`macOS`), so that Mac must be on and awake while a release builds. Once the repository is public, it uses
-GitHub's hosted runners.
+macOS builds on GitHub's hosted runners. Only if the repository were private again would it fall back to the
+org's self-hosted Mac runner (labels `self-hosted`, `macOS`), which then has to be on and awake while a release
+builds.
 
 When the updater key is set, the release also gets `latest.json`, which installed apps check for updates
 through the latest release, so only desktop releases are marked latest.
 
-The updater downloads from public GitHub release URLs, so it only works once the repository is public
-(or after pointing `plugins.updater.endpoints` in `src-tauri/tauri.conf.json` at public storage such as R2).
+The updater reads `latest.json` and the installers from the public GitHub release URLs. They only stay
+reachable while the repository is public; a private fork has to point `plugins.updater.endpoints` in
+`src-tauri/tauri.conf.json` at public storage such as R2.
 
 ### Signing secrets
 

@@ -60,6 +60,10 @@ together.
 - Use [Conventional Commits](https://www.conventionalcommits.org) style for
   commit messages and pull request titles, for example `feat: add project files`
   or `fix(api): keep seq after reconnect`.
+- Release notes are built from pull request labels. `app:desktop` and
+  `app:mobile` are added automatically from the files a pull request changes
+  (`.github/labeler.yml`); add `skip-changelog` to a pull request that should
+  not appear in the notes.
 
 ## Contributor License Agreement
 

@@ -31,8 +31,9 @@ and running on your own Cloudflare account.
 - **Yours to run.** One Cloudflare Worker with Durable Objects, D1, R2 and
   Containers. No servers to manage.
 - **Apps that follow you.** Web, iOS and Android apps, and a desktop app for
-  macOS, Windows and Linux with the runner built in, all connect to any Myrel
-  server you point them at.
+  macOS, Windows and Linux with the runner built in
+  ([releases](https://github.com/Fibteq-Inc/myrel/releases)), all connect to
+  any Myrel server you point them at.
 
 ## What it does
 
