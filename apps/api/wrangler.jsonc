@@ -164,6 +164,6 @@
     "CONNECTOR_REGISTRY_URL": "",
     "EMAIL_FROM": "Myrel <myrel@mail.fibteq.app>",
     "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
-    "VAPID_SUBJECT": "mailto:ismail.kose@fibteq.io"
+    "VAPID_SUBJECT": "mailto:myrel@fibteq.app"
   }
 }
