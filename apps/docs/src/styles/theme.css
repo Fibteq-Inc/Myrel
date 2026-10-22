@@ -1,0 +1,16 @@
+/* Myrel's accent (apps/web/src/styles.css) on Starlight's palette. */
+:root {
+  --sl-color-accent-low: #1e2142;
+  --sl-color-accent: #6d63ff;
+  --sl-color-accent-high: #c9cfff;
+}
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e3e6ff;
+  --sl-color-accent: #4f45e0;
+  --sl-color-accent-high: #1e2142;
+}
+/* Screenshots of the app sit on a dark frame in both themes. */
+.sl-markdown-content img {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+}

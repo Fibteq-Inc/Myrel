@@ -18,6 +18,7 @@
     "deploy:api:preview": "pnpm run deploy:preview",
     "deploy:artifacts": "pnpm --filter @myrel/artifacts run deploy",
     "deploy:artifacts:preview": "pnpm --filter @myrel/artifacts run deploy:preview",
+    "deploy:docs": "pnpm --filter @myrel/docs run deploy",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "db:generate": "pnpm --filter @myrel/db generate",
