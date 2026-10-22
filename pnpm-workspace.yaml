@@ -15,3 +15,10 @@ peerDependencyRules:
   allowedVersions:
     # Only needed by the agents SDK's optional Vite decorator plugin, which Myrel doesn't use.
     "@babel/core": "7"
+
+# Security fixes for transitive deps (Dependabot); drop once the parents ship them.
+overrides:
+  # xcode (via Expo config plugins) pins uuid 7; it only calls uuid.v4(), which 11.x keeps.
+  "xcode>uuid": ^11.1.1
+  # drizzle-kit's deprecated @esbuild-kit loader pins esbuild 0.18 (GHSA-67mh-4wv8-2f99).
+  "@esbuild-kit/core-utils>esbuild": ^0.25.0
