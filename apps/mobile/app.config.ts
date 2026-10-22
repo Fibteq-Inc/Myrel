@@ -8,7 +8,7 @@ const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
 
 // Store builds get their version from the release tag (MYREL_RELEASE_TAG=mobile-v0.3.0, set by
-// .eas/workflows/store-release.yml); local and manual builds use package.json's.
+// .github/workflows/mobile.yml); local and manual builds use package.json's.
 const releaseVersion = process.env.MYREL_RELEASE_TAG?.match(/^mobile-v(\d+\.\d+\.\d+)$/)?.[1];
 const version = releaseVersion ?? (require("./package.json") as { version: string }).version;
 
@@ -31,8 +31,8 @@ const config: ExpoConfig = {
   android: {
     package: "io.fibteq.myrel",
     adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#5148e6" },
-    // Firebase config for FCM pushes: the path of google-services.json, which EAS provides
-    // through the GOOGLE_SERVICES_JSON file variable (the file itself stays out of git).
+    // Firebase config for FCM pushes: the path of google-services.json, which the store build and
+    // update workflows write from the GOOGLE_SERVICES_JSON secret (the file itself stays out of git).
     ...(googleServicesFile && { googleServicesFile }),
   },
   plugins: [

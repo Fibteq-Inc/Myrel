@@ -8,9 +8,9 @@ name: Release
 # desktop: tags main, opens a draft release with the notes, builds the installers (desktop.yml) and
 #          publishes the release once every platform built. A failed platform leaves the draft: rerun the
 #          failed job, or rebuild with Actions → Desktop → Run workflow with the tag, then publish it.
-# mobile:  tags main and publishes the release; the tag starts the EAS store build
-#          (apps/mobile/.eas/workflows/store-release.yml). Mobile releases are never marked "latest",
-#          because the desktop updater reads releases/latest/download/latest.json.
+# mobile:  tags main, publishes the release and builds both store binaries on GitHub (mobile.yml), which
+#          uploads them to TestFlight and Play internal testing. Mobile releases are never marked
+#          "latest", because the desktop updater reads releases/latest/download/latest.json.
 #
 # A release drafted by hand in the GitHub UI with a `desktop-v*` tag works too: publishing it starts the
 # desktop build (desktop.yml listens for published releases).
@@ -88,8 +88,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          # A tag pushed with GITHUB_TOKEN doesn't start other GitHub workflows, so desktop.yml is called
-          # below; EAS reads the push through its own GitHub app and still starts the mobile store build.
+          # A tag pushed with GITHUB_TOKEN doesn't start other workflows, so the app's build is called below.
           git tag "$TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG"
 
@@ -113,6 +112,14 @@ jobs:
     secrets: inherit
     permissions:
       contents: write
+
+  mobile:
+    needs: tag
+    if: inputs.app == 'mobile'
+    uses: ./.github/workflows/mobile.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
 
   publish:
     needs: [tag, desktop]

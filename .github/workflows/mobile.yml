@@ -1,0 +1,122 @@
+name: Mobile
+
+# Builds the store binaries on GitHub's runners (iOS on macOS, Android on Linux) with `eas build --local`,
+# so no EAS build credits are used, and uploads them with `eas submit` to TestFlight and Play internal
+# testing. Sending a version for review stays a manual step in App Store Connect and Play Console.
+#
+# Releases: the Release workflow (release.yml) tags `mobile-v*` and calls this with the tag. A manual run
+# (Actions → Mobile → Run workflow) rebuilds one platform of an existing tag, e.g. when its store upload
+# failed.
+#
+# Signing credentials (distribution certificate, provisioning profile, upload keystore) and the store
+# keys for submitting stay on EAS; the build downloads them. Build numbers also stay on EAS
+# (eas.json: appVersionSource remote, autoIncrement). The store version comes from the tag
+# (app.config.ts reads MYREL_RELEASE_TAG).
+#
+# Secrets, in the `store` environment (Settings → Environments; limit it to the main branch):
+#   EXPO_TOKEN            an Expo robot user's access token with access to the project
+#   GOOGLE_SERVICES_JSON  content of google-services.json (FCM). EAS keeps it as a secret variable, which
+#                         local builds can't read, so it comes from here.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build, e.g. mobile-v0.3.0
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild, e.g. mobile-v0.3.0
+        type: string
+        required: true
+      platform:
+        description: Platform to rebuild
+        type: choice
+        options: [both, ios, android]
+        default: both
+
+concurrency:
+  group: mobile-${{ inputs.tag }}-${{ inputs.platform || 'both' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  EAS_CLI: eas-cli@25.3.0
+
+jobs:
+  build:
+    if: startsWith(inputs.tag, 'mobile-v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            os: macos-latest
+            artifact: app.ipa
+          - platform: android
+            os: ubuntu-latest
+            artifact: app.aab
+    runs-on: ${{ matrix.os }}
+    environment: store
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      MYREL_RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Skip the platform not asked for
+        id: wanted
+        shell: bash
+        env:
+          ONLY: ${{ inputs.platform || 'both' }}
+        run: echo "build=$([ "$ONLY" = both ] || [ "$ONLY" = "${{ matrix.platform }}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: steps.wanted.outputs.build == 'true'
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        if: steps.wanted.outputs.build == 'true'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: steps.wanted.outputs.build == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: steps.wanted.outputs.build == 'true' && matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.wanted.outputs.build == 'true'
+
+      # Same absolute path in mobile-update.yml, so the Android fingerprint (runtime version) of the
+      # build and of its OTA updates match.
+      - name: Write google-services.json
+        if: steps.wanted.outputs.build == 'true' && matrix.platform == 'android'
+        shell: bash
+        env:
+          CONTENT: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          [ -n "$CONTENT" ] || { echo "::error::GOOGLE_SERVICES_JSON is not set in the store environment."; exit 1; }
+          printf '%s' "$CONTENT" > "$RUNNER_TEMP/google-services.json"
+          echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+
+      - name: Build
+        if: steps.wanted.outputs.build == 'true'
+        working-directory: apps/mobile
+        run: >
+          npx -y "$EAS_CLI" build --local --non-interactive
+          --platform ${{ matrix.platform }} --profile production
+          --output "$RUNNER_TEMP/${{ matrix.artifact }}"
+
+      - name: Submit to the store
+        if: steps.wanted.outputs.build == 'true'
+        working-directory: apps/mobile
+        run: >
+          npx -y "$EAS_CLI" submit --non-interactive --wait
+          --platform ${{ matrix.platform }} --profile production
+          --path "$RUNNER_TEMP/${{ matrix.artifact }}"
