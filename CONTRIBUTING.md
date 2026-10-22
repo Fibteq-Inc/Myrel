@@ -13,7 +13,7 @@ in a pull request, and the Contributor License Agreement.
 
 ## Development setup
 
-Requires Node 22+ and pnpm 10.
+Requires Node 24.22.1+ (see `.node-version`) and pnpm 10.
 
 ```sh
 pnpm install

@@ -24,7 +24,7 @@ deploying from Git with [Workers Builds](https://developers.cloudflare.com/worke
   use (long agent turns, many projects) fits the Workers Paid plan better.
 - A GitHub or GitLab account for Workers Builds.
 - An API key for at least one model provider: Fireworks, Anthropic or OpenAI.
-- Locally: Node 22+ and pnpm 10 (only for the one-time setup commands).
+- Locally: Node 24+ and pnpm 10 (only for the one-time setup commands).
 
 ## 1. Get the code
 
