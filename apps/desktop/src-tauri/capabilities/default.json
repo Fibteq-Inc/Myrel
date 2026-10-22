@@ -12,6 +12,7 @@
     "fs:allow-read-file",
     "notification:default",
     "opener:allow-open-url",
+    "opener:allow-default-urls",
     "process:allow-restart",
     "store:default",
     "updater:default"
