@@ -50,5 +50,6 @@ malicious server operator.
   `wrangler.jsonc` or Git.
 - Leave `SIGNUP_ENABLED` off on public servers unless you mean to allow open
   registration. If you open it, set up
-  [Turnstile](docs/self-hosting.md#sign-up-protection-turnstile) on sign-up.
+  [Turnstile](docs/self-hosting.md#sign-up-protection-turnstile) on sign-up
+  and forgotten-password requests.
 - Only list origins you control in `TRUSTED_ORIGINS`.

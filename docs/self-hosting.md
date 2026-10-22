@@ -148,7 +148,11 @@ The simplest way in is to set the `ADMIN_EMAILS` secret to your address, then
 open your Myrel URL and create your account with it: that address may sign up
 while sign-ups are closed and is an admin. When the server sends email (the
 `EMAIL` binding), it becomes an admin once you follow the verification link
-Myrel sends, so nobody else can claim it by signing up first. Without the
+Myrel sends, so nobody else can claim it by signing up first. The first
+verification also starts the account clean: any sessions opened before it end,
+the password entered at sign-up stops working, and the link goes on to setting
+a new one. This protects you when somebody signed up with your address before
+you did. Without the
 `EMAIL` binding nothing checks the address, so anyone who reaches the sign-up
 page before you could register it: create your account right after the first
 deploy, or keep the Worker behind Cloudflare Access until you have. Without `ADMIN_EMAILS`:
@@ -184,7 +188,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` | GitHub integration (see [GitHub App](#github-app)) | No |
 | `EXPO_ACCESS_TOKEN` | Mobile push, only if Expo enhanced push security is on | No |
 | `ADMIN_EMAILS` | Comma-separated addresses of the server's admins. They may sign up while sign-ups are closed and are always admins. Unset: the first account becomes the admin | Recommended on a public server |
-| `TURNSTILE_SECRET_KEY` | Turnstile check on sign-up, with `TURNSTILE_SITE_KEY` (see [Sign-up protection](#sign-up-protection-turnstile)) | No |
+| `TURNSTILE_SECRET_KEY` | Turnstile check on sign-up and forgotten-password requests, with `TURNSTILE_SITE_KEY` (see [Sign-up protection](#sign-up-protection-turnstile)) | No |
 
 ### Variables
 
@@ -194,7 +198,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `TRUSTED_ORIGINS` | empty | Extra comma-separated origins allowed to call the API cross-origin. The desktop app origins are always allowed. |
 | `INSTANCE_NAME` | `Myrel` | Name shown to apps that connect to this server. |
 | `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. Admins can change it at runtime in Settings, which then takes precedence. |
-| `TURNSTILE_SITE_KEY` | empty | Site key of a Cloudflare Turnstile widget sign-up asks to solve, with the `TURNSTILE_SECRET_KEY` secret. Off unless both are set. |
+| `TURNSTILE_SITE_KEY` | empty | Site key of a Cloudflare Turnstile widget sign-up and forgotten-password requests ask to solve, with the `TURNSTILE_SECRET_KEY` secret. Off unless both are set. |
 | `LLM_PROVIDER` | `fireworks` | `fireworks`, `anthropic` or `openai`. |
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
@@ -206,7 +210,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `RUNNER_IMAGES` | empty | `"true"` or `"false"` when that model does or does not read images (screenshots); empty guesses from its name. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
 | `CONNECTOR_REGISTRY_URL` | (empty) | Where the connector catalog is copied from every hour (a Worker cron trigger). Empty means the official MCP Registry, `https://registry.modelcontextprotocol.io`; any server with the same `/v0/servers` API works. |
-| `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |
+| `EMAIL_FROM` | Fibteq's address | Sender for notification, verification and password-reset emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |
 | `GITHUB_APP_ID` | Fibteq's GitHub App | Your GitHub App's id: replace the value in `wrangler.jsonc`, or remove it there and set it as a secret. Its URL name is read from GitHub (`GITHUB_APP_SLUG` is only a fallback for when GitHub cannot be reached). GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
@@ -228,7 +232,7 @@ supply the D1 id.
 | `ARTIFACTS` | R2 bucket `myrel-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for its cloud agent (see [Code sandbox](#code-sandbox)) |
 | `WORKSPACES` | Artifacts namespace `myrel` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
-| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) and address verification: with it, invitations, the `ADMIN_EMAILS` admin role, file uploads and the cloud sandbox wait until a person follows the link sent at sign-up. Without it, every address counts as verified. |
+| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) and address verification: with it, invitations, the `ADMIN_EMAILS` admin role, file uploads and the cloud sandbox wait until a person follows the link sent at sign-up, and people can reset a forgotten password by email. Without it, every address counts as verified and there is no forgot-password flow. |
 | `AUTH_LIMIT` | Rate limiting (`ratelimits`) | Sign-up, sign-in and their emails: 10 a minute per client IP. Optional; its `namespace_id` must be unique in your Cloudflare account. |
 
 ## Optional features
@@ -253,7 +257,9 @@ widget keeps scripts from creating accounts. Create a widget under
 **Turnstile** in the dashboard with your Myrel hostname, put its site key in
 `TURNSTILE_SITE_KEY` and its secret key in the `TURNSTILE_SECRET_KEY` secret.
 Sign-up on the web then asks to solve it; the desktop and mobile apps send
-people to the web page to sign up. Sign-in is not affected (the `AUTH_LIMIT`
+people to the web page to sign up. A forgotten-password request asks to solve
+the same widget (the desktop and mobile apps open the web page for it too).
+Sign-in is not affected (the `AUTH_LIMIT`
 rate limit covers it). With either key missing, sign-up has no challenge.
 
 ### D1 read replication
