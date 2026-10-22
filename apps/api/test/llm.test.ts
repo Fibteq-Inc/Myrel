@@ -252,6 +252,8 @@ describe("callCostMicros", () => {
     // 11,400 input at $0.15/M + 644 output at $0.50/M
     expect(callCostMicros(call, DEFAULT_PRICES)).toBe(2032);
     expect(priceFor("glm-5p3-flash", DEFAULT_PRICES)).toEqual(DEFAULT_PRICES["glm-5p3-flash"]);
+    // A dated snapshot takes its family's price.
+    expect(priceFor("accounts/fireworks/models/deepseek-v4p1-flash-1017", DEFAULT_PRICES)).toEqual(DEFAULT_PRICES["deepseek-v4p1-flash"]);
   });
 });
 
@@ -305,6 +307,7 @@ describe("readsImages", () => {
     expect(readsImages("openai", "accounts/fireworks/models/glm-5p3")).toBe(false);
     expect(readsImages("openai", "firerouter/opus")).toBe(false);
     expect(readsImages("openai", "auto")).toBe(false);
+    expect(readsImages("openai", "accounts/fireworks/models/deepseek-v4p1-flash-1017")).toBe(true);
   });
 
   it("lets RUNNER_IMAGES decide for the harness's model", () => {

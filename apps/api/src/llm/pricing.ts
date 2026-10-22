@@ -23,6 +23,7 @@ export const DEFAULT_PRICES: Record<string, Price> = {
   "glm-5p3": { input: 1.4, output: 4.4, cachedInput: 0.26 },
   "glm-5p3-flash": { input: 0.15, output: 0.5, cachedInput: 0.03 },
   "kimi-k3": { input: 3, output: 15, cachedInput: 0.3 },
+  "deepseek-v4p1-flash": { input: 0.3, output: 1.2, cachedInput: 0.006 },
 };
 
 /** Parses LLM_PRICES; a malformed value is ignored rather than breaking model calls. */

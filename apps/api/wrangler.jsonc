@@ -141,9 +141,9 @@
     "INSTANCE_NAME": "Myrel",
     "SIGNUP_ENABLED": "false",
     "LLM_PROVIDER": "fireworks",
-    // Fibteq's deployment: the coordinator and in-app agents on GLM 5.3, the sandbox harness on
-    // Fireworks' auto (open models only; no Anthropic Provider Key on the account).
-    "LLM_MODEL": "accounts/fireworks/models/glm-5p3",
+    // Fibteq's deployment: the coordinator and in-app agents on DeepSeek V4.1 Flash, the sandbox
+    // harness on Fireworks' auto (open models only; no Anthropic Provider Key on the account).
+    "LLM_MODEL": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",

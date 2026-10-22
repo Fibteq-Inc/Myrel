@@ -151,5 +151,5 @@ export function readsImages(kind: ModelConfig["kind"], modelId: string): boolean
   if (kind === "anthropic") return true;
   const name = modelId.toLowerCase();
   if (name === "auto" || /router/.test(name)) return false;
-  return /claude|gpt-4o|gpt-4\.1|gpt-5|\bo[34]\b|gemini|gemma-?3|kimi-k2[p.][5-9]|qwen[\d.p]*-?vl|-vl\b|vision|llama-?v?4|llama4|pixtral|glm-?4[p.]\dv|minicpm-v|internvl/.test(name);
+  return /claude|gpt-4o|gpt-4\.1|gpt-5|\bo[34]\b|gemini|gemma-?3|kimi-k2[p.][5-9]|qwen[\d.p]*-?vl|-vl\b|vision|llama-?v?4|llama4|pixtral|glm-?4[p.]\dv|deepseek-v4p1-flash|minicpm-v|internvl/.test(name);
 }
