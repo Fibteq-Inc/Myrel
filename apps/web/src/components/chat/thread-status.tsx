@@ -1,9 +1,9 @@
 import { checklistProgress, parseChecklist } from "@myrel/client";
 import type { MessageKey, Translate } from "@myrel/i18n";
-import type { Thread } from "@myrel/protocol";
-import { CircleAlert, CircleCheck, CircleDot, CirclePause, LoaderCircle } from "lucide-react";
+import type { Thread, ThreadCloseReason } from "@myrel/protocol";
+import { CircleAlert, CircleCheck, CircleDot, CircleMinus, CirclePause, LoaderCircle } from "lucide-react";
 
-type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed";
+type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed" | "closed";
 
 const STATUS: Record<StatusKey, { label: MessageKey; tone: string }> = {
   working: { label: "status.working", tone: "text-subtle" },
@@ -11,16 +11,24 @@ const STATUS: Record<StatusKey, { label: MessageKey; tone: string }> = {
   review_ready: { label: "status.reviewReady", tone: "text-warn" },
   done: { label: "status.done", tone: "text-subtle" },
   failed: { label: "status.failed", tone: "text-bad" },
+  closed: { label: "status.closedCancelled", tone: "text-subtle" },
+};
+
+/** A thread closed as opened by mistake says why. */
+const CLOSED: Record<ThreadCloseReason, MessageKey> = {
+  duplicate: "status.closedDuplicate",
+  misrouted: "status.closedMisrouted",
+  cancelled: "status.closedCancelled",
 };
 
 function statusKey(thread: Thread): StatusKey {
-  return thread.resolved ? "done" : thread.status;
+  return thread.closeReason ? "closed" : thread.resolved ? "done" : thread.status;
 }
 
 /** The thread's state in a few words, plus the color class it reads in. */
 export function threadStatus(thread: Thread, t: Translate) {
   const { label, tone } = STATUS[statusKey(thread)];
-  return { label: t(label), tone };
+  return { label: t(thread.closeReason ? CLOSED[thread.closeReason] : label), tone };
 }
 
 /**
@@ -60,5 +68,7 @@ export function ThreadStatusIcon({ thread, size = 16 }: { thread: Thread; size?:
       return <CircleCheck {...props} className="flex-none text-ok" />;
     case "failed":
       return <CircleAlert {...props} className="flex-none text-bad" />;
+    case "closed":
+      return <CircleMinus {...props} className="flex-none text-subtle" />;
   }
 }

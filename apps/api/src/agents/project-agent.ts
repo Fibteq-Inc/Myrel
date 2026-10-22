@@ -23,6 +23,7 @@ import {
   type ServerEvent,
   SYNC_PAGE_SIZE,
   type Thread,
+  type ThreadCloseReason,
   type ThreadStatus,
   type UpdateRoutineInput,
 } from "@myrel/protocol";
@@ -32,6 +33,7 @@ import { canUseCoordinator } from "../extensions";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
 import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
+import { listPullRequests } from "../github/pulls";
 import { deliverNotification, excerpt } from "../notifications/deliver";
 import {
   type CoordinatorHost,
@@ -79,6 +81,8 @@ type ThreadRow = {
   status: ThreadStatus;
   status_text: string | null;
   resolved: number;
+  close_reason: ThreadCloseReason | null;
+  duplicate_of: string | null;
   label: string | null;
   created_at: string;
   updated_at: string;
@@ -108,7 +112,9 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
   relay?: MessageRelay;
 };
 
-export type ThreadPatch = Partial<Pick<Thread, "title" | "status" | "statusText" | "resolved" | "label">>;
+export type ThreadPatch = Partial<
+  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label">
+>;
 
 /** What a thread agent reads at the start of each turn. */
 export type ThreadContext = {
@@ -133,6 +139,8 @@ const OBSERVE_DELAY_SEC = 60;
 const RELAY_HISTORY = 20;
 /** A relay between the same two threads (either way) within this window is refused, so notes cannot bounce. */
 const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+/** A person's ask that repeats one of theirs from this recently is taken for a duplicate, not a new thread. */
+const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 
 /** Most recent project-chat messages the coordinator sees each turn. */
 const COORDINATOR_HISTORY = 40;
@@ -192,6 +200,11 @@ export class ProjectAgent extends Agent<Env> {
     // Added with the coordinator's acknowledgement line.
     const threadColumns = this.sql<{ name: string }>`PRAGMA table_info(threads)`;
     if (!threadColumns.some((c) => c.name === "ack_message_id")) this.sql`ALTER TABLE threads ADD COLUMN ack_message_id TEXT`;
+    // Added with closing threads opened by mistake.
+    if (!threadColumns.some((c) => c.name === "close_reason")) {
+      this.sql`ALTER TABLE threads ADD COLUMN close_reason TEXT`;
+      this.sql`ALTER TABLE threads ADD COLUMN duplicate_of TEXT`;
+    }
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -300,6 +313,10 @@ export class ProjectAgent extends Agent<Env> {
       case "thread.resolve": {
         if (!this.getThread(event.threadId)) {
           return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
+        }
+        if (event.resolved && event.reason) {
+          await this.closeThread(event.threadId, { reason: event.reason, by: "person" });
+          return;
         }
         this.updateThread(event.threadId, {
           resolved: event.resolved,
@@ -459,11 +476,86 @@ export class ProjectAgent extends Agent<Env> {
     const current = this.getThread(id);
     if (!current) return null;
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    // A close reason only describes a closed thread: reopening it, or resolving it the usual way, clears it.
+    if (!next.resolved || (patch.resolved && patch.closeReason === undefined)) {
+      next.closeReason = null;
+      next.duplicateOf = null;
+    }
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
-      resolved = ${next.resolved ? 1 : 0}, label = ${next.label}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
+      resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
+      label = ${next.label}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
     this.syncActivity();
     return next;
+  }
+
+  /**
+   * Closes a thread that should not have been opened, without deleting anything: its running turn
+   * stops, its routines pause, and the card reads closed with the reason. Writing in it reopens it.
+   * The coordinator may only close a thread that has produced nothing a person could miss; anything
+   * else is the person's call.
+   */
+  async closeThread(
+    threadId: string,
+    input: { reason: ThreadCloseReason; duplicateOf?: string; note?: string; by: "coordinator" | "person" },
+  ): Promise<Thread> {
+    const thread = this.getThread(threadId);
+    if (!thread) throw new Error(`No thread ${threadId}.`);
+    const original = input.duplicateOf ? this.getThread(input.duplicateOf) : null;
+    if (input.duplicateOf && (!original || original.id === thread.id)) throw new Error(`No other thread ${input.duplicateOf}.`);
+    if (input.by === "coordinator") {
+      if (thread.resolved) throw new Error(`"${thread.title}" is already resolved; leave it.`);
+      const kept = await this.closeBlockers(thread);
+      if (kept.length) {
+        throw new Error(
+          `"${thread.title}" already has ${kept.join(", ")}, so only a person can close it. Leave it open; if it looks like a mistake, ask through message_thread so the thread puts it to the person.`,
+        );
+      }
+    }
+    for (const r of this.listRoutines()) {
+      if (r.target.kind === "thread" && r.target.threadId === thread.id && !r.paused) this.updateRoutine(r.id, { paused: true });
+    }
+    const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
+    await agent.close();
+    const closed = this.updateThread(thread.id, {
+      status: "done",
+      resolved: true,
+      closeReason: input.reason,
+      duplicateOf: original?.id ?? null,
+    })!;
+    this.setActivity(thread.id, false);
+    if (input.note) this.sendMessage({ threadId: thread.id, authorKind: "system", authorId: SYSTEM_ID, body: input.note });
+    return closed;
+  }
+
+  /** What a thread made that closing it could hide from people: pull requests, artifacts, routines, their own messages. */
+  private async closeBlockers(thread: Thread): Promise<string[]> {
+    const kept: string[] = [];
+    if ((await listPullRequests(this.env.DB, this.name, thread.id)).length) kept.push("a pull request");
+    if (this.artifacts.list().some((a) => a.threadId === thread.id)) kept.push("an artifact");
+    if (this.listRoutines().some((r) => r.target.kind === "thread" && r.target.threadId === thread.id)) kept.push("a routine");
+    const [people] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM messages WHERE thread_id = ${thread.id} AND author_kind = 'user'`;
+    if (people!.n > 0) kept.push("messages from people");
+    return kept;
+  }
+
+  /**
+   * A recent thread whose ask is the same as this message's: same person, same words, within
+   * DUPLICATE_WINDOW_MS, not itself closed. Catches an ask sent again before its card showed up.
+   */
+  findDuplicateThread(messageId: string): Thread | null {
+    const message = this.getMessage(messageId);
+    if (!message || message.authorKind !== "user") return null;
+    const words = sameAsk(message.body);
+    if (!words) return null;
+    const since = Date.parse(message.createdAt) - DUPLICATE_WINDOW_MS;
+    return (
+      this.listThreads().findLast((t) => {
+        if (t.closeReason || t.rootMessageId === messageId || Date.parse(t.createdAt) < since) return false;
+        const root = this.getMessage(t.rootMessageId);
+        return root?.authorKind === "user" && root.authorId === message.authorId && sameAsk(root.body) === words;
+      }) ?? null
+    );
   }
 
   /** Everything a thread agent needs for one turn. Callable over RPC. */
@@ -921,6 +1013,8 @@ export class ProjectAgent extends Agent<Env> {
         await agent.start({ projectId: this.name, threadId: thread.id, brief });
         return thread;
       },
+      findDuplicate: (messageId) => this.findDuplicateThread(messageId),
+      closeThread: (threadId, input) => this.closeThread(threadId, { ...input, by: "coordinator" }),
       messageThread: async (threadId, note, kind) => {
         const thread = this.getThread(threadId);
         // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
@@ -1094,6 +1188,8 @@ export class ProjectAgent extends Agent<Env> {
       status: r.status,
       statusText: r.status_text,
       resolved: r.resolved === 1,
+      closeReason: r.close_reason ?? null,
+      duplicateOf: r.duplicate_of ?? null,
       label: r.label,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -1116,6 +1212,14 @@ export class ProjectAgent extends Agent<Env> {
       createdAt: r.created_at,
     };
   }
+}
+
+/** An ask reduced to its words, so a resend with other casing, spacing or punctuation still matches. */
+function sameAsk(body: string): string {
+  return body
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 /** When a routine runs next: the next cron match, or a one-off time that has not run yet. */

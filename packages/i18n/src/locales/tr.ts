@@ -176,6 +176,9 @@ export const tr: Catalog = {
   "status.reviewReady": "Seni bekliyor",
   "status.done": "Çözüldü",
   "status.failed": "Başarısız",
+  "status.closedDuplicate": "Kopya, kapatıldı",
+  "status.closedMisrouted": "Kapatıldı, başka thread'de",
+  "status.closedCancelled": "Kapatıldı",
 
   // Thread view
   "thread.loading": "Thread yükleniyor",

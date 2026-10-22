@@ -3,7 +3,7 @@ import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
-import { MAX_MESSAGE_LENGTH, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadId } from "./models";
+import { MAX_MESSAGE_LENGTH, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
@@ -17,8 +17,13 @@ export const ClientEvent = z.discriminatedUnion("type", [
     /** Paths of files already uploaded to the project files (see POST /uploads). */
     attachments: z.array(FilePath).max(MAX_ATTACHMENTS).default([]),
   }).refine((e) => e.body.length > 0 || e.attachments.length > 0, "Write something or attach a file"),
-  /** A person marks a thread resolved, or reopens it. */
-  z.object({ type: z.literal("thread.resolve"), threadId: ThreadId, resolved: z.boolean() }),
+  /** A person marks a thread resolved (optionally closing it with a reason), or reopens it. */
+  z.object({
+    type: z.literal("thread.resolve"),
+    threadId: ThreadId,
+    resolved: z.boolean(),
+    reason: ThreadCloseReason.optional(),
+  }),
   z.object({
     type: z.literal("sync"),
     /** Return messages with seq strictly greater than this. 0 = from the start. */

@@ -181,6 +181,85 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("refuses a second thread for the same ask sent again", async () => {
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      if (req.turns === 1) {
+        const message_id = newMessageId(req.prompt);
+        return {
+          text: "",
+          toolCalls: [call("start_thread", { message_id, title: "Test PR", instructions: "Open a test PR.", project_ack: "Başlıyorum." })],
+        };
+      }
+      // After the refusal, the coordinator says so instead.
+      if (req.turns === 3 && req.prompt.includes("küçük bir test")) {
+        return { text: "", toolCalls: [call("post_message", { text: "Zaten o thread'de." })] };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "Küçük bir test PR'ı oluşturur musun?" }));
+    await until(async () => (await agent.listThreads())[0] ?? null, "first thread");
+    ws.send(JSON.stringify({ type: "message.send", body: "küçük bir test PR'ı oluşturur musun" }));
+    await until(
+      async () => (await agent.getMessagesAfter(0)).messages.find((m) => m.body === "Zaten o thread'de.") ?? null,
+      "refusal handled",
+    );
+    expect(await agent.listThreads()).toHaveLength(1);
+    ws.close();
+  });
+
+  it("lets the coordinator close a thread it opened by mistake, and reopens it on a reply", async () => {
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      // After close_thread refused, the coordinator leaves it.
+      if (req.turns === 3 && req.prompt.includes("Boşver yine")) {
+        return { text: "", toolCalls: [call("post_message", { text: "Açık bıraktım." })] };
+      }
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const message_id = newMessageId(req.prompt);
+      const open = /↳ thread \[(thr_[0-9A-Z]{26})\]/.exec(req.prompt)?.[1];
+      if (open && req.prompt.includes("Boşver")) {
+        return { text: "", toolCalls: [call("close_thread", { thread_id: open, reason: "cancelled", note: "Bunu kapattım." })] };
+      }
+      return {
+        text: "",
+        toolCalls: [call("start_thread", { message_id, title: "X", instructions: "Do X.", project_ack: "Başlıyorum." })],
+      };
+    });
+    const { ws, agent } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "X'i yap" }));
+    const opened = await until(async () => {
+      const t = (await agent.listThreads())[0];
+      return t?.status === "review_ready" ? t : null;
+    }, "thread");
+    ws.send(JSON.stringify({ type: "message.send", body: "Boşver, gerek yok" }));
+
+    const closed = await until(async () => {
+      const t = (await agent.getThread(opened.id))!;
+      return t.closeReason ? t : null;
+    }, "closed");
+    expect(closed).toMatchObject({ resolved: true, status: "done", closeReason: "cancelled", duplicateOf: null });
+    const all = (await agent.getMessagesAfter(0)).messages;
+    expect(all.filter((m) => m.threadId === null).map((m) => m.body)).toContain("Bunu kapattım.");
+    expect(all.find((m) => m.threadId === opened.id && m.authorKind === "system")?.body).toBe("Bunu kapattım.");
+    expect(await agent.listThreads()).toHaveLength(1);
+
+    // Writing in it opens it again, without the close reason.
+    ws.send(JSON.stringify({ type: "message.send", threadId: opened.id, body: "Aslında yap" }));
+    const reopened = await until(async () => {
+      const t = (await agent.getThread(opened.id))!;
+      return t.resolved ? null : t;
+    }, "reopened");
+    expect(reopened.closeReason).toBeNull();
+
+    // Now that a person wrote in it, only a person may close it.
+    ws.send(JSON.stringify({ type: "message.send", body: "Boşver yine" }));
+    await until(async () => (await agent.getMessagesAfter(0)).messages.find((m) => m.body === "Açık bıraktım.") ?? null, "refused");
+    expect((await agent.getThread(opened.id))!.resolved).toBe(false);
+    ws.close();
+  });
+
   it("wakes the thread agent on a reply in the thread, and lets it ask the coordinator", async () => {
     const requests: string[] = [];
     setFakeModel((req) => {

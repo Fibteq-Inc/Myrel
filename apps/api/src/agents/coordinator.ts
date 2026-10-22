@@ -1,4 +1,4 @@
-import { type Message, type MessageRelay, type Routine, type Thread, threadLink } from "@myrel/protocol";
+import { type Message, type MessageRelay, type Routine, type Thread, ThreadCloseReason, threadLink } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
@@ -32,6 +32,10 @@ export type CoordinatorHost = {
     ack?: string;
     projectAck?: string;
   }): Promise<Thread>;
+  /** A recent thread the same person opened with the same ask, if this message repeats one. */
+  findDuplicate(messageId: string): Thread | null;
+  /** Closes a thread opened by mistake. Throws when it already holds work only a person may set aside. */
+  closeThread(threadId: string, input: { reason: ThreadCloseReason; duplicateOf?: string; note?: string }): Promise<Thread>;
   /** follow_up forwards a person's follow-up; reply answers the thread's request. */
   messageThread(threadId: string, note: string, kind: "follow_up" | "reply"): Promise<void>;
   /** Tell an open thread what another thread's work means for it. Throws when the relay would repeat or bounce. */
@@ -48,6 +52,8 @@ For each new message in the project chat:
   - ack is the thread's opening line, saying what is being done first.
   - Do not also call post_message for it; project_ack is that post.
 - A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread, with the thread written as a link people can tap to open it: [thread title](#thread_id), for example "Passed this on to the [Calculator](#thr_…) thread". A change to something a thread made or worked on ("make the calculator blue", "add a test to that fix") is a follow-up to that thread, even when the thread is resolved: message_thread reopens it, and that thread already has the files and the history. Start a new thread only for work no existing thread covers.
+- The same ask sent again (a resend while the first thread is still starting, a double tap): it is not new work. start_thread refuses it and names the thread that already has it; send it there with message_thread as a follow-up, unless the person clearly wants the work done a second time.
+- A thread you opened by mistake (a duplicate of another thread, or work another thread already covers, or an ask the person took back): call close_thread with the reason and one short line for the person, linking the thread that carries the work. Closing deletes nothing and writing in the thread reopens it. You may only close a thread that has made nothing yet (no pull request, artifact or routine, no messages from people); close_thread refuses the rest, and then the person decides.
 - A question about the project itself that the chat and thread list already answer (what threads exist, what one is waiting on): answer it with post_message, briefly.
 - A greeting or FYI with nothing to do: one short post_message, or a react.
 - Thanks or a sign-off: react with an emoji and nothing else.
@@ -198,6 +204,10 @@ export function coordinatorTools(
         title: z.string().min(1).max(80).describe("A few words naming what the thread is about."),
         instructions: z.string().min(1).max(8000).describe("The brief for the thread agent."),
         ack: z.string().max(400).optional().describe("One line posted as the thread's opening message."),
+        allow_duplicate: z
+          .boolean()
+          .optional()
+          .describe("Only when the person clearly asks for the same work again, as a separate thread."),
         project_ack: z
           .string()
           .max(200)
@@ -206,11 +216,17 @@ export function coordinatorTools(
             "One short line posted in the project chat under the person's message, saying you got it and are starting. Required when the message is a person's.",
           ),
       }),
-      run: async ({ message_id, title, instructions, ack, project_ack }) => {
+      run: async ({ message_id, title, instructions, ack, project_ack, allow_duplicate }) => {
         const root = host.getMessage(message_id);
         if (!root || root.threadId) throw new Error(`${message_id} is not a project-chat message.`);
         const existing = host.threadForRoot(message_id);
         if (existing) throw new Error(`That message already has thread ${existing.id}; use message_thread.`);
+        const original = allow_duplicate ? null : host.findDuplicate(message_id);
+        if (original) {
+          throw new Error(
+            `This repeats the ask behind thread ${original.id} "${original.title}" from a few minutes ago. Send it there with message_thread and a project_ack linking that thread; pass allow_duplicate only if the person wants the work done again.`,
+          );
+        }
         // A person's ask always gets a visible "on it" line, not just a card.
         const projectAck = project_ack?.trim() || undefined;
         if (root.authorKind === "user" && !projectAck) {
@@ -218,6 +234,32 @@ export function coordinatorTools(
         }
         const thread = await host.startThread({ rootMessageId: message_id, title, brief: instructions, ack, projectAck });
         return `Started thread ${thread.id}.`;
+      },
+    }),
+    tool({
+      name: "close_thread",
+      description:
+        "Close a thread you opened by mistake: a duplicate of another thread, work another thread covers, or an ask the person took back. Nothing is deleted, and writing in it reopens it.",
+      input: z.object({
+        thread_id: z.string(),
+        reason: ThreadCloseReason.describe(
+          "duplicate: the same ask as another thread. misrouted: another thread covers it. cancelled: the person took it back.",
+        ),
+        duplicate_of: z.string().optional().describe("The thread that carries the work, for duplicate and misrouted."),
+        note: z
+          .string()
+          .min(1)
+          .max(300)
+          .describe(
+            "One short line for the person, posted in the project chat and in the closed thread, e.g. \"Same ask as [Test PR](#thr_…); I kept that one.\"",
+          ),
+      }),
+      run: async ({ thread_id, reason, duplicate_of, note }) => {
+        const thread = await host.closeThread(thread_id, { reason, duplicateOf: duplicate_of, note });
+        const original = duplicate_of ? host.getThread(duplicate_of) : null;
+        // People should be one tap from the thread that carries the work.
+        host.post(!original || note.includes(`(#${original.id})`) ? note : `${note} ${threadLink(original)}`);
+        return `Closed ${thread.id}.`;
       },
     }),
     tool({

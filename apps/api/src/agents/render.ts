@@ -31,7 +31,11 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
 }
 
 export function renderThread(t: Thread): string {
-  const state = t.resolved ? "resolved" : t.status;
+  const state = t.closeReason
+    ? `closed (${t.closeReason}${t.duplicateOf ? ` of ${t.duplicateOf}` : ""})`
+    : t.resolved
+      ? "resolved"
+      : t.status;
   return `- [${t.id}] "${t.title}" · ${state} · started on ${t.rootMessageId}`;
 }
 

@@ -1,11 +1,11 @@
 import { parseChecklist } from "@myrel/client";
 import type { MessageKey } from "@myrel/i18n";
-import type { Thread } from "@myrel/protocol";
-import { CircleAlert, CircleCheck, CircleDot, CirclePause } from "lucide-react-native";
+import type { Thread, ThreadCloseReason } from "@myrel/protocol";
+import { CircleAlert, CircleCheck, CircleDot, CircleMinus, CirclePause } from "lucide-react-native";
 import { colors } from "../theme";
 import { Spinner } from "./ui";
 
-type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed";
+type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed" | "closed";
 
 const STATUS: Record<StatusKey, { label: MessageKey; color: string }> = {
   working: { label: "status.working", color: colors.subtle },
@@ -13,10 +13,18 @@ const STATUS: Record<StatusKey, { label: MessageKey; color: string }> = {
   review_ready: { label: "status.reviewReady", color: colors.warn },
   done: { label: "status.done", color: colors.subtle },
   failed: { label: "status.failed", color: colors.bad },
+  closed: { label: "status.closedCancelled", color: colors.subtle },
+};
+
+/** A thread closed as opened by mistake says why. */
+const CLOSED: Record<ThreadCloseReason, MessageKey> = {
+  duplicate: "status.closedDuplicate",
+  misrouted: "status.closedMisrouted",
+  cancelled: "status.closedCancelled",
 };
 
 function statusKey(thread: Thread): StatusKey {
-  return thread.resolved ? "done" : thread.status;
+  return thread.closeReason ? "closed" : thread.resolved ? "done" : thread.status;
 }
 
 type Translate = (key: MessageKey) => string;
@@ -24,7 +32,7 @@ type Translate = (key: MessageKey) => string;
 /** The thread's state in a few words, plus the color it reads in. */
 export function threadStatus(thread: Thread, t: Translate) {
   const s = STATUS[statusKey(thread)];
-  return { label: t(s.label), color: s.color };
+  return { label: t(thread.closeReason ? CLOSED[thread.closeReason] : s.label), color: s.color };
 }
 
 /** What the thread is doing right now: its active checklist step, else its status. */
@@ -48,5 +56,7 @@ export function ThreadStatusIcon({ thread, size = 16 }: { thread: Thread; size?:
       return <CircleCheck size={size} color={colors.ok} />;
     case "failed":
       return <CircleAlert size={size} color={colors.bad} />;
+    case "closed":
+      return <CircleMinus size={size} color={colors.subtle} />;
   }
 }
