@@ -11,7 +11,7 @@ Shared values:
 |---|---|
 | App name | Myrel |
 | Website | https://myrel.fibteq.io |
-| Support | https://myrel.fibteq.io/support/ · myrel@fibteq.app |
+| Support | https://myrel.fibteq.io/support/ · myrel@fibteq.io |
 | Privacy policy | https://myrel.fibteq.io/privacy/ |
 | Terms | https://myrel.fibteq.io/terms/ |
 | Account deletion | https://myrel.fibteq.io/delete-account/ |
@@ -19,7 +19,7 @@ Shared values:
 
 ## Google Play: main store listing
 
-Category **Productivity**, tags: AI assistant, Productivity, Developer tools. Contact email myrel@fibteq.app,
+Category **Productivity**, tags: AI assistant, Productivity, Developer tools. Contact email myrel@fibteq.io,
 website https://myrel.fibteq.io.
 
 Graphics: icon `../assets/icon.png` scaled to 512x512, feature graphic `screenshots/feature-graphic-<lang>.png`,
@@ -171,6 +171,21 @@ each with a 7-day free trial. The build needs `EXPO_PUBLIC_REVENUECAT_IOS_KEY` a
 `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY` in the EAS environment; without them the app shows no purchase
 buttons. Review note for Apple: "Pro can be bought in Settings > Plan and billing. The demo account
 is on Free."
+
+## App Store: graphics
+
+The Play images (`android-phone/`, 1080x1920, and the feature graphics) are rejected by App Store
+Connect; use these instead (PNG, RGB, no alpha):
+
+| App Store Connect slot | Size | Folder |
+|---|---|---|
+| iPhone 6.9" display (covers every iPhone size) | 1320x2868 | `screenshots/ios-6.9/<lang>/` |
+| iPad 13" display (needed because `supportsTablet` is on) | 2064x2752 | `screenshots/ios-ipad-13/<lang>/` |
+| App icon | 1024x1024, no alpha | taken from the build (`../assets/icon.png`) |
+
+The App Store has no header or feature graphic. Search results show the icon, name, subtitle and the
+first three screenshots, so `01`-`03` are the ones that sell the app. `metadata:push` uploads the
+screenshots together with the texts.
 
 ## App Store: things `metadata:push` does not set
 

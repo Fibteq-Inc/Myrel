@@ -22,7 +22,7 @@ const tr = {
   title: NAME,
   subtitle: "Yapay zekâ ajanlarıyla çalış",
   promoText: "Projeni anlat, işi thread'lere bölen koordinatör ve görevleri yürüten ajanlar gerisini halletsin. Karar gerektiğinde telefonuna bildirim gelir.",
-  keywords: ["yapay zeka", "ajan", "AI", "proje", "kod", "github", "asistan", "ekip", "otomasyon", "claude", "görev"],
+  keywords: ["yapay zeka", "ajan", "AI", "proje", "kod", "github", "asistan", "ekip", "otomasyon", "sohbet", "görev"],
   description: `${NAME}, projelerinde yapay zekâ ajanlarıyla birlikte çalıştığın bir çalışma alanı.
 
 Projene ne istediğini yaz; koordinatör işi parçalara ayırır ve her parça için bir thread açar. Her thread'de bir ajan araştırır, kod yazar, pull request açar, belge ve artifact üretir. Sen de nerede olursan ol ilerlemeyi takip edersin.
@@ -49,7 +49,7 @@ const en = {
   title: NAME,
   subtitle: "Work alongside your AI agents",
   promoText: "Describe the work; a coordinator splits it into threads and agents carry out each one. When a decision needs you, it lands on your phone.",
-  keywords: ["AI", "agents", "assistant", "projects", "coding", "github", "team", "automation", "claude", "tasks", "workflow"],
+  keywords: ["assistant", "chatbot", "projects", "coding", "developer", "github", "team", "automation", "tasks", "workflow", "productivity"],
   description: `${NAME} is a workspace where you work on projects together with AI agents.
 
 Tell your project what you need; the coordinator breaks the work down and opens a thread for each part. In every thread an agent researches, writes code, opens pull requests and produces documents and artifacts, while you follow along from wherever you are.
