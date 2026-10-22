@@ -1,4 +1,4 @@
-import { formatPlan, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
+import { formatPlan, formatPlanUpdate, isPlanMessage, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
@@ -107,6 +107,53 @@ describe("coordinator and thread agent", () => {
     await until(() => events.some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active), "idle");
     expect(events.some((e) => e.type === "thread.updated" && e.thread.id === thread.id)).toBe(true);
     expect(project.id).toBe(thread.projectId);
+    ws.close();
+  });
+
+  it("notes plan steps added while the plan card sits further up, one note for changes in a row", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [
+          call("start_thread", { message_id: newMessageId(req.prompt), title: "Fix", instructions: "Fix it.", project_ack: "Tamam." }),
+        ],
+      };
+    });
+    const plan = (...steps: [string, string][]) => ({ title: "Fix", steps: steps.map(([text, state]) => ({ text, state })) });
+    const play: Play = async (turn) => {
+      await turn.call("update_plan", plan(["Read", "active"], ["Fix", "todo"]));
+      // The card is still the last message: an added step is in view, no note.
+      await turn.call("update_plan", plan(["Read", "active"], ["Fix", "todo"], ["Test", "todo"]));
+      await turn.call("reply", { text: "Read the code." });
+      // Ticks alone make no note.
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "active"], ["Test", "todo"]));
+      // Now the card is behind the reply: a note, then a second change lands in the same note.
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "active"], ["Test", "todo"], ["Mobile", "todo"]));
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "failed"], ["Mobile", "todo"], ["Docs", "todo"]));
+      await turn.call("reply", { text: "Fix failed." });
+      // After another message, a new note.
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "failed"], ["Mobile", "todo"], ["Docs", "todo"], ["Retry", "active"]));
+      return "Done.";
+    };
+
+    const { ws, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "Fix it" }));
+    const thread = await until(async () => {
+      const t = (await agent.listThreads())[0];
+      return t?.status === "review_ready" ? t : null;
+    }, "thread done");
+
+    const ctx = (await agent.getThreadContext(thread.id))!;
+    expect(ctx.messages.filter((m) => m.authorId === "thread-agent").map((m) => m.body)).toEqual([
+      formatPlan("Fix\n\n✓ Read\n✗ Fix\n○ Mobile\n○ Docs\n✱ Retry"),
+      "Read the code.",
+      formatPlanUpdate({ added: ["Mobile", "Docs"], removed: ["Test"], failed: ["Fix"] }),
+      "Fix failed.",
+      formatPlanUpdate({ added: ["Retry"], removed: [], failed: [] }),
+    ]);
+    // The notes are the plan's bookkeeping, not replies.
+    expect(ctx.messages.filter((m) => m.authorId === "thread-agent" && !isPlanMessage(m.body))).toHaveLength(2);
     ws.close();
   });
 

@@ -1,3 +1,4 @@
+import type { PlanUpdate } from "@myrel/protocol";
 import { z } from "zod";
 
 /**
@@ -57,4 +58,40 @@ export function composeStatus(plan: Plan | null, task: string | null): string | 
   // Steps start after the header and the blank line.
   lines.splice(at + 3, 0, ...nested);
   return lines.join("\n");
+}
+
+/** The plan's own steps in checklist text (not a task's nested ones), by text, with their marks. */
+function topSteps(checklist: string): Map<string, string> {
+  const steps = new Map<string, string>();
+  for (const line of checklist.split("\n").slice(1)) {
+    if (!line || line.startsWith(" ")) continue;
+    steps.set(line.slice(1).trim(), line[0]!);
+  }
+  return steps;
+}
+
+/** What changed in the plan's shape from one checklist to the next: steps added, dropped or newly failed. */
+export function planChanges(prev: string, next: string): PlanUpdate {
+  const before = topSteps(prev);
+  const after = topSteps(next);
+  return {
+    added: [...after.keys()].filter((s) => !before.has(s)),
+    removed: [...before.keys()].filter((s) => !after.has(s)),
+    failed: [...after].filter(([s, mark]) => mark === "✗" && before.has(s) && before.get(s) !== "✗").map(([s]) => s),
+  };
+}
+
+export function hasChanges(u: PlanUpdate): boolean {
+  return u.added.length + u.removed.length + u.failed.length > 0;
+}
+
+/** Two updates in a row as one note: a step added then dropped is no change at all. */
+export function mergePlanUpdates(a: PlanUpdate, b: PlanUpdate): PlanUpdate {
+  const union = (x: string[], y: string[]) => [...new Set([...x, ...y])];
+  const removed = union(a.removed.filter((s) => !b.added.includes(s)), b.removed.filter((s) => !a.added.includes(s)));
+  return {
+    added: union(a.added.filter((s) => !b.removed.includes(s)), b.added.filter((s) => !a.removed.includes(s))),
+    removed,
+    failed: union(a.failed, b.failed).filter((s) => !removed.includes(s) && !b.removed.includes(s)),
+  };
 }

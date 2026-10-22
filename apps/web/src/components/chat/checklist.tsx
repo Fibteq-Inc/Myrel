@@ -1,7 +1,8 @@
 import { type ChecklistItem, checklistProgress, freshSteps, parseChecklist } from "@myrel/client";
+import type { PlanUpdate } from "@myrel/protocol";
 import { useT } from "@myrel/i18n/react";
-import { ChevronDown, CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useId, useReducer, useState } from "react";
+import { ChevronDown, CircleCheck, CircleDashed, CircleMinus, CircleX, ListChecks, LoaderCircle } from "lucide-react";
+import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 import { cn } from "../../lib/ui";
 
 /**
@@ -113,25 +114,31 @@ export function PlanProgress({
   planKey,
   text,
   live,
+  open,
+  onOpenChange,
   onJump,
 }: {
   /** Which plan this is (thread and plan title), so new steps are told apart per plan. */
   planKey: string;
   text: string;
   live: boolean;
+  /** Whether the whole plan is open under the line; a plan update note can open it too. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   /** Scrolls to the plan card in the conversation. */
   onJump?: () => void;
 }) {
   const t = useT();
   const panelId = useId();
-  const [open, setOpen] = useState(false);
   const { title, items } = parseChecklist(text);
   const { fresh, markSeen } = useFreshSteps(planKey, items);
-  const toggle = useCallback(() => {
-    // Closing the panel is when the person has seen the new steps.
-    if (open) markSeen();
-    setOpen(!open);
-  }, [open, markSeen]);
+  // Closing the panel is when the person has seen the new steps.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) markSeen();
+    wasOpen.current = open;
+  });
+  const toggle = useCallback(() => onOpenChange(!open), [open, onOpenChange]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && toggle();
@@ -203,6 +210,69 @@ export function PlanProgress({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * A note at the end of the conversation that the agent added, dropped or failed
+ * plan steps while the plan card sat further up. It reads as one line; opening
+ * it shows just what changed, and from there the whole plan.
+ */
+export function PlanUpdateNote({ update, onOpenPlan }: { update: PlanUpdate; onOpenPlan?: () => void }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const parts = [
+    update.added.length > 0 && <span className="text-accent">{t("planUpdate.added", { count: update.added.length })}</span>,
+    update.removed.length > 0 && <span>{t("planUpdate.removed", { count: update.removed.length })}</span>,
+    update.failed.length > 0 && <span className="text-bad">{t("planUpdate.failed", { count: update.failed.length })}</span>,
+  ].filter(Boolean);
+  const rows: [string, string, string][] = [
+    ...update.added.map((s): [string, string, string] => ["+", s, "text-fg"]),
+    ...update.removed.map((s): [string, string, string] => ["−", s, "text-subtle line-through decoration-subtle"]),
+    ...update.failed.map((s): [string, string, string] => ["✗", s, "text-bad"]),
+  ];
+  return (
+    <div className="flex gap-3.5">
+      {/* Lines up with the agent's messages, under its mark. */}
+      <span className="w-7 flex-none" aria-hidden="true" />
+      <div className="min-w-0 flex-1 rounded-xl border border-dashed border-edge text-xs text-muted">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:text-fg"
+        >
+          <ListChecks size={13} className="flex-none text-subtle" aria-hidden="true" />
+          <span className="min-w-0 truncate">
+            {t("planUpdate.title")}
+            {parts.map((p, i) => (
+              <span key={i}>
+                {" · "}
+                {p}
+              </span>
+            ))}
+          </span>
+          <ChevronDown size={13} className={cn("ml-auto flex-none text-subtle transition-transform", open && "rotate-180")} aria-hidden="true" />
+        </button>
+        {open && (
+          <div className="flex flex-col gap-1.5 px-3 pb-2.5">
+            <ul className="flex flex-col gap-1 text-[13px]">
+              {rows.map(([mark, step, cls], i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="w-3.5 flex-none text-center text-subtle">{mark}</span>
+                  <span className={cls}>{step}</span>
+                </li>
+              ))}
+            </ul>
+            {onOpenPlan && (
+              <button type="button" onClick={onOpenPlan} className="self-start text-accent hover:underline">
+                {t("planUpdate.openPlan")}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -9,6 +9,8 @@ import {
   createId,
   formatConnectorSuggestion,
   formatPlan,
+  formatPlanUpdate,
+  type PlanUpdate,
   type MessageStats,
   type SkillBundle,
   type Task,
@@ -67,7 +69,7 @@ import {
 } from "./folder-access";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
-import { composeStatus, type Plan } from "./plan";
+import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
@@ -1404,6 +1406,7 @@ export class ThreadAgent extends Agent<Env> {
     const titleOf = (text: string) => text.split("\n", 1)[0];
     if (cardId && shown !== null && titleOf(shown) === titleOf(statusText)) {
       await project.editMessage(cardId, formatPlan(statusText));
+      await this.notePlanChanges(projectId, threadId, cardId, planChanges(shown, statusText));
     } else {
       const card = await project.sendMessage({
         threadId,
@@ -1412,8 +1415,36 @@ export class ThreadAgent extends Agent<Env> {
         body: formatPlan(statusText),
       });
       this.setMeta("plan_card_id", card.id);
+      // A new plan has its own card at the end; notes about the old one are done.
+      this.deleteMeta("plan_update_id");
+      this.deleteMeta("plan_update");
     }
     this.setMeta("plan_card_text", statusText);
+  }
+
+  /**
+   * Steps added, dropped or failed while the plan card sits further up the
+   * conversation get a note at the end, so nobody has to scroll up to see the
+   * plan changed. Changes in a row land in the same note; ticks never make one.
+   */
+  private async notePlanChanges(projectId: string, threadId: string, cardId: string, changes: PlanUpdate) {
+    if (!hasChanges(changes)) return;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const last = await project.lastThreadMessageId(threadId);
+    // The card is the last thing in the conversation, so the change is in view already.
+    if (last === cardId) return;
+    const noteId = this.getMeta("plan_update_id");
+    const shown = this.getMeta("plan_update");
+    if (noteId && last === noteId && shown) {
+      const merged = mergePlanUpdates(JSON.parse(shown) as PlanUpdate, changes);
+      this.setMeta("plan_update", JSON.stringify(merged));
+      // Changes that cancel out leave the note as it was rather than empty.
+      if (hasChanges(merged)) await project.editMessage(noteId, formatPlanUpdate(merged));
+      return;
+    }
+    const note = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatPlanUpdate(changes) });
+    this.setMeta("plan_update_id", note.id);
+    this.setMeta("plan_update", JSON.stringify(changes));
   }
 
   private ids() {
