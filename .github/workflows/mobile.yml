@@ -82,7 +82,7 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         if: steps.wanted.outputs.build == 'true'
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: pnpm
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         if: steps.wanted.outputs.build == 'true' && matrix.platform == 'android'
