@@ -46,6 +46,20 @@ export interface LocalComputer {
   onStatus(listener: (status: ComputerStatus) => void): () => void;
 }
 
+/** A newer release of the app, ready to download. */
+export type AppUpdate = {
+  version: string;
+  /** Downloads and installs the update, then restarts the app. */
+  install(): Promise<void>;
+};
+
+/** The installed app's version and its updates (desktop only). */
+export interface AppUpdater {
+  version(): Promise<string>;
+  /** The newer release, or null when this is the latest one. */
+  check(): Promise<AppUpdate | null>;
+}
+
 /**
  * Everything the UI needs from its host. apps/web uses `webPlatform()`; the
  * desktop shell (Tauri) and mobile app (Expo) provide their own, backed by the
@@ -61,6 +75,8 @@ export interface Platform {
   pickFiles(options?: { multiple?: boolean; accept?: string[] }): Promise<PickedFile[]>;
   /** Desktop only: this computer as a runner for local folders. */
   computer?: LocalComputer;
+  /** Desktop only: the app's version and in-app updates. */
+  updater?: AppUpdater;
 }
 
 /** Key/value store over Web Storage; falls back to memory when storage is blocked. */

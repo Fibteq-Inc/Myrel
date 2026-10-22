@@ -3,9 +3,10 @@ import { useI18n, useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
+import { AppUpdateSection } from "../../../components/app-update";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
-import { api, meQuery, sessionQuery } from "../../../lib/api";
+import { api, meQuery, platform, sessionQuery } from "../../../lib/api";
 import { currentPushSubscription } from "../../../lib/push";
 import { Button, errorMessage, Input } from "../../../lib/ui";
 
@@ -122,6 +123,8 @@ function AccountSettings() {
           </Select>
         </div>
       </Section>
+
+      {platform.updater && <AppUpdateSection updater={platform.updater} />}
 
       <DeleteAccount email={me.email} />
     </>
