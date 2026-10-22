@@ -349,7 +349,7 @@ export class ThreadAgent extends Agent<Env> {
     this.sql`UPDATE routine_runs SET seen = 1`;
     this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
-    const prompt = threadPrompt({
+    const promptInput = {
       ...ctx,
       brief: this.getMeta("brief") ?? "",
       lastSeenSeq,
@@ -360,10 +360,11 @@ export class ThreadAgent extends Agent<Env> {
       githubEvents,
       pullRequests: await listPullRequests(this.env.DB, projectId, threadId),
       now: new Date(),
-    });
+    };
     const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
     await this.startAgentTurn({
-      prompt,
+      prompt: threadPrompt(promptInput),
+      followUp: threadPrompt({ ...promptInput, followUp: true }),
       requester,
       place,
       timezone: ctx.defaultTimezone,
@@ -387,6 +388,8 @@ export class ThreadAgent extends Agent<Env> {
    */
   private async startAgentTurn(input: {
     prompt: string;
+    /** The same, with only what is new since the last turn, for a CLI session that continues it. */
+    followUp: string;
     place: Exclude<TaskPlace, { kind: "error" }>;
     timezone: string;
     language: string;
@@ -413,6 +416,9 @@ export class ThreadAgent extends Agent<Env> {
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
+    // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
+    const previousTask = this.getMeta("agent_last_task");
+    this.setMeta("agent_last_task", taskId);
     const turn: AgentTurn = {
       pending: [],
       replied: false,
@@ -450,7 +456,15 @@ export class ThreadAgent extends Agent<Env> {
               : { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env: await readSecrets(this.env, { id: c.id, secret: c.secret }) },
           ),
         );
-        const agent = { mcpPath, token, ...(local.length && { connectors: local }), ...(skills.length && { skills: { path: `${mcpPath}/skills` } }) };
+        const resume =
+          previousTask && input.followUp.length <= MAX_AGENT_PROMPT ? { after: previousTask, prompt: agentPrompt(agentPlace, input.followUp, infos, skills) } : undefined;
+        const agent = {
+          mcpPath,
+          token,
+          ...(local.length && { connectors: local }),
+          ...(skills.length && { skills: { path: `${mcpPath}/skills` } }),
+          ...(resume && { resume }),
+        };
         const backend = localBackend(this.env, { projectId, threadId, workspace, agent });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);

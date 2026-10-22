@@ -197,7 +197,7 @@ const claude: CliAdapter = {
 const codex: CliAdapter = {
   id: "codex",
   bin: "codex",
-  args: ({ access, extra = [], dirs = [] }) => [
+  args: ({ access, resume, extra = [], dirs = [] }) => [
     "exec",
     "--json",
     "--skip-git-repo-check",
@@ -206,6 +206,8 @@ const codex: CliAdapter = {
     { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" }[access],
     ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...extra,
+    // exec's own flags go before its resume subcommand, which takes the session and the prompt.
+    ...(resume ? ["resume", resume] : []),
     "-",
   ],
   // Config overrides for one run; the token stays in the environment.

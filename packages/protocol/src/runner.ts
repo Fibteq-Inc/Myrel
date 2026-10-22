@@ -198,6 +198,12 @@ export const ServerToRunner = z.discriminatedUnion("type", [
          * with the run's token), for the CLI to find in a folder of the run.
          */
         skills: z.object({ path: z.string().regex(/^\/api\/[\w/-]+$/).max(300) }).optional(),
+        /**
+         * A shorter prompt for a CLI session that continues the thread's last turn, `after` (that
+         * turn's task id): the same instructions, but only what is new in the thread since then, as
+         * the session already holds the rest. Older runners ignore it and send `prompt`.
+         */
+        resume: z.object({ after: TaskId, prompt: z.string().min(1).max(MAX_TASK_TEXT) }).optional(),
       })
       .optional(),
   }),
@@ -211,6 +217,8 @@ export const ServerToRunner = z.discriminatedUnion("type", [
   z.object({ type: z.literal("folder.unshare"), requestId: RunnerRequestId, path: z.string().min(1).max(1024) }),
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunner>;
+/** What a task.start gives a CLI that runs as the thread's agent. */
+export type AgentStart = NonNullable<Extract<ServerToRunner, { type: "task.start" }>["agent"]>;
 
 // ---- REST ------------------------------------------------------------------
 
