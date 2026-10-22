@@ -1,17 +1,28 @@
 import { useT } from "@myrel/i18n/react";
-import type { ProjectFile } from "@myrel/protocol";
+import { MAX_MESSAGE_LENGTH, type ProjectFile } from "@myrel/protocol";
 import { ArrowUp, Paperclip } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { errorMessage } from "../../lib/ui";
 import { PendingAttachments } from "../files";
 
-type Pending = { id: string; name: string; file?: ProjectFile; error?: string };
+/** `text` is set for a long paste that was turned into a file, so it can go back into the message. */
+type Pending = { id: string; name: string; file?: ProjectFile; error?: string; text?: string };
+
+/** A paste this long becomes a .txt attachment instead of filling the message. */
+const LONG_PASTE_CHARS = 4000;
+const LONG_PASTE_LINES = 80;
+
+function isLongPaste(text: string): boolean {
+  return text.length > LONG_PASTE_CHARS || text.split("\n").length > LONG_PASTE_LINES;
+}
 
 /**
  * The message box: grows with the text, Enter sends, Shift+Enter breaks the
  * line. `tools` renders in the bottom bar, left of Send (attachments, model
  * picker and the like plug in there). With `onUpload`, files can be attached
  * (paperclip, paste or drop); they upload right away and are sent by path.
+ * A long text paste is attached as a .txt file the same way, with a way to
+ * put it back into the message.
  */
 export function Composer({
   placeholder,
@@ -37,16 +48,31 @@ export function Composer({
   const uploading = pending.some((p) => !p.file && !p.error);
   const ready = pending.flatMap((p) => (p.file ? [p.file.path] : []));
 
-  function attach(files: File[]) {
+  function attach(files: File[], text?: string) {
     if (!onUpload) return;
     for (const file of files) {
       const id = crypto.randomUUID();
-      setPending((list) => [...list, { id, name: file.name }]);
+      setPending((list) => [...list, { id, name: file.name, text }]);
       onUpload(file).then(
         (uploaded) => setPending((list) => list.map((p) => (p.id === id ? { ...p, file: uploaded } : p))),
         (err) => setPending((list) => list.map((p) => (p.id === id ? { ...p, error: errorMessage(err, t) } : p))),
       );
     }
+  }
+
+  function attachText(text: string) {
+    const time = new Date().toTimeString().slice(0, 8).replaceAll(":", "-");
+    const name = t("composer.pastedFileName", { time });
+    attach([new File([text], name, { type: "text/plain" })], text);
+  }
+
+  /** Puts a pasted file's text back into the message (the uploaded copy stays in the project files). */
+  function inline(id: string) {
+    const item = pending.find((p) => p.id === id);
+    if (item?.text === undefined) return;
+    setPending((list) => list.filter((p) => p.id !== id));
+    setDraft((d) => (d ? `${d}\n${item.text}` : item.text!));
+    ref.current?.focus();
   }
 
   // Grow with the text, up to a cap.
@@ -85,16 +111,28 @@ export function Composer({
         className="flex cursor-text flex-col gap-1 rounded-2xl border border-edge bg-raised px-3.5 pb-2 pt-3 shadow-[0_8px_24px_rgba(0,0,0,0.25)] transition-colors focus-within:border-[#3a3a44]"
         onClick={() => ref.current?.focus()}
       >
-        <PendingAttachments items={pending} onRemove={(id) => setPending((list) => list.filter((p) => p.id !== id))} />
+        <PendingAttachments
+          items={pending}
+          onRemove={(id) => setPending((list) => list.filter((p) => p.id !== id))}
+          onInline={inline}
+          canInline={(item) => item.text !== undefined && draft.length + item.text.length <= MAX_MESSAGE_LENGTH}
+        />
         <textarea
           ref={ref}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={(e) => {
-            if (onUpload && e.clipboardData.files.length > 0) {
+            if (!onUpload) return;
+            if (e.clipboardData.files.length > 0) {
               e.preventDefault();
               attach([...e.clipboardData.files]);
+              return;
+            }
+            const text = e.clipboardData.getData("text/plain");
+            if (isLongPaste(text)) {
+              e.preventDefault();
+              attachText(text);
             }
           }}
           rows={1}

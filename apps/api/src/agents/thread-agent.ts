@@ -9,6 +9,8 @@ import {
   createId,
   formatConnectorSuggestion,
   formatPlan,
+  formatPlanUpdate,
+  type PlanUpdate,
   type MessageStats,
   type SkillBundle,
   type Task,
@@ -35,8 +37,9 @@ import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest
 import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
-import { listPullRequests, trackPullRequest } from "../github/pulls";
-import { listProjectRepos } from "../github/store";
+import type { PullCredit } from "../github/attribution";
+import { CONFLICT_RETRY_SEC, type ConflictCheck, checkConflict, listPullRequests, openPullRequest, trackPullRequest } from "../github/pulls";
+import { connectRepoByName, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
@@ -54,15 +57,22 @@ import {
   type AccessRequest,
   accessTargets,
   allowAnswer,
+  answeredAccessMessage,
+  commandAnswer,
+  commandMessage,
   denyAnswer,
+  describeCommand,
   describeRequest,
   insideAny,
+  opensPullRequest,
+  USE_OPEN_PULL_REQUEST,
 } from "./folder-access";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
-import { composeStatus, type Plan } from "./plan";
+import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
+import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
 import type { TaskWithLog } from "./thread-tasks";
 import { type CoordinatorNote, type ReplyNeeds, type RoutineRun, threadPrompt, threadTools } from "./thread-worker";
@@ -119,7 +129,15 @@ type AgentTurn = {
   planDone?: boolean;
   /** When it replied with its plan done; the turn ends a minute later unless it moves on. */
   doneReplyAt?: number;
+  /** It published an artifact this turn, which people have not answered yet. */
+  published?: boolean;
 };
+
+/** The louder of what two replies wait on: a decision or a block outranks a review. */
+function louder(a: ReplyNeeds | null | undefined, b: ReplyNeeds | null | undefined): ReplyNeeds | null {
+  if (!a || !b) return a ?? b ?? null;
+  return a === "review" ? b : a;
+}
 
 /** The GitHub branch where a cloud turn leaves the unpushed work of the repositories it cloned. */
 function saveBranch(threadId: string): string {
@@ -235,6 +253,8 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind !== "github") this.deleteMeta("closed");
     // An answer to a folder card the running turn waits on goes to that turn, not to a new one.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
+    // A tap on the repository card connects it first, so the turn it starts has it.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
     }
@@ -351,7 +371,7 @@ export class ThreadAgent extends Agent<Env> {
     this.sql`UPDATE routine_runs SET seen = 1`;
     this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
-    const prompt = threadPrompt({
+    const promptInput = {
       ...ctx,
       brief: this.getMeta("brief") ?? "",
       lastSeenSeq,
@@ -362,10 +382,11 @@ export class ThreadAgent extends Agent<Env> {
       githubEvents,
       pullRequests: await listPullRequests(this.env.DB, projectId, threadId),
       now: new Date(),
-    });
+    };
     const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
     await this.startAgentTurn({
-      prompt,
+      prompt: threadPrompt(promptInput),
+      followUp: threadPrompt({ ...promptInput, followUp: true }),
       requester,
       place,
       timezone: ctx.defaultTimezone,
@@ -389,6 +410,8 @@ export class ThreadAgent extends Agent<Env> {
    */
   private async startAgentTurn(input: {
     prompt: string;
+    /** The same, with only what is new since the last turn, for a CLI session that continues it. */
+    followUp: string;
     place: Exclude<TaskPlace, { kind: "error" }>;
     timezone: string;
     language: string;
@@ -415,6 +438,9 @@ export class ThreadAgent extends Agent<Env> {
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
+    // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
+    const previousTask = this.getMeta("agent_last_task");
+    this.setMeta("agent_last_task", taskId);
     const turn: AgentTurn = {
       pending: [],
       replied: false,
@@ -452,7 +478,15 @@ export class ThreadAgent extends Agent<Env> {
               : { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env: await readSecrets(this.env, { id: c.id, secret: c.secret }) },
           ),
         );
-        const agent = { mcpPath, token, ...(local.length && { connectors: local }), ...(skills.length && { skills: { path: `${mcpPath}/skills` } }) };
+        const resume =
+          previousTask && input.followUp.length <= MAX_AGENT_PROMPT ? { after: previousTask, prompt: agentPrompt(agentPlace, input.followUp, infos, skills) } : undefined;
+        const agent = {
+          mcpPath,
+          token,
+          ...(local.length && { connectors: local }),
+          ...(skills.length && { skills: { path: `${mcpPath}/skills` } }),
+          ...(resume && { resume }),
+        };
         const backend = localBackend(this.env, { projectId, threadId, workspace, agent });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
@@ -612,7 +646,7 @@ export class ThreadAgent extends Agent<Env> {
       status: resolved ? "done" : asked ? "working" : failed ? "failed" : "review_ready",
       resolved,
     });
-    const kind = failed ? "failed" : resolved ? "done" : (turn?.needs ?? ((replied || lastText) && !asked ? "ready" : null));
+    const kind = failed ? "failed" : resolved ? "done" : ((turn?.needs === "review" ? "ready" : turn?.needs) ?? ((replied || lastText) && !asked ? "ready" : null));
     if (kind) await project.notifyThread(threadId, kind, lastText ?? turn?.lastReply ?? row.summary ?? "");
     await project.setActivity(threadId, false);
     if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
@@ -735,7 +769,20 @@ export class ThreadAgent extends Agent<Env> {
         const started = JSON.parse(this.getMeta("access_folders") ?? "[]") as string[];
         const targets = accessTargets(input, started[0]);
         const outside = targets.filter((t) => !insideAny(t.path, started));
-        if (!outside.length) return denyAnswer(ACCESS_LEVEL_DENIED);
+        // A file inside the folders asks only when the runner is read-only, which stays as it is.
+        if (!outside.length && targets.length) return denyAnswer(ACCESS_LEVEL_DENIED);
+        // A command the runner's access level does not run on its own: the person decides here,
+        // instead of restarting the runner with --access full.
+        if (!outside.length) {
+          // Pull requests go through Myrel's GitHub App, which credits the person and follows them.
+          if (opensPullRequest(input)) return denyAnswer(USE_OPEN_PULL_REQUEST);
+          if (this.getMeta("access_commands")) return allowAnswer(input);
+          const command = describeCommand(tool_name, input);
+          const answer = await this.askAccess(command, command, "command");
+          if (answer === null) return denyAnswer("The person did not answer in time about running this. Carry on without it, and say in your reply what you could not do.");
+          if (answer === "deny") return denyAnswer("The person did not allow running this. Carry on without it; if the work cannot be done without it, say so in a reply.");
+          return allowAnswer(input);
+        }
         // Folders the person allowed this turn, or added to the project since it started.
         const { projectId } = this.ids();
         const workspace = await getWorkspace(this.env, projectId);
@@ -758,7 +805,7 @@ export class ThreadAgent extends Agent<Env> {
    * Puts one folder to the person as a card (or joins a card already asking about it) and waits for
    * the answer: null when none came in time or the turn ended.
    */
-  private async askAccess(folder: string, what: string): Promise<AccessAnswer | null> {
+  private async askAccess(folder: string, what: string, kind?: "command"): Promise<AccessAnswer | null> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const until = Date.now() + ACCESS_WAIT_MS;
@@ -768,15 +815,18 @@ export class ThreadAgent extends Agent<Env> {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     if (!this.runningTask() || Date.now() >= until) return null;
-    let request = this.accessRequests().find((r) => r.folder === folder && !r.answer);
+    let request = this.accessRequests().find((r) => r.folder === folder && r.kind === kind && !r.answer);
     if (!request) {
-      request = { id: crypto.randomUUID(), folder };
+      request = { id: crypto.randomUUID(), folder, ...(kind && { kind }) };
       this.setMeta("access_requests", JSON.stringify([...this.accessRequests(), request]));
       const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
-      const body = accessMessage(folder, what, turn?.language ?? "en");
+      const language = turn?.language ?? "en";
+      const body = kind === "command" ? commandMessage(folder, language) : accessMessage(folder, what, language);
       const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
       // Not news for the next turn, unless someone wrote in between.
       if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      const id = request.id;
+      this.setMeta("access_requests", JSON.stringify(this.accessRequests().map((r) => (r.id === id ? { ...r, messageId: m.id } : r))));
       await project.updateThread(threadId, { status: "blocked" });
       await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
     }
@@ -794,9 +844,9 @@ export class ThreadAgent extends Agent<Env> {
 
   /** A person answered the running turn's folder cards. Returns false when the message is not such an answer. */
   private async answerAccess(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
-    const answer = accessAnswer(reason.body ?? "");
     // Only one card is open at a time (see askAccess); the answer is for that one alone.
     const open = this.accessRequests().filter((r) => !r.answer).slice(0, 1);
+    const answer = open[0]?.kind === "command" ? commandAnswer(reason.body ?? "") : accessAnswer(reason.body ?? "");
     if (!answer || !open.length || !this.runningTask()) return false;
     const { projectId } = this.ids();
     // The folders are on someone's own computer: only they answer for it. Anyone else's
@@ -806,6 +856,11 @@ export class ThreadAgent extends Agent<Env> {
     const given = answer;
     const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
     for (const r of open) {
+      if (r.kind === "command") {
+        if (given === "always") this.setMeta("access_commands", "1");
+        r.answer = given;
+        continue;
+      }
       let mine = given;
       if (mine === "always" && !(await this.addProjectFolder(projectId, r.folder))) mine = "once";
       if (mine !== "deny") grants.push(r.folder);
@@ -813,8 +868,63 @@ export class ThreadAgent extends Agent<Env> {
     }
     this.setMeta("access_grants", JSON.stringify(grants));
     this.setMeta("access_requests", JSON.stringify(this.accessRequests().map((r) => open.find((o) => o.id === r.id) ?? r)));
+    // The answered card shrinks to one line; the explanation was for while it waited.
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    for (const r of open) {
+      if (!r.messageId) continue;
+      await project.editMessage(r.messageId, answeredAccessMessage(r, turn?.language ?? "en")).catch((err) => console.warn("access card not shortened", err));
+    }
     // The answer was for this turn: it is not news for the next one.
     if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(reason.seq));
+    return true;
+  }
+
+  private repoRequest(): RepoRequest | null {
+    return JSON.parse(this.getMeta("repo_request") ?? "null") as RepoRequest | null;
+  }
+
+  /**
+   * A person answered the repository card. "Connect" connects it as them (owner or admin, with
+   * GitHub access to it): on success the turn their answer starts has it; otherwise a new card says
+   * what to do first and no turn starts. Returns true when the answer needs no turn.
+   */
+  private async answerRepoRequest(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const request = this.repoRequest();
+    const answer = request ? repoAnswer(reason.body ?? "") : null;
+    if (!request || !answer) return false;
+    if (answer === "skip" || !reason.authorId) {
+      this.deleteMeta("repo_request");
+      return false;
+    }
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const language = this.getMeta("language") ?? "en";
+    const result = await connectRepoByName(this.env, projectId, reason.authorId, request.repo);
+    if (result.ok) {
+      this.deleteMeta("repo_request");
+      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: repoConnectedMessage(result.repo.fullName, language) });
+      return false;
+    }
+    const origin = await project.publicOrigin();
+    const back = `/projects/${projectId}/threads/${threadId}`;
+    // Without a known address the links stay relative, which the web app still opens.
+    const links = {
+      connectUrl: `${origin ?? ""}/api/github/connect?returnTo=${encodeURIComponent(back)}`,
+      settingsUrl: `${origin ?? ""}/settings/projects/${projectId}`,
+    };
+    const body = repoFailureMessage(request.repo, result.reason, links, language);
+    if (result.reason === "not_configured") {
+      this.deleteMeta("repo_request");
+      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
+      return false;
+    }
+    // A fresh card to try again from once they did what it says; the agent has nothing to do yet.
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    this.setMeta("repo_request", JSON.stringify({ repo: request.repo, messageId: m.id } satisfies RepoRequest));
+    // Neither the answer nor the new card is news for the next turn, unless someone wrote in between.
+    const seen = Number(this.getMeta("last_seen_seq") ?? 0);
+    if (reason.seq === seen + 1 && m.seq === reason.seq + 1) this.setMeta("last_seen_seq", String(m.seq));
     return true;
   }
 
@@ -841,6 +951,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("access_folders");
     this.deleteMeta("access_grants");
     this.deleteMeta("access_requests");
+    this.deleteMeta("access_commands");
   }
 
   // ---- Connector suggestions -------------------------------------------------
@@ -914,13 +1025,30 @@ export class ThreadAgent extends Agent<Env> {
     await project.editMessage(s.messageId, formatConnectorSuggestion(card));
   }
 
+  /** Who this thread's pull requests credit: the person it works for, and a link back to the thread. */
+  private async pullCredit(): Promise<PullCredit> {
+    const { projectId, threadId } = this.ids();
+    const requester = this.getMeta("requester") || null;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const [origin, person, login] = await Promise.all([
+      project.publicOrigin(),
+      requester
+        ? createDb(this.env.DB).select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, requester)).then((r) => r[0])
+        : undefined,
+      requester ? githubLogin(this.env.DB, requester) : null,
+    ]);
+    return { name: person?.name ?? null, login, threadUrl: origin ? `${origin}/projects/${projectId}/threads/${threadId}` : null };
+  }
+
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
   private async agentToolset(): Promise<Tool[]> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
     const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
-    const track = (url: string) => trackPullRequest(this.env, projectId, threadId, url);
+    // A pull request a reply only mentions is credited only when it was opened during this turn,
+    // which makes it this agent's (opened with gh, say); an older one may not be this thread's.
+    const track = (url: string, credit?: PullCredit) => trackPullRequest(this.env, projectId, threadId, url, credit);
     const local = this.runningTask()?.backend === "local";
     return [
       ...(local ? [this.approveAccessTool()] : []),
@@ -931,7 +1059,7 @@ export class ThreadAgent extends Agent<Env> {
           const t = turn();
           const row = this.runningTask();
           const counted = row ? this.runStats(row, t.mark) : null;
-          save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs, ...(counted && { mark: counted.mark }) });
+          save({ pending: [], replied: true, lastReply: text, needs: louder(needs, t.needs), ...(counted && { mark: counted.mark }) });
           const m = await project.sendMessage({
             threadId,
             authorKind: "agent",
@@ -950,7 +1078,10 @@ export class ThreadAgent extends Agent<Env> {
           // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
           // A pull request it links to is followed even when it forgot track_pull_request.
-          for (const url of pullRequestUrls(text)) await track(url).catch((err) => console.warn("tracking pull request failed", url, err));
+          const urls = pullRequestUrls(text);
+          const started = this.runningTask()?.created_at;
+          const credit = urls.length && started ? { ...(await this.pullCredit()), since: new Date(Date.parse(started) - 60_000).toISOString() } : undefined;
+          for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
           return m;
         },
         publishArtifact: async (input) => {
@@ -958,7 +1089,7 @@ export class ThreadAgent extends Agent<Env> {
           if ("error" in result) throw new Error(result.error);
           const { artifact } = result;
           const ref = { artifactId: artifact.id, version: artifact.version, title: artifact.title };
-          save({ pending: [...turn().pending.filter((p) => p.artifactId !== artifact.id), ref] });
+          save({ pending: [...turn().pending.filter((p) => p.artifactId !== artifact.id), ref], published: true });
           return artifact;
         },
         setPlan: async (plan) => {
@@ -976,13 +1107,43 @@ export class ThreadAgent extends Agent<Env> {
           const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
         },
-        resolve: async () => save({ resolved: true }),
+        // What it showed or asked this turn waits on the person: the thread stays "waiting for you",
+        // and their answer wakes it, instead of reading as finished.
+        resolve: async () => {
+          const t = turn();
+          if (t.needs || t.published) {
+            return "Not resolved: this turn asked the person something or presented work for their feedback, so the thread waits on their answer. End your turn without resolving; it shows as waiting for them.";
+          }
+          save({ resolved: true });
+          return null;
+        },
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
         trackPullRequest: async (url) => {
-          const pr = await track(url);
+          const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
           return `Following ${pr.repo}#${pr.number}: its state shows in the thread, and CI failures, reviews and the merge will wake you.`;
+        },
+        requestRepo: async (repo, reason) => {
+          if ((await listProjectRepos(this.env.DB, projectId)).some((r) => r.fullName.toLowerCase() === repo.toLowerCase())) {
+            return `${repo} is already connected to this project.`;
+          }
+          const open = this.repoRequest();
+          if (open) return `A card asking for ${open.repo} is already waiting for the person. End your turn.`;
+          const m = await project.sendMessage({
+            threadId,
+            authorKind: "agent",
+            authorId: THREAD_AGENT_ID,
+            body: repoRequestMessage(repo, reason, turn()?.language ?? "en"),
+          });
+          if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+          this.setMeta("repo_request", JSON.stringify({ repo, messageId: m.id } satisfies RepoRequest));
+          await project.updateThread(threadId, { status: "blocked" });
+          return `The card is in the thread. End your turn now: once ${repo} is connected you are woken with it connected, and carry on from there.`;
+        },
+        openPullRequest: async (input) => {
+          const { pr, created } = await openPullRequest(this.env, projectId, threadId, input, await this.pullCredit());
+          return `${created ? "Opened" : "An open pull request already exists for that branch:"} ${pr.url} (${pr.repo}#${pr.number}). Myrel follows it: CI failures, reviews and the merge will wake you.`;
         },
       }),
       ...suggestionTools({
@@ -1152,7 +1313,7 @@ export class ThreadAgent extends Agent<Env> {
       await this.publishTask(taskId);
       // From now on the webhook keeps the pull request's state current and wakes this thread on CI and reviews.
       if (progress.prUrl) {
-        await trackPullRequest(this.env, projectId, threadId, progress.prUrl).catch((err) =>
+        await trackPullRequest(this.env, projectId, threadId, progress.prUrl, await this.pullCredit()).catch((err) =>
           console.error("tracking pull request failed", progress.prUrl, err),
         );
       }
@@ -1233,6 +1394,15 @@ export class ThreadAgent extends Agent<Env> {
     await this.taskEvents(row.id, [{ type: "done", ok: false, error: SANDBOX_LOST }]);
   }
 
+  /** GitHub is still working out whether one of the thread's pull requests merges cleanly: asks again shortly. */
+  async scheduleConflictCheck(payload: ConflictCheck): Promise<void> {
+    await this.schedule(CONFLICT_RETRY_SEC, "conflictCheck", payload);
+  }
+
+  async conflictCheck(payload: ConflictCheck): Promise<void> {
+    await checkConflict(this.env, payload.repoId, payload.number, payload.attempt);
+  }
+
   async taskWatchdog(payload: { taskId: string }): Promise<void> {
     await this.taskEvents(payload.taskId, [
       { type: "done", ok: false, error: "The runner stopped answering, so the task was given up." },
@@ -1276,6 +1446,7 @@ export class ThreadAgent extends Agent<Env> {
     const titleOf = (text: string) => text.split("\n", 1)[0];
     if (cardId && shown !== null && titleOf(shown) === titleOf(statusText)) {
       await project.editMessage(cardId, formatPlan(statusText));
+      await this.notePlanChanges(projectId, threadId, cardId, planChanges(shown, statusText));
     } else {
       const card = await project.sendMessage({
         threadId,
@@ -1284,8 +1455,36 @@ export class ThreadAgent extends Agent<Env> {
         body: formatPlan(statusText),
       });
       this.setMeta("plan_card_id", card.id);
+      // A new plan has its own card at the end; notes about the old one are done.
+      this.deleteMeta("plan_update_id");
+      this.deleteMeta("plan_update");
     }
     this.setMeta("plan_card_text", statusText);
+  }
+
+  /**
+   * Steps added, dropped or failed while the plan card sits further up the
+   * conversation get a note at the end, so nobody has to scroll up to see the
+   * plan changed. Changes in a row land in the same note; ticks never make one.
+   */
+  private async notePlanChanges(projectId: string, threadId: string, cardId: string, changes: PlanUpdate) {
+    if (!hasChanges(changes)) return;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const last = await project.lastThreadMessageId(threadId);
+    // The card is the last thing in the conversation, so the change is in view already.
+    if (last === cardId) return;
+    const noteId = this.getMeta("plan_update_id");
+    const shown = this.getMeta("plan_update");
+    if (noteId && last === noteId && shown) {
+      const merged = mergePlanUpdates(JSON.parse(shown) as PlanUpdate, changes);
+      this.setMeta("plan_update", JSON.stringify(merged));
+      // Changes that cancel out leave the note as it was rather than empty.
+      if (hasChanges(merged)) await project.editMessage(noteId, formatPlanUpdate(merged));
+      return;
+    }
+    const note = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatPlanUpdate(changes) });
+    this.setMeta("plan_update_id", note.id);
+    this.setMeta("plan_update", JSON.stringify(changes));
   }
 
   private ids() {

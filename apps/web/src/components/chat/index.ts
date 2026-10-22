@@ -1,4 +1,4 @@
-export { Checklist, PlanCard, PlanProgress } from "./checklist";
+export { Checklist, PlanCard, PlanProgress, PlanUpdateNote } from "./checklist";
 export { Composer } from "./composer";
 export { DecisionCard } from "./decision-card";
 export { EarlierMessages, useHistoryWindow } from "./history";

@@ -76,6 +76,24 @@ export const MessageStats = z.object({
 });
 export type MessageStats = z.infer<typeof MessageStats>;
 
+/**
+ * brief: the coordinator opened a thread with this brief. follow_up: it forwarded a person's
+ * follow-up. reply: it answered a thread's request. relay: it passed news from another thread.
+ */
+export const RelayKind = z.enum(["brief", "follow_up", "reply", "relay"]);
+export type RelayKind = z.infer<typeof RelayKind>;
+
+/** What the coordinator sent a thread's agent, carried by the one-line message that says so. */
+export const MessageRelay = z.object({
+  kind: RelayKind,
+  /** The thread the note went to. */
+  threadId: ThreadId,
+  /** relay only: the thread the news came from. */
+  fromThreadId: ThreadId.optional(),
+  note: z.string(),
+});
+export type MessageRelay = z.infer<typeof MessageRelay>;
+
 export const Message = z.object({
   id: MessageId,
   projectId: ProjectId,
@@ -90,6 +108,8 @@ export const Message = z.object({
   artifacts: z.array(ArtifactRef).optional(),
   /** Agent messages only: model, time, tokens and where it ran. Absent on older messages. */
   stats: MessageStats.optional(),
+  /** Coordinator messages only: the note it sent a thread, which people can open under the line. */
+  relay: MessageRelay.optional(),
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,
@@ -291,6 +311,8 @@ export const PullRequest = z.object({
   checks: z.enum(["pending", "success", "failure"]).nullable(),
   /** The latest decisive review; null when nobody approved or asked for changes. */
   review: z.enum(["approved", "changes_requested"]).nullable(),
+  /** The branch conflicts with its base and cannot be merged until that is resolved. */
+  conflict: z.boolean().default(false),
   updatedAt: Timestamp,
 });
 export type PullRequest = z.infer<typeof PullRequest>;

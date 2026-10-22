@@ -1,4 +1,4 @@
-import { type Message, parseConnectorSuggestion, planChecklist, type Thread } from "@myrel/protocol";
+import { type Message, parseConnectorSuggestion, parsePlanUpdate, planChecklist, type Thread } from "@myrel/protocol";
 
 /** How a message's author reads in a prompt. */
 export function authorLabel(m: Message, names: Record<string, string>): string {
@@ -12,6 +12,7 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
   // A plan card's steps are in the prompt's own plan section; its title is enough here.
   const plan = planChecklist(m.body);
   if (plan !== null) return `${head}\n${indent(`(plan card: ${plan.split("\n", 1)[0]})`)}`;
+  if (parsePlanUpdate(m.body)) return `${head}\n${indent("(plan update note)")}`;
   const card = parseConnectorSuggestion(m.body);
   if (card) {
     const names = card.offers.map((o) => o.name).join(", ");
@@ -23,6 +24,8 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
           : "waiting for the person";
     return `${head}\n${indent(`(connector card offering ${names}: ${state})`)}`;
   }
+  // The note itself is in the prompt already (the brief, or the coordinator's notes).
+  if (m.relay) return `${head}\n${indent(`${m.body}\n(marker for a coordinator note people can open)`)}`;
   const files = (m.attachments ?? []).map((a) => `📎 attached: ${a.path} (${a.contentType}, ${a.size} bytes)`);
   return `${head}\n${indent([m.body, ...files].filter(Boolean).join("\n"))}`;
 }

@@ -21,6 +21,8 @@ export const fakeGithub = {
     { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
   requests: [] as { method: string; url: string; body?: unknown }[],
+  /** The repositories of installation 42 the signed-in user can reach themselves. */
+  userRepos: [7, 8],
 };
 
 const realFetch = globalThis.fetch;
@@ -36,6 +38,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return body.code === "good-code" ? Response.json({ access_token: "user-token" }) : Response.json({ error: "bad_verification_code" });
   }
   if (url.pathname === "/app") return Response.json({ id: 1234, slug: "myrel-test" });
+  if (url.pathname === "/user") return Response.json({ id: 9001, login: "octo" });
+  if (url.pathname === "/user/installations/42/repositories") {
+    const repositories = fakeGithub.repos.filter((r) => fakeGithub.userRepos.includes(r.id));
+    return Response.json({ total_count: repositories.length, repositories });
+  }
   if (url.pathname === "/user/installations") {
     return Response.json({ total_count: fakeGithub.installations.length, installations: fakeGithub.installations });
   }
@@ -50,7 +57,43 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname === "/installation/repositories") {
     return Response.json({ total_count: fakeGithub.repos.length, repositories: fakeGithub.repos });
   }
+  const pulls = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls$/);
+  if (pulls) {
+    const repo = pulls[1]!;
+    const mine = Object.entries(fakeGithub.pulls)
+      .filter(([key]) => key.startsWith(`${repo}#`))
+      .map(([, p]) => p as { number: number; state: string; head: { ref: string } });
+    if (method === "GET") {
+      const head = url.searchParams.get("head")?.split(":").at(-1);
+      return Response.json(mine.filter((p) => p.state === "open" && (!head || p.head.ref === head)));
+    }
+    if (mine.some((p) => p.state === "open" && p.head.ref === body.head)) return new Response(JSON.stringify({ message: "A pull request already exists" }), { status: 422 });
+    const number = 500 + Math.floor(Math.random() * 1e6);
+    const created = {
+      number,
+      html_url: `https://github.com/${repo}/pull/${number}`,
+      title: body.title,
+      body: body.body,
+      state: "open",
+      draft: body.draft ?? false,
+      merged: false,
+      created_at: new Date().toISOString(),
+      user: { login: "fibteq[bot]" },
+      head: { sha: `sha-${number}`, ref: body.head },
+    };
+    fakeGithub.pulls[`${repo}#${number}`] = created;
+    return Response.json(created, { status: 201 });
+  }
+  if (/^\/repos\/[^/]+\/[^/]+\/(issues\/\d+\/assignees|pulls\/\d+\/requested_reviewers)$/.test(url.pathname)) {
+    return Response.json({}, { status: 201 });
+  }
   const pull = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
+  if (pull && method === "PATCH") {
+    const key = `${pull[1]}#${pull[2]}`;
+    if (!fakeGithub.pulls[key]) return new Response("{}", { status: 404 });
+    fakeGithub.pulls[key] = { ...(fakeGithub.pulls[key] as object), ...body };
+    return Response.json(fakeGithub.pulls[key]);
+  }
   if (pull) {
     const found = fakeGithub.pulls[`${pull[1]}#${pull[2]}`];
     return found ? Response.json(found) : new Response("{}", { status: 404 });

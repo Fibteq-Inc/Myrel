@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { appJwt, pemToPkcs8 } from "../src/github/app";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { listRepoFiles, readRepoFile } from "../src/github/files";
-import { listPullRequests, trackPullRequest } from "../src/github/pulls";
+import { attributionBlock, withAttribution } from "../src/github/attribution";
+import { listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
+import { githubLogin } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
 import { fakeGithub } from "./fake-github";
 
@@ -79,6 +81,15 @@ describe("github helpers", () => {
   });
 });
 
+describe("pull request credit", () => {
+  it("writes a block that cannot break out of its comment or format the name", () => {
+    const block = attributionBlock({ name: "<b>Eve</b> [x](y)", login: "e--ve", threadUrl: "https://myrel.test/t" })!;
+    expect(block).toBe('<!-- myrel-attribution: {"github_login":"eve"} -->\n_Requested by **\\<b\\>Eve\\</b\\> \\[x\\]\\(y\\)** · [Myrel thread](https://myrel.test/t)_');
+    expect(withAttribution(block, { name: "Bob", login: null, threadUrl: null })).toBe(block);
+    expect(attributionBlock({ name: null, login: null, threadUrl: null })).toBeNull();
+  });
+});
+
 describe("connecting GitHub", () => {
   it("reports whether the app is configured", async () => {
     const token = await signUp();
@@ -98,6 +109,13 @@ describe("connecting GitHub", () => {
     ]);
     const { repos } = (await (await api("/api/github/repos", { token })).json()) as { repos: GithubRepo[] };
     expect(repos.map((r) => r.fullName)).toEqual(["acme/app", "acme/docs"]);
+  });
+
+  it("remembers which GitHub account the person connected", async () => {
+    const token = await signUp();
+    await connect(token);
+    const me = (await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } };
+    expect(await githubLogin(env.DB, me.user.id)).toBe("octo");
   });
 
   it("can sign in to GitHub without installing", async () => {
@@ -146,6 +164,23 @@ describe("project repositories", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("only connects repositories the person can reach on GitHub, not every one the installation covers", async () => {
+    fakeGithub.userRepos = [8];
+    try {
+      const token = await signUp();
+      await connect(token);
+      const project = await createProject(token);
+      const picker = (await (await api("/api/github/repos", { token })).json()) as { repos: GithubRepo[] };
+      expect(picker.repos.map((r) => r.fullName)).toEqual(["acme/docs"]);
+      const add = (repoId: number) =>
+        api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId }) });
+      expect((await add(7)).status).toBe(404);
+      expect((await add(8)).status).toBe(201);
+    } finally {
+      fakeGithub.userRepos = [7, 8];
+    }
+  });
+
   it("asks for a fresh GitHub sign-in before picking repositories on an old one", async () => {
     const token = await signUp();
     await connect(token);
@@ -160,6 +195,9 @@ describe("project repositories", () => {
 
     await connect(token);
     expect((await add()).status).toBe(201);
+    // A sign-in from before Myrel kept the person's own repositories counts as old too.
+    await testEnv.DB.prepare("DELETE FROM github_user_repos WHERE user_id = ?").bind(me).run();
+    expect((await api("/api/github/repos", { token })).status).toBe(409);
   });
 
   it("does not let users add repos from installations they cannot reach", async () => {
@@ -246,6 +284,8 @@ describe("pull requests", () => {
     draft: false,
     merged: false,
     head: { sha: "sha-1", ref: "myrel/fix-login" },
+    base: { ref: "main" },
+    mergeable: true,
     ...over,
   });
 
@@ -349,6 +389,119 @@ describe("pull requests", () => {
     const after = (await projectAgent.getThreadContext(thread.id))!.messages;
     expect(after.slice(before).map((m) => m.body)).toEqual([`acme/app#${n} was merged.`]);
     expect(await projectAgent.getThread(thread.id)).toMatchObject({ resolved: true, status: "done" });
+  });
+
+  it("wakes the thread once when a push to its base leaves the pull request conflicting", async () => {
+    const { project, thread, events } = await setup();
+    const n = number + 10;
+    const u = `https://github.com/acme/app/pull/${n}`;
+    const at = (over: Record<string, unknown> = {}) => pull({ number: n, html_url: u, ...over });
+    const current = async () => (await listPullRequests(env.DB, project.id, thread.id))[0];
+    fakeGithub.pulls[`acme/app#${n}`] = at();
+    expect(await trackPullRequest(env, project.id, thread.id, u)).toMatchObject({ conflict: false });
+
+    // Another pull request lands on main; GitHub has not worked out mergeability yet, so the thread's agent asks again later.
+    fakeGithub.pulls[`acme/app#${n}`] = at({ mergeable: null });
+    await hook("push", { ref: "refs/heads/main" });
+    expect((await current())?.conflict).toBe(false);
+    const stub = env.THREAD_AGENT.get(env.THREAD_AGENT.idFromName(thread.id));
+    const schedules = await runInDurableObject(stub, (agent: ThreadAgent) => agent.getSchedules());
+    expect(schedules.filter((s) => s.callback === "conflictCheck").map((s) => s.payload)).toEqual([{ repoId: 7, number: n, attempt: 1 }]);
+
+    // It conflicts: the card says so and the thread's agent is woken.
+    fakeGithub.pulls[`acme/app#${n}`] = at({ mergeable: false });
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.conflictCheck({ repoId: 7, number: n, attempt: 1 });
+    expect((await current())?.conflict).toBe(true);
+    expect(events.some((e) => e.type === "pr.updated" && e.pullRequest.conflict)).toBe(true);
+    expect(await githubEvents(thread.id)).toEqual([expect.stringContaining("has merge conflicts with its base branch main")]);
+
+    // Still conflicting after more pushes: nobody is woken again. Pushes to other branches are not about it.
+    await hook("push", { ref: "refs/heads/main" });
+    await hook("push", { ref: "refs/heads/release" });
+    expect(await githubEvents(thread.id)).toHaveLength(1);
+
+    // The agent brings main in and pushes: the mark clears without waking anyone.
+    fakeGithub.pulls[`acme/app#${n}`] = at({ head: { sha: "sha-9", ref: "myrel/fix-login" } });
+    await hook("pull_request", { action: "synchronize", pull_request: at({ head: { sha: "sha-9", ref: "myrel/fix-login" }, mergeable: null }) });
+    expect((await current())?.conflict).toBe(false);
+    expect(await githubEvents(thread.id)).toHaveLength(1);
+  });
+
+  it("opens a pull request through the app, crediting the person with a link back to the thread", async () => {
+    const { project, thread } = await setup();
+    const credit = { name: "İsmail *K*", login: "octo", threadUrl: `${BASE}/projects/${project.id}/threads/${thread.id}` };
+    const before = fakeGithub.requests.length;
+    const { pr, created } = await openPullRequest(
+      env,
+      project.id,
+      thread.id,
+      { repo: "Acme/App", head: "myrel/readme-note", title: "Add a note", body: "Adds a note." },
+      credit,
+    );
+    expect(created).toBe(true);
+    expect(pr).toMatchObject({ repo: "acme/app", state: "open", threadId: thread.id });
+    const sent = fakeGithub.requests.slice(before);
+    // GitHub reads the branches to open a pull request: without contents it refuses ("not all refs are readable").
+    const scoped = sent.filter((r) => r.url.endsWith("/access_tokens")).map((r) => (r.body as { permissions?: Record<string, string> }).permissions);
+    expect(scoped).toContainEqual(expect.objectContaining({ contents: "read", pull_requests: "write" }));
+    const create = sent.find((r) => r.method === "POST" && r.url.endsWith("/repos/acme/app/pulls"))!;
+    const body = (create.body as { body: string; base: string }).body;
+    expect((create.body as { base: string }).base).toBe("main");
+    expect(body.split("\n").slice(0, 2)).toEqual([
+      '<!-- myrel-attribution: {"github_login":"octo"} -->',
+      `_Requested by **İsmail \\*K\\*** · [Myrel thread](${credit.threadUrl})_`,
+    ]);
+    expect(body.endsWith("\n\nAdds a note.")).toBe(true);
+    expect(sent.some((r) => r.url.endsWith(`/issues/${pr.number}/assignees`) && JSON.stringify(r.body) === '{"assignees":["octo"]}')).toBe(true);
+    expect(sent.some((r) => r.url.endsWith(`/pulls/${pr.number}/requested_reviewers`))).toBe(true);
+    // Already credited, so the body is left alone.
+    expect(sent.some((r) => r.method === "PATCH")).toBe(false);
+
+    // The same branch again: its open pull request comes back instead of a second one.
+    const again = await openPullRequest(env, project.id, thread.id, { repo: "acme/app", head: "myrel/readme-note", title: "Add a note" }, credit);
+    expect(again).toMatchObject({ created: false, pr: { number: pr.number } });
+    // Only connected repositories.
+    await expect(openPullRequest(env, project.id, thread.id, { repo: "acme/docs", head: "x", title: "x" }, credit)).rejects.toThrow("not connected");
+  });
+
+  it("credits a pull request the agent opened itself once, and never one a reply only mentions", async () => {
+    const { project, thread } = await setup();
+    const credit = { name: "İsmail", login: null, threadUrl: "https://myrel.test/projects/p/threads/t" };
+    const n = number + 1;
+    const own = `https://github.com/acme/app/pull/${n}`;
+    fakeGithub.pulls[`acme/app#${n}`] = pull({ number: n, html_url: own, body: "Fixes the login.", created_at: new Date().toISOString(), user: { login: "octo" } });
+    await trackPullRequest(env, project.id, thread.id, own, credit);
+    const credited = (fakeGithub.pulls[`acme/app#${n}`] as { body: string }).body;
+    expect(credited).toBe(`${attributionBlock(credit)}\n\nFixes the login.`);
+    // Followed a second time: nothing changes.
+    const before = fakeGithub.requests.length;
+    await trackPullRequest(env, project.id, thread.id, own, credit);
+    expect(fakeGithub.requests.slice(before).some((r) => r.method !== "GET")).toBe(false);
+
+    const m = number + 2;
+    const mentioned = `https://github.com/acme/app/pull/${m}`;
+    fakeGithub.pulls[`acme/app#${m}`] = pull({ number: m, html_url: mentioned, body: "Someone else's." });
+    await trackPullRequest(env, project.id, thread.id, mentioned);
+    expect((fakeGithub.pulls[`acme/app#${m}`] as { body: string }).body).toBe("Someone else's.");
+    // An old one is not credited either.
+    const o = number + 3;
+    const old = `https://github.com/acme/app/pull/${o}`;
+    fakeGithub.pulls[`acme/app#${o}`] = pull({ number: o, html_url: old, body: "Old.", created_at: "2020-01-01T00:00:00Z" });
+    await trackPullRequest(env, project.id, thread.id, old, credit);
+    expect((fakeGithub.pulls[`acme/app#${o}`] as { body: string }).body).toBe("Old.");
+    // A reply's link counts as the agent's own when the pull request was opened during its turn.
+    const turnStart = new Date(Date.now() - 5 * 60_000).toISOString();
+    const g = number + 4;
+    const viaGh = `https://github.com/acme/app/pull/${g}`;
+    fakeGithub.pulls[`acme/app#${g}`] = pull({ number: g, html_url: viaGh, body: "Via gh.", created_at: new Date().toISOString() });
+    await trackPullRequest(env, project.id, thread.id, viaGh, { ...credit, since: turnStart });
+    expect((fakeGithub.pulls[`acme/app#${g}`] as { body: string }).body).toBe(`${attributionBlock(credit)}\n\nVia gh.`);
+    const b = number + 5;
+    const before2 = `https://github.com/acme/app/pull/${b}`;
+    fakeGithub.pulls[`acme/app#${b}`] = pull({ number: b, html_url: before2, body: "Earlier.", created_at: new Date(Date.now() - 10 * 60_000).toISOString() });
+    await trackPullRequest(env, project.id, thread.id, before2, { ...credit, since: turnStart });
+    expect((fakeGithub.pulls[`acme/app#${b}`] as { body: string }).body).toBe("Earlier.");
   });
 
   it("ignores events about pull requests no thread opened", async () => {

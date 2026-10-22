@@ -1,4 +1,4 @@
-import type { Task, TerminalLine } from "@myrel/protocol";
+import { type Task, type TerminalLine, unwrapShell } from "@myrel/protocol";
 import {
   ChevronRight,
   CircleAlert,
@@ -207,14 +207,14 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
   const t = useT();
   const dur = useDuration();
   const times = stepTimes(lines, end);
-  const ref = useRef<HTMLPreElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   useEffect(() => {
     const el = ref.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [lines.length]);
   return (
-    <pre
+    <div
       ref={ref}
       role="log"
       aria-label={t("tasks.terminalOutput")}
@@ -222,23 +222,55 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
         const el = e.currentTarget;
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
-      className="max-h-64 overflow-auto rounded-lg border border-line bg-[#08080a] px-3 py-2 font-mono text-[12px] leading-[1.55] text-body"
+      className="flex max-h-[28rem] flex-col overflow-auto rounded-lg border border-line bg-[#08080a] px-3 py-2 font-mono text-[12px] leading-[1.6] text-body"
     >
       {lines.length === 0 && <span className="text-subtle">{t("tasks.waiting")}</span>}
       {lines.map((l, i) => (
-        <div
-          key={i}
-          className={`flex items-start gap-3 ${l.stream === "stderr" ? "text-bad" : l.stream === "system" ? "text-subtle" : ""}`}
-        >
-          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{l.text}</span>
-          {times[i] !== undefined && (
-            <span className="flex-none tabular-nums text-subtle" title={t("tasks.stepTime")}>
-              {dur(times[i]!)}
-            </span>
-          )}
-        </div>
+        <TerminalRow key={i} line={l} first={i === 0} time={times[i] === undefined ? undefined : dur(times[i]!)} />
       ))}
-    </pre>
+    </div>
+  );
+}
+
+/** Past this many characters or lines, a step shows folded with a toggle. */
+const FOLD_CHARS = 280;
+const FOLD_LINES = 3;
+
+/**
+ * One terminal line. A command shows after a prompt, without the shell wrapper the CLI ran it in;
+ * an agent's step or message reads as prose; output stays monospace under its command. The step's
+ * time has its own column, so long text wraps beside it instead of running into it.
+ */
+function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const step = line.tool ? line.text.replace(/^→ /, "") : null;
+  const command = step?.startsWith("$ ") ? unwrapShell(step.slice(2)) : null;
+  const text = command ?? step ?? line.text;
+  const long = !!step && (text.length > FOLD_CHARS || text.split("\n").length > FOLD_LINES);
+  const folded = long && !open;
+  const tone = line.stream === "stderr" ? "text-bad" : step ? "" : line.stream === "system" ? "text-subtle" : "text-muted";
+  return (
+    <div className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 ${step && !first ? "mt-2" : ""} ${tone}`}>
+      <span aria-hidden="true" className={`w-[1ch] select-none ${command ? "text-accent" : step ? "text-subtle" : ""}`}>
+        {command ? "$" : step ? "›" : ""}
+      </span>
+      <div className="min-w-0">
+        <div
+          className={`whitespace-pre-wrap [overflow-wrap:anywhere] ${step && !command ? "font-sans text-[13px] leading-[1.5] text-fg" : ""} ${command ? "text-fg" : ""} ${folded ? "line-clamp-3" : ""}`}
+        >
+          {text}
+        </div>
+        {long && (
+          <button type="button" onClick={() => setOpen(!open)} className="mt-0.5 font-sans text-xs text-accent hover:underline">
+            {open ? t("tasks.showLess") : t("tasks.showMore")}
+          </button>
+        )}
+      </div>
+      <span className="whitespace-nowrap pl-2 text-right tabular-nums text-subtle" title={time ? t("tasks.stepTime") : undefined}>
+        {time ?? ""}
+      </span>
+    </div>
   );
 }
 

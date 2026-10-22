@@ -76,6 +76,25 @@ describe("CLI output parsing", () => {
     expect(ADAPTERS.claude.args({ access: "edit", resume: "s-1" })).toEqual(
       expect.arrayContaining(["--permission-mode", "acceptEdits", "--resume", "s-1"]),
     );
+    // codex exec takes its own flags before the resume subcommand, then the session and the prompt.
+    expect(ADAPTERS.codex.args({ access: "edit", resume: "s-2" }).slice(-3)).toEqual(["resume", "s-2", "-"]);
+  });
+
+  it("runs Claude Code in auto mode with auto access, asking Myrel about the rest; other CLIs stay at edit", () => {
+    const args = ADAPTERS.claude.args({ access: "auto", asks: true });
+    expect(args).toEqual(expect.arrayContaining(["--permission-mode", "auto", "--permission-prompt-tool", "mcp__myrel__approve_access"]));
+    expect(ADAPTERS.codex.args({ access: "auto" })).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));
+    expect(ADAPTERS.gemini.args({ access: "auto" })).toEqual(expect.arrayContaining(["--approval-mode", "auto_edit"]));
+  });
+
+  it("starts Claude Code with only Myrel's MCP servers, its own tools loaded up front", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
+    const agent = await ADAPTERS.claude.agent({ url: "https://myrel.test/mcp", token: "t".repeat(32), dir });
+    // The person's own MCP servers would hold up the first model call (up to 30s for one that hangs).
+    expect(agent.args).toEqual(expect.arrayContaining(["--strict-mcp-config"]));
+    expect(agent.env).toMatchObject({ ENABLE_CLAUDEAI_MCP_SERVERS: "false", MCP_TIMEOUT: "10000" });
+    const config = JSON.parse(await readFile(agent.args[agent.args.indexOf("--mcp-config") + 1]!, "utf8"));
+    expect(config.mcpServers.myrel.alwaysLoad).toBe(true);
   });
 
   it("passes the project's other folders to each CLI", () => {
@@ -100,6 +119,31 @@ describe("CLI output parsing", () => {
     const gemini: ParseState = {};
     ADAPTERS.gemini.end!(JSON.stringify({ response: "Merhaba" }), gemini);
     expect(gemini.result).toBe("Merhaba");
+  });
+
+  it("shows Codex's commands without their shell wrapper and its messages whole", () => {
+    const codex: ParseState = {};
+    const command = `/bin/zsh -lc "rg --files -g '"'!node_modules'"'"`;
+    ADAPTERS.codex.line(JSON.stringify({ type: "item.started", item: { type: "command_execution", command } }), codex);
+    expect(codex.progress).toBe("$ rg --files -g '!node_modules'");
+    const text = `${"Kayıt adımı bir SQL prosedürünü çağırıyor. ".repeat(10)}\nİkinci satır.`;
+    ADAPTERS.codex.line(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }), codex);
+    expect(codex.progress).toBe(text.trim());
+  });
+
+  it("fails a Codex run only when its turn fails, not on an error it recovered from", () => {
+    const recovered: ParseState = {};
+    ADAPTERS.codex.line(JSON.stringify({ type: "error", message: "Reconnecting... 1/5" }), recovered);
+    ADAPTERS.codex.line(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Bitti." } }), recovered);
+    ADAPTERS.codex.line(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }), recovered);
+    expect(recovered.failed).toBeFalsy();
+    expect(recovered.result).toBe("Bitti.");
+
+    const failed: ParseState = {};
+    ADAPTERS.codex.line(JSON.stringify({ type: "error", message: "stream disconnected" }), failed);
+    ADAPTERS.codex.line(JSON.stringify({ type: "turn.failed", error: { message: "stream disconnected" } }), failed);
+    expect(failed.failed).toBe(true);
+    expect(failed.result).toBe("stream disconnected");
   });
 });
 
@@ -140,7 +184,15 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
   it("gives Codex the endpoint as config overrides and the token in its environment", async () => {
     const agent = await ADAPTERS.codex.agent(mcp());
     expect(agent).toEqual({
-      args: ["-c", 'mcp_servers.myrel.url="https://myrel.test/api/agent-mcp/thr_1"', "-c", 'mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"'],
+      args: [
+        "-c",
+        'mcp_servers.myrel.url="https://myrel.test/api/agent-mcp/thr_1"',
+        "-c",
+        'mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"',
+        // codex exec cannot ask, so Myrel's tools are approved up front.
+        "-c",
+        'mcp_servers.myrel.default_tools_approval_mode="approve"',
+      ],
       env: { MYREL_MCP_TOKEN: "t".repeat(32) },
     });
     // The prompt still comes last, on stdin.
@@ -163,7 +215,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
       { transport: "stdio" as const, name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } },
     ];
     const claude = await ADAPTERS.claude.agent({ ...mcp(), connectors });
-    expect(claude.args.slice(-2)).toEqual(["--allowedTools", "mcp__myrel,mcp__linear,mcp__db"]);
+    expect(claude.args.slice(-4)).toEqual(["--allowedTools", "mcp__myrel,mcp__linear,mcp__db", "--disallowedTools", "Bash(gh pr create:*)"]);
     const config = JSON.parse(await readFile(claude.args[1]!, "utf8"));
     expect(config.mcpServers.linear).toEqual({ type: "http", url: connectors[0]!.url, headers: { Authorization: `Bearer ${"t".repeat(32)}` } });
     expect(config.mcpServers.db).toEqual({ type: "stdio", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } });
@@ -172,6 +224,16 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     expect(codex.args).toContain('mcp_servers.linear.url="https://myrel.test/api/agent-mcp/thr_1/c/linear"');
     expect(codex.args).toContain('mcp_servers.db.args=["-y","pg-mcp"]');
     expect(codex.args).toContain('mcp_servers.db.env={ DATABASE_URL = "postgres://x" }');
+    expect(codex.args).toContain('mcp_servers.linear.default_tools_approval_mode="approve"');
+    expect(codex.args).toContain('mcp_servers.db.default_tools_approval_mode="approve"');
+  });
+
+  it("pre-approves Codex's app tools unless the run may only read", async () => {
+    // `codex exec` cannot ask, so a tool that needs approval would fail even after the person approved in the thread.
+    const apps = 'apps._default.default_tools_approval_mode="approve"';
+    expect((await ADAPTERS.codex.agent({ ...mcp(), access: "edit" })).args).toContain(apps);
+    expect((await ADAPTERS.codex.agent({ ...mcp(), access: "full" })).args).toContain(apps);
+    expect((await ADAPTERS.codex.agent({ ...mcp(), access: "read" })).args).not.toContain(apps);
   });
 });
 
@@ -232,7 +294,48 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s in %s
     expect(frames.at(-1)).toMatchObject({ type: "task.done", ok: true });
     expect((frames.at(-1) as { result: string }).result).toMatch(/^fix the bug in .*proj$/);
     // The thread's next task resumes the same CLI session.
-    expect(await new SessionStore().get("thr_01JTEST0000000000000000000")).toBe("sess-42");
+    expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "claude")).toEqual({ id: "sess-42", task: "task_01JTEST0000000000000000000" });
+  });
+
+  /** Starts an agent turn that may continue the session of turn `after`. */
+  async function agentTurn(folder: string, after: string) {
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => ({ folders: [{ path: folder, name: "proj" }], access: "edit" }), sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    await runner.start({
+      type: "task.start",
+      taskId: "task_01JTEST0000000000000000002",
+      threadId: "thr_01JTEST0000000000000000000",
+      folder,
+      cli: "claude",
+      prompt: "whole thread",
+      agent: { mcpPath: "/api/agent-mcp/thr_01JTEST0000000000000000000", token: "t".repeat(32), resume: { after, prompt: "only what is new" } },
+    });
+    return frames.at(-1) as { ok: boolean; result: string };
+  }
+
+  it("continues the last turn's session with only what is new", async () => {
+    await fakeClaude(`read prompt
+r=""; prev=""; for a in "$@"; do [ "$prev" = "--resume" ] && r="$a"; prev="$a"; done
+printf '{"type":"result","subtype":"success","is_error":false,"result":"%s / %s"}\n' "$r" "$prompt"`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const sessions = new SessionStore();
+    await sessions.set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000001" });
+    expect((await agentTurn(folder, "task_01JTEST0000000000000000001")).result).toBe("sess-1 / only what is new");
+    // A session that did not see the last turn (it ran in the cloud, say) gets the whole thread.
+    await sessions.set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000009" });
+    expect((await agentTurn(folder, "task_01JTEST0000000000000000001")).result).toBe("sess-1 / whole thread");
+  });
+
+  it("starts a new session with the whole thread when the old one cannot be resumed", async () => {
+    await fakeClaude(`read prompt
+case "$*" in *--resume*) echo "No conversation found with session ID: sess-1" >&2; exit 1 ;; esac
+printf '{"type":"result","subtype":"success","is_error":false,"result":"new / %s"}\n' "$prompt"`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    await new SessionStore().set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000001" });
+    expect(await agentTurn(folder, "task_01JTEST0000000000000000001")).toMatchObject({ ok: true, result: "new / whole thread" });
   });
 
   it("connects the CLI to the thread's MCP endpoint when it runs as the thread's agent", async () => {
@@ -266,6 +369,7 @@ echo "args: $*" >&2`,
           type: "http",
           url: "https://myrel.test/api/agent-mcp/thr_01JTEST0000000000000000009",
           headers: { Authorization: `Bearer ${"t".repeat(32)}` },
+          alwaysLoad: true,
         },
       },
     });

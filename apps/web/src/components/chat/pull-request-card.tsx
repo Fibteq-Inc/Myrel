@@ -10,6 +10,7 @@ import {
   GitPullRequestDraft,
   LoaderCircle,
   MessageSquareWarning,
+  TriangleAlert,
 } from "lucide-react";
 import { cn } from "../../lib/ui";
 
@@ -62,6 +63,12 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
           </span>
           <span className={state.className}>{state.label}</span>
           {pr.state === "open" && <Checks checks={pr.checks} />}
+          {pr.state === "open" && pr.conflict && (
+            <span className="flex items-center gap-1 text-bad">
+              <TriangleAlert size={12} aria-hidden="true" />
+              {t("pr.conflict")}
+            </span>
+          )}
           {pr.state === "open" && pr.review && (
             <span className={cn("flex items-center gap-1", pr.review === "approved" ? "text-ok" : "text-warn")}>
               {pr.review === "approved" ? (

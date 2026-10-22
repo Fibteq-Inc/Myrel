@@ -26,9 +26,14 @@ export type ThreadHost = {
   /** It set a plan this turn. */
   planned(): boolean;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
-  resolve(): Promise<void>;
+  /** Marks the thread finished, or says why it cannot be yet. */
+  resolve(): Promise<string | null>;
   /** Follows a pull request on a connected repository; says what happened. */
   trackPullRequest(url: string): Promise<string>;
+  /** Asks the person, with a card, to connect a GitHub repository to the project; says what happened. */
+  requestRepo(repo: string, reason: string): Promise<string>;
+  /** Opens a pull request on a connected repository through Myrel's GitHub App; says what happened. */
+  openPullRequest(input: { repo: string; head: string; base?: string; title: string; body?: string; draft?: boolean }): Promise<string>;
   /** Directory listing of a connected repository. */
   listRepoFiles(repo: string, path: string, ref?: string): Promise<string>;
   /** Text of one file in a connected repository. */
@@ -39,8 +44,11 @@ export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean 
 
 export type RoutineRun = { name: string; prompt: string; createdAt: string; isNew: boolean };
 
-/** What a reply waits on from people, which decides how loudly they are notified. */
-export type ReplyNeeds = "decision" | "blocked";
+/**
+ * What a reply waits on from people, which decides how loudly they are notified. review: it
+ * presented something (a proposal, a draft, an artifact) and waits for their feedback.
+ */
+export type ReplyNeeds = "decision" | "blocked" | "review";
 
 export function threadPrompt(input: {
   projectName: string;
@@ -61,8 +69,14 @@ export function threadPrompt(input: {
   routines: Routine[];
   now: Date;
   defaultTimezone: string;
+  /**
+   * For a CLI session that continues the last turn and so already holds the thread: only the
+   * messages that arrived since, without the message the thread started from.
+   */
+  followUp?: boolean;
 }): string {
-  const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
+  const shown = input.followUp ? input.messages.filter((m) => m.seq > input.lastSeenSeq) : input.messages;
+  const history = shown.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
   const github = (input.githubEvents ?? []).map((g) => `- ${g.createdAt}${g.isNew ? " · NEW" : ""}: ${g.body}`);
   const pulls = (input.pullRequests ?? []).map(renderPullRequest);
@@ -77,9 +91,11 @@ export function threadPrompt(input: {
           .map((r) => `- ${r.fullName} (default branch ${r.defaultBranch}${r.private ? ", private" : ""})`)
           .join("\n")}`
       : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
-    `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
-    `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
-    notes.length ? `## Notes from the coordinator (not visible to people)\n${notes.join("\n")}` : "",
+    input.followUp ? "" : `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
+    input.followUp
+      ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already)\n${history.join("\n\n") || "(no new messages)"}`
+      : `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
+    notes.length ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${notes.join("\n")}` : "",
     pulls.length ? `## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}` : "",
     github.length ? `## GitHub events on those pull requests (NEW = since your last turn)\n${github.join("\n\n")}` : "",
     input.artifacts?.length
@@ -102,6 +118,14 @@ function renderPullRequest(pr: PullRequest): string {
   return `- ${pr.repo}#${pr.number} "${pr.title}" ${pr.url}: ${pr.draft && pr.state === "open" ? "draft" : pr.state}, ${ci}${review}`;
 }
 
+/** A reply past this many characters or lines should have been an artifact or a file. */
+const LONG_REPLY_CHARS = 1500;
+const LONG_REPLY_LINES = 15;
+
+export function isLongReply(text: string): boolean {
+  return text.length > LONG_REPLY_CHARS || text.trim().split("\n").length > LONG_REPLY_LINES;
+}
+
 export function threadTools(host: ThreadHost): Tool[] {
   return [
     tool({
@@ -110,9 +134,11 @@ export function threadTools(host: ThreadHost): Tool[] {
       input: z.object({
         text: z.string().min(1).max(32_000),
         needs: z
-          .enum(["decision", "blocked"])
+          .enum(["decision", "blocked", "review"])
           .optional()
-          .describe("decision: asks people to choose or approve. blocked: stuck on something only they can change."),
+          .describe(
+            "decision: asks people to choose or approve. blocked: stuck on something only they can change. review: presents something (a proposal, a draft, an artifact) and waits for their feedback.",
+          ),
         files: z
           .array(z.string())
           .max(20)
@@ -121,11 +147,15 @@ export function threadTools(host: ThreadHost): Tool[] {
       }),
       run: async ({ text, needs, files }) => {
         await host.reply(text, needs, files);
+        // Long replies make threads hard to scroll; sending it anyway and nudging keeps the turn going.
+        const tooLong = isLongReply(text)
+          ? " That reply was long: keep the next ones to a few sentences, put longer content in an artifact or a project file, and ask for choices with ask_decision."
+          : "";
         // Weaker models read their opening note as the end of the turn; it is not. Some also skip
         // the plan and only set it once the work is done, when people no longer need it.
         if (!needs && !host.planned())
-          return "Sent. Unless that reply finished the turn, call update_plan next, before any other tool, so people follow your plan while you work.";
-        return "Sent.";
+          return `Sent.${tooLong} Unless that reply finished the turn, call update_plan next, before any other tool, so people follow your plan while you work.`;
+        return `Sent.${tooLong}`;
       },
     }),
     tool({
@@ -198,6 +228,30 @@ export function threadTools(host: ThreadHost): Tool[] {
       run: ({ repo, path, ref }) => host.readRepoFile(repo, path, ref),
     }),
     tool({
+      name: "request_repo_connection",
+      description:
+        "Ask the person to connect a GitHub repository this project has not connected (to push to it or open a pull request). Posts a card; one tap by a project owner or admin connects it through Myrel's GitHub App, and you are woken to carry on. End your turn after calling it.",
+      input: z.object({
+        repo: z.string().min(3).max(200).regex(/^[\w.-]+\/[\w.-]+$/).describe("owner/name"),
+        reason: z.string().min(1).max(300).describe("One sentence, in the person's language, on what you need it for."),
+      }),
+      run: ({ repo, reason }) => host.requestRepo(repo, reason),
+    }),
+    tool({
+      name: "open_pull_request",
+      description:
+        "Open a pull request on a connected repository through Myrel's GitHub App, after you pushed its branch. It needs no GitHub sign-in or gh on your side, credits the person this thread works for with a link back here, and follows the pull request like track_pull_request. If the branch already has an open pull request, that one is returned.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        head: z.string().min(1).max(255).describe("The pushed branch with the changes."),
+        base: z.string().max(255).optional().describe("The branch to merge into. Defaults to the repository's default branch."),
+        title: z.string().min(1).max(256),
+        body: z.string().max(60000).optional().describe("What changed and why, in Markdown. Myrel adds the credit line on top itself."),
+        draft: z.boolean().optional(),
+      }),
+      run: (input) => host.openPullRequest(input),
+    }),
+    tool({
       name: "track_pull_request",
       description:
         "Follow a pull request you opened on a connected repository: its CI, reviews and merge show in the thread and wake you.",
@@ -206,10 +260,12 @@ export function threadTools(host: ThreadHost): Tool[] {
     }),
     tool({
       name: "resolve_thread",
-      description: "Mark this thread finished. Call it after the reply that delivers the result.",
+      description:
+        "Mark this thread finished. Call it after the reply that delivers the result, once nothing waits on the person: not in a turn that asked them something or presented a proposal, draft or artifact for their feedback.",
       input: z.object({}),
       run: async () => {
-        await host.resolve();
+        const refused = await host.resolve();
+        if (refused) return refused;
         return { output: "Thread resolved.", stop: true };
       },
     }),

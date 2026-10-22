@@ -162,6 +162,27 @@
       "when": 1792571738514,
       "tag": "0022_store_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792655064398,
+      "tag": "0023_github_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792657640731,
+      "tag": "0024_github_user_repos",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792666967726,
+      "tag": "0025_pull_request_conflict",
+      "breakpoints": true
     }
   ]
 }

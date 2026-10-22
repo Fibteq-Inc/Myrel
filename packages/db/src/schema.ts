@@ -255,6 +255,35 @@ export const githubInstallationUsers = sqliteTable(
   (t) => [primaryKey({ columns: [t.installationId, t.userId] }), index("github_installation_users_user_id_idx").on(t.userId)],
 );
 
+/**
+ * Repositories of an installation that GitHub said the user can reach themselves, at their last
+ * GitHub sign-in. An installation can cover more repositories than one of its members may see, so
+ * connecting a repository to a project checks this, not only the installation.
+ */
+export const githubUserRepos = sqliteTable(
+  "github_user_repos",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    installationId: integer("installation_id")
+      .notNull()
+      .references(() => githubInstallations.id, { onDelete: "cascade" }),
+    repoId: integer("repo_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.installationId, t.repoId] })],
+);
+
+/** The GitHub account a Myrel user signed in with when connecting GitHub, so pull requests can credit and assign them. */
+export const githubAccounts = sqliteTable("github_accounts", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  githubId: integer("github_id").notNull(),
+  login: text("login").notNull(),
+  updatedAt: timestamps.updatedAt,
+});
+
 /** A repository connected to a project. `repoId` is GitHub's repository id, stable across renames. */
 export const projectRepos = sqliteTable(
   "project_repos",
@@ -298,6 +327,8 @@ export const pullRequests = sqliteTable(
     headRef: text("head_ref").notNull(),
     checks: text("checks", { enum: ["pending", "success", "failure"] }),
     review: text("review", { enum: ["approved", "changes_requested"] }),
+    /** The branch no longer merges cleanly into its base. */
+    conflict: integer("conflict", { mode: "boolean" }).notNull().default(false),
     ...timestamps,
   },
   (t) => [primaryKey({ columns: [t.repoId, t.number] }), index("pull_requests_project_id_idx").on(t.projectId, t.threadId)],

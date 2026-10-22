@@ -4,8 +4,10 @@ Myrel talks to GitHub through a **GitHub App**. Each Myrel server needs its own 
 People connect their GitHub account in a project's settings, pick repositories, and thread
 agents can then read the code in those repositories. Their tasks clone, push and open pull
 requests through the same app, and the webhook keeps each pull request a thread opened up to
-date: the thread shows its CI, review and merge state live, and its agent is woken when CI
-fails, someone asks for changes or comments, or it is merged or closed.
+date: the thread shows its CI, review, conflict and merge state live, and its agent is woken
+when CI fails, someone asks for changes or comments, it starts to conflict with its base
+branch, or it is merged or closed. GitHub sends no event for a new conflict, so a push to a
+branch makes Myrel look again at the open pull requests that merge into it.
 
 ## Quick setup
 
