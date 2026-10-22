@@ -284,6 +284,8 @@ describe("pull requests", () => {
     draft: false,
     merged: false,
     head: { sha: "sha-1", ref: "myrel/fix-login" },
+    base: { ref: "main" },
+    mergeable: true,
     ...over,
   });
 
@@ -387,6 +389,43 @@ describe("pull requests", () => {
     const after = (await projectAgent.getThreadContext(thread.id))!.messages;
     expect(after.slice(before).map((m) => m.body)).toEqual([`acme/app#${n} was merged.`]);
     expect(await projectAgent.getThread(thread.id)).toMatchObject({ resolved: true, status: "done" });
+  });
+
+  it("wakes the thread once when a push to its base leaves the pull request conflicting", async () => {
+    const { project, thread, events } = await setup();
+    const n = number + 10;
+    const u = `https://github.com/acme/app/pull/${n}`;
+    const at = (over: Record<string, unknown> = {}) => pull({ number: n, html_url: u, ...over });
+    const current = async () => (await listPullRequests(env.DB, project.id, thread.id))[0];
+    fakeGithub.pulls[`acme/app#${n}`] = at();
+    expect(await trackPullRequest(env, project.id, thread.id, u)).toMatchObject({ conflict: false });
+
+    // Another pull request lands on main; GitHub has not worked out mergeability yet, so the thread's agent asks again later.
+    fakeGithub.pulls[`acme/app#${n}`] = at({ mergeable: null });
+    await hook("push", { ref: "refs/heads/main" });
+    expect((await current())?.conflict).toBe(false);
+    const stub = env.THREAD_AGENT.get(env.THREAD_AGENT.idFromName(thread.id));
+    const schedules = await runInDurableObject(stub, (agent: ThreadAgent) => agent.getSchedules());
+    expect(schedules.filter((s) => s.callback === "conflictCheck").map((s) => s.payload)).toEqual([{ repoId: 7, number: n, attempt: 1 }]);
+
+    // It conflicts: the card says so and the thread's agent is woken.
+    fakeGithub.pulls[`acme/app#${n}`] = at({ mergeable: false });
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.conflictCheck({ repoId: 7, number: n, attempt: 1 });
+    expect((await current())?.conflict).toBe(true);
+    expect(events.some((e) => e.type === "pr.updated" && e.pullRequest.conflict)).toBe(true);
+    expect(await githubEvents(thread.id)).toEqual([expect.stringContaining("has merge conflicts with its base branch main")]);
+
+    // Still conflicting after more pushes: nobody is woken again. Pushes to other branches are not about it.
+    await hook("push", { ref: "refs/heads/main" });
+    await hook("push", { ref: "refs/heads/release" });
+    expect(await githubEvents(thread.id)).toHaveLength(1);
+
+    // The agent brings main in and pushes: the mark clears without waking anyone.
+    fakeGithub.pulls[`acme/app#${n}`] = at({ head: { sha: "sha-9", ref: "myrel/fix-login" } });
+    await hook("pull_request", { action: "synchronize", pull_request: at({ head: { sha: "sha-9", ref: "myrel/fix-login" }, mergeable: null }) });
+    expect((await current())?.conflict).toBe(false);
+    expect(await githubEvents(thread.id)).toHaveLength(1);
   });
 
   it("opens a pull request through the app, crediting the person with a link back to the thread", async () => {

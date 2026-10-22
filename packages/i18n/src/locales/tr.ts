@@ -702,6 +702,7 @@ export const tr: Catalog = {
   "pr.checksFailure": "CI başarısız",
   "pr.approved": "Onaylandı",
   "pr.changesRequested": "Değişiklik istendi",
+  "pr.conflict": "Conflict var",
   "tasks.terminalOutput": "Terminal çıktısı",
   "tasks.totalTime": "Toplam süre",
   "tasks.stepTime": "Bu adımın süresi",

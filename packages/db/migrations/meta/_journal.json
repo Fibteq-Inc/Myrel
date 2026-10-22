@@ -176,6 +176,13 @@
       "when": 1792657640731,
       "tag": "0024_github_user_repos",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792666967726,
+      "tag": "0025_pull_request_conflict",
+      "breakpoints": true
     }
   ]
 }

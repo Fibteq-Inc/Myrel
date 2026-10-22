@@ -300,6 +300,8 @@ export const PullRequest = z.object({
   checks: z.enum(["pending", "success", "failure"]).nullable(),
   /** The latest decisive review; null when nobody approved or asked for changes. */
   review: z.enum(["approved", "changes_requested"]).nullable(),
+  /** The branch conflicts with its base and cannot be merged until that is resolved. */
+  conflict: z.boolean().default(false),
   updatedAt: Timestamp,
 });
 export type PullRequest = z.infer<typeof PullRequest>;

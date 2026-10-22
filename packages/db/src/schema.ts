@@ -327,6 +327,8 @@ export const pullRequests = sqliteTable(
     headRef: text("head_ref").notNull(),
     checks: text("checks", { enum: ["pending", "success", "failure"] }),
     review: text("review", { enum: ["approved", "changes_requested"] }),
+    /** The branch no longer merges cleanly into its base. */
+    conflict: integer("conflict", { mode: "boolean" }).notNull().default(false),
     ...timestamps,
   },
   (t) => [primaryKey({ columns: [t.repoId, t.number] }), index("pull_requests_project_id_idx").on(t.projectId, t.threadId)],
