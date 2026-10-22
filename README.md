@@ -139,6 +139,7 @@ project and ask for something in the project chat.
 
 Other scripts: `pnpm typecheck`, `pnpm test`, `pnpm build`. After changing
 `packages/db/src/schema.ts`, run `pnpm db:generate` to create a migration.
+Run `pnpm typecheck` and `pnpm test` before opening a pull request.
 
 ## Self-hosting
 
