@@ -1,0 +1,79 @@
+name: Mobile update
+
+# Ships JavaScript-only changes to installed mobile apps as an EAS Update: on every push to main that
+# touches the app or the packages it bundles, or by hand. Runs on GitHub so it uses no EAS Workflows time;
+# the update itself is served by EAS Update.
+#
+# Builds use the fingerprint runtime policy (app.config.ts), so an update only reaches installed builds
+# with the same native fingerprint. A change that needs a new store build (a native module, an SDK bump)
+# publishes an update no installed app picks up, and the next store build embeds that code anyway.
+#
+# Secrets: EXPO_TOKEN and GOOGLE_SERVICES_JSON in the `store` environment (see mobile.yml).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/mobile/**
+      - packages/client/**
+      - packages/i18n/**
+      - packages/protocol/**
+      - pnpm-lock.yaml
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options: [production, preview]
+        default: production
+      message:
+        type: string
+        required: false
+
+concurrency:
+  group: mobile-update-${{ inputs.channel || 'production' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: store
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android, ios]
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # Same default server the build profiles in eas.json set.
+      EXPO_PUBLIC_MYREL_SERVER: https://myrel.fibteq.io
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Same path as in mobile.yml's Android build, so the fingerprints match.
+      - name: Write google-services.json
+        if: matrix.platform == 'android'
+        shell: bash
+        env:
+          CONTENT: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          [ -n "$CONTENT" ] || { echo "::error::GOOGLE_SERVICES_JSON is not set in the store environment."; exit 1; }
+          printf '%s' "$CONTENT" > "$RUNNER_TEMP/google-services.json"
+          echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+
+      - name: Publish
+        working-directory: apps/mobile
+        env:
+          CHANNEL: ${{ inputs.channel || 'production' }}
+          MESSAGE: ${{ inputs.message || github.event.head_commit.message || 'Manual update' }}
+        run: >
+          npx -y eas-cli@25.3.0 update --non-interactive
+          --platform ${{ matrix.platform }} --channel "$CHANNEL" --environment "$CHANNEL"
+          --message "$MESSAGE"
