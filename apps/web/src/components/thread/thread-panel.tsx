@@ -347,6 +347,7 @@ function Conversation({
   const pullRequests = threadPullRequests(state, thread.id);
   const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
   const active = !!state.active[thread.id];
+  const last = messages.at(-1);
   const working = thread.status === "working" && !thread.resolved;
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
@@ -372,7 +373,12 @@ function Conversation({
           />
         </div>
       )}
-      <ScrollToEnd dep={messages.length + (active ? 1 : 0)} className="flex-1 overflow-y-auto">
+      <ScrollToEnd
+        last={last?.id}
+        busy={active}
+        mine={last?.authorKind === "user" && last.authorId === me}
+        className="flex-1 overflow-y-auto"
+      >
         <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
           {root && !history.hidden && <MessageView message={root} me={me} names={names} />}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
