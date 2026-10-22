@@ -9,11 +9,12 @@ import {
   githubConfigured,
   githubUser,
   installationRepos,
+  userInstallationRepoIds,
   userInstallations,
 } from "../github/app";
 import { handlePullEvent } from "../github/pulls";
 import { safeReturnTo, signState, verifyState, verifyWebhook } from "../github/state";
-import { githubGrantStale, listUserInstallations, saveGithubAccount, syncUserInstallations } from "../github/store";
+import { githubGrantStale, listUserInstallations, saveGithubAccount, syncUserInstallations, userRepoIds } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 
 const { githubInstallations, projectRepos } = schema;
@@ -79,7 +80,10 @@ export const githubRoutes = new Hono<AppEnv>()
     if (!code) return back("no_code");
     try {
       const token = await exchangeCode(c.env, code);
-      await syncUserInstallations(c.env.DB, c.get("user").id, await userInstallations(token));
+      const installs = await userInstallations(token);
+      // An installation can cover repositories this person may not see: keep the ones they can.
+      const repos = new Map(await Promise.all(installs.map(async (i) => [i.id, await userInstallationRepoIds(token, i.id)] as const)));
+      await syncUserInstallations(c.env.DB, c.get("user").id, installs, repos);
       // Only credits and assigns pull requests, so connecting never fails over it.
       await githubUser(token)
         .then((account) => saveGithubAccount(c.env.DB, c.get("user").id, account))
@@ -97,12 +101,15 @@ export const githubRoutes = new Hono<AppEnv>()
       return c.json({ error: "github_reauth", message: "Sign in to GitHub again to pick repositories." }, 409);
     }
     const installs = await listUserInstallations(c.env.DB, c.get("user").id);
+    const reachable = await userRepoIds(c.env.DB, c.get("user").id);
     const lists = await Promise.all(
       installs.map(async (i) =>
         (await installationRepos(c.env, i.id).catch((err) => {
           console.error("listing installation repos failed", i.id, err);
           return [] as GithubApiRepo[];
-        })).map((r): GithubRepo => ({
+        }))
+          .filter((r) => reachable.has(`${i.id}:${r.id}`))
+          .map((r): GithubRepo => ({
           id: r.id,
           installationId: i.id,
           fullName: r.full_name,

@@ -23,7 +23,7 @@ import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
 import { listPullRequests } from "../github/pulls";
-import { canUseInstallation, listProjectRepos } from "../github/store";
+import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
@@ -277,7 +277,11 @@ export const projectRoutes = new Hono<AppEnv>()
     const { installationId, repoId } = input.data;
     const grant = await canUseInstallation(c.env.DB, userId, installationId);
     if (grant === "no") return c.json({ error: "forbidden" }, 403);
-    if (grant === "stale") return c.json({ error: "github_reauth", message: "Sign in to GitHub again to pick repositories." }, 409);
+    if (grant === "stale" || (await githubGrantStale(c.env.DB, userId))) {
+      return c.json({ error: "github_reauth", message: "Sign in to GitHub again to pick repositories." }, 409);
+    }
+    // The installation may cover repositories this person cannot see on GitHub.
+    if (!(await userCanReachRepo(c.env.DB, userId, installationId, repoId))) return c.json({ error: "repo_not_accessible" }, 404);
 
     // Narrowing a token to the repo fails unless the installation really covers it.
     let repo;

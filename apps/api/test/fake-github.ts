@@ -21,6 +21,8 @@ export const fakeGithub = {
     { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
   requests: [] as { method: string; url: string; body?: unknown }[],
+  /** The repositories of installation 42 the signed-in user can reach themselves. */
+  userRepos: [7, 8],
 };
 
 const realFetch = globalThis.fetch;
@@ -37,6 +39,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname === "/app") return Response.json({ id: 1234, slug: "myrel-test" });
   if (url.pathname === "/user") return Response.json({ id: 9001, login: "octo" });
+  if (url.pathname === "/user/installations/42/repositories") {
+    const repositories = fakeGithub.repos.filter((r) => fakeGithub.userRepos.includes(r.id));
+    return Response.json({ total_count: repositories.length, repositories });
+  }
   if (url.pathname === "/user/installations") {
     return Response.json({ total_count: fakeGithub.installations.length, installations: fakeGithub.installations });
   }

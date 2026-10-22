@@ -164,6 +164,23 @@ describe("project repositories", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("only connects repositories the person can reach on GitHub, not every one the installation covers", async () => {
+    fakeGithub.userRepos = [8];
+    try {
+      const token = await signUp();
+      await connect(token);
+      const project = await createProject(token);
+      const picker = (await (await api("/api/github/repos", { token })).json()) as { repos: GithubRepo[] };
+      expect(picker.repos.map((r) => r.fullName)).toEqual(["acme/docs"]);
+      const add = (repoId: number) =>
+        api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId }) });
+      expect((await add(7)).status).toBe(404);
+      expect((await add(8)).status).toBe(201);
+    } finally {
+      fakeGithub.userRepos = [7, 8];
+    }
+  });
+
   it("asks for a fresh GitHub sign-in before picking repositories on an old one", async () => {
     const token = await signUp();
     await connect(token);
@@ -178,6 +195,9 @@ describe("project repositories", () => {
 
     await connect(token);
     expect((await add()).status).toBe(201);
+    // A sign-in from before Myrel kept the person's own repositories counts as old too.
+    await testEnv.DB.prepare("DELETE FROM github_user_repos WHERE user_id = ?").bind(me).run();
+    expect((await api("/api/github/repos", { token })).status).toBe(409);
   });
 
   it("does not let users add repos from installations they cannot reach", async () => {
@@ -383,6 +403,9 @@ describe("pull requests", () => {
     expect(created).toBe(true);
     expect(pr).toMatchObject({ repo: "acme/app", state: "open", threadId: thread.id });
     const sent = fakeGithub.requests.slice(before);
+    // GitHub reads the branches to open a pull request: without contents it refuses ("not all refs are readable").
+    const scoped = sent.filter((r) => r.url.endsWith("/access_tokens")).map((r) => (r.body as { permissions?: Record<string, string> }).permissions);
+    expect(scoped).toContainEqual(expect.objectContaining({ contents: "read", pull_requests: "write" }));
     const create = sent.find((r) => r.method === "POST" && r.url.endsWith("/repos/acme/app/pulls"))!;
     const body = (create.body as { body: string; base: string }).body;
     expect((create.body as { base: string }).base).toBe("main");
