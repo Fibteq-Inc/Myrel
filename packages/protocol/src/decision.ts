@@ -33,3 +33,34 @@ export function parseDecision(json: string): Decision | null {
     return null;
   }
 }
+
+/** The decision cards in a message body, in order. */
+export function decisionsIn(body: string): Decision[] {
+  const found: Decision[] = [];
+  for (const m of body.matchAll(new RegExp("```" + DECISION_LANG + "\\n([\\s\\S]*?)\\n```", "g"))) {
+    const decision = parseDecision(m[1]!);
+    if (decision) found.push(decision);
+  }
+  return found;
+}
+
+/**
+ * People's messages that only pick an option on a decision card above them. The card already shows
+ * the pick, so clients leave these out instead of repeating it in a bubble of its own.
+ */
+export function decisionPicks(
+  messages: { id: string; authorKind: string; body: string; attachments?: unknown[] | null }[],
+): Set<string> {
+  const picks = new Set<string>();
+  let labels: string[] = [];
+  const key = (s: string) => s.trim().toLocaleLowerCase();
+  for (const m of messages) {
+    if (m.authorKind === "agent") {
+      for (const d of decisionsIn(m.body)) labels.push(...d.options.map((o) => key(o.label)));
+    } else if (m.authorKind === "user") {
+      if (labels.includes(key(m.body)) && !m.attachments?.length) picks.add(m.id);
+      labels = [];
+    }
+  }
+  return picks;
+}

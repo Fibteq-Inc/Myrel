@@ -92,7 +92,8 @@ export async function trackPullRequest(
       .from(pullRequests)
       .where(and(eq(pullRequests.repoId, repo.repoId), eq(pullRequests.number, pull.number)))
       .limit(1);
-    const recent = !pull.created_at || Date.now() - Date.parse(pull.created_at) < CREDIT_WINDOW_MS;
+    const opened = pull.created_at ? Date.parse(pull.created_at) : Date.now();
+    const recent = credit.since ? opened >= Date.parse(credit.since) : Date.now() - opened < CREDIT_WINDOW_MS;
     if (!known && recent && pull.state === "open") {
       await creditPull(env, repo, pull, credit).catch((err) => console.warn("crediting pull request failed", pull.html_url, err));
     }

@@ -11,6 +11,8 @@ export type PullCredit = {
   login: string | null;
   /** The thread on Myrel, e.g. https://myrel.fibteq.io/projects/p/threads/t. */
   threadUrl: string | null;
+  /** Only a pull request opened at or after this time (ISO) is credited when first followed. */
+  since?: string;
 };
 
 const MARKER = "<!-- myrel-attribution";

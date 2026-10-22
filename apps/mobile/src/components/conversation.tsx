@@ -1,4 +1,4 @@
-import { type Artifact, type Message, planChecklist, type Reaction } from "@myrel/protocol";
+import { type Artifact, decisionPicks, type Message, planChecklist, type Reaction } from "@myrel/protocol";
 import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -50,6 +50,8 @@ export function Conversation({
   const openLink = useOpenLink(projectId);
   const openArtifact = useOpenArtifact(projectId);
   const answers = useMemo(() => decisionAnswers(messages), [messages]);
+  // A tap on a card is shown on the card itself, not again as a bubble.
+  const picks = useMemo(() => decisionPicks(messages), [messages]);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
   const data = useMemo(() => [...messages].reverse(), [messages]);
   // KeyboardAvoidingView measures itself relative to its parent, so anything
@@ -89,6 +91,9 @@ export function Conversation({
           ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
           ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
           renderItem={({ item }) => {
+            const footer = footerFor?.(item);
+            // A pick that opened a thread keeps its bubble, which carries the thread's card.
+            if (picks.has(item.id) && !footer) return null;
             const checklist = item.authorKind === "agent" ? planChecklist(item.body) : null;
             if (checklist !== null) {
               const current = plan && item.id === plan.messageId ? plan : null;
@@ -107,7 +112,7 @@ export function Conversation({
                   item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
                 }
               >
-                {footerFor?.(item)}
+                {footer}
               </MessageView>
             );
           }}
