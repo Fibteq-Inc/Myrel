@@ -1,6 +1,7 @@
-import { checklistProgress, parseChecklist } from "@myrel/client";
+import { type ChecklistItem, checklistProgress, freshSteps, parseChecklist } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle } from "lucide-react";
+import { ChevronDown, CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle } from "lucide-react";
+import { useCallback, useEffect, useId, useReducer, useState } from "react";
 import { cn } from "../../lib/ui";
 
 /**
@@ -8,7 +9,7 @@ import { cn } from "../../lib/ui";
  * are indented under the plan step they run in; skipped steps stay visible,
  * struck through, so people see what the agent chose not to do.
  */
-export function Checklist({ text, live = true }: { text: string; live?: boolean }) {
+export function Checklist({ text, live = true, fresh }: { text: string; live?: boolean; fresh?: ReadonlySet<string> }) {
   const t = useT();
   const { title, items } = parseChecklist(text);
   if (items.length === 0) return <div className="whitespace-pre-wrap text-[13px] text-muted">{text}</div>;
@@ -55,7 +56,14 @@ export function Checklist({ text, live = true }: { text: string; live?: boolean 
               {item.state === "failed" && <CircleX size={15} className="text-bad" aria-label={t("checklist.failed")} />}
               {item.state === "skipped" && <CircleMinus size={15} aria-label={t("checklist.skipped")} />}
             </span>
-            {item.text}
+            <span>
+              {item.text}
+              {item.depth === 0 && fresh?.has(item.text) && (
+                <span className="ml-1.5 rounded-full border border-accent px-1.5 text-[10px] font-semibold text-accent">
+                  {t("checklist.new")}
+                </span>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -76,49 +84,125 @@ export function PlanCard({ text, live, id }: { text: string; live: boolean; id?:
   );
 }
 
+/** The plan steps each person has had in view, per plan (thread and title), for this session. */
+const seenSteps = new Map<string, Set<string>>();
+
 /**
- * The thread's progress in one line, pinned above the conversation while the
- * agent works: the step it is on and how many are done. The full list is the
- * plan card in the conversation; clicking jumps to it.
+ * The plan steps added since the person last opened the plan. A plan seen for
+ * the first time counts as seen, so only steps the agent adds later are new.
  */
-export function PlanProgress({ text, live, onOpen }: { text: string; live: boolean; onOpen?: () => void }) {
+function useFreshSteps(key: string, items: ChecklistItem[]) {
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const shown = () => new Set(items.filter((i) => i.depth === 0).map((i) => i.text));
+  if (!seenSteps.has(key)) seenSteps.set(key, shown());
+  const fresh = freshSteps(items, seenSteps.get(key)!);
+  const markSeen = () => {
+    seenSteps.set(key, shown());
+    rerender();
+  };
+  return { fresh, markSeen };
+}
+
+/**
+ * The thread's progress in one line, pinned above the conversation: the step
+ * the agent is on and how many are done, with a badge when the agent added
+ * steps. Clicking opens the whole plan right there, so nobody has to scroll
+ * back to the plan card; the card stays where the work started.
+ */
+export function PlanProgress({
+  planKey,
+  text,
+  live,
+  onJump,
+}: {
+  /** Which plan this is (thread and plan title), so new steps are told apart per plan. */
+  planKey: string;
+  text: string;
+  live: boolean;
+  /** Scrolls to the plan card in the conversation. */
+  onJump?: () => void;
+}) {
   const t = useT();
+  const panelId = useId();
+  const [open, setOpen] = useState(false);
   const { title, items } = parseChecklist(text);
+  const { fresh, markSeen } = useFreshSteps(planKey, items);
+  const toggle = useCallback(() => {
+    // Closing the panel is when the person has seen the new steps.
+    if (open) markSeen();
+    setOpen(!open);
+  }, [open, markSeen]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && toggle();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, toggle]);
   if (items.length === 0) return null;
   const { done, total } = checklistProgress(items);
   const step = items.findLast((i) => i.state === "active") ?? items.find((i) => i.state === "failed");
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      disabled={!onOpen}
-      className="flex w-full flex-col gap-1.5 text-left enabled:hover:[&_.plan-step]:text-fg"
-    >
-      <span className="flex w-full items-center gap-2 text-xs">
-        {step?.state === "failed" ? (
-          <CircleX size={13} className="flex-none text-bad" aria-hidden="true" />
-        ) : live && step ? (
-          <LoaderCircle size={13} className="flex-none animate-spin text-accent" aria-hidden="true" />
-        ) : done === total ? (
-          <CircleCheck size={13} className="flex-none text-ok" aria-hidden="true" />
-        ) : (
-          <CircleDashed size={13} className="flex-none text-subtle" aria-hidden="true" />
-        )}
-        <span className="plan-step truncate text-muted transition-colors">{step?.text ?? (title || t("checklist.progress"))}</span>
-        <span className="ml-auto flex-none font-mono text-subtle">
-          {done} / {total}
-        </span>
-      </span>
-      <span
-        role="progressbar"
-        aria-label={t("checklist.progress")}
-        aria-valuemin={0}
-        aria-valuemax={total}
-        aria-valuenow={done}
-        className="block h-1 w-full overflow-hidden rounded bg-[#222227]"
+    <div>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="flex w-full flex-col gap-1.5 text-left hover:[&_.plan-step]:text-fg"
       >
-        <span className="block h-full rounded bg-accent transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
-      </span>
-    </button>
+        <span className="flex w-full items-center gap-2 text-xs">
+          {step?.state === "failed" ? (
+            <CircleX size={13} className="flex-none text-bad" aria-hidden="true" />
+          ) : live && step ? (
+            <LoaderCircle size={13} className="flex-none animate-spin text-accent" aria-hidden="true" />
+          ) : done === total ? (
+            <CircleCheck size={13} className="flex-none text-ok" aria-hidden="true" />
+          ) : (
+            <CircleDashed size={13} className="flex-none text-subtle" aria-hidden="true" />
+          )}
+          <span className="plan-step truncate text-muted transition-colors">{step?.text ?? (title || t("checklist.progress"))}</span>
+          {!open && fresh.size > 0 && (
+            <span className="flex-none rounded-full bg-accent px-1.5 text-[10px] font-bold leading-4 text-ground">
+              {t("checklist.newSteps", { count: fresh.size })}
+            </span>
+          )}
+          <span className="ml-auto flex-none font-mono text-subtle">
+            {done} / {total}
+          </span>
+          <ChevronDown
+            size={13}
+            className={cn("flex-none text-subtle transition-transform", open && "rotate-180")}
+            aria-hidden="true"
+          />
+        </span>
+        <span
+          role="progressbar"
+          aria-label={t("checklist.progress")}
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={done}
+          className="block h-1 w-full overflow-hidden rounded bg-[#222227]"
+        >
+          <span className="block h-full rounded bg-accent transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+        </span>
+      </button>
+      {open && (
+        <div id={panelId} className="mt-3 flex max-h-[50vh] flex-col gap-3 overflow-y-auto pb-1">
+          <Checklist text={text} live={live} fresh={fresh} />
+          {onJump && (
+            <button
+              type="button"
+              onClick={() => {
+                toggle();
+                onJump();
+              }}
+              className="self-start text-xs text-accent hover:underline"
+            >
+              {t("checklist.openCard")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
