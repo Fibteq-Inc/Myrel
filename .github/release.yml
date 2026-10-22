@@ -1,0 +1,12 @@
+# Default layout for "Generate release notes" in the GitHub UI. The Release workflow uses the per-app files
+# (release-desktop.yml, release-mobile.yml) instead.
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: Desktop
+      labels: ["app:desktop"]
+    - title: Mobile
+      labels: ["app:mobile"]
+    - title: Other changes
+      labels: ["*"]

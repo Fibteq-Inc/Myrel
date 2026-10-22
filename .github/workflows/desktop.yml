@@ -3,13 +3,12 @@ name: Desktop
 # Builds the Tauri app for macOS, Windows and Linux.
 # Builds only run from main. Pull requests don't build the app; CI's typecheck and build already cover
 # the desktop and runner TypeScript.
-# Releases: merging the desktop Release PR (release-please.yml) tags `desktop-v*`, creates the GitHub
-# release and calls this workflow with that tag. A `desktop-v*` tag pushed by hand works the same way.
+# Releases: the Release workflow (release.yml) tags `desktop-v*`, opens a draft release with GitHub's
+# generated notes and calls this workflow with that tag. Publishing a `desktop-v*` release drafted by hand
+# in the GitHub UI starts it the same way. The version comes from the tag, not from a file.
 # Manual runs on main upload unsigned-for-release installers as workflow artifacts. A manual run with a tag
 # rebuilds that release from its tag (e.g. when one platform failed) and replaces its installers.
-# Release notes list the pull requests since the previous desktop tag that changed the app
-# (apps/desktop/scripts/release-notes.sh).
-# Release builds: signed builds (when the secrets below exist) attached to a draft GitHub release,
+# Release builds: signed builds (when the secrets below exist) attached to the tag's GitHub release,
 # plus `latest.json` for the in-app updater.
 #
 # Optional secrets (the build still runs without them, just unsigned):
@@ -24,8 +23,9 @@ name: Desktop
 #   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
 
 on:
-  push:
-    tags: ["desktop-v*"]
+  # Releases published in the UI. Ones written by release.yml (GITHUB_TOKEN) don't trigger this.
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -49,6 +49,8 @@ permissions:
 jobs:
   # Stops tags on commits that aren't on main, and manual runs started from another branch.
   from-main:
+    # A published release only builds when it is a desktop one.
+    if: github.event_name != 'release' || startsWith(github.ref_name, 'desktop-v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -73,8 +75,9 @@ jobs:
   build:
     needs: from-main
     env:
-      # The release to attach installers to: the Release PR's tag, a pushed tag, or none for manual runs.
-      RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name) || '' }}
+      # The release to attach installers to: release.yml's tag, a published release's tag, or none for
+      # manual runs.
+      RELEASE_TAG: ${{ inputs.tag || (github.event_name == 'release' && github.ref_name) || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -120,7 +123,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Use signing secrets when present
+      - name: Use the release version and signing secrets when present
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -143,13 +146,21 @@ jobs:
               { echo "$name<<__MYREL_EOF__"; printf '%s\n' "${!name}"; echo "__MYREL_EOF__"; } >> "$GITHUB_ENV"
             fi
           done
+          # Extra Tauri config for this build, merged over tauri.conf.json.
+          conf='{}'
+          # A release takes its version from the tag (desktop-v0.7.0 → 0.7.0); Cargo.toml's isn't bumped.
+          if [ -n "$RELEASE_TAG" ]; then
+            conf="$(jq -c --arg version "${RELEASE_TAG#desktop-v}" '. + {version: $version}' <<< "$conf")"
+          fi
           # Updater artifacts need both halves of the key pair.
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$UPDATER_PUBKEY" ]; then
-            jq -n --arg pubkey "$UPDATER_PUBKEY" \
-              '{bundle: {createUpdaterArtifacts: true}, plugins: {updater: {pubkey: $pubkey}}}' \
-              > apps/desktop/src-tauri/tauri.ci.conf.json
-            echo "TAURI_EXTRA_ARGS=--config src-tauri/tauri.ci.conf.json" >> "$GITHUB_ENV"
+            conf="$(jq -c --arg pubkey "$UPDATER_PUBKEY" \
+              '. + {bundle: {createUpdaterArtifacts: true}, plugins: {updater: {pubkey: $pubkey}}}' <<< "$conf")"
             echo "UPDATER_JSON=true" >> "$GITHUB_ENV"
+          fi
+          if [ "$conf" != '{}' ]; then
+            printf '%s\n' "$conf" > apps/desktop/src-tauri/tauri.ci.conf.json
+            echo "TAURI_EXTRA_ARGS=--config src-tauri/tauri.ci.conf.json" >> "$GITHUB_ENV"
           fi
 
       - name: Build
@@ -178,24 +189,3 @@ jobs:
             apps/desktop/src-tauri/target/*/release/bundle/
           if-no-files-found: error
           retention-days: 14
-
-  # Replaces the release body with the pull requests that changed the app since the previous desktop tag.
-  # release-please's changelog only sees Conventional Commits under its paths, which misses most of them.
-  notes:
-    needs: build
-    if: ${{ !cancelled() && (inputs.tag || startsWith(github.ref, 'refs/tags/desktop-v')) }}
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-      - name: Write release notes
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          apps/desktop/scripts/release-notes.sh "$RELEASE_TAG" > "$RUNNER_TEMP/notes.md"
-          cat "$RUNNER_TEMP/notes.md"
-          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"

@@ -1,5 +1,7 @@
 # Changelog
 
+Releases after 0.6.0 are listed on [GitHub Releases](https://github.com/Fibteq-Inc/myrel/releases) (`desktop-v*` tags).
+
 ## [0.6.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.5.0...desktop-v0.6.0) (2026-10-22)
 
 

@@ -67,12 +67,14 @@ runs `.eas/workflows/publish-update.yml`, which publishes for each platform that
 build with the same native fingerprint (`runtimeVersion` uses the fingerprint policy, so a version bump
 alone does not cut builds off).
 
-Store versions go through release-please. Commits under `apps/mobile` keep a "release mobile X.Y.Z"
-pull request up to date with the next version and a changelog. Merging it tags `mobile-vX.Y.Z`, and
-the tag runs `.eas/workflows/store-release.yml`: production builds for both platforms, uploaded to
-TestFlight and Play internal testing. Sending the version for review stays a manual step in App Store
-Connect and Play Console. Merge the release pull request whenever a native change (a new native module,
-config plugin or permission) is on `main`, since those can't ship as an update.
+Store versions start by hand: Actions → Release → Run workflow, app `mobile`, and the version step. The
+workflow (`.github/workflows/release.yml`) tags the tip of main `mobile-vX.Y.Z` and publishes a GitHub
+release with the generated notes (pull requests labelled `app:mobile`, `.github/release-mobile.yml`). The
+tag runs `.eas/workflows/store-release.yml`: production builds for both platforms, uploaded to TestFlight
+and Play internal testing. The tag is the store version (`app.config.ts` reads it from `MYREL_RELEASE_TAG`);
+`package.json` isn't bumped. Sending the version for review stays a manual step in App Store Connect and
+Play Console. Release whenever a native change (a new native module, config plugin or permission) is on
+`main`, since those can't ship as an update.
 
 ## Store listing
 
