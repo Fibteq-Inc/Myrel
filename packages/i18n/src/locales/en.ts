@@ -160,6 +160,9 @@ export const en = {
   "status.reviewReady": "Waiting for you",
   "status.done": "Resolved",
   "status.failed": "Failed",
+  "status.closedDuplicate": "Closed as a duplicate",
+  "status.closedMisrouted": "Closed, another thread has it",
+  "status.closedCancelled": "Closed",
 
   // Thread view
   "thread.loading": "Loading thread",

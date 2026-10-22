@@ -103,6 +103,14 @@ export type Message = z.infer<typeof Message>;
 export const ThreadStatus = z.enum(["working", "blocked", "review_ready", "done", "failed"]);
 export type ThreadStatus = z.infer<typeof ThreadStatus>;
 
+/**
+ * Why a resolved thread was closed without its work being done: it repeated another thread's ask,
+ * it was opened for something another thread covers, or the ask was dropped. Null when it was
+ * resolved the usual way, and again once it is reopened.
+ */
+export const ThreadCloseReason = z.enum(["duplicate", "misrouted", "cancelled"]);
+export type ThreadCloseReason = z.infer<typeof ThreadCloseReason>;
+
 export const Thread = z.object({
   id: ThreadId,
   projectId: ProjectId,
@@ -118,6 +126,9 @@ export const Thread = z.object({
   /** The thread agent's progress checklist (`update_status`), shown while it works. */
   statusText: z.string().nullable(),
   resolved: z.boolean(),
+  closeReason: ThreadCloseReason.nullable().default(null),
+  /** For a duplicate: the thread that carries the work. */
+  duplicateOf: ThreadId.nullable().default(null),
   label: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,

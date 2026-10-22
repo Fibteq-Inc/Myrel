@@ -231,6 +231,8 @@ export class ThreadAgent extends Agent<Env> {
    * thread's pull requests changed on GitHub. Task results come through taskEvents.
    */
   async wake(reason: ThreadWake): Promise<void> {
+    // Someone writing in a closed thread, the coordinator sending it work or a routine resumed for it opens it again.
+    if (reason.kind !== "github") this.deleteMeta("closed");
     // An answer to a folder card the running turn waits on goes to that turn, not to a new one.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
     if (reason.kind === "coordinator") {
@@ -277,6 +279,16 @@ export class ThreadAgent extends Agent<Env> {
     await project.notifyThread(threadId, "done", body);
   }
 
+  /**
+   * The thread was closed as opened by mistake (ProjectAgent.closeThread). Its running turn stops
+   * and what that turn would still have said or set is dropped. Callable over RPC.
+   */
+  async close(): Promise<void> {
+    this.setMeta("closed", "1");
+    this.setMeta("dirty", "0");
+    await this.cancelRunningTask();
+  }
+
   private async markDirty() {
     this.setMeta("dirty", "1");
     await this.queue("threadTurn", null);
@@ -284,7 +296,7 @@ export class ThreadAgent extends Agent<Env> {
 
   /** Queue callback. Turns run one at a time; wakes during a turn get their own turn after it. */
   async threadTurn(): Promise<void> {
-    if (this.getMeta("dirty") !== "1") return;
+    if (this.getMeta("dirty") !== "1" || this.getMeta("closed") === "1") return;
     // The agent is mid-turn; this wake waits for it (finishAgentTurn queues the next turn).
     if (this.runningTask()) return;
     this.setMeta("dirty", "0");
@@ -557,6 +569,8 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("agent_skills");
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    // Closed while it ran: the card already reads closed, and the cancelled run has nothing to tell anyone.
+    if (this.getMeta("closed") === "1") return void (await project.setActivity(threadId, false));
     let pending = turn?.pending ?? [];
     const replied = turn?.replied ?? false;
     let lastText: string | null = null;

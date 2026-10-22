@@ -39,6 +39,8 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
   status: "working",
   statusText: null,
   resolved: false,
+  closeReason: null,
+  duplicateOf: null,
   label: null,
   createdAt: now,
   updatedAt: now,
