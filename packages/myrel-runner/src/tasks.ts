@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunnerToServer, ServerToRunner } from "@myrel/protocol";
+import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
 import { ADAPTERS, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
 import { downloadSkills, type RunSkills } from "./skills";
@@ -24,6 +24,8 @@ export type TaskRunnerOptions = {
   /** For tests: replaces child_process.spawn. */
   spawn?: typeof spawn;
   log?: (line: string) => void;
+  /** The subscription limits a CLI reported during or after a run. */
+  onLimits?: (cli: CliId, limits: CliLimits) => void;
 };
 
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
@@ -133,6 +135,12 @@ export class TaskRunner {
     let lastProgress = 0;
     let sentProgress: string | undefined;
     let sentUsage = "";
+    let sentLimits: CliLimits | undefined;
+    const reportLimits = (limits: CliLimits | undefined) => {
+      if (!limits || limits === sentLimits) return;
+      sentLimits = limits;
+      this.opts.onLimits?.(task.cli, limits);
+    };
     /** The CLI's usage so far, for the server to show under the agent's replies. */
     const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
     const flushProgress = () => {
@@ -154,6 +162,7 @@ export class TaskRunner {
       const lines = buffered.split("\n");
       buffered = lines.pop()!;
       for (const line of lines) adapter.line(line.trim(), state);
+      reportLimits(state.limits);
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
       if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage)) flushProgress();
@@ -208,6 +217,7 @@ export class TaskRunner {
       child.on("close", async (code, signal) => {
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
+        reportLimits(state.limits ?? (await adapter.limits?.(state).catch(() => undefined)));
         if (state.sessionId && task.cli === "claude") await this.opts.sessions.set(task.threadId, state.sessionId).catch(() => {});
         const ok = code === 0 && !state.failed;
         const result =

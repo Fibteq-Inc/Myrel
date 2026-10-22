@@ -1,6 +1,8 @@
 import { watchFile, unwatchFile } from "node:fs";
 import { hostname, platform } from "node:os";
 import {
+  type CliId,
+  type CliLimits,
   PairRunnerResult,
   RUNNER_PROTOCOL_VERSION,
   type RunnerToServer,
@@ -9,10 +11,11 @@ import {
 import { detectClis } from "./clis";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { listDirs, shareableFolder } from "./folders";
+import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.9.0";
+export const RUNNER_VERSION = "0.10.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -81,7 +84,20 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   if (!config.server || !config.token) throw new Error("This computer is not paired yet. Run `myrel-runner pair <code> --server <url>` first.");
 
   const clis = await detectClis();
-  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log });
+  // The last limits each CLI reported; hello carries them with the CLI's version.
+  const limits = await loadLimits();
+  const setLimits = (cli: CliId, next: CliLimits | undefined) => {
+    const prev = limits[cli];
+    if (!next || (prev && prev.at >= next.at)) return;
+    limits[cli] = next;
+    void saveLimits(limits).catch(() => {});
+    if (JSON.stringify({ ...prev, at: "" }) !== JSON.stringify({ ...next, at: "" })) hello();
+  };
+  // Codex writes its limits whenever the person uses it, in Myrel or not; looked at now and then.
+  const readCodex = () => {
+    if (clis.some((c) => c.id === "codex")) void readCodexLimits().then((l) => setLimits("codex", l), () => {});
+  };
+  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log, onLimits: setLimits });
   let stopReason: Extract<RunnerStatus, { state: "stopped" }>["reason"] = "stopped";
   let socket: WebSocket | null = null;
   let stopped = false;
@@ -104,7 +120,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       hostname: hostname(),
       platform: platform(),
       folders: config.folders,
-      clis,
+      clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
       features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders"],
       running: tasks.runningIds(),
     });
@@ -118,6 +134,9 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   watchFile(configPath(), { interval: 2000 }, onConfigChange);
 
   const ping = setInterval(() => send({ type: "ping" }), 25_000);
+  readCodex();
+  const codexLimits = setInterval(readCodex, 10 * 60 * 1000);
+  codexLimits.unref?.();
   // Removes the worktrees of threads whose work is merged (see pruneWorktrees).
   const prune = () =>
     void pruneWorktrees((w) => tasks.inUse(w))
@@ -130,6 +149,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     stopped = true;
     clearInterval(ping);
     clearInterval(pruning);
+    clearInterval(codexLimits);
     unwatchFile(configPath(), onConfigChange);
     tasks.stopAll();
     socket?.close(1000);

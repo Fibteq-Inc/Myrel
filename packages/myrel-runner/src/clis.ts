@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CliId, RunnerCli } from "@myrel/protocol";
+import type { CliId, CliLimits, RunnerCli } from "@myrel/protocol";
 import type { Access } from "./config";
+import { claudeLimits, readCodexLimits } from "./limits";
 
 /** What a CLI's output told us so far. */
 export type ParseState = {
@@ -20,6 +21,8 @@ export type ParseState = {
   model?: string;
   /** Model calls already counted, for CLIs that repeat a call's usage on each of its parts. */
   counted?: Set<string>;
+  /** The subscription limits the CLI reported in its output (Claude Code's rate_limit_event). */
+  limits?: CliLimits;
 };
 
 /**
@@ -45,6 +48,8 @@ export type CliAdapter = {
   line(line: string, state: ParseState): void;
   /** Called with all of stdout when the CLI exits, for CLIs that print one JSON document. */
   end?(stdout: string, state: ParseState): void;
+  /** After a run, the subscription limits the CLI saved somewhere else than its output. */
+  limits?(state: ParseState): Promise<CliLimits | undefined>;
 };
 
 /** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__myrel__<tool> in Claude Code. */
@@ -135,6 +140,7 @@ const claude: CliAdapter = {
     if (!event) return;
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.type === "system" && typeof event.model === "string") state.model = event.model;
+    if (event.type === "rate_limit_event") state.limits = claudeLimits(event.rate_limit_info, state.limits);
     if (event.type === "assistant") {
       const message = (event.message ?? {}) as { id?: unknown; model?: unknown; usage?: unknown; content?: unknown[] };
       if (typeof message.model === "string") state.model = message.model;
@@ -218,6 +224,8 @@ const codex: CliAdapter = {
       if (typeof message === "string") state.result = message;
     }
   },
+  // `codex exec --json` leaves its rate limits out; the session file it writes has them.
+  limits: (state) => readCodexLimits(state.sessionId),
 };
 
 const gemini: CliAdapter = {
