@@ -25,10 +25,16 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   // A tap on a card is shown on the card itself, not again as a bubble.
   const picks = decisionPicks(chat);
   const thinking = !!state.active[""];
+  const last = chat.at(-1);
 
   return (
     <div className={cn("@container flex min-h-0 min-w-0 flex-1 flex-col", className)}>
-      <ScrollToEnd dep={chat.length + (thinking ? 1 : 0)} className="flex-1 overflow-y-auto">
+      <ScrollToEnd
+        last={last?.id}
+        busy={thinking}
+        mine={last?.authorKind === "user" && last.authorId === me}
+        className="flex-1 overflow-y-auto"
+      >
         <div className="mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6">
           {chat.length === 0 && (ready ? <EmptyChat /> : <LoadingChat />)}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
