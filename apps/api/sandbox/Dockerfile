@@ -3,7 +3,7 @@
 # so the image is reproducible; the steps run from the slowest-changing to the fastest-changing, so a
 # version bump rebuilds only the layers after it.
 # Docker Hub's official Node image through Google's mirror, which Docker Hub's pull limits do not hit.
-FROM mirror.gcr.io/library/node:24.11.1-trixie-slim
+FROM mirror.gcr.io/library/node:24.22.1-trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -o Acquire::Retries=5 update \
