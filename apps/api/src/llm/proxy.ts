@@ -28,12 +28,15 @@ const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-
  * Anthropic's. For an OpenAI-compatible call it also reports what the call cost: the provider's
  * own figure when it sends one (usage.cost in the last chunk of a stream, or the JSON's usage / a
  * cost header), else the usage priced by the model the response names, as a router such as
- * Fireworks' auto picks one per call. OpenCode prices Anthropic calls itself, so those report nothing here.
+ * Fireworks' auto picks one per call. An Anthropic call is priced from its usage the same way. This
+ * count is the turn's, whatever the harness reports, so a call made around the harness (with the
+ * turn's token from its shell) is counted too. A call that used tokens but cannot be priced reports
+ * null, so plan limits can charge it a fallback per call.
  */
 export async function proxyModel(
   req: Request,
   target: { url: string; apiKey: string; kind: "openai" | "anthropic"; model?: string; prices?: Record<string, Price> },
-  onCost: (usd: number) => Promise<void>,
+  onCost: (usd: number | null) => Promise<void>,
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
   const headers = new Headers(target.kind === "anthropic" ? { "x-api-key": target.apiKey } : { authorization: `Bearer ${target.apiKey}` });
@@ -54,18 +57,46 @@ export async function proxyModel(
     const v = upstream.headers.get(name);
     if (v) out.set(name, v);
   }
+  // Called once per inference that used tokens: its cost, or null when it cannot be priced.
   const report = (usd: number | undefined) => {
-    if (usd !== undefined && usd > 0) waitUntil(onCost(usd).catch((err) => console.error("model cost", err)));
+    if (usd === undefined || usd > 0) waitUntil(onCost(usd ?? null).catch((err) => console.error("model cost", err)));
   };
 
-  if (!upstream.body || !upstream.ok || target.kind === "anthropic") return new Response(upstream.body, { status: upstream.status, headers: out });
-  if (!(upstream.headers.get("content-type") ?? "").includes("text/event-stream")) {
+  if (!upstream.body || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers: out });
+  const streamed = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
+  if (target.kind === "anthropic") {
+    if (!streamed) {
+      const text = await upstream.text();
+      let parsed: { usage?: Record<string, unknown>; model?: unknown } = {};
+      try {
+        parsed = JSON.parse(text) as typeof parsed;
+      } catch {}
+      // count_tokens answers without usage: nothing was generated.
+      if (parsed.usage) report(anthropicCost(parsed.usage, parsed.model, target.prices));
+      return new Response(text, { status: upstream.status, headers: out });
+    }
+    const scan = anthropicStreamScanner();
+    const body = upstream.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          scan.push(chunk);
+          controller.enqueue(chunk);
+        },
+        flush() {
+          const usage = scan.usage();
+          if (usage) report(anthropicCost(usage, scan.model(), target.prices));
+        },
+      }),
+    );
+    return new Response(body, { status: upstream.status, headers: out });
+  }
+  if (!streamed) {
     const text = await upstream.text();
     let parsed: { usage?: Record<string, unknown>; model?: unknown } = {};
     try {
       parsed = JSON.parse(text) as typeof parsed;
     } catch {}
-    report(reportedCost(parsed.usage, upstream.headers).costUsd ?? estimatedCost(parsed.usage, parsed.model, target.prices));
+    if (parsed.usage) report(reportedCost(parsed.usage, upstream.headers).costUsd ?? estimatedCost(parsed.usage, parsed.model, target.prices));
     return new Response(text, { status: upstream.status, headers: out });
   }
 
@@ -77,7 +108,8 @@ export async function proxyModel(
         controller.enqueue(chunk);
       },
       flush() {
-        report(scan.cost() ?? reportedCost(undefined, upstream.headers).costUsd ?? estimatedCost(scan.usage(), scan.model(), target.prices));
+        const cost = scan.cost() ?? reportedCost(undefined, upstream.headers).costUsd;
+        if (cost !== undefined || scan.usage()) report(cost ?? estimatedCost(scan.usage(), scan.model(), target.prices));
       },
     }),
   );
@@ -115,6 +147,53 @@ function estimatedCost(usage: Record<string, unknown> | undefined, model: unknow
     price,
   );
   return micros / 1_000_000;
+}
+
+/** An Anthropic call's cost from its usage, priced by the model the response names. */
+function anthropicCost(usage: Record<string, unknown>, model: unknown, prices: Record<string, Price> | undefined): number | undefined {
+  if (typeof model !== "string" || !prices) return undefined;
+  const price = priceFor(model, prices);
+  if (!price) return undefined;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const cached = n(usage.cache_read_input_tokens);
+  const inputTokens = n(usage.input_tokens) + n(usage.cache_creation_input_tokens) + cached;
+  return costMicros({ inputTokens, outputTokens: n(usage.output_tokens), cachedInputTokens: cached }, price) / 1_000_000;
+}
+
+/**
+ * Follows an Anthropic message stream: message_start names the model and the input tokens,
+ * message_delta carries the output tokens so far.
+ */
+export function anthropicStreamScanner() {
+  const decoder = new TextDecoder();
+  let rest = "";
+  let usage: Record<string, unknown> | undefined;
+  let model: string | undefined;
+  const line = (l: string) => {
+    if (!l.startsWith("data:") || !l.includes('"usage"')) return;
+    try {
+      const event = JSON.parse(l.slice(5)) as { type?: string; message?: { model?: unknown; usage?: Record<string, unknown> }; usage?: Record<string, unknown> };
+      if (event.type === "message_start" && event.message?.usage) {
+        if (typeof event.message.model === "string") model = event.message.model;
+        usage = { ...event.message.usage };
+      } else if (event.type === "message_delta" && event.usage) {
+        usage = { ...usage, ...event.usage };
+      }
+    } catch {}
+  };
+  return {
+    push(chunk: Uint8Array) {
+      const lines = (rest + decoder.decode(chunk, { stream: true })).split("\n");
+      rest = lines.pop() ?? "";
+      for (const l of lines) line(l.trim());
+    },
+    usage() {
+      if (rest) line(rest.trim());
+      rest = "";
+      return usage;
+    },
+    model: () => model,
+  };
 }
 
 /**

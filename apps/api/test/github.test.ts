@@ -8,7 +8,7 @@ import type { ThreadAgent } from "../src/agents/thread-agent";
 import { listRepoFiles, readRepoFile } from "../src/github/files";
 import { attributionBlock, withAttribution } from "../src/github/attribution";
 import { listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
-import { githubLogin } from "../src/github/store";
+import { githubLogin, projectRepoToken } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
 import { fakeGithub } from "./fake-github";
 
@@ -232,6 +232,33 @@ describe("project repositories", () => {
 
     const tokenRequest = fakeGithub.requests.findLast((r) => r.url.endsWith("/access_tokens"));
     expect(tokenRequest?.body).toEqual({ repository_ids: [7], permissions: { contents: "read", metadata: "read" } });
+  });
+
+  it("connects and writes to repositories the person can push to, never ones they can only read", async () => {
+    try {
+      fakeGithub.userPush = [8];
+      const token = await signUp();
+      await connect(token);
+      const project = await createProject(token);
+      const add = (repoId: number) =>
+        api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId }) });
+      // acme/app is visible to them on GitHub but read-only.
+      expect((await add(7)).status).toBe(404);
+      expect((await add(8)).status).toBe(201);
+
+      // Connected while they could push; then GitHub takes push away and they sign in again.
+      fakeGithub.userPush = [7, 8];
+      await connect(token);
+      expect((await add(7)).status).toBe(201);
+      fakeGithub.userPush = [8];
+      await connect(token);
+      await expect(projectRepoToken(env, project.id, "acme/app", { contents: "write", metadata: "read" })).rejects.toThrow("cannot push");
+      // Reading still works, and so does writing where they can push.
+      await expect(projectRepoToken(env, project.id, "acme/app")).resolves.toMatchObject({ token: "inst-token" });
+      await expect(projectRepoToken(env, project.id, "acme/docs", { contents: "write", metadata: "read" })).resolves.toMatchObject({ token: "inst-token" });
+    } finally {
+      fakeGithub.userPush = [7, 8];
+    }
   });
 
   it("drops repositories when the app is uninstalled", async () => {

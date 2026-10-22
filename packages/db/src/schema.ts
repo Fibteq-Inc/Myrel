@@ -274,9 +274,11 @@ export const githubInstallationUsers = sqliteTable(
 );
 
 /**
- * Repositories of an installation that GitHub said the user can reach themselves, at their last
- * GitHub sign-in. An installation can cover more repositories than one of its members may see, so
- * connecting a repository to a project checks this, not only the installation.
+ * Repositories of an installation that GitHub said the user can push to themselves, at their last
+ * GitHub sign-in. An installation can cover more repositories than one of its members may see or
+ * change, so connecting a repository to a project checks this, not only the installation, and so
+ * does every write token for it (see repoWritable): Myrel's agents never write where the person who
+ * connected the repository could not.
  */
 export const githubUserRepos = sqliteTable(
   "github_user_repos",

@@ -47,6 +47,20 @@ export async function loadConfig(): Promise<RunnerConfig> {
   return config;
 }
 
+/** The runner's own credentials in its environment, which no process it starts may inherit. */
+const RUNNER_SECRETS = ["MYREL_RUNNER_TOKEN"];
+
+/**
+ * The environment for a process the runner starts (an agent CLI, git, a version check): the runner's
+ * own, minus its device token. A task runs repository code (tests, builds, scripts) that must never
+ * be able to read the token and connect as this computer.
+ */
+export function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  for (const key of RUNNER_SECRETS) delete env[key];
+  return env;
+}
+
 export async function saveConfig(config: RunnerConfig): Promise<void> {
   // Never persist a token that only came from the environment.
   const saved = { ...config };

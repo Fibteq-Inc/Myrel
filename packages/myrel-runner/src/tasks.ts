@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
 import { ADAPTERS, type CliAdapter, type ParseState } from "./clis";
-import type { RunnerConfig, SessionStore } from "./config";
+import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { downloadSkills, type RunSkills } from "./skills";
 import { threadWorktree, type Worktree } from "./worktrees";
 
@@ -158,7 +158,7 @@ export class TaskRunner {
     const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: run.asks });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
-      env: { ...process.env, ...agent.env },
+      env: childEnv(agent.env),
       stdio: ["pipe", "pipe", "pipe"],
       // Windows CLIs are .cmd shims. Only fixed flags are on the command line; the prompt goes on stdin.
       shell: process.platform === "win32",

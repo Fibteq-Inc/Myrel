@@ -192,6 +192,9 @@ describe("hosted billing", () => {
     const long = await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 0, seconds: 7200 });
     expect(long.ok || long.reason).toContain("2 hours");
     expect(await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 10_000, seconds: 60 })).toEqual({ ok: true });
+    // Calls that could not be priced count one by one ($0.02 each by default): 50 make $1.
+    const unpriced = await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 0, seconds: 60, unpricedCalls: 50 });
+    expect(unpriced.ok || unpriced.reason).toContain("model usage");
 
     // Another turn running: a new one waits, the running one carries on.
     const now = Date.now();

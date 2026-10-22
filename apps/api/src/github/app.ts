@@ -189,16 +189,20 @@ export async function userInstallations(userToken: string): Promise<UserInstalla
   return all;
 }
 
-/** Ids of the repositories of an installation that the user behind `userToken` can reach themselves. */
+/** Ids of the repositories of an installation that the user behind `userToken` can push to themselves. */
 export async function userInstallationRepoIds(userToken: string, installationId: number): Promise<number[]> {
   const ids: number[] = [];
+  let seen = 0;
   for (let page = 1; page <= 10; page++) {
-    const res = await githubFetch<{ total_count: number; repositories: { id: number }[] }>(
-      userToken,
-      `/user/installations/${installationId}/repositories?per_page=100&page=${page}`,
-    );
-    ids.push(...res.repositories.map((r) => r.id));
-    if (ids.length >= res.total_count || res.repositories.length === 0) break;
+    const res = await githubFetch<{
+      total_count: number;
+      repositories: { id: number; permissions?: { admin?: boolean; maintain?: boolean; push?: boolean } }[];
+    }>(userToken, `/user/installations/${installationId}/repositories?per_page=100&page=${page}`);
+    // Only repositories the person can push to: connecting one hands Myrel's agents the App's write
+    // access, which must not exceed the person's own. Seeing a repository is not enough.
+    ids.push(...res.repositories.filter((r) => r.permissions?.push || r.permissions?.maintain || r.permissions?.admin).map((r) => r.id));
+    seen += res.repositories.length;
+    if (seen >= res.total_count || res.repositories.length === 0) break;
   }
   return ids;
 }

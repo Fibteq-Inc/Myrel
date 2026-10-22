@@ -1,6 +1,6 @@
 import { formatPlan, formatPlanUpdate, isPlanMessage, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
 import { getAgentByName } from "agents";
-import { env } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentProject, api, type Play, signUp, until } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
@@ -423,7 +423,7 @@ describe("coordinator and thread agent", () => {
       await turn.call("reply", { text: "Here it is." });
       await turn.call("resolve_thread");
     };
-    const { ws, agent } = await setup(play);
+    const { ws, agent, token } = await setup(play);
     ws.send(JSON.stringify({ type: "message.send", body: "Build a calculator" }));
     const thread: Thread = await until(async () => ((await agent.listThreads())[0]?.resolved ? (await agent.listThreads())[0] : null), "resolved");
 
@@ -438,6 +438,13 @@ describe("coordinator and thread agent", () => {
     const inThread = (await agent.getThreadContext(thread.id))!.messages.at(-1)!;
     expect(inThread).toMatchObject({ authorId: "coordinator", body: "The coordinator forwarded a follow-up.", relay: followUp });
     expect(await agent.getThread(thread.id)).toMatchObject({ resolved: false });
+    // The thread is told who asked, from the project chat message itself, not from the model.
+    const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    const notes = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) =>
+      state.storage.sql.exec<{ forwarded: number; actor: string | null }>("SELECT forwarded, actor FROM notes").toArray(),
+    );
+    expect(notes).toContainEqual({ forwarded: 1, actor: me });
     ws.close();
   });
 

@@ -120,24 +120,51 @@ async function recordUsage(d1: D1Database, ctx: UsageContext & { turnId: string 
 }
 
 /**
- * One row for a finished run_task: the coding harness's own model calls, summed.
- * The task id is the turn id. Billed as the thread's work.
+ * One row for a finished run_task: the coding harness's own model calls, summed. A cloud turn's
+ * calls that could not be priced (`unpricedCalls`, see proxyModel) add one unpriced row each, so
+ * plan limits charge each of them rather than the turn once. The task id is the turn id. Billed as
+ * the thread's work.
  */
 export async function recordTaskUsage(
   env: LlmEnv & { DB: D1Database },
   ctx: { projectId: string; threadId: string; taskId: string; provider: string; model: string },
   usage: { inputTokens: number; outputTokens: number; costUsd: number },
   latencyMs: number,
+  unpricedCalls = 0,
 ) {
-  if (usage.inputTokens === 0 && usage.outputTokens === 0) return;
-  const cost = taskCostMicros(env, ctx.model, usage);
-  await createDb(env.DB)
+  if (usage.inputTokens === 0 && usage.outputTokens === 0 && unpricedCalls === 0) return;
+  // With per-call counting the priced calls' sum is the turn's known cost; the rest is in the unpriced rows.
+  const cost = unpricedCalls > 0 ? Math.round(usage.costUsd * 1_000_000) : taskCostMicros(env, ctx.model, usage);
+  const bill = await billing(env.DB, ctx.projectId);
+  const unpriced = Array.from({ length: unpricedCalls }, () => ({
+    id: createId("usage"),
+    createdAt: new Date(),
+    projectId: ctx.projectId,
+    ...bill,
+    threadId: ctx.threadId,
+    userId: null,
+    agent: "thread" as const,
+    turnId: ctx.taskId,
+    provider: ctx.provider,
+    model: ctx.model,
+    servedModel: null,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    costMicros: null,
+    latencyMs: 0,
+  }));
+  // One statement per row: D1 caps the bound parameters of a single statement.
+  const db = createDb(env.DB);
+  const [first, ...more] = unpriced.map((row) => db.insert(schema.usageEvents).values(row));
+  if (first) await db.batch([first, ...more]);
+  await db
     .insert(schema.usageEvents)
     .values({
       id: createId("usage"),
       createdAt: new Date(),
       projectId: ctx.projectId,
-      ...(await billing(env.DB, ctx.projectId)),
+      ...bill,
       threadId: ctx.threadId,
       userId: null,
       agent: "thread",

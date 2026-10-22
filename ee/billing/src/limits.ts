@@ -8,6 +8,7 @@ import {
   SANDBOX_MICROS_PER_SECOND,
   type Standing,
   standingOf,
+  unpricedCallMicros,
   usageOf,
 } from "./store";
 
@@ -55,7 +56,7 @@ export const billingExtensions: Extensions = {
     if (!(await userVerified(env, project.owner))) return refuse(UNVERIFIED_OWNER);
     const usage = await usageOf(env, standing, project.owner);
     // A running turn's use is not in the usage tables until it ends.
-    const turnMicros = project.ownKey ? 0 : (running?.modelMicros ?? 0);
+    const turnMicros = project.ownKey ? 0 : (running?.modelMicros ?? 0) + (running?.unpricedCalls ?? 0) * unpricedCallMicros(env);
     usage.modelMicros += turnMicros;
     usage.sandboxSeconds += running?.seconds ?? 0;
     const { modelMicros, sandboxSeconds, concurrentSandboxes } = standing.limits;

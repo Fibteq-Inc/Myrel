@@ -162,7 +162,9 @@ export class Sandbox extends DurableObject<Env> {
             answered = true;
             push({ type: "log", stream: "system", text: `${harness.label} started`, ms: Date.now() - agentStarted });
           }
-          push(e);
+          // Every model call of a cloud turn goes through Myrel's proxy, which prices it (proxyModel);
+          // the harness's own cost figure would count it twice, and misses calls made around it.
+          push(e.type === "usage" ? { ...e, costUsd: undefined } : e);
           if (e.type === "usage") {
             const now = Date.now();
             const tokens = e.inputTokens + e.outputTokens;
