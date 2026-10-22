@@ -26,7 +26,8 @@ export type ThreadHost = {
   /** It set a plan this turn. */
   planned(): boolean;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
-  resolve(): Promise<void>;
+  /** Marks the thread finished, or says why it cannot be yet. */
+  resolve(): Promise<string | null>;
   /** Follows a pull request on a connected repository; says what happened. */
   trackPullRequest(url: string): Promise<string>;
   /** Directory listing of a connected repository. */
@@ -39,8 +40,11 @@ export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean 
 
 export type RoutineRun = { name: string; prompt: string; createdAt: string; isNew: boolean };
 
-/** What a reply waits on from people, which decides how loudly they are notified. */
-export type ReplyNeeds = "decision" | "blocked";
+/**
+ * What a reply waits on from people, which decides how loudly they are notified. review: it
+ * presented something (a proposal, a draft, an artifact) and waits for their feedback.
+ */
+export type ReplyNeeds = "decision" | "blocked" | "review";
 
 export function threadPrompt(input: {
   projectName: string;
@@ -110,9 +114,11 @@ export function threadTools(host: ThreadHost): Tool[] {
       input: z.object({
         text: z.string().min(1).max(32_000),
         needs: z
-          .enum(["decision", "blocked"])
+          .enum(["decision", "blocked", "review"])
           .optional()
-          .describe("decision: asks people to choose or approve. blocked: stuck on something only they can change."),
+          .describe(
+            "decision: asks people to choose or approve. blocked: stuck on something only they can change. review: presents something (a proposal, a draft, an artifact) and waits for their feedback.",
+          ),
         files: z
           .array(z.string())
           .max(20)
@@ -206,10 +212,12 @@ export function threadTools(host: ThreadHost): Tool[] {
     }),
     tool({
       name: "resolve_thread",
-      description: "Mark this thread finished. Call it after the reply that delivers the result.",
+      description:
+        "Mark this thread finished. Call it after the reply that delivers the result, once nothing waits on the person: not in a turn that asked them something or presented a proposal, draft or artifact for their feedback.",
       input: z.object({}),
       run: async () => {
-        await host.resolve();
+        const refused = await host.resolve();
+        if (refused) return refused;
         return { output: "Thread resolved.", stop: true };
       },
     }),

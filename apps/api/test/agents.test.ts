@@ -175,6 +175,45 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("keeps a thread waiting on the person after it presented work for their feedback", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Dark mode", instructions: "Propose it.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const refusals: string[] = [];
+    const play: Play = async (turn) => {
+      const latest = turn.prompt.slice(turn.prompt.lastIndexOf("## Thread so far"));
+      if (latest.includes("looks good")) {
+        await turn.call("resolve_thread");
+        return;
+      }
+      await turn.call("publish_artifact", { title: "Dark mode", html: "<h1>Dark</h1>" });
+      await turn.call("reply", { text: "Here is the proposal. What do you think?", needs: "review" });
+      refusals.push((await turn.call("resolve_thread")).text);
+    };
+
+    const { ws, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "add dark mode" }));
+
+    const waiting: Thread = await until(async () => {
+      const t = (await agent.listThreads())[0];
+      return t?.status === "review_ready" ? t : null;
+    }, "waiting on the person");
+    expect(waiting.resolved).toBe(false);
+    expect(refusals[0]).toContain("Not resolved");
+
+    ws.send(JSON.stringify({ type: "message.send", threadId: waiting.id, body: "looks good, thanks" }));
+    const done = await until(async () => {
+      const t = await agent.getThread(waiting.id);
+      return t?.resolved ? t : null;
+    }, "resolved");
+    expect(done.status).toBe("done");
+    ws.close();
+  });
+
   it("forwards a follow-up to a resolved thread, reopens it and links it in the project chat", async () => {
     setFakeModel((req) => {
       if (req.turns > 1) return { text: "", toolCalls: [] };

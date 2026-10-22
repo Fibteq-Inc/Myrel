@@ -119,7 +119,15 @@ type AgentTurn = {
   planDone?: boolean;
   /** When it replied with its plan done; the turn ends a minute later unless it moves on. */
   doneReplyAt?: number;
+  /** It published an artifact this turn, which people have not answered yet. */
+  published?: boolean;
 };
+
+/** The louder of what two replies wait on: a decision or a block outranks a review. */
+function louder(a: ReplyNeeds | null | undefined, b: ReplyNeeds | null | undefined): ReplyNeeds | null {
+  if (!a || !b) return a ?? b ?? null;
+  return a === "review" ? b : a;
+}
 
 /** The GitHub branch where a cloud turn leaves the unpushed work of the repositories it cloned. */
 function saveBranch(threadId: string): string {
@@ -598,7 +606,7 @@ export class ThreadAgent extends Agent<Env> {
       status: resolved ? "done" : asked ? "working" : failed ? "failed" : "review_ready",
       resolved,
     });
-    const kind = failed ? "failed" : resolved ? "done" : (turn?.needs ?? ((replied || lastText) && !asked ? "ready" : null));
+    const kind = failed ? "failed" : resolved ? "done" : ((turn?.needs === "review" ? "ready" : turn?.needs) ?? ((replied || lastText) && !asked ? "ready" : null));
     if (kind) await project.notifyThread(threadId, kind, lastText ?? turn?.lastReply ?? row.summary ?? "");
     await project.setActivity(threadId, false);
     if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
@@ -917,7 +925,7 @@ export class ThreadAgent extends Agent<Env> {
           const t = turn();
           const row = this.runningTask();
           const counted = row ? this.runStats(row, t.mark) : null;
-          save({ pending: [], replied: true, lastReply: text, needs: needs ?? t.needs, ...(counted && { mark: counted.mark }) });
+          save({ pending: [], replied: true, lastReply: text, needs: louder(needs, t.needs), ...(counted && { mark: counted.mark }) });
           const m = await project.sendMessage({
             threadId,
             authorKind: "agent",
@@ -944,7 +952,7 @@ export class ThreadAgent extends Agent<Env> {
           if ("error" in result) throw new Error(result.error);
           const { artifact } = result;
           const ref = { artifactId: artifact.id, version: artifact.version, title: artifact.title };
-          save({ pending: [...turn().pending.filter((p) => p.artifactId !== artifact.id), ref] });
+          save({ pending: [...turn().pending.filter((p) => p.artifactId !== artifact.id), ref], published: true });
           return artifact;
         },
         setPlan: async (plan) => {
@@ -962,7 +970,16 @@ export class ThreadAgent extends Agent<Env> {
           const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
         },
-        resolve: async () => save({ resolved: true }),
+        // What it showed or asked this turn waits on the person: the thread stays "waiting for you",
+        // and their answer wakes it, instead of reading as finished.
+        resolve: async () => {
+          const t = turn();
+          if (t.needs || t.published) {
+            return "Not resolved: this turn asked the person something or presented work for their feedback, so the thread waits on their answer. End your turn without resolving; it shows as waiting for them.";
+          }
+          save({ resolved: true });
+          return null;
+        },
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
         trackPullRequest: async (url) => {
