@@ -1,0 +1,7 @@
+# Served with the web app's pages (Workers static assets). The app is never framed by another site,
+# and plugins and <base> tricks are off.
+/*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'; object-src 'none'; base-uri 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

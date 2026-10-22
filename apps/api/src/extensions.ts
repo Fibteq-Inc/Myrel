@@ -34,6 +34,8 @@ export type Extensions = {
   legal?: LegalLinks;
   /** Before a connector (MCP server) is added: a person's own, or a project's. */
   canAddConnector?: (env: Env, owner: { userId: string } | { projectId: string }) => Promise<LimitCheck>;
+  /** Before a project file is stored: `bytes` would make the project's files take `total` bytes. */
+  canStoreFile?: (env: Env, projectId: string, total: number) => Promise<LimitCheck>;
   /** Before a skill is added: a person's own, or a project's. */
   canAddSkill?: (env: Env, owner: { userId: string } | { projectId: string }) => Promise<LimitCheck>;
 };
@@ -80,4 +82,8 @@ export async function canAddConnector(env: Env, owner: { userId: string } | { pr
 
 export async function canAddSkill(env: Env, owner: { userId: string } | { projectId: string }): Promise<LimitCheck> {
   return current.canAddSkill ? current.canAddSkill(env, owner) : ALLOWED;
+}
+
+export async function canStoreFile(env: Env, projectId: string, total: number): Promise<LimitCheck> {
+  return current.canStoreFile ? current.canStoreFile(env, projectId, total) : ALLOWED;
 }

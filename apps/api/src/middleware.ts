@@ -12,11 +12,12 @@ export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; session: S
 
 /**
  * Resolves the Better Auth session from cookies or `Authorization: Bearer`.
- * WebSocket clients that cannot set headers may pass `?token=` instead.
+ * WebSocket clients that cannot set headers may pass `?token=` instead; only a WebSocket upgrade
+ * may, so a session token never has to sit in an ordinary URL (and the logs and history that keep them).
  */
 export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const headers = new Headers(c.req.raw.headers);
-  const token = c.req.query("token");
+  const token = c.req.header("upgrade")?.toLowerCase() === "websocket" ? c.req.query("token") : undefined;
   if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
 
   let session = await createAuth(c.env).api.getSession({ headers });

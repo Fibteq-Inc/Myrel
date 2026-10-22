@@ -4,7 +4,15 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { decryptSecret } from "./crypto";
 import { createProvider, type ProviderOverride, type ProviderResult, serverProviderId, taskModel } from "./llm";
 
-const { apiKeys, projects } = schema;
+const { apiKeys, projectMembers, projects } = schema;
+
+async function keyOwnerIsMember(env: Env, projectId: string, userId: string): Promise<boolean> {
+  const [row] = await createDb(env.DB)
+    .select({ userId: projectMembers.userId })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
+  return Boolean(row);
+}
 
 type KeyRow = typeof apiKeys.$inferSelect;
 
@@ -59,6 +67,10 @@ async function projectOverride(
   try {
     if (project?.keyId) {
       const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, project.keyId));
+      // A person's own key works for the projects they are in, never for one they have left.
+      if (key?.ownerId && !(await keyOwnerIsMember(env, projectId, key.ownerId))) {
+        return { ok: false, reason: "The project's model key belongs to someone who is no longer in it. Choose another key in Settings." };
+      }
       if (key) {
         override.provider = key.provider as ProviderId;
         override.apiKey = await decryptSecret(env, key.secret, key.id);

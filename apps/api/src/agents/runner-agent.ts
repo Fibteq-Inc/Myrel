@@ -73,6 +73,11 @@ export class RunnerAgent extends Agent<Env> {
     return false;
   }
 
+  /** The runner never writes the agent's synced state: its frames go through onMessage. */
+  override shouldConnectionBeReadonly(): boolean {
+    return true;
+  }
+
   override async onConnect(connection: Connection, { request }: ConnectionContext) {
     if (request.headers.get(RUNNER_ID_HEADER) !== this.name) {
       connection.close(4401, "unauthorized");

@@ -140,6 +140,15 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       if (moved && (!newSecrets || Object.values(newSecrets).some((v) => v === ""))) {
         return c.json({ error: "invalid_input", message: "This connector moves to another server: enter its headers again." }, 400);
       }
+      // A command's variables go to the command they were given for, run by whoever gave them: a new
+      // command, other arguments, another computer or another person setting it needs them entered again.
+      const rerun =
+        row.transport === "stdio" &&
+        (fields.command !== undefined || fields.args !== undefined || fields.runsOn !== undefined || next.createdBy !== row.createdBy) &&
+        Object.keys(await readSecrets(c.env, row)).length > 0;
+      if (rerun && (!newSecrets || Object.values(newSecrets).some((v) => v === ""))) {
+        return c.json({ error: "invalid_input", message: "This command changes or gets a new owner: enter its variables again." }, 400);
+      }
       if (newSecrets) {
         // An empty value keeps what is stored under that name; a name left out is removed.
         const stored = await readSecrets(c.env, row);

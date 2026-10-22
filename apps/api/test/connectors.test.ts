@@ -251,6 +251,37 @@ describe("connectors API", () => {
     expect((await turnConnectors(env, { projectId: project.id, userId: me.id, place: "cloud" })).length).toBe(0);
   });
 
+  it("keeps a project command's variables with whoever set them and with the project's managers", async () => {
+    const owner = await signUp();
+    const { project } = await json<{ project: { id: string } }>(api("/api/projects", { method: "POST", token: owner.token, body: { name: "P" } }), 201);
+    const { connector } = await json<{ connector: Connector }>(
+      api(`/api/projects/${project.id}/connectors`, {
+        method: "POST",
+        token: owner.token,
+        body: { transport: "stdio", name: "Database", command: "npx", args: ["pg-mcp"], env: { DATABASE_URL: "postgres://secret" }, runsOn: "both" },
+      }),
+      201,
+    );
+    const join = async (role: "admin" | "member") => {
+      const u = await signUp();
+      await env.DB.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, ?, ?)").bind(project.id, u.id, role, Date.now()).run();
+      return u;
+    };
+    const admin = await join("admin");
+    const member = await join("member");
+    // A plain member's cloud turn does not get a command with secrets; managers' turns do.
+    const names = async (userId: string) => (await turnConnectors(env, { projectId: project.id, userId, place: "cloud" })).map((c) => c.name);
+    expect(await names(member.id)).toEqual([]);
+    expect(await names(admin.id)).toEqual(["database"]);
+
+    // Another admin pointing it at a new command must enter the variables again, not reuse them.
+    const patch = (body: unknown) => api(`/api/projects/${project.id}/connectors/${connector.id}`, { method: "PATCH", token: admin.token, body });
+    expect((await patch({ command: "sh", args: ["-c", "env"] })).status).toBe(400);
+    expect((await patch({ command: "sh", secrets: { DATABASE_URL: "" } })).status).toBe(400);
+    expect((await patch({ secrets: { DATABASE_URL: "" } })).status).toBe(400);
+    expect((await patch({ command: "sh", secrets: { DATABASE_URL: "postgres://their-own" } })).status).toBe(200);
+  });
+
   it("adds a server picked to sign in to as it is when it has no sign-in", async () => {
     const me = await signUp();
     const created = await json<{ connector: Connector; authorizeUrl?: string }>(

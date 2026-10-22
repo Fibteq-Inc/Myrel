@@ -62,6 +62,10 @@ describe("the cloud agent", () => {
     });
     const { user } = (await signUp.json()) as { user: { id: string } };
     await env.DB.prepare("UPDATE user SET email_verified = 0 WHERE id = ?").bind(user.id).run();
+    // A member of the project: a thread works only for its members.
+    await env.DB.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
+      .bind(project.id, user.id, Date.now())
+      .run();
     const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: user.id, body: "çalıştır" });
     const thread = await projectAgent.createThread(root.id, "Doğrulanmamış");
     const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);

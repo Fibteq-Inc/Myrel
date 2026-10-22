@@ -122,6 +122,15 @@ export async function turnConnectors(
           .where(and(eq(connectors.ownerId, where.userId), eq(connectors.enabled, true)))
       ).map((r) => r.connector)
     : [];
+  // A cloud turn's commands run in a sandbox whose shell sees their variables, so a project command
+  // with secrets is only given to turns for its owners and admins, or for whoever set it.
+  const [membership] = where.userId
+    ? await db
+        .select({ role: schema.projectMembers.role })
+        .from(schema.projectMembers)
+        .where(and(eq(schema.projectMembers.projectId, where.projectId), eq(schema.projectMembers.userId, where.userId)))
+    : [];
+  const manages = membership?.role === "owner" || membership?.role === "admin";
   const used = new Set(["myrel"]);
   const out: TurnConnector[] = [];
   for (const row of [...project, ...own]) {
@@ -129,6 +138,7 @@ export async function turnConnectors(
     // A project's command starts on a computer only when its owner set that command (createdBy is
     // whoever last set it): another admin of the project cannot run one on their computer.
     if (row.transport === "stdio" && where.place === "local" && row.projectId && where.runnerId && row.createdBy !== computer?.userId) continue;
+    if (row.transport === "stdio" && where.place === "cloud" && row.projectId && row.secret && !manages && row.createdBy !== where.userId) continue;
     if (row.transport === "http" && (!row.url || (row.auth === "oauth" && row.status === "needs_auth"))) continue;
     let name = row.slug;
     for (let i = 2; used.has(name); i++) name = `${row.slug.slice(0, 29)}-${i}`;

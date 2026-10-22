@@ -48,7 +48,8 @@ function localFolders(place: Extract<AgentPlace, { kind: "local" }>): string {
     : "Work in this folder only.";
   const outside = place.asks
     ? "When the work needs a folder outside them, just use it: Myrel asks the person for you and your step waits for their answer. If they say no, carry on without it. The same goes for a command the runner does not run on its own (git commit, git push, tests): just run it, and Myrel asks the person on a card; never tell them to restart the runner instead."
-    : "When the work needs a folder outside them, ask the person in a reply to add it under Folders in the project's settings; until then you cannot reach it.";
+    : // Only Claude Code asks per folder; other CLIs' sandboxes limit writes, not reads, so the rule is the agent's to keep.
+      "Never read or change anything outside them, even where your tools would let you: other files on this computer (keys, other projects, the home folder) are not the project's, and anything you read can end up in a reply that every member sees. When the work needs a folder outside them, ask the person in a reply to add it under Folders in the project's settings, and wait until they have.";
   return `${list} ${outside}`;
 }
 

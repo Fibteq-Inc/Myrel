@@ -25,6 +25,8 @@ export type BillingSummary = {
     sandboxSeconds: number | null;
     modelMicros: number | null;
     connectors: number | null;
+    /** Bytes each project's files may take. */
+    storageBytes: number | null;
     /** Cloud turns that may run at once. */
     concurrentSandboxes: number | null;
   };

@@ -33,6 +33,7 @@ export default function ArtifactScreen() {
   const url = isArtifact ? view.data?.url : params.url;
   const valid = typeof url === "string" && /^https?:\/\//i.test(url);
   const [title, setTitle] = useState("");
+  const [shownUrl, setShownUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
   let body;
@@ -48,7 +49,10 @@ export default function ArtifactScreen() {
           source={{ uri: url }}
           style={{ flex: 1, backgroundColor: colors.ground }}
           onLoadEnd={() => setLoading(false)}
-          onNavigationStateChange={(nav) => setTitle(nav.title ?? "")}
+          onNavigationStateChange={(nav) => {
+            setTitle(nav.title ?? "");
+            setShownUrl(nav.url ?? "");
+          }}
           sharedCookiesEnabled={false}
           thirdPartyCookiesEnabled={false}
           allowsBackForwardNavigationGestures
@@ -68,7 +72,9 @@ export default function ArtifactScreen() {
     <View style={{ flex: 1, backgroundColor: colors.ground }}>
       <Stack.Screen
         options={{
-          title: title || (valid ? hostOf(url) : isArtifact ? t("artifacts.artifact") : ""),
+          // Any page can be opened here (a link in a message, or myrel://artifact?url=…), and any page
+          // can name itself "Myrel": outside an artifact the header shows the address it is really on.
+          title: isArtifact ? title || t("artifacts.artifact") : valid ? hostOf(shownUrl || url) : "",
           headerRight: () =>
             valid ? (
               <Pressable

@@ -12,6 +12,8 @@ import { Hono } from "hono";
 import { type Author, contentTypeFor, fileKey, uploadPath, verifyFileLink } from "../agents/knowledge";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../middleware";
+import { canStoreFile } from "../extensions";
+import { UNVERIFIED_MESSAGE } from "../verification";
 import { findMembership } from "./projects";
 
 type Ctx = Context<AppEnv>;
@@ -142,12 +144,17 @@ async function store(c: Ctx, projectId: string, path: string, author: Author, st
   const bytes = await c.req.arrayBuffer();
   if (bytes.byteLength > MAX_FILE_SIZE) return c.json({ error: "too_large", maxBytes: MAX_FILE_SIZE }, 413);
 
+  const project = await getAgentByName(c.env.PROJECT_AGENT, projectId);
+  // Storage is the service's to pay for: a person stores files once they have shown the address is theirs.
+  if (author.kind === "user" && !c.get("user").verified) return c.json({ error: "email_not_verified", message: UNVERIFIED_MESSAGE }, 403);
+  const room = await canStoreFile(c.env, projectId, (await project.filesBytes(path)) + bytes.byteLength);
+  if (!room.ok) return c.json({ error: "limit_reached", message: room.reason }, 402);
+
   const sent = c.req.header("content-type")?.split(";")[0]?.trim();
   // Browsers send octet-stream for unknown types; the extension usually knows better.
   const contentType =
     sent && sent !== "application/octet-stream" ? (c.req.header("content-type") as string) : contentTypeFor(path, "application/octet-stream");
   await c.env.FILES.put(fileKey(projectId, path), bytes, { httpMetadata: { contentType } });
-  const project = await getAgentByName(c.env.PROJECT_AGENT, projectId);
   const file = await project.recordFile({ path, size: bytes.byteLength, contentType }, author);
   return c.json({ file }, status);
 }

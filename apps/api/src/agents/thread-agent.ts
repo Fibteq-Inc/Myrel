@@ -34,7 +34,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest";
-import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
+import { fromBase64, readBundle, tameSkillMd, toBase64, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import type { PullCredit } from "../github/attribution";
@@ -369,7 +369,8 @@ export class ThreadAgent extends Agent<Env> {
         : null
       : !wroteSince && routineActor
         ? await member(routineActor.actor)
-        : lastWriter;
+        : // Someone who has left the project since writing here gets no more turns.
+          await member(lastWriter);
     this.setMeta("requester", requester ?? "");
     const place = await taskPlace(this.env, projectId, requester);
     if (place.kind === "error") return this.cannotWork(place.message);
@@ -785,7 +786,9 @@ export class ThreadAgent extends Agent<Env> {
       console.error("skills", err);
       return [];
     });
-    this.setMeta("agent_skills", JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name }))));
+    // On someone's computer a project skill comes tamed (see tameSkillMd): its author may not be them.
+    const tame = place.kind === "local";
+    this.setMeta("agent_skills", JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name, tame: tame && s.project }))));
     return skills;
   }
 
@@ -796,8 +799,19 @@ export class ThreadAgent extends Agent<Env> {
   async skillBundle(token: string): Promise<SkillBundle | null> {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return null;
-    const given = JSON.parse(this.getMeta("agent_skills") ?? "[]") as { id: string; name: string }[];
-    const skills = await Promise.all(given.map(async (s) => ({ name: s.name, files: await readBundle(this.env, s.id) })));
+    const given = JSON.parse(this.getMeta("agent_skills") ?? "[]") as { id: string; name: string; tame?: boolean }[];
+    const skills = await Promise.all(
+      given.map(async (s) => {
+        const files = await readBundle(this.env, s.id);
+        if (!s.tame) return { name: s.name, files };
+        return {
+          name: s.name,
+          files: files.map((f) =>
+            f.path === "SKILL.md" ? { ...f, content: toBase64(new TextEncoder().encode(tameSkillMd(new TextDecoder().decode(fromBase64(f.content))))) } : f,
+          ),
+        };
+      }),
+    );
     return { skills: skills.filter((s) => s.files.length) };
   }
 
