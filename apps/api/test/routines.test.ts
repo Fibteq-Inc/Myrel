@@ -52,6 +52,19 @@ const json = async <T>(res: Response | Promise<Response>) => (await (await res).
 
 afterEach(resetFakeModel);
 
+/** Waits until the thread has no turn running and none pending, so no work outlives the test. */
+async function settled(threadAgent: unknown) {
+  await until(
+    () =>
+      runInDurableObject(threadAgent as DurableObjectStub, (_, state) => {
+        const running = state.storage.sql.exec("SELECT id FROM tasks WHERE status = 'running'").toArray().length;
+        const dirty = state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'dirty'").toArray()[0]?.value === "1";
+        return running === 0 && !dirty;
+      }),
+    "the thread to settle",
+  );
+}
+
 describe("routines", () => {
   it("lets members create, pause, resume and delete routines over the API", async () => {
     const { token, project, ws, events } = await setup();
@@ -272,6 +285,7 @@ describe("routines", () => {
     expect(await until(async () => (await requester()) === owner, "the thread's first turn")).toBe(true);
     await agent.runRoutineNow(routine.id);
     expect(await until(async () => (await requester()) === memberId, "the routine's turn")).toBe(true);
+    await settled(threadAgent);
   }, 20_000);
 
   it("works a follow-up forwarded from the project chat for whoever asked it, not for the thread's person", async () => {
@@ -306,5 +320,6 @@ describe("routines", () => {
     // The coordinator answering the thread's own request is not an ask: the thread's person again.
     await threadAgent.wake({ kind: "coordinator", note: "Permission granted." });
     expect(await until(async () => (await requester()) === owner, "the answered turn")).toBe(true);
+    await settled(threadAgent);
   }, 30_000);
 });
