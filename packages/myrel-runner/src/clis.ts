@@ -178,12 +178,18 @@ const codex: CliAdapter = {
     "-",
   ],
   // Config overrides for one run; the token stays in the environment.
-  agent: async ({ url, token, connectors = [] }) => {
+  agent: async ({ url, token, connectors = [], access }) => {
+    // `codex exec` runs with approval policy "never": a tool that asks for approval (one that is
+    // not read-only) fails instead of waiting, since nobody can answer there. People approve in
+    // the thread, so Myrel's own servers and its connectors are pre-approved, like Claude Code's
+    // --allowedTools.
+    const approve = (name: string) => ["-c", `mcp_servers.${name}.default_tools_approval_mode="approve"`];
     const remote = (name: string, at: string) => [
       "-c",
       `mcp_servers.${name}.url=${JSON.stringify(at)}`,
       "-c",
       `mcp_servers.${name}.bearer_token_env_var=${JSON.stringify(TOKEN_VAR)}`,
+      ...approve(name),
     ];
     const args = remote(MYREL_MCP_SERVER, url);
     for (const c of connectors) {
@@ -195,7 +201,11 @@ const codex: CliAdapter = {
       const env = Object.entries(c.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`);
       args.push("-c", `mcp_servers.${c.name}.command=${JSON.stringify(c.command)}`, "-c", `mcp_servers.${c.name}.args=${JSON.stringify(c.args)}`);
       if (env.length) args.push("-c", `mcp_servers.${c.name}.env={ ${env.join(", ")} }`);
+      args.push(...approve(c.name));
     }
+    // The person's own ChatGPT apps too, unless the run may only read. A per-app setting in their
+    // config.toml still wins.
+    if (access && access !== "read") args.push("-c", 'apps._default.default_tools_approval_mode="approve"');
     return { args, env: { [TOKEN_VAR]: token } };
   },
   line(line, state) {
