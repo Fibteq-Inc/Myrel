@@ -7,7 +7,7 @@ directory and have no limits.
 ## How it plugs in
 
 The core defines optional hooks in `apps/api/src/extensions.ts`: `canCreateProject`,
-`canUseSandbox`, `canUseCoordinator`, `canAddConnector`, `legal` and `billing` (shown to clients in `/api/info`). This
+`canUseSandbox`, `canUseCoordinator`, `canAddConnector`, `canAddSkill`, `canStoreFile`, `legal` and `billing` (shown to clients in `/api/info`). This
 package's `src/worker.ts` is the hosted Worker's entry: it sets the hooks, adds `/api/billing`,
 and hands everything else to the core Worker. The core never imports this package.
 
@@ -31,6 +31,7 @@ and hands everything else to the core Worker. The core never imports this packag
 | Cloud turns at once | 1 | Unlimited | Unlimited |
 | Included model usage | $1/month | $5/month | $5/person/month, pooled |
 | Connectors (own + on owned projects) | 2 | Unlimited | Unlimited |
+| File storage per project | 1 GB | 20 GB | 20 GB |
 
 Monthly allowances reset on the 1st (UTC). Included model usage is what the coordinator and the
 cloud thread agent spend on the service's model keys, for projects without a key of their own
@@ -41,11 +42,18 @@ never limited.
 Limits are checked when a cloud turn starts and again every minute while it runs, counting what the
 turn has used so far, so a long turn ends (with the reason) once it reaches them. Free runs one cloud
 turn at a time across a person's projects. The service's model keys and cloud sandbox are used only on
-projects whose owner has verified their email address.
+projects whose owner has verified their email address, and uploading files needs a verified
+address too. On the service's key, a project may only pick a model with a known price (built-in
+or `LLM_PRICES`); any other model runs only on a key of the project's own.
 
 Free has a second, service-wide guard: once everyone on Free together has cost
 `BILLING_FREE_MONTHLY_BUDGET_USD` this month (default 200; model spend plus sandbox time at
 about $0.05 an hour), Free cloud turns and coordinator turns stop until the 1st.
+
+A free trial starts without a card. If no card is on file when it ends, the subscription is
+cancelled rather than left unpaid. While trialing, a Team gets the allowance of the smallest Team
+(2 seats) however many seats it has. Adding a Team seat is charged at once and only added if the
+charge goes through; removing one gives no credit back.
 
 When a paid plan ends, nothing is deleted. Projects keep working; only new projects, cloud turns
 and coordinator turns over the Free limits are refused.
