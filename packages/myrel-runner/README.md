@@ -71,7 +71,12 @@ Read-only tasks (`--access read`) always run in the folder itself.
 |---|---|---|---|
 | `read` | `--permission-mode plan` | `--sandbox read-only` | `--approval-mode default` |
 | `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--approval-mode auto_edit` |
+| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--approval-mode auto_edit` |
 | `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--approval-mode yolo` |
+
+With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
+the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode; Codex and
+Gemini CLI cannot ask mid-run, so for them `auto` is the same as `edit`.
 
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.

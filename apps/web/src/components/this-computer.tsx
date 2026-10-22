@@ -12,6 +12,7 @@ import { OnlineDot } from "./runners";
 const ACCESS: { value: ComputerAccess; label: MessageKey }[] = [
   { value: "read", label: "thisComputer.accessRead" },
   { value: "edit", label: "thisComputer.accessEdit" },
+  { value: "auto", label: "thisComputer.accessAuto" },
   { value: "full", label: "thisComputer.accessFull" },
 ];
 

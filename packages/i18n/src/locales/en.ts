@@ -528,6 +528,7 @@ export const en = {
   "thisComputer.access": "The CLI may",
   "thisComputer.accessRead": "Read only",
   "thisComputer.accessEdit": "Edit files",
+  "thisComputer.accessAuto": "Auto (Claude Code decides, asks when unsure)",
   "thisComputer.accessFull": "Run any command",
   "workspace.pr": "Pull request",
   "workspace.prEmpty": "No pull request yet",

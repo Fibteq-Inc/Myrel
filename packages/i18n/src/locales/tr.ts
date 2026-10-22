@@ -526,6 +526,7 @@ export const tr: Catalog = {
   "thisComputer.access": "CLI'ın yetkisi",
   "thisComputer.accessRead": "Sadece okuma",
   "thisComputer.accessEdit": "Dosya düzenleme",
+  "thisComputer.accessAuto": "Otomatik (Claude Code karar verir, emin değilse sorar)",
   "thisComputer.accessFull": "Her komutu çalıştırma",
   "workspace.pr": "PR",
   "workspace.prEmpty": "Henüz PR yok",

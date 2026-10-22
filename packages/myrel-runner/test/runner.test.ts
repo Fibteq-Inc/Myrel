@@ -78,6 +78,13 @@ describe("CLI output parsing", () => {
     );
   });
 
+  it("runs Claude Code in auto mode with auto access, asking Myrel about the rest; other CLIs stay at edit", () => {
+    const args = ADAPTERS.claude.args({ access: "auto", asks: true });
+    expect(args).toEqual(expect.arrayContaining(["--permission-mode", "auto", "--permission-prompt-tool", "mcp__myrel__approve_access"]));
+    expect(ADAPTERS.codex.args({ access: "auto" })).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));
+    expect(ADAPTERS.gemini.args({ access: "auto" })).toEqual(expect.arrayContaining(["--approval-mode", "auto_edit"]));
+  });
+
   it("passes the project's other folders to each CLI", () => {
     expect(ADAPTERS.claude.args({ access: "full", dirs: ["/a"] })).toEqual(
       expect.arrayContaining(["--permission-mode", "bypassPermissions", "--add-dir", "/a"]),
