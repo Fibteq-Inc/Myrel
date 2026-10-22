@@ -161,7 +161,7 @@ ee/                commercial features: hosted plans and billing (ee/billing)
 
 ## Quick start (local)
 
-Requires Node 22+ and pnpm 10.
+Requires Node 24.22.1+ (see `.node-version`) and pnpm 10.
 
 ```sh
 pnpm install
