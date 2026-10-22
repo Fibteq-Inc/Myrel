@@ -1,7 +1,7 @@
 import { openLinksExternally } from "@myrel/client";
 import { handleDeepLinks } from "./deep-link";
 import { desktopPlatform } from "./platform";
-import { checkForUpdate } from "./updater";
+import { startUpdateChecks } from "./updater";
 
 // apps/web reads the platform when its modules load, so it must exist before the app is imported.
 const platform = desktopPlatform();
@@ -13,4 +13,4 @@ openLinksExternally(window, platform.openExternal);
 await import("@myrel/web/main");
 
 void handleDeepLinks(platform);
-if (!import.meta.env.DEV) void checkForUpdate();
+if (!import.meta.env.DEV) startUpdateChecks();
