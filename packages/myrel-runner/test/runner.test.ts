@@ -184,7 +184,15 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
   it("gives Codex the endpoint as config overrides and the token in its environment", async () => {
     const agent = await ADAPTERS.codex.agent(mcp());
     expect(agent).toEqual({
-      args: ["-c", 'mcp_servers.myrel.url="https://myrel.test/api/agent-mcp/thr_1"', "-c", 'mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"'],
+      args: [
+        "-c",
+        'mcp_servers.myrel.url="https://myrel.test/api/agent-mcp/thr_1"',
+        "-c",
+        'mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"',
+        // codex exec cannot ask, so Myrel's tools are approved up front.
+        "-c",
+        'mcp_servers.myrel.default_tools_approval_mode="approve"',
+      ],
       env: { MYREL_MCP_TOKEN: "t".repeat(32) },
     });
     // The prompt still comes last, on stdin.
@@ -216,6 +224,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     expect(codex.args).toContain('mcp_servers.linear.url="https://myrel.test/api/agent-mcp/thr_1/c/linear"');
     expect(codex.args).toContain('mcp_servers.db.args=["-y","pg-mcp"]');
     expect(codex.args).toContain('mcp_servers.db.env={ DATABASE_URL = "postgres://x" }');
+    expect(codex.args.join(" ")).not.toContain("linear.default_tools_approval_mode");
   });
 });
 

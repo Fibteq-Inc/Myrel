@@ -218,7 +218,9 @@ const codex: CliAdapter = {
       "-c",
       `mcp_servers.${name}.bearer_token_env_var=${JSON.stringify(TOKEN_VAR)}`,
     ];
-    const args = remote(MYREL_MCP_SERVER, url);
+    // `codex exec` cannot ask anyone, so a Myrel tool that is not read-only (reply, update_plan) was
+    // refused ("approval policy is never"). Only Myrel's own server is approved; connectors are not.
+    const args = [...remote(MYREL_MCP_SERVER, url), "-c", `mcp_servers.${MYREL_MCP_SERVER}.default_tools_approval_mode="approve"`];
     for (const c of connectors) {
       if (c.transport === "http") {
         args.push(...remote(c.name, c.url));
