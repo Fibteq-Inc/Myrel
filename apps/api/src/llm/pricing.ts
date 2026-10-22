@@ -18,6 +18,10 @@ export const DEFAULT_PRICES: Record<string, Price> = {
   "claude-sonnet-4-6": { input: 3, output: 15, cachedInput: 0.3 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cachedInput: 0.01 },
   "claude-haiku-4-5": { input: 1, output: 5, cachedInput: 0.1 },
+  // Fireworks' serverless list prices for the open models FireRouter routes to; FireRouter itself
+  // sends no cost, so a routed call is priced by the model that served it.
+  "glm-5p3": { input: 1.4, output: 4.4, cachedInput: 0.26 },
+  "glm-5p3-flash": { input: 0.15, output: 0.5, cachedInput: 0.03 },
 };
 
 /** Parses LLM_PRICES; a malformed value is ignored rather than breaking model calls. */

@@ -242,8 +242,16 @@ describe("callCostMicros", () => {
     const { callCostMicros } = await import("../src/usage");
     const call = { provider: "fireworks", model: "firerouter/opus", servedModel: "glm-5p3", usage: { inputTokens: 1000, outputTokens: 100 }, latencyMs: 1 };
     expect(callCostMicros({ ...call, costUsd: 0.0123 }, DEFAULT_PRICES)).toBe(12_300);
-    expect(callCostMicros(call, DEFAULT_PRICES)).toBeNull();
+    expect(callCostMicros({ ...call, servedModel: "unlisted-model" }, DEFAULT_PRICES)).toBeNull();
     expect(callCostMicros(call, { "glm-5p3": { input: 1, output: 2 } })).toBe(1200);
+  });
+
+  it("prices a FireRouter call by the open model that served it", async () => {
+    const { callCostMicros } = await import("../src/usage");
+    const call = { provider: "fireworks", model: "firerouter/opus", servedModel: "glm-5p3-flash", usage: { inputTokens: 11_400, outputTokens: 644 }, latencyMs: 1 };
+    // 11,400 input at $0.15/M + 644 output at $0.50/M
+    expect(callCostMicros(call, DEFAULT_PRICES)).toBe(2032);
+    expect(priceFor("glm-5p3-flash", DEFAULT_PRICES)).toEqual(DEFAULT_PRICES["glm-5p3-flash"]);
   });
 });
 
