@@ -76,6 +76,8 @@ describe("CLI output parsing", () => {
     expect(ADAPTERS.claude.args({ access: "edit", resume: "s-1" })).toEqual(
       expect.arrayContaining(["--permission-mode", "acceptEdits", "--resume", "s-1"]),
     );
+    // codex exec takes its own flags before the resume subcommand, then the session and the prompt.
+    expect(ADAPTERS.codex.args({ access: "edit", resume: "s-2" }).slice(-3)).toEqual(["resume", "s-2", "-"]);
   });
 
   it("runs Claude Code in auto mode with auto access, asking Myrel about the rest; other CLIs stay at edit", () => {
@@ -274,7 +276,48 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s in %s
     expect(frames.at(-1)).toMatchObject({ type: "task.done", ok: true });
     expect((frames.at(-1) as { result: string }).result).toMatch(/^fix the bug in .*proj$/);
     // The thread's next task resumes the same CLI session.
-    expect(await new SessionStore().get("thr_01JTEST0000000000000000000")).toBe("sess-42");
+    expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "claude")).toEqual({ id: "sess-42", task: "task_01JTEST0000000000000000000" });
+  });
+
+  /** Starts an agent turn that may continue the session of turn `after`. */
+  async function agentTurn(folder: string, after: string) {
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => ({ folders: [{ path: folder, name: "proj" }], access: "edit" }), sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    await runner.start({
+      type: "task.start",
+      taskId: "task_01JTEST0000000000000000002",
+      threadId: "thr_01JTEST0000000000000000000",
+      folder,
+      cli: "claude",
+      prompt: "whole thread",
+      agent: { mcpPath: "/api/agent-mcp/thr_01JTEST0000000000000000000", token: "t".repeat(32), resume: { after, prompt: "only what is new" } },
+    });
+    return frames.at(-1) as { ok: boolean; result: string };
+  }
+
+  it("continues the last turn's session with only what is new", async () => {
+    await fakeClaude(`read prompt
+r=""; prev=""; for a in "$@"; do [ "$prev" = "--resume" ] && r="$a"; prev="$a"; done
+printf '{"type":"result","subtype":"success","is_error":false,"result":"%s / %s"}\n' "$r" "$prompt"`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const sessions = new SessionStore();
+    await sessions.set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000001" });
+    expect((await agentTurn(folder, "task_01JTEST0000000000000000001")).result).toBe("sess-1 / only what is new");
+    // A session that did not see the last turn (it ran in the cloud, say) gets the whole thread.
+    await sessions.set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000009" });
+    expect((await agentTurn(folder, "task_01JTEST0000000000000000001")).result).toBe("sess-1 / whole thread");
+  });
+
+  it("starts a new session with the whole thread when the old one cannot be resumed", async () => {
+    await fakeClaude(`read prompt
+case "$*" in *--resume*) echo "No conversation found with session ID: sess-1" >&2; exit 1 ;; esac
+printf '{"type":"result","subtype":"success","is_error":false,"result":"new / %s"}\n' "$prompt"`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    await new SessionStore().set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000001" });
+    expect(await agentTurn(folder, "task_01JTEST0000000000000000001")).toMatchObject({ ok: true, result: "new / whole thread" });
   });
 
   it("connects the CLI to the thread's MCP endpoint when it runs as the thread's agent", async () => {

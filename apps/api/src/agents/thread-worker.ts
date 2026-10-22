@@ -65,8 +65,14 @@ export function threadPrompt(input: {
   routines: Routine[];
   now: Date;
   defaultTimezone: string;
+  /**
+   * For a CLI session that continues the last turn and so already holds the thread: only the
+   * messages that arrived since, without the message the thread started from.
+   */
+  followUp?: boolean;
 }): string {
-  const history = input.messages.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
+  const shown = input.followUp ? input.messages.filter((m) => m.seq > input.lastSeenSeq) : input.messages;
+  const history = shown.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
   const github = (input.githubEvents ?? []).map((g) => `- ${g.createdAt}${g.isNew ? " · NEW" : ""}: ${g.body}`);
   const pulls = (input.pullRequests ?? []).map(renderPullRequest);
@@ -81,8 +87,10 @@ export function threadPrompt(input: {
           .map((r) => `- ${r.fullName} (default branch ${r.defaultBranch}${r.private ? ", private" : ""})`)
           .join("\n")}`
       : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
-    `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
-    `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
+    input.followUp ? "" : `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
+    input.followUp
+      ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already)\n${history.join("\n\n") || "(no new messages)"}`
+      : `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
     notes.length ? `## Notes from the coordinator (not visible to people)\n${notes.join("\n")}` : "",
     pulls.length ? `## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}` : "",
     github.length ? `## GitHub events on those pull requests (NEW = since your last turn)\n${github.join("\n\n")}` : "",

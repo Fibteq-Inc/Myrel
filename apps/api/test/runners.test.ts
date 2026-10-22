@@ -493,7 +493,15 @@ describe("local workspace", () => {
     runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
     await new Promise((r) => setTimeout(r, 200));
-    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(2);
+    const turns = runnerSide.frames.filter((f): f is Start => f.type === "task.start");
+    expect(turns).toHaveLength(2);
+    // The first turn has no session to continue; the second can continue the first's with only what is new.
+    expect(turns[0]!.agent?.resume).toBeUndefined();
+    expect(turns[1]!.agent?.resume?.after).toBe(start.taskId);
+    expect(turns[1]!.agent!.resume!.prompt).toContain("New in the thread since your last turn");
+    expect(turns[1]!.agent!.resume!.prompt).toContain("Bu sefer izin ver");
+    expect(turns[1]!.agent!.resume!.prompt).not.toContain("The message this thread started from");
+    expect(turns[1]!.prompt).toContain("The message this thread started from");
     runnerSide.ws.close();
   });
 
