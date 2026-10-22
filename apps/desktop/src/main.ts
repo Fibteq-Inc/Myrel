@@ -7,6 +7,7 @@ import { checkForUpdate } from "./updater";
 const platform = desktopPlatform();
 (globalThis as { __MYREL_PLATFORM__?: typeof platform }).__MYREL_PLATFORM__ = platform;
 // The webview ignores target="_blank" and window.open; links to other sites go to the default browser.
+// Must run before the plugins' injected link handlers (see openLinksExternally).
 openLinksExternally(window, platform.openExternal);
 
 await import("@myrel/web/main");

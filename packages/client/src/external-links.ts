@@ -14,12 +14,16 @@ export function externalUrl(href: string, appOrigin: string): string | null {
   return url.origin === appOrigin ? null : url.href;
 }
 
-type LinkWindow = Pick<Window, "document" | "location" | "open">;
+type LinkWindow = Pick<Window, "location" | "open" | "addEventListener" | "removeEventListener">;
 
 /**
  * Native shells (Tauri's WKWebView/WebView2) drop `target="_blank"` clicks and
  * `window.open` calls. Sends links to other sites through `open` (the system
  * browser) instead; the app's own links keep working as before.
+ *
+ * Listens on the window in the capture phase and stops the click there, so it runs
+ * before the link handlers Tauri plugins inject: tauri-plugin-shell's calls
+ * `shell.open`, which the app is not allowed to use, and cancels the click.
  * Returns a function that undoes it.
  */
 export function openLinksExternally(win: LinkWindow, open: (url: string) => unknown): () => void {
@@ -34,6 +38,7 @@ export function openLinksExternally(win: LinkWindow, open: (url: string) => unkn
     const url = externalUrl(anchor.getAttribute("href") ?? "", appOrigin);
     if (!url) return;
     event.preventDefault();
+    event.stopPropagation();
     void open(url);
   };
 
@@ -45,13 +50,12 @@ export function openLinksExternally(win: LinkWindow, open: (url: string) => unkn
     return null;
   }) as Window["open"];
 
-  // Bubble phase, after React: handlers that call preventDefault keep control of their links.
-  win.document.addEventListener("click", onClick);
-  win.document.addEventListener("auxclick", onClick);
+  win.addEventListener("click", onClick, true);
+  win.addEventListener("auxclick", onClick, true);
   win.open = patchedOpen;
   return () => {
-    win.document.removeEventListener("click", onClick);
-    win.document.removeEventListener("auxclick", onClick);
+    win.removeEventListener("click", onClick, true);
+    win.removeEventListener("auxclick", onClick, true);
     if (win.open === patchedOpen) win.open = windowOpen;
   };
 }
