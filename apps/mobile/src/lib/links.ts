@@ -26,7 +26,8 @@ export function useOpenLink(projectId: string, threadId?: string) {
         const local = file.kind === "local" ? `&local=1${threadId ? `&thread=${encodeURIComponent(threadId)}` : ""}` : "";
         router.push(`/projects/${projectId}/file?path=${encodeURIComponent(file.path)}${local}` as Href);
       } else if (/^https?:\/\//i.test(href)) router.push({ pathname: "/artifact", params: { url: href } });
-      else void Linking.openURL(href).catch(() => {});
+      // Only mail and phone links go to the OS: any other scheme would fire another app's deep link.
+      else if (/^(mailto|tel):/i.test(href)) void Linking.openURL(href).catch(() => {});
     },
     [router, projectId, threadId, files, t],
   );
