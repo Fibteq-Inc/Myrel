@@ -956,7 +956,7 @@ export class ProjectAgent extends Agent<Env> {
           defaultTimezone: this.defaultTimezone(),
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
@@ -985,7 +985,28 @@ export class ProjectAgent extends Agent<Env> {
     return null;
   }
 
-  private coordinatorHost(meter?: TurnMeter): CoordinatorHost {
+  /**
+   * Who a follow-up this coordinator turn forwards to a thread is for: the one person whose project
+   * chat messages (or routine) it answers. Null when that is not one person (several wrote, or no
+   * one did), so the thread then works without anyone's own computer or connectors rather than
+   * with those of whoever wrote in it before. Decided here from the inbox, never by the model.
+   */
+  private forwardedFor(inbox: InboxItem[]): string | null {
+    const people = new Set<string>();
+    for (const item of inbox) {
+      if (item.kind === "message") {
+        const m = this.getMessage(item.messageId);
+        if (m?.authorKind === "user") people.add(m.authorId);
+      } else if (item.kind === "routine") {
+        const routine = this.getRoutine(item.routineId);
+        people.add(routine && routine.createdBy !== "agent" ? routine.createdBy : "");
+      }
+    }
+    const [only] = people;
+    return people.size === 1 && only ? only : null;
+  }
+
+  private coordinatorHost(meter?: TurnMeter, forwardedFor: string | null = null): CoordinatorHost {
     const post = (body: string, relay?: MessageRelay) =>
       this.sendMessage({
         threadId: null,
@@ -1023,7 +1044,8 @@ export class ProjectAgent extends Agent<Env> {
         const reopened = !!thread?.resolved;
         if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
         relayInThread({ kind, threadId, note }, relayLine(kind, note));
-        await this.wakeThread(threadId, { kind: "coordinator", note, reopened });
+        // A forwarded ask works for whoever asked it; an answer to the thread's own request changes nothing.
+        await this.wakeThread(threadId, { kind: "coordinator", note, reopened, ...(kind === "follow_up" && { forwardedFor }) });
       },
       relay: async (fromThreadId, toThreadId, note) => {
         const from = this.getThread(fromThreadId);
@@ -1237,7 +1259,11 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
   | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean }
-  | { kind: "coordinator"; note: string; reopened?: boolean }
+  /**
+   * forwardedFor: set when the note forwards a person's ask from the project chat: who asked (see
+   * ProjectAgent.forwardedFor), or null when that is not one known person.
+   */
+  | { kind: "coordinator"; note: string; reopened?: boolean; forwardedFor?: string | null }
   /** actor: the person the routine works for (its author); none for one an agent made for its thread. */
   | { kind: "routine"; name: string; prompt: string; actor?: string; reopened?: boolean }
   /**

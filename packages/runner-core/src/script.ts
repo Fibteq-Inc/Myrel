@@ -26,14 +26,18 @@ mkdir -p "$MYREL_WORKDIR" && cd "$MYREL_WORKDIR" || fail prepare "Cannot open $M
 git config --global user.name "$MYREL_GIT_NAME"
 git config --global user.email "$MYREL_GIT_EMAIL"
 git config --global init.defaultBranch main
+# An older script set a helper for every host; a sandbox that ran one still has it.
+git config --global --unset-all credential.helper >/dev/null 2>&1
 if [ -n "\${MYREL_WORKSPACE_TOKEN:-}" ]; then
   # Sent only to the workspace remote, and kept in the environment rather than on disk.
   export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.$MYREL_WORKSPACE_REMOTE.extraHeader"
   export GIT_CONFIG_VALUE_0="Authorization: Bearer $MYREL_WORKSPACE_TOKEN"
 fi
 if [ -n "\${GITHUB_TOKEN:-}" ]; then
-  # The token stays in the environment; git asks this helper instead of storing it.
-  git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
+  # The token stays in the environment; git asks this helper instead of storing it. It is GitHub's
+  # only: the helper is set for https://github.com and answers nothing for any other host (a
+  # submodule or remote elsewhere asking for a password gets none).
+  git config --global credential.https://github.com.helper '!f() { [ "$1" = get ] || exit 0; p=; h=; while IFS== read -r k v; do case "$k" in protocol) p="$v" ;; host) h="$v" ;; esac; done; [ "$p" = https ] && [ "$h" = github.com ] || exit 0; echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
   export GH_TOKEN="$GITHUB_TOKEN"
 fi
 # There is no SSH key here: GitHub's SSH addresses go over HTTPS, where the token above works.

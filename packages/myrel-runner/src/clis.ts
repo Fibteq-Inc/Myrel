@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
-import type { Access } from "./config";
+import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
 
 /** What a CLI's output told us so far. */
@@ -321,7 +321,7 @@ export async function detectClis(): Promise<RunnerCli[]> {
     Object.values(ADAPTERS).map(
       (a) =>
         new Promise<RunnerCli | null>((resolve) => {
-          execFile(a.bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32" }, (err, stdout) => {
+          execFile(a.bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
             resolve(err ? null : { id: a.id, version: firstLine(stdout) || null });
           });
         }),

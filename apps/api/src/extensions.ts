@@ -7,8 +7,11 @@
 /** Whether something may happen now, and if not, the reason to show the person. */
 export type LimitCheck = { ok: true } | { ok: false; reason: string };
 
-/** What a cloud turn still running has used: its model spend (millionths of a dollar) and its time so far. */
-export type RunningTurn = { modelMicros: number; seconds: number };
+/**
+ * What a cloud turn still running has used: its priced model spend (millionths of a dollar), its
+ * model calls that could not be priced, and its time so far.
+ */
+export type RunningTurn = { modelMicros: number; seconds: number; unpricedCalls?: number };
 
 export type LegalLinks = { terms: string; privacy: string; version: string };
 

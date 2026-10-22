@@ -273,4 +273,38 @@ describe("routines", () => {
     await agent.runRoutineNow(routine.id);
     expect(await until(async () => (await requester()) === memberId, "the routine's turn")).toBe(true);
   }, 20_000);
+
+  it("works a follow-up forwarded from the project chat for whoever asked it, not for the thread's person", async () => {
+    const { token, project, ws, agent } = await setup();
+    ws.close();
+    const owner = (await json<{ user: { id: string } }>(api("/api/auth/get-session", { token }))).user.id;
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: owner, body: "my thread" });
+    const thread = await agent.createThread(root.id, "Mine");
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `m${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "M" }),
+    });
+    const memberId = (await json<{ user: { id: string } }>(api("/api/auth/get-session", { token: signUp.headers.get("set-auth-token")! }))).user.id;
+    await env.DB.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
+      .bind(project.id, memberId, Date.now())
+      .run();
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Keep notes." });
+    const requester = () =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
+        const rows = state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'requester'").toArray();
+        return rows[0]?.value ?? null;
+      });
+    expect(await until(async () => (await requester()) === owner, "the thread's first turn")).toBe(true);
+
+    // The member asked in the project chat; the coordinator forwarded it here.
+    await threadAgent.wake({ kind: "coordinator", note: "Add a test.", forwardedFor: memberId });
+    expect(await until(async () => (await requester()) === memberId, "the forwarded turn")).toBe(true);
+    // Not one known person: nobody's own computer or connectors.
+    await threadAgent.wake({ kind: "coordinator", note: "Two people asked.", forwardedFor: null });
+    expect(await until(async () => (await requester()) === "", "the unattributed turn")).toBe(true);
+    // The coordinator answering the thread's own request is not an ask: the thread's person again.
+    await threadAgent.wake({ kind: "coordinator", note: "Permission granted." });
+    expect(await until(async () => (await requester()) === owner, "the answered turn")).toBe(true);
+  }, 30_000);
 });

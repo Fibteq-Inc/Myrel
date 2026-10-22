@@ -4,7 +4,7 @@ import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { githubConfigured, installationToken } from "../github/app";
-import { listProjectRepos } from "../github/store";
+import { listProjectRepos, repoWritable } from "../github/store";
 import { getWorkspace } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts), for a task that works for `principal`. */
@@ -115,7 +115,10 @@ export async function taskPlace(env: Env, projectId: string, requester: string |
  */
 export async function projectGithubToken(env: Env, projectId: string, runSec: number): Promise<string | null> {
   if (!githubConfigured(env)) return null;
-  const repos = await listProjectRepos(env.DB, projectId);
+  // Only repositories whoever connected them can push to (see repoWritable).
+  const all = await listProjectRepos(env.DB, projectId);
+  const writable = await Promise.all(all.map((r) => repoWritable(env.DB, projectId, r)));
+  const repos = all.filter((_, i) => writable[i]);
   const first = repos[0];
   if (!first) return null;
   const repositoryIds = repos.filter((r) => r.installationId === first.installationId).map((r) => r.repoId);

@@ -11,7 +11,7 @@ function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "o
     seen.push({ url, init });
     return upstream;
   });
-  const costs: number[] = [];
+  const costs: (number | null)[] = [];
   const waits: Promise<unknown>[] = [];
   const req = new Request("https://myrel.test/api/agent-mcp/t/model/chat/completions", {
     method: "POST",
@@ -83,16 +83,45 @@ describe("proxyModel", () => {
     expect(costs).toEqual([0.00002725]);
   });
 
-  it("gives Anthropic its key as x-api-key, leaves the body alone and reports no cost", async () => {
-    const upstream = Response.json({ usage: { input_tokens: 1, cost: 9 } }, { headers: { "x-litellm-response-cost": "9" } });
-    const { res, seen, costs, settle } = run(upstream, { model: "claude", stream: true }, "anthropic");
+  it("gives Anthropic its key as x-api-key, leaves the body alone and prices the call itself", async () => {
+    const prices = { "claude-sonnet-x": { input: 3, output: 15, cachedInput: 0.3 } };
+    const upstream = Response.json(
+      { model: "claude-sonnet-x", usage: { input_tokens: 1000, cache_read_input_tokens: 1000, output_tokens: 100 } },
+      { headers: { "x-litellm-response-cost": "9" } },
+    );
+    const { res, seen, costs, settle } = run(upstream, { model: "claude", stream: false }, "anthropic", prices);
     await res;
     await settle();
     const headers = new Headers(seen[0]!.init.headers);
     expect(headers.get("x-api-key")).toBe("real-key");
     expect(headers.get("authorization")).toBeNull();
-    expect(JSON.parse(seen[0]!.init.body as string)).toEqual({ model: "claude", stream: true });
-    expect(costs).toEqual([]);
+    expect(JSON.parse(seen[0]!.init.body as string)).toEqual({ model: "claude", stream: false });
+    // 1,000 uncached at $3/M + 1,000 cached at $0.30/M + 100 output at $15/M; never the header's figure
+    expect(costs).toEqual([0.0048]);
+  });
+
+  it("prices an Anthropic stream from message_start and message_delta", async () => {
+    const prices = { "claude-sonnet-x": { input: 3, output: 15 } };
+    const sse =
+      'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-x","usage":{"input_tokens":1000,"output_tokens":1}}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"hi"}}\n\n' +
+      'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":200}}\n\n';
+    const upstream = new Response(sse, { headers: { "content-type": "text/event-stream" } });
+    const { res, costs, settle } = run(upstream, { model: "claude", stream: true }, "anthropic", prices);
+    await (await res).text();
+    await settle();
+    // 1,000 input at $3/M + 200 output at $15/M
+    expect(costs).toEqual([0.006]);
+  });
+
+  it("counts an Anthropic call it cannot price, and not a token count", async () => {
+    const { res, costs, settle } = run(Response.json({ model: "claude-unknown", usage: { input_tokens: 5, output_tokens: 5 } }), { model: "x" }, "anthropic", {});
+    await res;
+    const counted = run(Response.json({ input_tokens: 5 }), { model: "x" }, "anthropic", {});
+    await counted.res;
+    await Promise.all([settle(), counted.settle()]);
+    expect(costs).toEqual([null]);
+    expect(counted.costs).toEqual([]);
   });
 
   it("prices a JSON call by the model its response names when the provider sends no cost", async () => {
@@ -118,11 +147,14 @@ describe("proxyModel", () => {
     expect(costs).toEqual([0.0048]);
   });
 
-  it("reports nothing when the provider sends no cost", async () => {
+  it("counts a call it cannot price as unpriced, and a call without usage not at all", async () => {
     const { res, costs, settle } = run(Response.json({ usage: { prompt_tokens: 1 } }), { model: "m", messages: [] });
     await res;
-    await settle();
-    expect(costs).toEqual([]);
+    const empty = run(Response.json({ choices: [] }), { model: "m", messages: [] });
+    await empty.res;
+    await Promise.all([settle(), empty.settle()]);
+    expect(costs).toEqual([null]);
+    expect(empty.costs).toEqual([]);
   });
 });
 

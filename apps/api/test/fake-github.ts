@@ -23,6 +23,8 @@ export const fakeGithub = {
   requests: [] as { method: string; url: string; body?: unknown }[],
   /** The repositories of installation 42 the signed-in user can reach themselves. */
   userRepos: [7, 8],
+  /** Of those, the ones they can push to; the rest they can only read. */
+  userPush: [7, 8],
 };
 
 const realFetch = globalThis.fetch;
@@ -40,7 +42,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname === "/app") return Response.json({ id: 1234, slug: "myrel-test" });
   if (url.pathname === "/user") return Response.json({ id: 9001, login: "octo" });
   if (url.pathname === "/user/installations/42/repositories") {
-    const repositories = fakeGithub.repos.filter((r) => fakeGithub.userRepos.includes(r.id));
+    const repositories = fakeGithub.repos
+      .filter((r) => fakeGithub.userRepos.includes(r.id))
+      .map((r) => ({ ...r, permissions: { admin: false, maintain: false, push: fakeGithub.userPush.includes(r.id), triage: true, pull: true } }));
     return Response.json({ total_count: repositories.length, repositories });
   }
   if (url.pathname === "/user/installations") {

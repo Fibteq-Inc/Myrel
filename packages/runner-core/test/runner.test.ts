@@ -200,6 +200,31 @@ function runScript(env: Record<string, string>) {
 }
 
 describe("task script", () => {
+  it("gives the GitHub token to github.com over https only", () => {
+    const home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "true" });
+    const { code } = runScript({ ...taskEnv(s, shell, { workdir }), HOME: home, GITHUB_TOKEN: "sentinel-github-token" });
+    expect(code).toBe(0);
+    // What git would send to a server asking for credentials, with the config the script left behind.
+    const fill = (protocol: string, host: string) =>
+      spawnSync("git", ["credential", "fill"], {
+        input: `protocol=${protocol}\nhost=${host}\npath=org/repo.git\n\n`,
+        // The task's processes have the token in their environment, as the helper expects.
+        env: { PATH: process.env.PATH, HOME: home, GITHUB_TOKEN: "sentinel-github-token", GIT_TERMINAL_PROMPT: "0" },
+        encoding: "utf8",
+      }).stdout;
+    expect(fill("https", "github.com")).toContain("password=sentinel-github-token");
+    for (const [protocol, host] of [
+      ["https", "attacker.invalid"],
+      ["https", "github.com.attacker.invalid"],
+      ["https", "evil.github.com"],
+      ["http", "github.com"],
+    ]) {
+      expect(fill(protocol!, host!)).not.toContain("sentinel-github-token");
+    }
+  });
+
   it("clones the repository, runs the harness on a fresh branch and reports phases", () => {
     const origin = mkdtempSync(join(tmpdir(), "myrel-origin-"));
     const git = (...args: string[]) => execFileSync("git", args, { cwd: origin, stdio: "pipe" });

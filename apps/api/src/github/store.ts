@@ -57,7 +57,7 @@ export async function githubGrantStale(db: D1Database, userId: string, now = Dat
   return !repo;
 }
 
-/** Whether the user's last GitHub sign-in showed they can reach this repository of the installation themselves. */
+/** Whether the user's last GitHub sign-in showed they can push to this repository of the installation themselves. */
 export async function userCanReachRepo(db: D1Database, userId: string, installationId: number, repoId: number): Promise<boolean> {
   const [row] = await createDb(db)
     .select({ id: githubUserRepos.repoId })
@@ -66,7 +66,25 @@ export async function userCanReachRepo(db: D1Database, userId: string, installat
   return Boolean(row);
 }
 
-/** The repository ids per installation the user can reach themselves (see githubUserRepos). */
+/**
+ * Whether Myrel may make a write token for a connected repository: the person who connected it
+ * could push to it at their last GitHub sign-in (see githubUserRepos). Someone with no record yet
+ * (connections from before Myrel kept push rights; they are asked to sign in to GitHub again when
+ * they next pick a repository) is trusted until then.
+ */
+export async function repoWritable(db: D1Database, projectId: string, repo: { repoId: number; installationId: number }): Promise<boolean> {
+  const d = createDb(db);
+  const [row] = await d
+    .select({ addedBy: projectRepos.addedBy })
+    .from(projectRepos)
+    .where(and(eq(projectRepos.projectId, projectId), eq(projectRepos.repoId, repo.repoId)));
+  if (!row?.addedBy) return true;
+  const [any] = await d.select({ id: githubUserRepos.repoId }).from(githubUserRepos).where(eq(githubUserRepos.userId, row.addedBy)).limit(1);
+  if (!any) return true;
+  return userCanReachRepo(db, row.addedBy, repo.installationId, repo.repoId);
+}
+
+/** The repository ids per installation the user can push to themselves (see githubUserRepos). */
 export async function userRepoIds(db: D1Database, userId: string): Promise<Set<string>> {
   const rows = await createDb(db)
     .select({ installationId: githubUserRepos.installationId, repoId: githubUserRepos.repoId })
@@ -168,6 +186,12 @@ export async function projectRepoToken(
     const names = repos.map((r) => r.fullName).join(", ") || "none";
     throw new Error(
       `${fullName} is not connected to this project (connected: ${names}). If it is the right repository, ask for it with request_repo_connection.`,
+    );
+  }
+  const writes = Object.values(permissions).includes("write");
+  if (writes && !(await repoWritable(env.DB, projectId, repo))) {
+    throw new Error(
+      `Myrel cannot write to ${repo.fullName}: whoever connected it to this project cannot push to it on GitHub. Someone who can should connect it again.`,
     );
   }
   const { token } = await installationToken(env, repo.installationId, { repositoryIds: [repo.repoId], permissions }, minValidMs);

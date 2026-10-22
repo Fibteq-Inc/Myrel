@@ -235,6 +235,11 @@ export class ThreadAgent extends Agent<Env> {
     if (!this.sql<{ name: string }>`PRAGMA table_info(routine_runs)`.some((c) => c.name === "actor")) {
       this.sql`ALTER TABLE routine_runs ADD COLUMN actor TEXT`;
     }
+    // Likewise who a forwarded ask is for (forwarded = 1; actor null when not one known person).
+    if (!this.sql<{ name: string }>`PRAGMA table_info(notes)`.some((c) => c.name === "forwarded")) {
+      this.sql`ALTER TABLE notes ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0`;
+      this.sql`ALTER TABLE notes ADD COLUMN actor TEXT`;
+    }
   }
 
   /** Called by the ProjectAgent when the coordinator opens this thread. */
@@ -258,7 +263,9 @@ export class ThreadAgent extends Agent<Env> {
     // A tap on the repository card connects it first, so the turn it starts has it.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     if (reason.kind === "coordinator") {
-      this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
+      const forwarded = reason.forwardedFor !== undefined;
+      this.sql`INSERT INTO notes (body, created_at, forwarded, actor)
+        VALUES (${reason.note}, ${new Date().toISOString()}, ${forwarded ? 1 : 0}, ${reason.forwardedFor ?? null})`;
     }
     if (reason.kind === "github" && reason.settled && this.getMeta("thread_id") && !this.runningTask() && !this.planHasWork()) {
       // A merge or close with nothing left to do: said here and settled without starting the agent.
@@ -345,10 +352,24 @@ export class ThreadAgent extends Agent<Env> {
     const lastSeen = Number(this.getMeta("last_seen_seq") ?? 0);
     const wroteSince = ctx.messages.some((m) => m.authorKind === "user" && m.seq > lastSeen);
     const [routineActor] = this.sql<{ actor: string }>`SELECT actor FROM routine_runs WHERE seen = 0 AND actor IS NOT NULL ORDER BY id DESC LIMIT 1`;
-    const requester =
-      !wroteSince && routineActor
-        ? (await isMember(this.env, projectId, routineActor.actor)) ? routineActor.actor : null
-        : ([ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null);
+    // An ask the coordinator forwarded from the project chat works for whoever asked it there, not
+    // for whoever wrote in this thread before (null: not one known person, so nobody's own).
+    // Notes that arrive while this turn is put together wait for the next one, so the turn never
+    // takes an ask it did not decide who works for.
+    const noteCut = this.sql<{ id: number | null }>`SELECT MAX(id) AS id FROM notes`[0]?.id ?? 0;
+    const forwarded = this.sql<{ actor: string | null }>`SELECT actor FROM notes WHERE seen = 0 AND forwarded = 1 AND id <= ${noteCut} ORDER BY id`;
+    const lastWriter = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.authorId ?? null;
+    const forwardedActors = new Set(forwarded.map((n) => n.actor));
+    const forwardedFor = forwardedActors.size === 1 ? [...forwardedActors][0]! : null;
+    const member = async (id: string | null) => (id && (await isMember(this.env, projectId, id)) ? id : null);
+    const requester = forwarded.length
+      ? // Someone also wrote here since: only when it is the same person does the turn work for them.
+        !wroteSince || lastWriter === forwardedFor
+        ? await member(forwardedFor)
+        : null
+      : !wroteSince && routineActor
+        ? await member(routineActor.actor)
+        : lastWriter;
     this.setMeta("requester", requester ?? "");
     const place = await taskPlace(this.env, projectId, requester);
     if (place.kind === "error") return this.cannotWork(place.message);
@@ -364,7 +385,7 @@ export class ThreadAgent extends Agent<Env> {
       );
     }
 
-    const noteRows = this.sql<NoteRow>`SELECT * FROM notes ORDER BY id`;
+    const noteRows = this.sql<NoteRow>`SELECT * FROM notes WHERE id <= ${noteCut} ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     // Only the last few runs matter; older ones are history the thread already acted on.
@@ -379,7 +400,7 @@ export class ThreadAgent extends Agent<Env> {
     // Only the last few events matter; the pull requests' current state is listed separately.
     const githubRows = this.sql<NoteRow>`SELECT * FROM (SELECT * FROM github_events ORDER BY id DESC LIMIT 10) ORDER BY id`;
     const githubEvents: CoordinatorNote[] = githubRows.map((g) => ({ body: g.body, createdAt: g.created_at, isNew: g.seen === 0 }));
-    this.sql`UPDATE notes SET seen = 1`;
+    this.sql`UPDATE notes SET seen = 1 WHERE id <= ${noteCut}`;
     this.sql`UPDATE routine_runs SET seen = 1`;
     this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
@@ -717,9 +738,21 @@ export class ThreadAgent extends Agent<Env> {
     return { projectId: this.ids().projectId, taskId: task.id };
   }
 
-  /** What one model call through Myrel cost, added to its turn's usage. Callable over RPC. */
-  async modelCost(taskId: string, costUsd: number): Promise<void> {
+  /**
+   * What one model call through Myrel cost, added to its turn's usage; null for a call that used
+   * tokens but has no price, counted so plan limits charge each such call. Callable over RPC.
+   */
+  async modelCost(taskId: string, costUsd: number | null): Promise<void> {
+    if (costUsd === null) {
+      if (this.runningTask()?.id === taskId) this.setMeta(`unpriced_calls:${taskId}`, String(this.unpricedCalls(taskId) + 1));
+      return;
+    }
     await this.taskEvents(taskId, [{ type: "usage", inputTokens: 0, outputTokens: 0, costUsd }]);
+  }
+
+  /** Model calls of a cloud turn that could not be priced (see modelCost). */
+  private unpricedCalls(taskId: string): number {
+    return Number(this.getMeta(`unpriced_calls:${taskId}`) ?? 0);
   }
 
   /**
@@ -1345,7 +1378,8 @@ export class ThreadAgent extends Agent<Env> {
       if (spec.model) {
         const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
         const ms = Date.now() - Date.parse(row.created_at);
-        await recordTaskUsage(this.env, ctx, progress.usage, ms).catch((err) => console.error("task usage", err));
+        await recordTaskUsage(this.env, ctx, progress.usage, ms, this.unpricedCalls(taskId)).catch((err) => console.error("task usage", err));
+        this.deleteMeta(`unpriced_calls:${taskId}`);
       }
       if (row.backend === "sandbox") {
         const run = { taskId, projectId, threadId, startedAt: new Date(row.created_at), endedAt: new Date() };
@@ -1601,7 +1635,8 @@ export class ThreadAgent extends Agent<Env> {
     const progress = JSON.parse(row.progress) as TaskProgress;
     const modelMicros = (spec.model && taskCostMicros(this.env, spec.model.id, progress.usage)) || 0;
     const seconds = Math.max(0, Math.round((Date.now() - Date.parse(row.created_at)) / 1000));
-    const check = await canUseSandbox(this.env, this.ids().projectId, { modelMicros, seconds }).catch((err) => {
+    const unpricedCalls = this.unpricedCalls(row.id);
+    const check = await canUseSandbox(this.env, this.ids().projectId, { modelMicros, seconds, unpricedCalls }).catch((err) => {
       console.error("sandbox limit check", err);
       return { ok: true } as const;
     });

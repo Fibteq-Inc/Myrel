@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { readJson, runnerHome, writeJson } from "./config";
+import { childEnv, readJson, runnerHome, writeJson } from "./config";
 
 const run = promisify(execFile);
 
@@ -22,7 +22,7 @@ export type Worktree = {
 };
 
 const indexPath = () => join(runnerHome(), "worktrees.json");
-const git = (cwd: string, args: string[]) => run("git", ["-C", cwd, ...args], { maxBuffer: 4 * 1024 * 1024 });
+const git = (cwd: string, args: string[]) => run("git", ["-C", cwd, ...args], { maxBuffer: 4 * 1024 * 1024, env: childEnv() });
 
 export async function listWorktrees(): Promise<Worktree[]> {
   return (await readJson<Worktree[]>(indexPath())) ?? [];
