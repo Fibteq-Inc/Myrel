@@ -60,13 +60,23 @@ export function AttachmentList({ attachments }: { attachments?: Attachment[] }) 
   );
 }
 
-/** Files picked in the composer, before sending. */
-export function PendingAttachments({
+type PendingItem = { id: string; name: string; file?: ProjectFile; error?: string };
+
+/**
+ * Files picked in the composer, before sending. With `onInline`, items that
+ * `canInline` (a long paste turned into a file) offer to go back into the
+ * message as text.
+ */
+export function PendingAttachments<T extends PendingItem>({
   items,
   onRemove,
+  onInline,
+  canInline,
 }: {
-  items: { id: string; name: string; file?: ProjectFile; error?: string }[];
+  items: T[];
   onRemove: (id: string) => void;
+  onInline?: (id: string) => void;
+  canInline?: (item: T) => boolean;
 }) {
   const t = useT();
   if (items.length === 0) return null;
@@ -75,7 +85,7 @@ export function PendingAttachments({
       {items.map((item) => (
         <span
           key={item.id}
-          className={`flex max-w-[240px] items-center gap-2 rounded-lg border bg-panel py-1 pl-2.5 pr-1 text-[13px] ${
+          className={`flex max-w-[320px] items-center gap-2 rounded-lg border bg-panel py-1 pl-2.5 pr-1 text-[13px] ${
             item.error ? "border-bad/60 text-bad" : "border-edge"
           }`}
           title={item.error}
@@ -86,6 +96,15 @@ export function PendingAttachments({
             <LoaderCircle size={13} className="flex-none animate-spin text-muted" aria-hidden="true" />
           ) : null}
           <span className="truncate">{item.name}</span>
+          {onInline && canInline?.(item) && (
+            <button
+              type="button"
+              onClick={() => onInline(item.id)}
+              className="flex-none rounded px-1 text-xs text-accent hover:bg-hover"
+            >
+              {t("composer.insertAsText")}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onRemove(item.id)}

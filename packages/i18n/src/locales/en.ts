@@ -460,6 +460,8 @@ export const en = {
   "common.loading": "Loading",
 
   // Shell and chat additions
+  "composer.pastedFileName": "pasted-text-{time}.txt",
+  "composer.insertAsText": "Insert as text",
   "composer.attach": "Attach files",
   "rail.projectFiles": "Project files",
   "rail.filesNoProject": "Files (open a project first)",
