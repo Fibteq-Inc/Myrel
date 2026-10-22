@@ -1,6 +1,7 @@
 import { API_VERSION, type Message, type Project, ServerEvent, ServerInfo, SYNC_PAGE_SIZE } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { createAuth } from "../src/auth";
+import { sessionStart } from "../src/d1-session";
 import { setExtensions } from "../src/extensions";
 import { isListedAdmin } from "../src/instance";
 import { verificationEmails } from "./fake-llm";
@@ -201,6 +202,45 @@ describe("cors", () => {
   it("does not allow unknown origins", async () => {
     const res = await api("/api/health", { headers: { origin: "https://evil.example" } });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("D1 sessions", () => {
+  it("answers with a bookmark the next request can read from", async () => {
+    const token = await signUp();
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Replica" }) });
+    expect(res.status).toBe(201);
+    const bookmark = res.headers.get("x-d1-bookmark");
+    expect(bookmark).toMatch(/^[0-9a-f]+(-[0-9a-f]+)+$/i);
+
+    const list = await api("/api/projects", { token, headers: { "x-d1-bookmark": bookmark! } });
+    expect(list.status).toBe(200);
+    const { projects } = (await list.json()) as { projects: Project[] };
+    expect(projects.map((p) => p.name)).toContain("Replica");
+  });
+
+  it("ignores a bookmark that is not one", async () => {
+    const token = await signUp();
+    const res = await api("/api/projects", { token, headers: { "x-d1-bookmark": "nonsense" } });
+    expect(res.status).toBe(200);
+  });
+
+  it("starts sign-in and callers without a bookmark on the primary", () => {
+    const req = (path: string, headers: Record<string, string> = {}) => new Request(`${BASE}${path}`, { headers });
+    expect(sessionStart(req("/api/projects", { "x-d1-bookmark": "0000000a-00000001" }))).toBe("0000000a-00000001");
+    expect(sessionStart(req("/api/auth/get-session", { "x-d1-bookmark": "0000000a-00000001" }))).toBe("first-primary");
+    expect(sessionStart(req("/api/github/callback"))).toBe("first-primary");
+    expect(sessionStart(req("/api/projects", { "x-d1-bookmark": "x'; drop" }))).toBe("first-primary");
+  });
+
+  it("lets the apps send and read the bookmark across origins", async () => {
+    const preflight = await api("/api/projects", {
+      method: "OPTIONS",
+      headers: { origin: "tauri://localhost", "access-control-request-method": "GET", "access-control-request-headers": "x-d1-bookmark" },
+    });
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("x-d1-bookmark");
+    const res = await api("/api/health", { headers: { origin: "tauri://localhost" } });
+    expect(res.headers.get("access-control-expose-headers")).toContain("x-d1-bookmark");
   });
 });
 
