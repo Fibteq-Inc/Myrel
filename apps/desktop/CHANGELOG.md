@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.4.0...desktop-v0.4.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **desktop:** open external links in the default browser ([b07927c](https://github.com/Fibteq-Inc/myrel/commit/b07927ce0f82e2d722d8253aa677f26cd4bcbae9))
+* **runner:** let Codex run approved MCP and app tools in agent runs ([3247cc8](https://github.com/Fibteq-Inc/myrel/commit/3247cc8cded45d784dc82a07cd4ac7b8b2960b09))
+
 ## [0.4.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.3.0...desktop-v0.4.0) (2026-10-22)
 
 
