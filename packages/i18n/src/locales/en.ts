@@ -104,6 +104,8 @@ export const en = {
 
   // Messages
   "message.copy": "Copy message",
+  "message.showMore": "Show more",
+  "message.showLess": "Show less",
   "message.thinking": "Thinking",
   "message.working": "Working",
   "stats.label": "How this reply was made",
