@@ -126,6 +126,19 @@ export async function usageOf(env: Env, standing: Standing, userId: string, now 
   };
 }
 
+/** Longest an agent turn runs (thread-agent's AGENT_TURN_SEC) plus slack: an older sandbox_active row was lost. */
+const ACTIVE_MAX_MS = 75 * 60 * 1000;
+
+/** Agent turns running in cloud sandboxes right now under a standing, pooled across its group. */
+export async function activeSandboxes(env: Env, standing: Standing, now = Date.now()): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM sandbox_active a WHERE a.billed_to IN (${GROUP}) AND a.started_at >= ?3`,
+  )
+    .bind(standing.ownerId, standing.plan, now - ACTIVE_MAX_MS)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
 /** Rough cost of cloud sandbox time to the service: standard-1, memory-bound, about $0.05 an hour. */
 export const SANDBOX_MICROS_PER_SECOND = 14;
 

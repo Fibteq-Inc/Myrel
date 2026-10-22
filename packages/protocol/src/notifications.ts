@@ -44,13 +44,28 @@ export const NotificationConfig = z.object({
 export type NotificationConfig = z.infer<typeof NotificationConfig>;
 
 /** A device registering for push: a browser (Web Push) or a native app (Expo push token). */
+/**
+ * The browsers' push services. A subscription's endpoint is where the server sends each push, so it
+ * must be one of them, never an address of the caller's choosing.
+ */
+const PUSH_SERVICE_HOSTS = [/^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /^web\.push\.apple\.com$/, /^[a-z0-9-]+\.notify\.windows\.com$/];
+
+export function isPushServiceEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    return url.protocol === "https:" && PUSH_SERVICE_HOSTS.some((host) => host.test(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
 export const PushSubscriptionInput = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("webpush"),
-    endpoint: z.url().max(2048),
+    endpoint: z.url().max(2048).refine(isPushServiceEndpoint, "Not a browser push service"),
     keys: z.object({ p256dh: z.string().min(1).max(256), auth: z.string().min(1).max(64) }),
   }),
-  z.object({ kind: z.literal("expo"), token: z.string().min(1).max(256) }),
+  z.object({ kind: z.literal("expo"), token: z.string().regex(/^Expo(nent)?PushToken\[[^\]]+\]$/).max(256) }),
 ]);
 export type PushSubscriptionInput = z.infer<typeof PushSubscriptionInput>;
 

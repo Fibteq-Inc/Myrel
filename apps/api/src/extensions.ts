@@ -7,6 +7,9 @@
 /** Whether something may happen now, and if not, the reason to show the person. */
 export type LimitCheck = { ok: true } | { ok: false; reason: string };
 
+/** What a cloud turn still running has used: its model spend (millionths of a dollar) and its time so far. */
+export type RunningTurn = { modelMicros: number; seconds: number };
+
 export type LegalLinks = { terms: string; privacy: string; version: string };
 
 export type Extensions = {
@@ -14,8 +17,11 @@ export type Extensions = {
   billing?: boolean;
   /** Before a person creates a project. */
   canCreateProject?: (env: Env, userId: string) => Promise<LimitCheck>;
-  /** Before a project's agent turn starts in a cloud sandbox. Local turns are never limited. */
-  canUseSandbox?: (env: Env, projectId: string) => Promise<LimitCheck>;
+  /**
+   * Before a project's agent turn starts in a cloud sandbox, and again while it runs, with `running`:
+   * what the turn has used so far (not yet in the usage tables). Local turns are never limited.
+   */
+  canUseSandbox?: (env: Env, projectId: string, running?: RunningTurn) => Promise<LimitCheck>;
   /** Before a coordinator turn. A project with its own model key is the extension's to exempt. */
   canUseCoordinator?: (env: Env, projectId: string) => Promise<LimitCheck>;
   /**
@@ -40,8 +46,8 @@ export async function canCreateProject(env: Env, userId: string): Promise<LimitC
   return current.canCreateProject ? current.canCreateProject(env, userId) : ALLOWED;
 }
 
-export async function canUseSandbox(env: Env, projectId: string): Promise<LimitCheck> {
-  return current.canUseSandbox ? current.canUseSandbox(env, projectId) : ALLOWED;
+export async function canUseSandbox(env: Env, projectId: string, running?: RunningTurn): Promise<LimitCheck> {
+  return current.canUseSandbox ? current.canUseSandbox(env, projectId, running) : ALLOWED;
 }
 
 export async function canUseCoordinator(env: Env, projectId: string): Promise<LimitCheck> {

@@ -3,6 +3,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { bearer } from "better-auth/plugins/bearer";
+import { captchaPlugins } from "./captcha";
 import { legalLinks } from "./extensions";
 import { admitNewUser } from "./instance";
 import { trustedOrigins } from "./origins";
@@ -60,7 +61,7 @@ export function createAuth(env: Env) {
       },
     },
     // Bearer tokens let native clients (desktop, Expo) authenticate without cookies.
-    plugins: [bearer()],
+    plugins: [bearer(), ...captchaPlugins(env)],
     telemetry: { enabled: false },
   });
 }

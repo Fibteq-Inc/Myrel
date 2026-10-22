@@ -45,7 +45,7 @@ import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
 import { localBackend, localCanceller, ownsComputer, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
-import { recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
+import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
 import {
@@ -546,6 +546,9 @@ export class ThreadAgent extends Agent<Env> {
           secrets.MYREL_WORKSPACE_TOKEN = workspace.token;
         }
         await this.launch(stored(spec), backend.id, () => backend.start(spec, secrets), language);
+        if (this.runningTask()?.id === taskId) {
+          await markSandboxActive(this.env.DB, { taskId, projectId, startedAt: new Date() }).catch((err) => console.error("sandbox active", err));
+        }
         if (!workspace && (this.env as Partial<Env>).WORKSPACES) {
           await this.taskEvents(taskId, [
             { type: "log", stream: "system", text: "This thread's workspace could not be opened, so this turn's work will not be saved for the next one." },
@@ -1412,6 +1415,14 @@ export class ThreadAgent extends Agent<Env> {
     if (!row || row.id !== payload.taskId || row.backend !== "sandbox") return;
     const sandbox = this.env.SANDBOX.getByName(this.getMeta("thread_id")!);
     if (await sandbox.running(row.id)) {
+      // The plan's limits are checked as the turn goes, counting what it used so far, so one long turn
+      // (or several at once) cannot run far past them; an over-limit turn ends with the reason.
+      const over = await this.overLimit(row);
+      if (over) {
+        await this.taskEvents(row.id, [{ type: "done", ok: false, error: over }]);
+        await sandbox.cancel(row.id).catch(() => false);
+        return;
+      }
       await this.schedule(SANDBOX_CHECK_SEC, "sandboxCheck", payload);
       return;
     }
@@ -1570,6 +1581,19 @@ export class ThreadAgent extends Agent<Env> {
     if (!row || !projectId) return;
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     await project.broadcastTask({ type: "task.updated", task: this.toTask(row) });
+  }
+
+  /** Why a running cloud turn must stop now (its plan's limits, counting the turn so far), or null. */
+  private async overLimit(row: TaskRow): Promise<string | null> {
+    const spec = JSON.parse(row.spec) as StoredSpec;
+    const progress = JSON.parse(row.progress) as TaskProgress;
+    const modelMicros = (spec.model && taskCostMicros(this.env, spec.model.id, progress.usage)) || 0;
+    const seconds = Math.max(0, Math.round((Date.now() - Date.parse(row.created_at)) / 1000));
+    const check = await canUseSandbox(this.env, this.ids().projectId, { modelMicros, seconds }).catch((err) => {
+      console.error("sandbox limit check", err);
+      return { ok: true } as const;
+    });
+    return check.ok ? null : check.reason;
   }
 
   private runningTask(): TaskRow | null {

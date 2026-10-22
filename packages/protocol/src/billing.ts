@@ -20,7 +20,14 @@ export type BillingSummary = {
   /** Whether a first checkout would start with a free trial. */
   trialAvailable: boolean;
   /** This calendar month (UTC). Projects: the caller's own. Sandbox and model spend on the service's keys: pooled across a Team. */
-  limits: { projects: number | null; sandboxSeconds: number | null; modelMicros: number | null; connectors: number | null };
+  limits: {
+    projects: number | null;
+    sandboxSeconds: number | null;
+    modelMicros: number | null;
+    connectors: number | null;
+    /** Cloud turns that may run at once. */
+    concurrentSandboxes: number | null;
+  };
   usage: { projects: number; sandboxSeconds: number; modelMicros: number; connectors: number };
   /** A Team plan's members besides its owner, for its owner. */
   members: { userId: string; name: string; email: string }[];

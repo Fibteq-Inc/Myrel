@@ -2,11 +2,19 @@ import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "./middleware";
 
 /**
- * Better Auth endpoints a script would hammer: creating accounts, guessing passwords, and the
- * emails they send. Better Auth's own limiter keeps counts in memory, which does nothing across
- * Workers isolates, so these go through the AUTH_LIMIT binding (wrangler.jsonc) per client IP.
+ * Endpoints a script would hammer: creating accounts, guessing passwords, the emails they send, and
+ * guessing runner pairing codes. Better Auth's own limiter keeps counts in memory, which does nothing
+ * across Workers isolates, so these go through the AUTH_LIMIT binding (wrangler.jsonc) per client IP.
  */
-const LIMITED = ["/sign-up/", "/sign-in/", "/send-verification-email", "/request-password-reset", "/forget-password", "/change-password"];
+const LIMITED = [
+  "/sign-up/",
+  "/sign-in/",
+  "/send-verification-email",
+  "/request-password-reset",
+  "/forget-password",
+  "/change-password",
+  "/runner/pair",
+];
 
 export const authLimit = createMiddleware<AppEnv>(async (c, next) => {
   const limiter = (c.env as Partial<Env>).AUTH_LIMIT;

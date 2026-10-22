@@ -81,7 +81,7 @@ describe("notifications", () => {
   it("sends an encrypted, VAPID-signed Web Push and drops subscriptions the push service says are gone", async () => {
     const { token, agent, thread, project } = await setup();
     const browser = await fakeBrowser();
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     const reg = await api("/api/notifications/subscriptions", {
       method: "POST",
       token,
@@ -106,7 +106,7 @@ describe("notifications", () => {
     expect(k).toBe(env.VAPID_PUBLIC_KEY);
     const [header, claims, sig] = jwt!.split(".");
     expect(JSON.parse(new TextDecoder().decode(b64urlDecode(claims!)))).toMatchObject({
-      aud: "https://push.example.test",
+      aud: "https://fcm.googleapis.com",
       sub: "mailto:test@example.com",
     });
     const pub = await crypto.subtle.importKey("raw", b64urlDecode(k!), { name: "ECDSA", namedCurve: "P-256" }, false, [
@@ -126,6 +126,23 @@ describe("notifications", () => {
     outbound.length = 0;
     await agent.notifyThread(thread.id, "ready", "and again");
     expect(outbound.some((o) => o.url === endpoint)).toBe(false);
+  });
+
+  it("takes push endpoints only from browser push services, and moves one to another account only with its keys", async () => {
+    const first = await setup();
+    const second = await setup();
+    const browser = await fakeBrowser();
+    const register = (token: string, endpoint: string, keys = browser.keys) =>
+      api("/api/notifications/subscriptions", { method: "POST", token, body: JSON.stringify({ kind: "webpush", endpoint, keys }) });
+    expect((await register(first.token, "https://attacker.example/hook")).status).toBe(400);
+    expect((await register(first.token, "http://fcm.googleapis.com/fcm/send/x")).status).toBe(400);
+
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
+    expect((await register(first.token, endpoint)).status).toBe(201);
+    // Someone who only knows the endpoint cannot take it over.
+    expect((await register(second.token, endpoint, { p256dh: "other", auth: "other" })).status).toBe(409);
+    // The same browser signing in to another account can.
+    expect((await register(second.token, endpoint)).status).toBe(201);
   });
 
   it("delivers to Expo for the mobile app and respects each member's settings", async () => {
