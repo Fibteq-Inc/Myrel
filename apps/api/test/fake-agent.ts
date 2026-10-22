@@ -57,6 +57,19 @@ export function mcp(start: TaskStart, body: unknown, bearer = start.agent!.token
   return api(start.agent!.mcpPath, { method: "POST", headers: { authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
 }
 
+/** Fake computers' connections still open (see closeRunners). */
+const openRunners = new Set<WebSocket>();
+
+/**
+ * Hangs up every fake computer agentProject connected (setup.ts does after each test). A socket
+ * left open past its test file gets frames while vitest tears the file down, which fails the run
+ * with an EnvironmentTeardownError even though every test passed.
+ */
+export function closeRunners() {
+  for (const ws of openRunners) ws.close();
+  openRunners.clear();
+}
+
 /**
  * A new project working in FOLDER on a fake computer of `token`'s user, with `play` as the
  * thread agent. `turns` lists every turn so far.
@@ -71,6 +84,7 @@ export async function agentProject(token: string, play: Play, opts: { features?:
   const runner = (await paired.json()) as { runner: { id: string }; token: string };
   const res = await api("/api/runner/connect", { token: runner.token, headers: { upgrade: "websocket" } });
   const ws = res.webSocket!;
+  openRunners.add(ws);
   const frames: ServerToRunner[] = [];
   const send = (frame: unknown) => ws.send(JSON.stringify(frame));
   const turns: Turn[] = [];

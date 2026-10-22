@@ -16,7 +16,16 @@ await env.DB.prepare(
   "INSERT OR IGNORE INTO user (id, name, email, email_verified, role, created_at, updated_at) VALUES ('u', 'Test', 'u@example.com', 1, 'user', 0, 0)",
 ).run();
 
+import { afterAll, afterEach } from "vitest";
+import { closeRunners } from "./fake-agent";
 import { captureEmail } from "./fake-llm";
 import "./fake-github";
 
 captureEmail(env.EMAIL);
+
+// A fake computer's connection does not outlive its test (see closeRunners).
+afterEach(closeRunners);
+// A turn a test's last step set off (its task.done, the thread's report and notification) still
+// runs in the Durable Objects when the test returns; tearing the file down under it fails the run
+// with an EnvironmentTeardownError though every test passed. A moment lets that work finish.
+afterAll(() => new Promise((resolve) => setTimeout(resolve, 1500)));
