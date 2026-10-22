@@ -7,7 +7,11 @@ import type { RunnerFolder } from "@myrel/protocol";
  * How much the CLI may do on its own in a shared folder.
  * read: look only. edit (default): change files, but not run arbitrary commands. full: anything, no prompts.
  */
-export type Access = "read" | "edit" | "full";
+/**
+ * What the CLI may do without asking. auto: Claude Code's auto mode, where it decides itself which
+ * steps are safe and asks (through Myrel) about the rest; other CLIs treat it like edit.
+ */
+export type Access = "read" | "edit" | "auto" | "full";
 
 export type RunnerConfig = {
   /** Origin of the Myrel server, e.g. https://myrel.example.com */

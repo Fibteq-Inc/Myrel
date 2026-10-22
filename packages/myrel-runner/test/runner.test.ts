@@ -78,6 +78,13 @@ describe("CLI output parsing", () => {
     );
   });
 
+  it("runs Claude Code in auto mode with auto access, asking Myrel about the rest; other CLIs stay at edit", () => {
+    const args = ADAPTERS.claude.args({ access: "auto", asks: true });
+    expect(args).toEqual(expect.arrayContaining(["--permission-mode", "auto", "--permission-prompt-tool", "mcp__myrel__approve_access"]));
+    expect(ADAPTERS.codex.args({ access: "auto" })).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));
+    expect(ADAPTERS.gemini.args({ access: "auto" })).toEqual(expect.arrayContaining(["--approval-mode", "auto_edit"]));
+  });
+
   it("starts Claude Code with only Myrel's MCP servers, its own tools loaded up front", async () => {
     const dir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
     const agent = await ADAPTERS.claude.agent({ url: "https://myrel.test/mcp", token: "t".repeat(32), dir });

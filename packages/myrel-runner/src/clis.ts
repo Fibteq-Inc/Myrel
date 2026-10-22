@@ -113,7 +113,8 @@ const claude: CliAdapter = {
     "--permission-mode",
     // Bypassing permissions would skip the question about folders outside the project, so full
     // access with Myrel asking pre-allows the rest instead (see agent()).
-    { read: "plan", edit: "acceptEdits", full: asks ? "acceptEdits" : "bypassPermissions" }[access],
+    // Auto mode runs the steps its classifier judges safe; what it would ask about goes to Myrel.
+    { read: "plan", edit: "acceptEdits", auto: "auto", full: asks ? "acceptEdits" : "bypassPermissions" }[access],
     ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...(asks ? ["--permission-prompt-tool", APPROVE_TOOL] : []),
     ...(resume ? ["--resume", resume] : []),
@@ -199,7 +200,8 @@ const codex: CliAdapter = {
     "--json",
     "--skip-git-repo-check",
     "--sandbox",
-    { read: "read-only", edit: "workspace-write", full: "danger-full-access" }[access],
+    // `codex exec` cannot ask mid-run, so auto stays in the workspace like edit.
+    { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" }[access],
     ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...extra,
     "-",
@@ -256,7 +258,7 @@ const gemini: CliAdapter = {
     "--output-format",
     "json",
     "--approval-mode",
-    { read: "default", edit: "auto_edit", full: "yolo" }[access],
+    { read: "default", edit: "auto_edit", auto: "auto_edit", full: "yolo" }[access],
     ...(dirs.length ? ["--include-directories", dirs.map(quotePath).join(",")] : []),
     ...extra,
   ],

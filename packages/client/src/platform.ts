@@ -16,7 +16,7 @@ export type ComputerStatus =
   | { state: "stopped"; reason: string }
   | { state: "error"; message: string };
 
-export type ComputerAccess = "read" | "edit" | "full";
+export type ComputerAccess = "read" | "edit" | "auto" | "full";
 
 export type ComputerInfo = {
   paired: boolean;
