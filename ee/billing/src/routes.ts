@@ -144,7 +144,12 @@ export const billingRoutes = new Hono<BillingEnv>()
       automatic_tax: { enabled: true },
       customer_update: { address: "auto", name: "auto" },
       tax_id_collection: { enabled: true },
-      subscription_data: { metadata: { user_id: user.id }, ...(trial && { trial_period_days: TRIAL_DAYS }) },
+      subscription_data: {
+        metadata: { user_id: user.id },
+        // A trial that ends with no card on file ends: it does not become an unpaid plan that keeps
+        // its limits through the past-due grace period.
+        ...(trial && { trial_period_days: TRIAL_DAYS, trial_settings: { end_behavior: { missing_payment_method: "cancel" } } }),
+      },
       // A trial starts without a card; Stripe asks for one before the first charge.
       ...(trial && { payment_method_collection: "if_required" }),
     });
@@ -191,7 +196,14 @@ export const billingRoutes = new Hono<BillingEnv>()
       .bind(owner.id, person.id, Date.now())
       .run();
     if (added.meta.changes === 0) return c.json({ error: "conflict", message: "That person is already on a team." }, 409);
-    await syncSeats(c.env, owner.id, sub.id);
+    try {
+      await syncSeats(c.env, owner.id, sub.id);
+    } catch (err) {
+      // The seat is paid for when it is added; one that cannot be paid is not added.
+      await c.env.DB.prepare("DELETE FROM billing_team_members WHERE owner_id = ? AND user_id = ?").bind(owner.id, person.id).run();
+      console.warn("adding a team seat failed", err);
+      return c.json({ error: "payment_failed", message: "The new seat could not be paid for. Check the card in the billing portal." }, 402);
+    }
     return c.body(null, 204);
   })
   /** A member leaves the Team they were added to; they go back to their own plan. */
@@ -272,9 +284,14 @@ async function fitSeats(env: Env & StripeEnv, ownerId: string, sub: StripeSubscr
     seats = Math.max(TEAM_MIN_SEATS, 1 + Number(row?.n ?? 0));
   }
   if (item.quantity === seats) return;
+  // More seats are charged now, and only if the charge goes through: the plan's pooled allowance
+  // grows with the seat count at once, so a seat must not be rented for an hour and paid later.
+  // Fewer seats give no credit back, for the same reason.
+  const more = seats > (item.quantity ?? 0);
   const updated = await stripe<StripeSubscription>(env, "POST", `/subscriptions/${sub.id}`, {
     items: [{ id: item.id, quantity: seats }],
-    proration_behavior: "create_prorations",
+    proration_behavior: more ? "always_invoice" : "none",
+    ...(more && { payment_behavior: "error_if_incomplete" }),
   });
   await saveSubscription(env, updated);
 }

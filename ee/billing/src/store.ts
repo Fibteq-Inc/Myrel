@@ -1,6 +1,6 @@
 import { adminEmails, isListedAdmin } from "../../../apps/api/src/instance";
 import { verificationRequired } from "../../../apps/api/src/verification";
-import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId, payingSql } from "./plans";
+import { isPaid, type Interval, type Limits, limitsFor, monthStart, type PlanId, payingSql, TEAM_MIN_SEATS } from "./plans";
 
 /** The plan a person works under: their own, or the Team plan of the owner who added them. */
 export type Standing = {
@@ -76,7 +76,8 @@ export async function standingOf(env: Env, userId: string): Promise<Standing> {
 }
 
 function standing(plan: PlanId, ownerId: string, sub: SubscriptionRow | null): Standing {
-  const seats = sub?.seats ?? 1;
+  // A trial is not paid for yet: its allowance is the smallest Team's, however many seats it has.
+  const seats = sub?.status === "trialing" ? Math.min(sub.seats, TEAM_MIN_SEATS) : (sub?.seats ?? 1);
   return { plan, ownerId, seats, limits: limitsFor(plan, seats), subscription: sub };
 }
 

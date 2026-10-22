@@ -244,6 +244,9 @@ describe("hosted billing", () => {
     expect((await webhook(subscriptionEvent(userId, "myrel_team_monthly"))).status).toBe(200);
     expect(calls.map((c) => c.url)).toEqual([`https://api.stripe.com/v1/subscriptions/sub_${userId}`]);
     expect(new URLSearchParams(calls[0]!.body).get("items[0][quantity]")).toBe("2");
+    // More seats are charged at once and only if the payment goes through.
+    expect(new URLSearchParams(calls[0]!.body).get("proration_behavior")).toBe("always_invoice");
+    expect(new URLSearchParams(calls[0]!.body).get("payment_behavior")).toBe("error_if_incomplete");
     const seats = await env.DB.prepare("SELECT seats FROM billing_subscriptions WHERE user_id = ?").bind(userId).first<{ seats: number }>();
     expect(seats?.seats).toBe(2);
   });
@@ -312,6 +315,32 @@ describe("hosted billing", () => {
     expect(await plan(free.token)).toBe("team");
     expect((await api("/api/billing/team/membership", { method: "DELETE", token: free.token })).status).toBe(204);
     expect(await plan(free.token)).toBe("free");
+
+    // A seat that cannot be paid for is not added.
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      if (init?.method === "POST") return Response.json({ error: { message: "Your card was declined." } }, { status: 402 });
+      return Response.json(subscriptionEvent(owner.userId, "myrel_team_monthly").data.object);
+    };
+    const another = await signUp();
+    const declined = await addMember(another.email);
+    expect(declined.status).toBe(402);
+    expect(await plan(another.token)).toBe("free");
+  });
+
+  it("gives a Team on trial the smallest Team's allowance, whatever its seats", async () => {
+    const { token, userId } = await signUp();
+    const trial = subscriptionEvent(userId, "myrel_team_monthly", "trialing", { trial_end: Math.floor(Date.now() / 1000) + 7 * 86400 });
+    trial.data.object.items.data[0]!.quantity = 50;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      return Response.json(trial.data.object);
+    };
+    expect((await webhook(trial)).status).toBe(200);
+    const summary = (await (await api("/api/billing", { token })).json()) as BillingSummary;
+    expect(summary.limits.sandboxSeconds).toBe(2 * 150 * 3600);
   });
 
   it("gives no second trial to an address whose account was deleted", async () => {
@@ -355,6 +384,8 @@ describe("hosted billing", () => {
     expect(session.get("customer")).toBe("cus_new");
     expect(session.get("line_items[0][price]")).toBe("price_pro");
     expect(session.get("subscription_data[trial_period_days]")).toBe("7");
+    // With no card by the end, the trial ends rather than turning into an unpaid plan.
+    expect(session.get("subscription_data[trial_settings][end_behavior][missing_payment_method]")).toBe("cancel");
     expect(session.get("automatic_tax[enabled]")).toBe("true");
     expect(session.get("payment_method_collection")).toBe("if_required");
   });
