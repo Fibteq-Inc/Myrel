@@ -69,11 +69,12 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "agent-clis": the same for Codex CLI and Gemini CLI.
  * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
  * "skills": the runner downloads the turn's skills (task.start's `agent.skills`) into a folder of the run.
+ * "files": reads a file in the project's folders for the web app to show ("file.read").
  * "project-folders": the CLI also gets the project's other folders (task.start's `folders`), reports
  * the folders it works in ("task.folders"), and Claude Code asks people through Myrel before touching
  * anything outside them (the thread's approve_access tool).
  */
-export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders"]);
+export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders", "files"]);
 
 /**
  * A connector (MCP server) for the CLI running as the thread's agent. A remote one is on this
@@ -138,6 +139,20 @@ export const CliUsage = z.object({
 });
 export type CliUsage = z.infer<typeof CliUsage>;
 
+/** Largest file "file.read" sends back, in bytes; a longer text file comes cut. */
+export const MAX_LOCAL_FILE_BYTES = 512 * 1024;
+
+/** A file in a project's folders, read for someone to look at (feature "files"). */
+export const RunnerFile = z.object({
+  /** Where the file really is on the computer. */
+  path: z.string().max(4096),
+  size: z.number().int().nonnegative(),
+  /** Base64 of the file, or of its first MAX_LOCAL_FILE_BYTES when `truncated`. */
+  data: z.string().max(Math.ceil(MAX_LOCAL_FILE_BYTES / 3) * 4 + 4),
+  truncated: z.boolean(),
+});
+export type RunnerFile = z.infer<typeof RunnerFile>;
+
 /** Frames the runner sends. */
 export const RunnerToServer = z.discriminatedUnion("type", [
   RunnerInfo.extend({
@@ -165,6 +180,7 @@ export const RunnerToServer = z.discriminatedUnion("type", [
   RunnerDirListing.extend({ type: z.literal("dirs"), requestId: RunnerRequestId }),
   z.object({ type: z.literal("folders"), requestId: RunnerRequestId, folders: z.array(RunnerFolder).max(200) }),
   z.object({ type: z.literal("request.failed"), requestId: RunnerRequestId, message: z.string().max(500) }),
+  RunnerFile.extend({ type: z.literal("file"), requestId: RunnerRequestId }),
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServer>;
 
@@ -215,6 +231,18 @@ export const ServerToRunner = z.discriminatedUnion("type", [
   /** Share or stop sharing a folder, as asked in the web app. Answered with "folders". */
   z.object({ type: z.literal("folder.share"), requestId: RunnerRequestId, path: z.string().min(1).max(1024) }),
   z.object({ type: z.literal("folder.unshare"), requestId: RunnerRequestId, path: z.string().min(1).max(1024) }),
+  /**
+   * Read one file, e.g. one an agent's message links to (feature "files"). Answered with "file".
+   * `path` is absolute or relative to `folders`, the project's folders; the runner reads it only
+   * inside those (each shared) or the thread's worktree of them.
+   */
+  z.object({
+    type: z.literal("file.read"),
+    requestId: RunnerRequestId,
+    path: z.string().min(1).max(4096),
+    folders: z.array(z.string().min(1).max(1024)).min(1).max(51),
+    threadId: ThreadId.optional(),
+  }),
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunner>;
 /** What a task.start gives a CLI that runs as the thread's agent. */

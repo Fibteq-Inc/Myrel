@@ -364,6 +364,37 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
     return c.json({ workspace: await getWorkspace(c.env, id) });
   })
+  // A file in the project's local folders (or a thread's worktree of them), e.g. one an agent's
+  // message links to. Read from the computer, so only by the person whose computer it is.
+  .get("/:id/workspace/file", async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    const path = c.req.query("path");
+    const threadId = c.req.query("thread") || undefined;
+    if (!path || path.length > 4096) return c.json({ error: "invalid_input", message: "Which file?" }, 400);
+    if (threadId ? !(await findThread(c.env, id, threadId, userId)) : !(await findMembership(c.env, id, userId))) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const workspace = await getWorkspace(c.env, id);
+    if (!workspace) return c.json({ error: "not_found", message: "This project has no local folder." }, 404);
+    const [runner] = await createDb(c.env.DB).select({ userId: runners.userId }).from(runners).where(eq(runners.id, workspace.runnerId));
+    if (runner?.userId !== userId) {
+      return c.json({ error: "forbidden", message: "Only the person whose computer this is can open its files." }, 403);
+    }
+    const agent = await getAgentByName(c.env.RUNNER_AGENT, workspace.runnerId);
+    const result = await agent.readFile({ path, folders: [workspace.path, ...workspace.folders], ...(threadId && { threadId }) });
+    if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
+    const { file } = result;
+    const bytes = Uint8Array.from(atob(file.data), (ch) => ch.charCodeAt(0));
+    return c.body(bytes, 200, {
+      "content-type": localFileType(file.path, bytes),
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "x-file-path": encodeURIComponent(file.path),
+      "x-file-size": String(file.size),
+      "x-file-truncated": file.truncated ? "1" : "0",
+    });
+  })
   .put("/:id/workspace", async (c) => {
     const id = c.req.param("id");
     const userId = c.get("user").id;
@@ -469,6 +500,24 @@ export async function findMembership(env: Env, projectId: string, userId: string
 }
 
 /** The thread's id when it exists in a project the user belongs to. */
+/** Previewable types by extension; anything else is text unless it has NUL bytes. Never HTML, so it cannot run. */
+const LOCAL_FILE_TYPES: Record<string, string> = {
+  md: "text/markdown; charset=utf-8",
+  markdown: "text/markdown; charset=utf-8",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  pdf: "application/pdf",
+};
+
+function localFileType(path: string, bytes: Uint8Array): string {
+  const known = LOCAL_FILE_TYPES[/\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase() ?? ""];
+  if (known) return known;
+  return bytes.subarray(0, 8000).includes(0) ? "application/octet-stream" : "text/plain; charset=utf-8";
+}
+
 async function findThread(env: Env, projectId: string, threadId: string, userId: string): Promise<string | null> {
   if (!(await findMembership(env, projectId, userId))) return null;
   const project = await getAgentByName(env.PROJECT_AGENT, projectId);
