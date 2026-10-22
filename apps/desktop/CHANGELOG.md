@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.3.0...desktop-v0.4.0) (2026-10-22)
+
+
+### Features
+
+* **chat:** note plan changes at the end of the conversation ([d5454dd](https://github.com/Fibteq-Inc/myrel/commit/d5454dde8692149b0a7deb6ab06081f28d439aed))
+* let people open what the coordinator sent a thread ([9e865bd](https://github.com/Fibteq-Inc/myrel/commit/9e865bd06275bec401305f4d4d8eb6a2a75be037))
+
 ## [0.3.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.2.1...desktop-v0.3.0) (2026-10-22)
 
 
