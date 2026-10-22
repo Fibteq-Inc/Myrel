@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { appJwt, pemToPkcs8 } from "../src/github/app";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { listRepoFiles, readRepoFile } from "../src/github/files";
-import { listPullRequests, trackPullRequest } from "../src/github/pulls";
+import { attributionBlock, withAttribution } from "../src/github/attribution";
+import { listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
+import { githubLogin } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
 import { fakeGithub } from "./fake-github";
 
@@ -79,6 +81,15 @@ describe("github helpers", () => {
   });
 });
 
+describe("pull request credit", () => {
+  it("writes a block that cannot break out of its comment or format the name", () => {
+    const block = attributionBlock({ name: "<b>Eve</b> [x](y)", login: "e--ve", threadUrl: "https://myrel.test/t" })!;
+    expect(block).toBe('<!-- myrel-attribution: {"github_login":"eve"} -->\n_Requested by **\\<b\\>Eve\\</b\\> \\[x\\]\\(y\\)** · [Myrel thread](https://myrel.test/t)_');
+    expect(withAttribution(block, { name: "Bob", login: null, threadUrl: null })).toBe(block);
+    expect(attributionBlock({ name: null, login: null, threadUrl: null })).toBeNull();
+  });
+});
+
 describe("connecting GitHub", () => {
   it("reports whether the app is configured", async () => {
     const token = await signUp();
@@ -98,6 +109,13 @@ describe("connecting GitHub", () => {
     ]);
     const { repos } = (await (await api("/api/github/repos", { token })).json()) as { repos: GithubRepo[] };
     expect(repos.map((r) => r.fullName)).toEqual(["acme/app", "acme/docs"]);
+  });
+
+  it("remembers which GitHub account the person connected", async () => {
+    const token = await signUp();
+    await connect(token);
+    const me = (await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } };
+    expect(await githubLogin(env.DB, me.user.id)).toBe("octo");
   });
 
   it("can sign in to GitHub without installing", async () => {
@@ -349,6 +367,67 @@ describe("pull requests", () => {
     const after = (await projectAgent.getThreadContext(thread.id))!.messages;
     expect(after.slice(before).map((m) => m.body)).toEqual([`acme/app#${n} was merged.`]);
     expect(await projectAgent.getThread(thread.id)).toMatchObject({ resolved: true, status: "done" });
+  });
+
+  it("opens a pull request through the app, crediting the person with a link back to the thread", async () => {
+    const { project, thread } = await setup();
+    const credit = { name: "İsmail *K*", login: "octo", threadUrl: `${BASE}/projects/${project.id}/threads/${thread.id}` };
+    const before = fakeGithub.requests.length;
+    const { pr, created } = await openPullRequest(
+      env,
+      project.id,
+      thread.id,
+      { repo: "Acme/App", head: "myrel/readme-note", title: "Add a note", body: "Adds a note." },
+      credit,
+    );
+    expect(created).toBe(true);
+    expect(pr).toMatchObject({ repo: "acme/app", state: "open", threadId: thread.id });
+    const sent = fakeGithub.requests.slice(before);
+    const create = sent.find((r) => r.method === "POST" && r.url.endsWith("/repos/acme/app/pulls"))!;
+    const body = (create.body as { body: string; base: string }).body;
+    expect((create.body as { base: string }).base).toBe("main");
+    expect(body.split("\n").slice(0, 2)).toEqual([
+      '<!-- myrel-attribution: {"github_login":"octo"} -->',
+      `_Requested by **İsmail \\*K\\*** · [Myrel thread](${credit.threadUrl})_`,
+    ]);
+    expect(body.endsWith("\n\nAdds a note.")).toBe(true);
+    expect(sent.some((r) => r.url.endsWith(`/issues/${pr.number}/assignees`) && JSON.stringify(r.body) === '{"assignees":["octo"]}')).toBe(true);
+    expect(sent.some((r) => r.url.endsWith(`/pulls/${pr.number}/requested_reviewers`))).toBe(true);
+    // Already credited, so the body is left alone.
+    expect(sent.some((r) => r.method === "PATCH")).toBe(false);
+
+    // The same branch again: its open pull request comes back instead of a second one.
+    const again = await openPullRequest(env, project.id, thread.id, { repo: "acme/app", head: "myrel/readme-note", title: "Add a note" }, credit);
+    expect(again).toMatchObject({ created: false, pr: { number: pr.number } });
+    // Only connected repositories.
+    await expect(openPullRequest(env, project.id, thread.id, { repo: "acme/docs", head: "x", title: "x" }, credit)).rejects.toThrow("not connected");
+  });
+
+  it("credits a pull request the agent opened itself once, and never one a reply only mentions", async () => {
+    const { project, thread } = await setup();
+    const credit = { name: "İsmail", login: null, threadUrl: "https://myrel.test/projects/p/threads/t" };
+    const n = number + 1;
+    const own = `https://github.com/acme/app/pull/${n}`;
+    fakeGithub.pulls[`acme/app#${n}`] = pull({ number: n, html_url: own, body: "Fixes the login.", created_at: new Date().toISOString(), user: { login: "octo" } });
+    await trackPullRequest(env, project.id, thread.id, own, credit);
+    const credited = (fakeGithub.pulls[`acme/app#${n}`] as { body: string }).body;
+    expect(credited).toBe(`${attributionBlock(credit)}\n\nFixes the login.`);
+    // Followed a second time: nothing changes.
+    const before = fakeGithub.requests.length;
+    await trackPullRequest(env, project.id, thread.id, own, credit);
+    expect(fakeGithub.requests.slice(before).some((r) => r.method !== "GET")).toBe(false);
+
+    const m = number + 2;
+    const mentioned = `https://github.com/acme/app/pull/${m}`;
+    fakeGithub.pulls[`acme/app#${m}`] = pull({ number: m, html_url: mentioned, body: "Someone else's." });
+    await trackPullRequest(env, project.id, thread.id, mentioned);
+    expect((fakeGithub.pulls[`acme/app#${m}`] as { body: string }).body).toBe("Someone else's.");
+    // An old one is not credited either.
+    const o = number + 3;
+    const old = `https://github.com/acme/app/pull/${o}`;
+    fakeGithub.pulls[`acme/app#${o}`] = pull({ number: o, html_url: old, body: "Old.", created_at: "2020-01-01T00:00:00Z" });
+    await trackPullRequest(env, project.id, thread.id, old, credit);
+    expect((fakeGithub.pulls[`acme/app#${o}`] as { body: string }).body).toBe("Old.");
   });
 
   it("ignores events about pull requests no thread opened", async () => {

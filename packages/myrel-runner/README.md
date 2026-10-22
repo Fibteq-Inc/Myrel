@@ -83,8 +83,10 @@ computer too; the CLI gets them with `--add-dir` (Claude Code, Codex) or `--incl
 
 When Claude Code runs as a thread's agent, its permission prompts go to Myrel (`--permission-prompt-tool
 mcp__myrel__approve_access`). If a step reaches a file outside the project's folders, Myrel asks you in the thread
-(Allow once, Add to project, Don't allow) and the step waits for your answer. A prompt about something inside the
-folders is about the access level above and is declined as before. With `full`, Claude Code then runs with
+(Allow once, Add to project, Don't allow) and the step waits for your answer. A command or web request the access
+level does not allow on its own (with `edit`: `git commit`, `git push`, tests) is asked about the same way (Run it,
+Allow commands this turn, Don't run), so there is no need to restart the runner with `--access full` for one task. A
+file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
 are asked about. Codex and Gemini CLI cannot ask mid-run, so they stay inside the folders.
 
