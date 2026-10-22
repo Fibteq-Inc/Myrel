@@ -24,6 +24,8 @@ jobs:
     outputs:
       desktop-released: ${{ steps.release.outputs['apps/desktop--release_created'] }}
       desktop-tag: ${{ steps.release.outputs['apps/desktop--tag_name'] }}
+      mobile-released: ${{ steps.release.outputs['apps/mobile--release_created'] }}
+      mobile-tag: ${{ steps.release.outputs['apps/mobile--tag_name'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release

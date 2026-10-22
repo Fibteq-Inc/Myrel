@@ -10,8 +10,27 @@
       "package-name": "desktop",
       "bump-minor-pre-major": true,
       "extra-files": [
-        { "type": "json", "path": "package.json", "jsonpath": "$.version" },
-        { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" }
+        {
+          "type": "json",
+          "path": "package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "toml",
+          "path": "src-tauri/Cargo.toml",
+          "jsonpath": "$.package.version"
+        }
+      ]
+    },
+    "apps/mobile": {
+      "release-type": "node",
+      "component": "mobile",
+      "package-name": "@myrel/mobile",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "app.config.ts"
+        }
       ]
     }
   }
