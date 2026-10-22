@@ -1,7 +1,8 @@
 name: Desktop
 
 # Builds the Tauri app for macOS, Windows and Linux.
-# Pull requests touching the desktop app or runner: unsigned builds, uploaded as workflow artifacts for testing.
+# Builds only run from main: a `desktop-v*` tag on a main commit, or a manual run on main. Pull requests
+# don't build the app; CI's typecheck and build already cover the desktop and runner TypeScript.
 # Tags `desktop-v*`: signed builds (when the secrets below exist) attached to a draft GitHub release,
 # plus `latest.json` for the in-app updater.
 #
@@ -16,13 +17,6 @@ name: Desktop
 #   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
 
 on:
-  # Only changes to the desktop shell or its bundled runner. Web changes are already checked by CI and
-  # reach the app on the next release, so they don't pay for three native builds on every PR.
-  pull_request:
-    paths:
-      - apps/desktop/**
-      - packages/myrel-runner/**
-      - .github/workflows/desktop.yml
   push:
     tags: ["desktop-v*"]
   workflow_dispatch:
@@ -35,7 +29,23 @@ permissions:
   contents: write
 
 jobs:
+  # Stops tags on commits that aren't on main, and manual runs started from another branch.
+  from-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check the commit is on main
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::Desktop builds only run from main; $GITHUB_REF is not on main."
+            exit 1
+          }
+
   build:
+    needs: from-main
     strategy:
       fail-fast: false
       matrix:
@@ -49,10 +59,9 @@ jobs:
           - os: ubuntu-22.04
             args: ""
             rust-targets: ""
-    # While the repository is private, releases and manual runs build macOS on the org's self-hosted Mac,
-    # because GitHub's hosted macOS runners often never pick up the job there. Pull requests, and every run
-    # once the repository is public, use hosted runners so outside code never runs on that Mac.
-    runs-on: ${{ matrix.os == 'macos-latest' && github.event_name != 'pull_request' && github.event.repository.private && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
+    # While the repository is private, macOS builds on the org's self-hosted Mac, because GitHub's hosted
+    # macOS runners often never pick up the job there. Once the repository is public it uses hosted runners.
+    runs-on: ${{ matrix.os == 'macos-latest' && github.event.repository.private && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -77,9 +86,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Pull requests build unsigned: the signing and notarization secrets only reach tag and manual runs.
       - name: Use signing secrets when present
-        if: github.event_name != 'pull_request'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
