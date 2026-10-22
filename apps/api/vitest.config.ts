@@ -36,6 +36,9 @@ export default defineConfig(async () => {
             BETTER_AUTH_SECRET: "test-secret-at-least-32-characters-long",
             // Model calls are answered by test/fake-llm.ts.
             FIREWORKS_API_KEY: "test-fireworks-key",
+            // The provider's default model, whatever the deployment pins in wrangler.jsonc.
+            LLM_MODEL: "",
+            RUNNER_MODEL: "",
             SIGNUP_ENABLED: "true",
             // GitHub calls are answered by test/fake-github.ts.
             GITHUB_APP_ID: "1234",

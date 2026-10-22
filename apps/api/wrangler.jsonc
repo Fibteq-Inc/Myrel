@@ -109,7 +109,7 @@
   // anthropic and openai calls then go through it (AI_GATEWAY_TOKEN secret for an authenticated gateway).
   // LLM_BASE_URL: optional full override of the provider's API base URL.
   // LLM_PRICES: optional JSON of model prices in US dollars per million tokens, used for the
-  // usage dashboard's cost estimates, e.g. {"firerouter/opus": {"input": 4, "output": 20, "cachedInput": 0.4}}.
+  // usage dashboard's cost estimates, e.g. {"kimi-k3": {"input": 3, "output": 15, "cachedInput": 0.3}}.
   // Built-in prices cover Claude models; a model with no price is metered with no cost.
   //
   // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a
@@ -144,7 +144,9 @@
     "INSTANCE_NAME": "Myrel",
     "SIGNUP_ENABLED": "false",
     "LLM_PROVIDER": "fireworks",
-    "LLM_MODEL": "",
+    // Fibteq's deployment: the coordinator and in-app agents on DeepSeek V4.1 Flash, the sandbox
+    // harness on Fireworks' auto (open models only; no Anthropic Provider Key on the account).
+    "LLM_MODEL": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
@@ -152,7 +154,7 @@
 
     "GITHUB_APP_ID": "5386818",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
-    "RUNNER_MODEL": "",
+    "RUNNER_MODEL": "auto",
     "RUNNER_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
     // Where the connector catalog is copied from; empty means the official MCP Registry.

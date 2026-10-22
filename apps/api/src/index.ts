@@ -28,7 +28,7 @@ import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
-import { modelCallAllowed, proxyModel } from "./llm";
+import { DEFAULT_PRICES, modelCallAllowed, parsePrices, proxyModel } from "./llm";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -107,7 +107,7 @@ const app = new Hono<AppEnv>()
     const url = `${model.model.baseUrl.replace(/\/+$/, "")}/${rest}`;
     return proxyModel(
       c.req.raw,
-      { url, apiKey: model.apiKey, kind: model.model.kind, model: model.model.id },
+      { url, apiKey: model.apiKey, kind: model.model.kind, model: model.model.id, prices: { ...DEFAULT_PRICES, ...parsePrices(c.env.LLM_PRICES) } },
       (usd) => thread.modelCost(caller.taskId, usd),
       (p) => c.executionCtx.waitUntil(p),
     );

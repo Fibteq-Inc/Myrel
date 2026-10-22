@@ -1,4 +1,5 @@
 import { reportedCost } from "./openai";
+import { costMicros, type Price, priceFor } from "./pricing";
 
 /** Response headers worth passing back to the harness; the rest describe the provider's own plumbing. */
 const PASSED_HEADERS = ["content-type", "cache-control", "retry-after", "x-request-id"];
@@ -24,13 +25,14 @@ const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-
 /**
  * Forwards one model call from a sandboxed harness to the real provider, adding the key there so
  * it never enters the sandbox: a bearer token for an OpenAI-compatible API, x-api-key for
- * Anthropic's. For an OpenAI-compatible call it also reports what the call cost when the provider
- * says so: usage.cost in the last chunk of a stream, or the JSON's usage / a cost header.
- * OpenCode prices Anthropic calls itself, so those report nothing here.
+ * Anthropic's. For an OpenAI-compatible call it also reports what the call cost: the provider's
+ * own figure when it sends one (usage.cost in the last chunk of a stream, or the JSON's usage / a
+ * cost header), else the usage priced by the model the response names, as a router such as
+ * Fireworks' auto picks one per call. OpenCode prices Anthropic calls itself, so those report nothing here.
  */
 export async function proxyModel(
   req: Request,
-  target: { url: string; apiKey: string; kind: "openai" | "anthropic"; model?: string },
+  target: { url: string; apiKey: string; kind: "openai" | "anthropic"; model?: string; prices?: Record<string, Price> },
   onCost: (usd: number) => Promise<void>,
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
@@ -59,11 +61,11 @@ export async function proxyModel(
   if (!upstream.body || !upstream.ok || target.kind === "anthropic") return new Response(upstream.body, { status: upstream.status, headers: out });
   if (!(upstream.headers.get("content-type") ?? "").includes("text/event-stream")) {
     const text = await upstream.text();
-    let usage: Record<string, unknown> | undefined;
+    let parsed: { usage?: Record<string, unknown>; model?: unknown } = {};
     try {
-      usage = (JSON.parse(text) as { usage?: Record<string, unknown> }).usage;
+      parsed = JSON.parse(text) as typeof parsed;
     } catch {}
-    report(reportedCost(usage, upstream.headers).costUsd);
+    report(reportedCost(parsed.usage, upstream.headers).costUsd ?? estimatedCost(parsed.usage, parsed.model, target.prices));
     return new Response(text, { status: upstream.status, headers: out });
   }
 
@@ -75,7 +77,7 @@ export async function proxyModel(
         controller.enqueue(chunk);
       },
       flush() {
-        report(scan.cost() ?? reportedCost(undefined, upstream.headers).costUsd);
+        report(scan.cost() ?? reportedCost(undefined, upstream.headers).costUsd ?? estimatedCost(scan.usage(), scan.model(), target.prices));
       },
     }),
   );
@@ -101,16 +103,38 @@ function withStreamUsage(body: string): string {
   }
 }
 
-/** Watches an SSE stream's data lines for the usage object a provider sends with the last chunk. */
+/** An OpenAI-compatible usage object priced at the list price of the model that served the call. */
+function estimatedCost(usage: Record<string, unknown> | undefined, model: unknown, prices: Record<string, Price> | undefined): number | undefined {
+  if (!usage || typeof model !== "string" || !prices) return undefined;
+  const price = priceFor(model, prices);
+  if (!price) return undefined;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const details = usage.prompt_tokens_details as { cached_tokens?: unknown } | undefined;
+  const micros = costMicros(
+    { inputTokens: n(usage.prompt_tokens), outputTokens: n(usage.completion_tokens), cachedInputTokens: n(details?.cached_tokens) },
+    price,
+  );
+  return micros / 1_000_000;
+}
+
+/**
+ * Watches an SSE stream's data lines for the usage object a provider sends with the last chunk,
+ * and the model the chunks name.
+ */
 export function streamCostScanner() {
   const decoder = new TextDecoder();
   let rest = "";
   let found: number | undefined;
+  let lastUsage: Record<string, unknown> | undefined;
+  let served: string | undefined;
   const line = (l: string) => {
-    if (!l.startsWith("data:") || !l.includes('"usage"')) return;
+    if (!l.startsWith("data:") || (!l.includes('"usage"') && served)) return;
     try {
-      const usage = (JSON.parse(l.slice(5)) as { usage?: Record<string, unknown> }).usage;
-      const cost = reportedCost(usage ?? undefined).costUsd;
+      const chunk = JSON.parse(l.slice(5)) as { usage?: Record<string, unknown> | null; model?: unknown };
+      if (!served && typeof chunk.model === "string") served = chunk.model;
+      if (!chunk.usage) return;
+      lastUsage = chunk.usage;
+      const cost = reportedCost(chunk.usage).costUsd;
       if (cost !== undefined) found = cost;
     } catch {}
   };
@@ -125,5 +149,9 @@ export function streamCostScanner() {
       rest = "";
       return found;
     },
+    /** The last usage object seen; call after cost(). */
+    usage: () => lastUsage,
+    /** The model the stream named. */
+    model: () => served,
   };
 }

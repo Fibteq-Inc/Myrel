@@ -58,7 +58,7 @@ describe("createProvider", () => {
     expect(f.calls[0]!.url).toBe("https://api.fireworks.ai/inference/v1/chat/completions");
     expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fw");
     const body = f.body();
-    expect(body.model).toBe("firerouter/opus");
+    expect(body.model).toBe("auto");
     expect(body.messages.map((m: { role: string }) => m.role)).toEqual(["system", "user", "assistant", "tool"]);
     expect(body.messages[2].tool_calls[0].function).toEqual({ name: "reply", arguments: '{"text":"x"}' });
     expect(body.tools[0].function.name).toBe("reply");
@@ -199,7 +199,7 @@ describe("pricing", () => {
     expect(priceFor("claude-opus-5-5", prices)).toEqual(DEFAULT_PRICES["claude-opus-5-5"]);
     expect(priceFor("accounts/fireworks/models/kimi-k2p6", prices)).toEqual({ input: 0.6, output: 2.5 });
     expect(priceFor("claude-sonnet-5-5-20261001", prices)).toEqual(DEFAULT_PRICES["claude-sonnet-5-5"]);
-    expect(priceFor("firerouter/opus", prices)).toBeNull();
+    expect(priceFor("auto", prices)).toBeNull();
   });
 
   it("charges cached input at the cache rate, in micro-dollars", () => {
@@ -242,8 +242,18 @@ describe("callCostMicros", () => {
     const { callCostMicros } = await import("../src/usage");
     const call = { provider: "fireworks", model: "firerouter/opus", servedModel: "glm-5p3", usage: { inputTokens: 1000, outputTokens: 100 }, latencyMs: 1 };
     expect(callCostMicros({ ...call, costUsd: 0.0123 }, DEFAULT_PRICES)).toBe(12_300);
-    expect(callCostMicros(call, DEFAULT_PRICES)).toBeNull();
+    expect(callCostMicros({ ...call, servedModel: "unlisted-model" }, DEFAULT_PRICES)).toBeNull();
     expect(callCostMicros(call, { "glm-5p3": { input: 1, output: 2 } })).toBe(1200);
+  });
+
+  it("prices an auto call by the open model that served it", async () => {
+    const { callCostMicros } = await import("../src/usage");
+    const call = { provider: "fireworks", model: "auto", servedModel: "glm-5p3-flash", usage: { inputTokens: 11_400, outputTokens: 644 }, latencyMs: 1 };
+    // 11,400 input at $0.15/M + 644 output at $0.50/M
+    expect(callCostMicros(call, DEFAULT_PRICES)).toBe(2032);
+    expect(priceFor("glm-5p3-flash", DEFAULT_PRICES)).toEqual(DEFAULT_PRICES["glm-5p3-flash"]);
+    // A dated snapshot takes its family's price.
+    expect(priceFor("accounts/fireworks/models/deepseek-v4p1-flash-1017", DEFAULT_PRICES)).toEqual(DEFAULT_PRICES["deepseek-v4p1-flash"]);
   });
 });
 
@@ -296,6 +306,8 @@ describe("readsImages", () => {
     expect(readsImages("openai", "accounts/fireworks/models/kimi-k2p6")).toBe(true);
     expect(readsImages("openai", "accounts/fireworks/models/glm-5p3")).toBe(false);
     expect(readsImages("openai", "firerouter/opus")).toBe(false);
+    expect(readsImages("openai", "auto")).toBe(false);
+    expect(readsImages("openai", "accounts/fireworks/models/deepseek-v4p1-flash-1017")).toBe(true);
   });
 
   it("lets RUNNER_IMAGES decide for the harness's model", () => {

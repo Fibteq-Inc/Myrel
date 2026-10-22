@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { modelCallAllowed, proxyModel, streamCostScanner } from "../src/llm";
+import { modelCallAllowed, type Price, proxyModel, streamCostScanner } from "../src/llm";
 
 afterEach(() => vi.unstubAllGlobals());
 
 const enc = new TextEncoder();
 
-function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "openai") {
+function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "openai", prices?: Record<string, Price>) {
   const seen: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     seen.push({ url, init });
@@ -18,7 +18,7 @@ function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "o
     headers: { authorization: "Bearer turn-token", "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const res = proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "real-key", kind }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
+  const res = proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "real-key", kind, prices }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
   return { res, seen, costs, settle: () => Promise.all(waits) };
 }
 
@@ -93,6 +93,29 @@ describe("proxyModel", () => {
     expect(headers.get("authorization")).toBeNull();
     expect(JSON.parse(seen[0]!.init.body as string)).toEqual({ model: "claude", stream: true });
     expect(costs).toEqual([]);
+  });
+
+  it("prices a JSON call by the model its response names when the provider sends no cost", async () => {
+    const prices = { "glm-5p3-flash": { input: 0.15, output: 0.5, cachedInput: 0.03 } };
+    const upstream = Response.json({ model: "glm-5p3-flash", usage: { prompt_tokens: 11_400, completion_tokens: 644 } });
+    const { res, costs, settle } = run(upstream, { model: "auto", messages: [] }, "openai", prices);
+    await res;
+    await settle();
+    // 11,400 input at $0.15/M + 644 output at $0.50/M
+    expect(costs).toEqual([0.002032]);
+  });
+
+  it("prices a stream by the model its chunks name and its usage chunk", async () => {
+    const prices = { "kimi-k3": { input: 3, output: 15, cachedInput: 0.3 } };
+    const sse =
+      'data: {"model":"kimi-k3","choices":[{"delta":{"content":"hi"}}]}\n\n' +
+      'data: {"model":"kimi-k3","choices":[],"usage":{"prompt_tokens":2000,"completion_tokens":100,"prompt_tokens_details":{"cached_tokens":1000}}}\n\ndata: [DONE]\n\n';
+    const upstream = new Response(sse, { headers: { "content-type": "text/event-stream" } });
+    const { res, costs, settle } = run(upstream, { model: "auto", stream: true, messages: [] }, "openai", prices);
+    await (await res).text();
+    await settle();
+    // 1,000 uncached at $3/M + 1,000 cached at $0.30/M + 100 output at $15/M
+    expect(costs).toEqual([0.0048]);
   });
 
   it("reports nothing when the provider sends no cost", async () => {
