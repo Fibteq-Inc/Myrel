@@ -686,6 +686,8 @@ export const en = {
   "tasks.terminalOutput": "Terminal output",
   "tasks.totalTime": "Total time",
   "tasks.stepTime": "How long this step took",
+  "tasks.showMore": "Show more",
+  "tasks.showLess": "Show less",
   "tasks.quiet": "No new output for {time}. If it looks stuck, stop it and send your message again.",
   "tasks.waiting": "Waiting for output…",
   "tasks.running": "Running",

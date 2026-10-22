@@ -15,7 +15,7 @@ import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.10.1";
+export const RUNNER_VERSION = "0.11.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -54,6 +54,9 @@ export async function checkPairing(config: Pick<RunnerConfig, "server" | "token"
 
 const UNPAIRED =
   "This computer is not paired with Myrel any more (it was removed, or paired again elsewhere). Get a new code in Myrel > Devices and run `myrel-runner pair <code> --server <url>`.";
+
+/** How long a task's result is sent again after each reconnect. */
+const RESEND_RESULTS_MS = 15 * 60 * 1000;
 
 export type RunnerHandle = { stop(): void; done: Promise<void> };
 
@@ -105,12 +108,22 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   let finish!: () => void;
   const done = new Promise<void>((r) => (finish = r));
 
-  // Results of tasks that finished while offline, sent first thing after reconnecting.
-  const pending: RunnerToServer[] = [];
+  // Results of recent tasks, sent again first thing after reconnecting: a result sent just as the
+  // connection dropped (a new version of Myrel being deployed) may never have arrived. The server
+  // ignores results of tasks it already finished.
+  const results = new Map<string, { frame: RunnerToServer; at: number }>();
   const send = (frame: RunnerToServer) => {
-    if (frame.type === "task.done") status({ state: "task", taskId: frame.taskId, event: "done", ok: frame.ok });
+    if (frame.type === "task.done") {
+      status({ state: "task", taskId: frame.taskId, event: "done", ok: frame.ok });
+      results.set(frame.taskId, { frame, at: Date.now() });
+    }
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
-    else if (frame.type === "task.done") pending.push(frame);
+  };
+  const resendResults = () => {
+    for (const [taskId, { frame, at }] of results) {
+      if (Date.now() - at > RESEND_RESULTS_MS) results.delete(taskId);
+      else send(frame);
+    }
   };
   const hello = () =>
     send({
@@ -183,7 +196,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       opened = true;
       attempt = 0;
       // Before hello: the server fails any task that hello does not list as running.
-      for (const frame of pending.splice(0)) send(frame);
+      resendResults();
       hello();
     };
     ws.onmessage = (e) => {
