@@ -47,10 +47,16 @@ Regenerate icons from `icon.svg` with `pnpm --filter @myrel/desktop icons`.
 ## Release
 
 Releases go through a Release PR ([release-please](https://github.com/googleapis/release-please), config in
-`release-please-config.json`). Every `feat:` or `fix:` commit on main that touches `apps/desktop` updates an
-open "chore(main): release desktop x.y.z" PR with the next version (in `package.json` and
-`src-tauri/Cargo.toml`) and `CHANGELOG.md`. Merging that PR tags `desktop-vx.y.z`, creates the GitHub release
-and starts `.github/workflows/desktop.yml`, which attaches the signed installers and `latest.json`.
+`release-please-config.json`). Every `feat:` or `fix:` commit on main that changes what ships in the app
+(anything outside `apps/api`, `apps/artifacts`, `apps/mobile`, `docs`, `ee`, `scripts` and `.github`, so the
+web UI and the runner count) updates an open "chore(main): release desktop x.y.z" PR with the next version (in
+`package.json` and `src-tauri/Cargo.toml`) and `CHANGELOG.md`. Merging that PR tags `desktop-vx.y.z`, creates
+the GitHub release and starts `.github/workflows/desktop.yml`, which attaches the signed installers and
+`latest.json`. The release notes then list every pull request since the previous desktop tag that changed
+the app (`scripts/release-notes.sh`), whatever its title.
+
+If one platform fails, fix the cause on main and rebuild the release with a manual run (Actions → Desktop →
+Run workflow on main, with the tag): it builds the tagged commit and replaces the release's installers.
 
 The app only builds from main: through the Release PR, a `desktop-v*` tag pushed by hand on a main commit, or
 a manual run (Actions → Desktop → Run workflow) on main, which uploads the installers as workflow artifacts.

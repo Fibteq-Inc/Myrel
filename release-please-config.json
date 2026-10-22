@@ -4,7 +4,7 @@
   "tag-separator": "-",
   "separate-pull-requests": true,
   "packages": {
-    "apps/desktop": {
+    ".": {
       "release-type": "simple",
       "component": "desktop",
       "package-name": "desktop",
@@ -12,14 +12,25 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "package.json",
+          "path": "apps/desktop/package.json",
           "jsonpath": "$.version"
         },
         {
           "type": "toml",
-          "path": "src-tauri/Cargo.toml",
+          "path": "apps/desktop/src-tauri/Cargo.toml",
           "jsonpath": "$.package.version"
         }
+      ],
+      "changelog-path": "apps/desktop/CHANGELOG.md",
+      "version-file": "apps/desktop/version.txt",
+      "exclude-paths": [
+        "apps/api",
+        "apps/artifacts",
+        "apps/mobile",
+        "docs",
+        "ee",
+        "scripts",
+        ".github"
       ]
     },
     "apps/mobile": {

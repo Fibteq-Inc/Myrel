@@ -5,7 +5,10 @@ name: Desktop
 # the desktop and runner TypeScript.
 # Releases: merging the desktop Release PR (release-please.yml) tags `desktop-v*`, creates the GitHub
 # release and calls this workflow with that tag. A `desktop-v*` tag pushed by hand works the same way.
-# Manual runs on main upload unsigned-for-release installers as workflow artifacts.
+# Manual runs on main upload unsigned-for-release installers as workflow artifacts. A manual run with a tag
+# rebuilds that release from its tag (e.g. when one platform failed) and replaces its installers.
+# Release notes list the pull requests since the previous desktop tag that changed the app
+# (apps/desktop/scripts/release-notes.sh).
 # Release builds: signed builds (when the secrets below exist) attached to a draft GitHub release,
 # plus `latest.json` for the in-app updater.
 #
@@ -13,8 +16,9 @@ name: Desktop
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY  macOS code signing
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID                                macOS notarization
 #   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD          updater signatures
-# APPLE_SIGNING_IDENTITY may be the certificate's SHA-1 fingerprint, which stays unambiguous on a Mac that
-# also has an older certificate with the same name.
+# With APPLE_CERTIFICATE set, APPLE_SIGNING_IDENTITY is not passed to the build: the bundler signs with the
+# imported certificate from its own temporary keychain, and it rejects an identity (such as a SHA-1
+# fingerprint) that isn't part of that certificate's name.
 # Optional variables:
 #   TAURI_UPDATER_PUBKEY   public half of TAURI_SIGNING_PRIVATE_KEY
 #   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
@@ -23,6 +27,11 @@ on:
   push:
     tags: ["desktop-v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Rebuild an existing release, e.g. desktop-v0.2.0 (leave empty for a test build of main)
+        type: string
+        required: false
   workflow_call:
     inputs:
       tag:
@@ -47,11 +56,19 @@ jobs:
           fetch-depth: 0
       - name: Check the commit is on main
         shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "::error::Desktop builds only run from main; $GITHUB_REF is not on main."
             exit 1
           }
+          if [ -n "$TAG" ]; then
+            git merge-base --is-ancestor "refs/tags/$TAG" origin/main || {
+              echo "::error::$TAG is not a tag on main."
+              exit 1
+            }
+          fi
 
   build:
     needs: from-main
@@ -76,6 +93,9 @@ jobs:
     runs-on: ${{ matrix.os == 'macos-latest' && github.event.repository.private && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # A release builds the tagged commit, also when a manual run on main rebuilds it.
+          ref: ${{ env.RELEASE_TAG || github.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -111,6 +131,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
         run: |
+          # The bundler signs with the imported certificate and rejects an identity that isn't in its name.
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            APPLE_SIGNING_IDENTITY=""
+          fi
           # Empty variables would make the bundler try (and fail) to sign, so only export the ones that are set.
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -n "${!name}" ]; then
@@ -152,3 +176,24 @@ jobs:
             apps/desktop/src-tauri/target/*/release/bundle/
           if-no-files-found: error
           retention-days: 14
+
+  # Replaces the release body with the pull requests that changed the app since the previous desktop tag.
+  # release-please's changelog only sees Conventional Commits under its paths, which misses most of them.
+  notes:
+    needs: build
+    if: ${{ !cancelled() && (inputs.tag || startsWith(github.ref, 'refs/tags/desktop-v')) }}
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Write release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          apps/desktop/scripts/release-notes.sh "$RELEASE_TAG" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
