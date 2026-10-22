@@ -71,6 +71,7 @@ export const tr: Catalog = {
   "rail.devices": "Cihazlar",
   "rail.settings": "Ayarlar",
   "rail.account": "Hesap",
+  "rail.docs": "Yardım ve dokümanlar",
   "rail.signOut": "Çıkış yap",
 
   // Projects page

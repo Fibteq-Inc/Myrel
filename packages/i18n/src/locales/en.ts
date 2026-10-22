@@ -75,6 +75,7 @@ export const en = {
   "rail.devices": "Devices",
   "rail.settings": "Settings",
   "rail.account": "Account",
+  "rail.docs": "Help and docs",
   "rail.signOut": "Sign out",
 
   // Projects page

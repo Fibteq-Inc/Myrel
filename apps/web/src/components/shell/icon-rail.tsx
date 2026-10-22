@@ -2,12 +2,15 @@ import type { SessionUser } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, type MessageKey } from "@myrel/i18n";
 import { useI18n } from "@myrel/i18n/react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { BarChart3, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
-import { canChooseServer, server } from "../../lib/api";
+import { BarChart3, BookOpen, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
+import { canChooseServer, platform, server } from "../../lib/api";
 import { MyrelMark, cn, UserAvatar } from "../../lib/ui";
 import { NotificationBell } from "../notifications";
 import { viewSearch } from "../project-view";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
+
+/** The user guide (apps/docs). */
+const DOCS_URL = "https://docs.myrel.fibteq.io";
 
 type RailItem = {
   label: MessageKey;
@@ -143,6 +146,16 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
                 </MenuItem>
               ))}
               <MenuSeparator />
+              <MenuItem
+                icon={<BookOpen size={15} />}
+                onSelect={() => {
+                  close();
+                  if (platform.name === "web") window.open(DOCS_URL, "_blank", "noopener");
+                  else void platform.openExternal(DOCS_URL);
+                }}
+              >
+                {t("rail.docs")}
+              </MenuItem>
               <MenuItem
                 icon={<LogOut size={15} />}
                 onSelect={() => {
