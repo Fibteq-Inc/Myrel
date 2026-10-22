@@ -8,6 +8,7 @@ import { ArtifactCards } from "./artifact-card";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
+import { RelayNote } from "./relay-note";
 import { MyrelMark, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
@@ -63,6 +64,7 @@ export function MessageView({
           ) : (
             !!message.body && <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />
           )}
+          {message.relay && <RelayNote relay={message.relay} onLink={onLink} />}
           <Attachments attachments={message.attachments} />
           {!!message.artifacts?.length && (
             <ArtifactCards refs={message.artifacts} artifacts={artifacts} onOpen={onOpenArtifact} />

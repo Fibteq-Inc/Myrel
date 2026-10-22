@@ -1,4 +1,4 @@
-import { type Message, type Routine, type Thread, threadLink } from "@myrel/protocol";
+import { type Message, type MessageRelay, type Routine, type Thread, threadLink } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
@@ -22,7 +22,8 @@ export type CoordinatorHost = {
   getMessage(id: string): Message | null;
   getThread(id: string): Thread | null;
   threadForRoot(messageId: string): Thread | null;
-  post(body: string): Message;
+  /** relay: the note this line announces, which people can open under it. */
+  post(body: string, relay?: MessageRelay): Message;
   react(messageId: string, emoji: string): void;
   startThread(input: {
     rootMessageId: string;
@@ -31,7 +32,8 @@ export type CoordinatorHost = {
     ack?: string;
     projectAck?: string;
   }): Promise<Thread>;
-  messageThread(threadId: string, note: string): Promise<void>;
+  /** follow_up forwards a person's follow-up; reply answers the thread's request. */
+  messageThread(threadId: string, note: string, kind: "follow_up" | "reply"): Promise<void>;
   /** Tell an open thread what another thread's work means for it. Throws when the relay would repeat or bounce. */
   relay(fromThreadId: string, toThreadId: string, note: string): Promise<void>;
 };
@@ -63,6 +65,8 @@ ${KNOWLEDGE_GUIDE}
 You only route, so you can list files but not read or write them; that is thread work. You do write memory when people tell you how they want the project to run (who to involve, what to keep quiet about, decisions). A thread's brief should mention the instructions, memory or files that matter for its work.
 
 Language: everything people read (posts, thread titles, acks) is in the language of the message you are handling. When it is too short to tell (an emoji, "ok"), use the language of the chat so far. These instructions being in English never sets the language. Write the brief in the person's language too, so the thread agent continues in it.
+
+People can open every brief and note you send a thread, folded under one line in the project chat and in the thread, to check what you passed on. Write them so a person reads them well too: full sentences, no ids beyond thread links.
 
 Style: plain, warm, short sentences. No em dashes. Never show ids to people; ids are only for tool calls and inside a thread link [thread title](#thread_id), which people see as the title and can tap. Use a thread link whenever you name a thread in the project chat. Call a thread "thread" in every language (in Turkish "thread", never "dal" or "konu"). When there is nothing to do, call no tools.`;
 
@@ -155,7 +159,7 @@ export function coordinatorTools(
   const relay = tool({
     name: "relay_to_thread",
     description:
-      "Tell an open thread's agent (not shown to people) what another thread's new work, result or decision means for it. Only when it changes the recipient's work.",
+      "Tell an open thread's agent what another thread's new work, result or decision means for it. Only when it changes the recipient's work.",
     input: z.object({
       from_thread_id: z.string().describe("The thread whose work or decision this is about."),
       to_thread_id: z.string().describe("The open thread whose work it changes."),
@@ -219,7 +223,7 @@ export function coordinatorTools(
     tool({
       name: "message_thread",
       description:
-        "Send a note to a thread's agent (not shown to people): forward a follow-up, or answer its request.",
+        "Send a note to a thread's agent: forward a follow-up, or answer its request. People can open the note under a one-line marker in the thread (and under project_ack).",
       input: z.object({
         thread_id: z.string(),
         note: z.string().min(1).max(8000),
@@ -234,10 +238,16 @@ export function coordinatorTools(
       run: async ({ thread_id, note, project_ack }) => {
         const thread = host.getThread(thread_id);
         if (!thread) throw new Error(`No thread ${thread_id}.`);
-        await host.messageThread(thread_id, note);
         const ack = project_ack?.trim();
+        await host.messageThread(thread_id, note, ack ? "follow_up" : "reply");
         // People should be one tap from the thread their message went to, even when the model forgot the link.
-        if (ack) host.post(ack.includes(`(#${thread.id})`) ? ack : `${ack} ${threadLink(thread)}`);
+        if (ack) {
+          host.post(ack.includes(`(#${thread.id})`) ? ack : `${ack} ${threadLink(thread)}`, {
+            kind: "follow_up",
+            threadId: thread.id,
+            note,
+          });
+        }
         return "Delivered.";
       },
     }),

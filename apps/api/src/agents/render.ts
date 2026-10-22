@@ -23,6 +23,8 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
           : "waiting for the person";
     return `${head}\n${indent(`(connector card offering ${names}: ${state})`)}`;
   }
+  // The note itself is in the prompt already (the brief, or the coordinator's notes).
+  if (m.relay) return `${head}\n${indent(`${m.body}\n(marker for a coordinator note people can open)`)}`;
   const files = (m.attachments ?? []).map((a) => `📎 attached: ${a.path} (${a.contentType}, ${a.size} bytes)`);
   return `${head}\n${indent([m.body, ...files].filter(Boolean).join("\n"))}`;
 }
