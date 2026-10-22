@@ -304,11 +304,14 @@ a container.
 
 - It needs [Cloudflare Containers](https://developers.cloudflare.com/containers/),
   which is on the Workers Paid plan.
-- `wrangler deploy` builds the sandbox image from `apps/api/sandbox/Dockerfile`
-  (git, gh, jq, ripgrep, Python with document libraries, tesseract, OpenCode) and
-  pushes it to Cloudflare's registry, so Docker must be running where you deploy.
-  Workers Builds has it. Later deploys push only the layers that changed, and
-  containers start from the image in seconds. To deploy the Worker without
+- The sandbox image is built from `apps/api/sandbox/Dockerfile` (git, gh, jq,
+  ripgrep, Python with document libraries, tesseract, OpenCode) and pinned by
+  digest in `apps/api/wrangler.jsonc`, so deploys need no Docker. The pinned
+  image is in Fibteq's registry: run `pnpm --filter @myrel/api sandbox:image`
+  once (Docker running, wrangler logged in to your account) to build, push and
+  pin your own, and again after changing the Dockerfile. Or set
+  `"base": { "dockerfile": "./sandbox/Dockerfile" }` to build it on every deploy.
+  Containers start from the image in seconds. To deploy the Worker without
   touching the image, add `--containers-rollout=none`.
 - The coding agent uses the project's model and key (the same ones the agents
   use). `RUNNER_MODEL` picks a different model for it.

@@ -32,8 +32,8 @@ const PRINCIPAL_KEY = "principal";
  * one task at a time with the shared task script from @myrel/runner-core and
  * streams the events back to the ThreadAgent through `taskEvents`.
  *
- * Containers start from the image `wrangler deploy` builds from
- * apps/api/sandbox/Dockerfile, with every tool already installed.
+ * Containers start from the image built from apps/api/sandbox/Dockerfile and
+ * pinned by digest in wrangler.jsonc, with every tool already installed.
  */
 export class Sandbox extends DurableObject<Env> {
   private current: { taskId: string; abort: AbortController } | null = null;
