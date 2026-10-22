@@ -1,4 +1,5 @@
 import type { Extensions, LimitCheck } from "../../../apps/api/src/extensions";
+import { DEFAULT_PRICES, parsePrices, priceFor } from "../../../apps/api/src/llm/pricing";
 import { userVerified } from "../../../apps/api/src/verification";
 import {
   activeSandboxes,
@@ -19,6 +20,18 @@ const UPGRADE = "Upgrade your plan in Settings > Plan and billing";
 const KEY_HINT = "add your own model key in the project's settings";
 /** The service pays for cloud turns and its model keys only on projects whose owner verified their address. */
 const UNVERIFIED_OWNER = "The project's owner needs to verify their email address first: open the link Myrel sent them, or send a new one from the banner.";
+
+/**
+ * Why a project on the service's key cannot use the model it picked: one with no price would be
+ * charged a flat fallback per call, far below what a large model really costs. Null when it can
+ * (the server's default model, priced by the model each answer names, or a priced one).
+ */
+async function unpricedModel(env: Env, projectId: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT llm_model AS model FROM projects WHERE id = ?").bind(projectId).first<{ model: string | null }>();
+  if (!row?.model) return null;
+  if (priceFor(row.model, { ...DEFAULT_PRICES, ...parsePrices(env.LLM_PRICES) })) return null;
+  return `The model ${row.model} has no known price, so it runs only on a model key of the project's own. Pick another model or ${KEY_HINT}.`;
+}
 
 /** The hosted service's plan limits, plugged into the core (see apps/api/src/extensions.ts). */
 export const billingExtensions: Extensions = {
@@ -64,6 +77,8 @@ export const billingExtensions: Extensions = {
     const standing = await standingOf(env, project.owner);
     if (standing.plan === "admin") return OK;
     if (!(await userVerified(env, project.owner))) return refuse(UNVERIFIED_OWNER);
+    const unpriced = project.ownKey ? null : await unpricedModel(env, projectId);
+    if (unpriced) return refuse(unpriced);
     const usage = await usageOf(env, standing, project.owner);
     // A running turn's use is not in the usage tables until it ends.
     const turnMicros = project.ownKey ? 0 : (running?.modelMicros ?? 0) + (running?.unpricedCalls ?? 0) * unpricedCallMicros(env);
@@ -102,6 +117,8 @@ export const billingExtensions: Extensions = {
     const standing = await standingOf(env, project.owner);
     if (standing.plan === "admin") return OK;
     if (!(await userVerified(env, project.owner))) return refuse(UNVERIFIED_OWNER);
+    const unpriced = await unpricedModel(env, projectId);
+    if (unpriced) return refuse(unpriced);
     const usage = await usageOf(env, standing, project.owner);
     const max = standing.limits.modelMicros;
     if (max !== null && usage.modelMicros >= max) {

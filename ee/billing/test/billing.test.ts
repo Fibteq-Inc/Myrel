@@ -210,6 +210,23 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canUseSandbox!(workerEnv, project.id)).toEqual({ ok: true });
   });
 
+  it("runs a model with no known price only on the project's own key", async () => {
+    const { token } = await signUp();
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    await env.DB.prepare("UPDATE projects SET llm_model = ? WHERE id = ?").bind("accounts/fireworks/models/some-huge-unpriced-model", project.id).run();
+    for (const check of [
+      await billingExtensions.canUseCoordinator!(workerEnv, project.id),
+      await billingExtensions.canUseSandbox!(workerEnv, project.id),
+    ]) {
+      expect(check.ok || check.reason).toContain("no known price");
+    }
+    // A priced model, or the server's default, is fine.
+    await env.DB.prepare("UPDATE projects SET llm_model = ? WHERE id = ?").bind("claude-opus-5-5", project.id).run();
+    expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
+    await env.DB.prepare("UPDATE projects SET llm_model = NULL WHERE id = ?").bind(project.id).run();
+    expect(await billingExtensions.canUseCoordinator!(workerEnv, project.id)).toEqual({ ok: true });
+  });
+
   it("limits how much a project's files take on Free", async () => {
     const { token } = await signUp();
     const project = ((await (await createProject(token)).json()) as { project: Project }).project;
