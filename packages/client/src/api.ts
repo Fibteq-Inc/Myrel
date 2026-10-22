@@ -161,6 +161,23 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Emails a link to set a new password (when the server's info says passwordReset). The link leads
+   * to `redirectTo` with `?token=`; `captchaToken` as for sign-up.
+   */
+  async requestPasswordReset({ captchaToken, ...input }: { email: string; redirectTo: string; captchaToken?: string }) {
+    await this.request("/api/auth/request-password-reset", {
+      method: "POST",
+      body: input,
+      ...(captchaToken && { headers: { "x-captcha-response": captchaToken } }),
+    });
+  }
+
+  /** Sets a new password with the token from the emailed link. Every session of the account ends. */
+  async resetPassword(input: { token: string; newPassword: string }) {
+    await this.request("/api/auth/reset-password", { method: "POST", body: input });
+  }
+
   signIn(input: { email: string; password: string }) {
     return this.request<{ user: SessionUser }>("/api/auth/sign-in/email", { method: "POST", body: input });
   }

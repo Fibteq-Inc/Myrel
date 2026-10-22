@@ -10,10 +10,11 @@ export function captchaConfig(env: Env): { provider: "turnstile"; siteKey: strin
 
 /**
  * Better Auth plugins that ask for a solved Turnstile challenge before an account is created, so a
- * script cannot open accounts by the thousand (each gets the Free plan's allowance). Sign-in stays as
+ * script cannot open accounts by the thousand (each gets the Free plan's allowance), and before a
+ * password reset email goes out, so the server cannot be used to flood someone's inbox. Sign-in stays as
  * it is: it creates nothing, and auth-limit.ts already slows down password guessing.
  */
 export function captchaPlugins(env: Env) {
   if (!captchaConfig(env)) return [];
-  return [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY!, endpoints: ["/sign-up/email"] })];
+  return [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY!, endpoints: ["/sign-up/email", "/request-password-reset"] })];
 }

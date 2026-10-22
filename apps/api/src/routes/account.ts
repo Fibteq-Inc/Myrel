@@ -2,6 +2,7 @@ import { createDb, schema } from "@myrel/db";
 import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo } from "@myrel/protocol";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
+import { createAuth, firstPasswordKey } from "../auth";
 import { encryptSecret, keyHint } from "../crypto";
 import { deleteAccount } from "../delete-account";
 import { toApiKey } from "../keys";
@@ -17,6 +18,16 @@ export const accountRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const { id, name, email, role } = c.get("user");
     return c.json({ user: { id, name, email, role } satisfies Me });
+  })
+  // Where a first email verification leads (see firstVerification in auth.ts): on to the page that
+  // sets a new password, with the link made for it. Anyone else goes home.
+  .get("/first-password", async (c) => {
+    const ctx = await createAuth(c.env).$context;
+    const key = firstPasswordKey(c.get("user").id);
+    const row = await ctx.internalAdapter.findVerificationValue(key);
+    if (!row || row.expiresAt < new Date()) return c.redirect("/");
+    await ctx.internalAdapter.deleteVerificationByIdentifier(key);
+    return c.redirect(`/reset-password?first=1&token=${encodeURIComponent(row.value)}`);
   })
   .delete("/", async (c) => {
     await deleteAccount(c.env, c.get("user").id);

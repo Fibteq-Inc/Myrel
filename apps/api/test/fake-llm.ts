@@ -46,7 +46,7 @@ export const verificationEmails: SentEmail[] = [];
 
 export function captureEmail(binding: SendEmail) {
   Object.getPrototypeOf(binding).send = async (message: SentEmail) => {
-    (String(message.subject).startsWith("Confirm your email") ? verificationEmails : emails).push(message);
+    (/^(Confirm your email|Set a new password)/.test(String(message.subject)) ? verificationEmails : emails).push(message);
     return { messageId: `test-${emails.length}` };
   };
 }

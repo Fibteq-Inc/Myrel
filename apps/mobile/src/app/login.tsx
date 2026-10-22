@@ -206,6 +206,12 @@ function SignInForm() {
           {mode === "signin" ? t("login.signIn") : t("login.signUp")}
         </Button>
       )}
+      {mode === "signin" && session.info?.auth.passwordReset && (
+        // The page that sets a new password is on the server's own site.
+        <Pressable onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?forgot`)} accessibilityRole="link">
+          <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.forgot")}</Text>
+        </Pressable>
+      )}
       {signUpAllowed ? (
         <Pressable onPress={() => setMode(mode === "signin" ? "signup" : "signin")} accessibilityRole="button">
           <Text style={[styles.hint, { textAlign: "center" }]}>

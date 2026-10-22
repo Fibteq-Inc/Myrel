@@ -58,6 +58,7 @@ const app = new Hono<AppEnv>()
         signUp: await signUpEnabled(c.env),
         emailVerification: verificationRequired(c.env),
         captcha: captchaConfig(c.env),
+        passwordReset: verificationRequired(c.env),
       },
       billing: sellsPlans(),
       legal: legalLinks(c.env, new URL(c.req.url).origin),
