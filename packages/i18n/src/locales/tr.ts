@@ -456,6 +456,8 @@ export const tr: Catalog = {
   "common.loading": "Yükleniyor",
 
   // Shell and chat additions
+  "composer.pastedFileName": "yapistirilan-metin-{time}.txt",
+  "composer.insertAsText": "Metin olarak ekle",
   "composer.attach": "Dosya ekle",
   "rail.projectFiles": "Proje dosyaları",
   "rail.filesNoProject": "Dosyalar (önce bir proje aç)",
