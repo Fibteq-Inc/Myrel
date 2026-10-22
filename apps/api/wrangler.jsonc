@@ -141,7 +141,9 @@
     "INSTANCE_NAME": "Myrel",
     "SIGNUP_ENABLED": "false",
     "LLM_PROVIDER": "fireworks",
-    "LLM_MODEL": "",
+    // Fibteq's deployment: the coordinator and in-app agents on GLM 5.3, the sandbox harness on
+    // Fireworks' auto (open models only; no Anthropic Provider Key on the account).
+    "LLM_MODEL": "accounts/fireworks/models/glm-5p3",
     "LLM_BASE_URL": "",
     "LLM_PRICES": "",
     "AI_GATEWAY_URL": "",
@@ -149,7 +151,7 @@
 
     "GITHUB_APP_ID": "5386818",
     "SANDBOX_INSTANCE_TYPE": "standard-1",
-    "RUNNER_MODEL": "",
+    "RUNNER_MODEL": "auto",
     "RUNNER_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
     // Where the connector catalog is copied from; empty means the official MCP Registry.
