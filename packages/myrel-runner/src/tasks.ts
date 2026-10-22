@@ -222,7 +222,7 @@ export class TaskRunner {
         const ok = code === 0 && !state.failed;
         const result =
           state.result ??
-          (ok ? stdout.trim() : `${adapter.bin} exited with ${signal ?? `code ${code}`}.\n${stderr.trim() || stdout.trim()}`);
+          (ok ? stdout.trim() : `${adapter.bin} exited with ${signal ?? `code ${code}`}.\n${state.error ?? (stderr.trim() || stdout.trim())}`);
         finish(ok, result || "(no output)");
       });
     });

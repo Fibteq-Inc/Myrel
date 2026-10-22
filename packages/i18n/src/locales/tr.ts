@@ -684,6 +684,8 @@ export const tr: Catalog = {
   "tasks.terminalOutput": "Terminal çıktısı",
   "tasks.totalTime": "Toplam süre",
   "tasks.stepTime": "Bu adımın süresi",
+  "tasks.showMore": "Devamını göster",
+  "tasks.showLess": "Daha az göster",
   "tasks.quiet": "{time} boyunca yeni çıktı yok. Takılmış görünüyorsa durdurup mesajını tekrar gönder.",
   "tasks.waiting": "Çıktı bekleniyor…",
   "tasks.running": "Çalışıyor",

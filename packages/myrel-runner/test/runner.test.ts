@@ -118,6 +118,31 @@ describe("CLI output parsing", () => {
     ADAPTERS.gemini.end!(JSON.stringify({ response: "Merhaba" }), gemini);
     expect(gemini.result).toBe("Merhaba");
   });
+
+  it("shows Codex's commands without their shell wrapper and its messages whole", () => {
+    const codex: ParseState = {};
+    const command = `/bin/zsh -lc "rg --files -g '"'!node_modules'"'"`;
+    ADAPTERS.codex.line(JSON.stringify({ type: "item.started", item: { type: "command_execution", command } }), codex);
+    expect(codex.progress).toBe("$ rg --files -g '!node_modules'");
+    const text = `${"Kayıt adımı bir SQL prosedürünü çağırıyor. ".repeat(10)}\nİkinci satır.`;
+    ADAPTERS.codex.line(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }), codex);
+    expect(codex.progress).toBe(text.trim());
+  });
+
+  it("fails a Codex run only when its turn fails, not on an error it recovered from", () => {
+    const recovered: ParseState = {};
+    ADAPTERS.codex.line(JSON.stringify({ type: "error", message: "Reconnecting... 1/5" }), recovered);
+    ADAPTERS.codex.line(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Bitti." } }), recovered);
+    ADAPTERS.codex.line(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }), recovered);
+    expect(recovered.failed).toBeFalsy();
+    expect(recovered.result).toBe("Bitti.");
+
+    const failed: ParseState = {};
+    ADAPTERS.codex.line(JSON.stringify({ type: "error", message: "stream disconnected" }), failed);
+    ADAPTERS.codex.line(JSON.stringify({ type: "turn.failed", error: { message: "stream disconnected" } }), failed);
+    expect(failed.failed).toBe(true);
+    expect(failed.result).toBe("stream disconnected");
+  });
 });
 
 describe("CLI usage", () => {
