@@ -37,7 +37,7 @@ import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import type { PullCredit } from "../github/attribution";
 import { listPullRequests, openPullRequest, trackPullRequest } from "../github/pulls";
-import { githubLogin, listProjectRepos } from "../github/store";
+import { connectRepoByName, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
@@ -70,6 +70,7 @@ import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, type Plan } from "./plan";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
+import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
 import type { TaskWithLog } from "./thread-tasks";
 import { type CoordinatorNote, type ReplyNeeds, type RoutineRun, threadPrompt, threadTools } from "./thread-worker";
@@ -240,6 +241,8 @@ export class ThreadAgent extends Agent<Env> {
   async wake(reason: ThreadWake): Promise<void> {
     // An answer to a folder card the running turn waits on goes to that turn, not to a new one.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
+    // A tap on the repository card connects it first, so the turn it starts has it.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     if (reason.kind === "coordinator") {
       this.sql`INSERT INTO notes (body, created_at) VALUES (${reason.note}, ${new Date().toISOString()})`;
     }
@@ -839,6 +842,54 @@ export class ThreadAgent extends Agent<Env> {
     return true;
   }
 
+  private repoRequest(): RepoRequest | null {
+    return JSON.parse(this.getMeta("repo_request") ?? "null") as RepoRequest | null;
+  }
+
+  /**
+   * A person answered the repository card. "Connect" connects it as them (owner or admin, with
+   * GitHub access to it): on success the turn their answer starts has it; otherwise a new card says
+   * what to do first and no turn starts. Returns true when the answer needs no turn.
+   */
+  private async answerRepoRequest(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const request = this.repoRequest();
+    const answer = request ? repoAnswer(reason.body ?? "") : null;
+    if (!request || !answer) return false;
+    if (answer === "skip" || !reason.authorId) {
+      this.deleteMeta("repo_request");
+      return false;
+    }
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const language = this.getMeta("language") ?? "en";
+    const result = await connectRepoByName(this.env, projectId, reason.authorId, request.repo);
+    if (result.ok) {
+      this.deleteMeta("repo_request");
+      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: repoConnectedMessage(result.repo.fullName, language) });
+      return false;
+    }
+    const origin = await project.publicOrigin();
+    const back = `/projects/${projectId}/threads/${threadId}`;
+    // Without a known address the links stay relative, which the web app still opens.
+    const links = {
+      connectUrl: `${origin ?? ""}/api/github/connect?returnTo=${encodeURIComponent(back)}`,
+      settingsUrl: `${origin ?? ""}/settings/projects/${projectId}`,
+    };
+    const body = repoFailureMessage(request.repo, result.reason, links, language);
+    if (result.reason === "not_configured") {
+      this.deleteMeta("repo_request");
+      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
+      return false;
+    }
+    // A fresh card to try again from once they did what it says; the agent has nothing to do yet.
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    this.setMeta("repo_request", JSON.stringify({ repo: request.repo, messageId: m.id } satisfies RepoRequest));
+    // Neither the answer nor the new card is news for the next turn, unless someone wrote in between.
+    const seen = Number(this.getMeta("last_seen_seq") ?? 0);
+    if (reason.seq === seen + 1 && m.seq === reason.seq + 1) this.setMeta("last_seen_seq", String(m.seq));
+    return true;
+  }
+
   /** Shares the folder on the project's computer and adds it to the project's folders. */
   private async addProjectFolder(projectId: string, folder: string): Promise<boolean> {
     const workspace = await getWorkspace(this.env, projectId);
@@ -1025,6 +1076,23 @@ export class ThreadAgent extends Agent<Env> {
           const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
           return `Following ${pr.repo}#${pr.number}: its state shows in the thread, and CI failures, reviews and the merge will wake you.`;
+        },
+        requestRepo: async (repo, reason) => {
+          if ((await listProjectRepos(this.env.DB, projectId)).some((r) => r.fullName.toLowerCase() === repo.toLowerCase())) {
+            return `${repo} is already connected to this project.`;
+          }
+          const open = this.repoRequest();
+          if (open) return `A card asking for ${open.repo} is already waiting for the person. End your turn.`;
+          const m = await project.sendMessage({
+            threadId,
+            authorKind: "agent",
+            authorId: THREAD_AGENT_ID,
+            body: repoRequestMessage(repo, reason, turn()?.language ?? "en"),
+          });
+          if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+          this.setMeta("repo_request", JSON.stringify({ repo, messageId: m.id } satisfies RepoRequest));
+          await project.updateThread(threadId, { status: "blocked" });
+          return `The card is in the thread. End your turn now: once ${repo} is connected you are woken with it connected, and carry on from there.`;
         },
         openPullRequest: async (input) => {
           const { pr, created } = await openPullRequest(this.env, projectId, threadId, input, await this.pullCredit());
