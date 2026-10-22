@@ -12,6 +12,21 @@ pnpm --filter @myrel/docs deploy    # build and upload to the myrel-docs Worker 
 
 Pages are Markdown in `src/content/docs/`; the sidebar is in `astro.config.mjs`.
 
+## Deploying with Workers Builds
+
+The `myrel-docs` Worker can deploy on every merge through Cloudflare Workers Builds:
+
+| Setting | Value |
+|---|---|
+| Root directory | `/` (the repository root, so pnpm installs the workspace) |
+| Build command | `pnpm --filter @myrel/docs build` |
+| Deploy command | `cd apps/docs && npx wrangler deploy --domain docs.myrel.fibteq.io` |
+| Non-production branch deploy command | `cd apps/docs && npx wrangler versions upload` |
+| Build watch paths | include `apps/docs/*` |
+
+Node comes from the root `.node-version`. The domain is passed on the command line rather than in
+`wrangler.jsonc`, so a self-hosted copy does not try to claim it.
+
 ## Screenshots
 
 The pictures in `src/assets/screenshots/` come from a local Myrel filled with made-up data, so they
