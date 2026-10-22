@@ -65,7 +65,8 @@ Read-only tasks (`--access read`) always run in the folder itself.
 
 ### What the CLI may do
 
-`myrel-runner start --access <level>` or `myrel-runner service install --access <level>` (saved for next time):
+`myrel-runner start --access <level>`, or for the background runner `myrel-runner service install --access <level>` or
+`myrel-runner update --access <level>` (both restart it). The level is saved for next time:
 
 | level | Claude Code | Codex | Gemini CLI |
 |---|---|---|---|
