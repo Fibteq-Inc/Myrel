@@ -56,6 +56,24 @@ export async function sendVerificationEmail(env: Env, to: string, url: string): 
   }
 }
 
+/** The link to set a new password, in English and Turkish. */
+export async function sendPasswordResetEmail(env: Env, to: string, url: string): Promise<void> {
+  const text = [
+    "Set a new password for your Myrel account:",
+    url,
+    "Myrel hesabınız için yeni şifre belirlemek üzere bu bağlantıyı açın.",
+    "The link works for an hour. If you did not ask for it, ignore this email: your password stays as it is.",
+  ].join("\n\n");
+  const href = esc(url);
+  const html = `<div style="font-family:system-ui,sans-serif;max-width:560px;color:#18181b">
+<h2 style="font-size:18px;margin:0 0 12px">Set a new password</h2>
+<p style="line-height:1.5">Open this link to set a new password for your Myrel account.<br>Myrel hesabınız için yeni şifre belirlemek üzere bu bağlantıyı açın.</p>
+<p><a href="${href}" style="display:inline-block;background:#5b6cff;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none">Set password · Şifre belirle</a></p>
+<p style="color:#71717a;font-size:13px">The link works for an hour. If you did not ask for it, ignore this email: your password stays as it is.</p>
+</div>`;
+  await sendEmail(env, { to, subject: "Set a new password for Myrel", text, html });
+}
+
 function esc(s: string) {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }

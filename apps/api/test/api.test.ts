@@ -29,6 +29,10 @@ async function signUp(email = `u${crypto.randomUUID()}@example.com`) {
   return token!;
 }
 
+function signIn(email: string, password: string) {
+  return api("/api/auth/sign-in/email", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
 async function createProject(token: string, name = "Demo"): Promise<Project> {
   const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name }) });
   expect(res.status).toBe(201);
@@ -329,8 +333,51 @@ describe("email verification", () => {
     const mail = verificationEmails.findLast((m) => m.to === email);
     expect(mail?.subject).toBe("Confirm your email for Myrel");
     const link = new URL(/https?:\/\/\S+verify-email\S+/.exec(mail!.text)![0]);
-    expect((await api(`${link.pathname}${link.search}`, { redirect: "manual" })).status).toBeLessThan(400);
-    expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token })).status).toBe(200);
+    const verified = await api(`${link.pathname}${link.search}`, { redirect: "manual" });
+    expect(verified.status).toBeLessThan(400);
+
+    // Whoever proved the address starts clean: sessions from before end, the sign-up password stops
+    // working, and the link goes on to setting a new password.
+    expect((await api("/api/account", { token })).status).toBe(401);
+    expect(verified.headers.get("location")).toBe("/api/account/first-password");
+    const session = verified.headers.get("set-auth-token")!;
+    const onward = await api("/api/account/first-password", { token: session, redirect: "manual" });
+    const reset = new URL(onward.headers.get("location")!, "http://myrel.test");
+    expect(reset.pathname).toBe("/reset-password");
+    expect((await signIn(email, "correct-horse-battery")).status).toBe(401);
+    const set = await api("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token: reset.searchParams.get("token"), newPassword: "a-brand-new-password" }),
+    });
+    expect(set.status).toBe(200);
+    const signedIn = await signIn(email, "a-brand-new-password");
+    expect(signedIn.status).toBe(200);
+    const fresh = signedIn.headers.get("set-auth-token")!;
+    expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: fresh })).status).toBe(200);
+    // The onward link is used up.
+    expect((await api("/api/account/first-password", { token: fresh, redirect: "manual" })).headers.get("location")).toBe("/");
+  });
+
+  it("sends a link to set a new password, which ends every session", async () => {
+    const email = `r${crypto.randomUUID()}@example.com`;
+    const token = await signUp(email);
+    const asked = await api("/api/auth/request-password-reset", {
+      method: "POST",
+      body: JSON.stringify({ email, redirectTo: "http://myrel.test/reset-password" }),
+    });
+    expect(asked.status).toBe(200);
+    const mail = verificationEmails.findLast((m) => m.to === email && m.subject === "Set a new password for Myrel");
+    const link = new URL(/https?:\/\/\S+reset-password\/\S+/.exec(mail!.text)![0]);
+    const landed = await api(`${link.pathname}${link.search}`, { redirect: "manual" });
+    const page = new URL(landed.headers.get("location")!, "http://myrel.test");
+    expect(page.pathname).toBe("/reset-password");
+    const done = await api("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token: page.searchParams.get("token"), newPassword: "another-good-password" }),
+    });
+    expect(done.status).toBe(200);
+    expect((await api("/api/account", { token })).status).toBe(401);
+    expect((await signIn(email, "another-good-password")).status).toBe(200);
   });
 });
 

@@ -24,6 +24,8 @@ export const ServerInfo = z.object({
      * header. Null when the server has none (older servers do not send it).
      */
     captcha: z.object({ provider: z.literal("turnstile"), siteKey: z.string() }).nullable().default(null),
+    /** Whether a forgotten password can be reset from a link sent by email (the server sends email). */
+    passwordReset: z.boolean().default(false),
   }),
   /** Whether this server sells plans (the hosted service); self-hosted servers have none. */
   billing: z.boolean().default(false),
