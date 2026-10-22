@@ -134,7 +134,11 @@ pnpm --filter @myrel/api exec wrangler secret put FIREWORKS_API_KEY
 
 or add it in the dashboard under **Settings → Variables and Secrets** (type
 *Secret*). To use another provider or model, change `LLM_PROVIDER` and
-`LLM_MODEL` in `apps/api/wrangler.jsonc` and push. If the key is missing, the
+`LLM_MODEL` in `apps/api/wrangler.jsonc` and push. The `LLM_MODEL` and
+`RUNNER_MODEL` values in the repository are the ones Fibteq's deployment uses
+(a DeepSeek model for the coordinator, `auto` for the cloud thread agent);
+empty them to use the provider's default. Each project can also pick its own
+provider, model and key in its settings. If the key is missing, the
 project chat says which secret to set instead of answering.
 
 ## 6. Create the first account
@@ -180,6 +184,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` | GitHub integration (see [GitHub App](#github-app)) | No |
 | `EXPO_ACCESS_TOKEN` | Mobile push, only if Expo enhanced push security is on | No |
 | `ADMIN_EMAILS` | Comma-separated addresses of the server's admins. They may sign up while sign-ups are closed and are always admins. Unset: the first account becomes the admin | Recommended on a public server |
+| `TURNSTILE_SECRET_KEY` | Turnstile check on sign-up, with `TURNSTILE_SITE_KEY` (see [Sign-up protection](#sign-up-protection-turnstile)) | No |
 
 ### Variables
 
@@ -188,18 +193,21 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `BETTER_AUTH_URL` | empty | Public origin, for example `https://myrel.example.com`. Inferred from the request when empty. The cloud thread agent calls back on it, so set it when the server sits behind a proxy that changes the host. |
 | `TRUSTED_ORIGINS` | empty | Extra comma-separated origins allowed to call the API cross-origin. The desktop app origins are always allowed. |
 | `INSTANCE_NAME` | `Myrel` | Name shown to apps that connect to this server. |
-| `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. |
+| `SIGNUP_ENABLED` | `"false"` | `"true"` lets anyone create an account. Admins can change it at runtime in Settings, which then takes precedence. |
+| `TURNSTILE_SITE_KEY` | empty | Site key of a Cloudflare Turnstile widget sign-up asks to solve, with the `TURNSTILE_SECRET_KEY` secret. Off unless both are set. |
 | `LLM_PROVIDER` | `fireworks` | `fireworks`, `anthropic` or `openai`. |
 | `LLM_MODEL` | empty | Model id; empty uses the provider's default. |
 | `LLM_BASE_URL` | empty | Full override of the provider's API base URL (proxies, custom gateway routes). |
+| `LLM_PRICES` | empty | JSON of extra model prices in US dollars per million tokens, e.g. `{"kimi-k3": {"input": 3, "output": 15, "cachedInput": 0.3}}`. Used for cost estimates; a model with no price shows its cost as unknown. |
 | `AI_GATEWAY_URL` | empty | `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>` to send Anthropic and OpenAI calls through AI Gateway. |
 | `ARTIFACTS_URL` | Fibteq's artifact Worker | Origin of the artifact Worker, for example `https://myrel-artifacts.<your-subdomain>.workers.dev`. Empty turns artifact previews off. |
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
+| `RUNNER_IMAGES` | empty | `"true"` or `"false"` when that model does or does not read images (screenshots); empty guesses from its name. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
 | `CONNECTOR_REGISTRY_URL` | (empty) | Where the connector catalog is copied from every hour (a Worker cron trigger). Empty means the official MCP Registry, `https://registry.modelcontextprotocol.io`; any server with the same `/v0/servers` API works. |
 | `EMAIL_FROM` | Fibteq's address | Sender for notification emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |
-| `GITHUB_APP_ID` | Fibteq's GitHub App | Your GitHub App's id. Its URL name is read from GitHub. GitHub stays off until all GitHub secrets are set too. |
+| `GITHUB_APP_ID` | Fibteq's GitHub App | Your GitHub App's id: replace the value in `wrangler.jsonc`, or remove it there and set it as a secret. Its URL name is read from GitHub (`GITHUB_APP_SLUG` is only a fallback for when GitHub cannot be reached). GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
 | `TERMS_URL`, `PRIVACY_URL` | empty | Links to your terms and privacy policy. When both are set, signing up requires accepting them. |
@@ -235,7 +243,28 @@ Each Myrel server needs its own GitHub App for connecting repositories and
 for threads to open pull requests. Run `node scripts/create-github-app.mjs`
 with `--origin` set to your Myrel URL, or follow the manual steps in
 [`apps/api/src/github/README.md`](../apps/api/src/github/README.md). Put the
-app id and slug in `vars` and the four secrets above on the Worker.
+app id in `GITHUB_APP_ID` (see the variables table) and the four secrets above
+on the Worker; the app's URL name is read from GitHub.
+
+### Sign-up protection (Turnstile)
+
+If you open sign-ups, a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)
+widget keeps scripts from creating accounts. Create a widget under
+**Turnstile** in the dashboard with your Myrel hostname, put its site key in
+`TURNSTILE_SITE_KEY` and its secret key in the `TURNSTILE_SECRET_KEY` secret.
+Sign-up on the web then asks to solve it; the desktop and mobile apps send
+people to the web page to sign up. Sign-in is not affected (the `AUTH_LIMIT`
+rate limit covers it). With either key missing, sign-up has no challenge.
+
+### D1 read replication
+
+Every API request runs on its own [D1 session](https://developers.cloudflare.com/d1/best-practices/read-replication/),
+and the apps send back the bookmark of their last answer (`x-d1-bookmark`), so
+a person always sees what they just saved. That makes it safe to turn on D1
+read replication (beta) for the `myrel` database in the dashboard, which lets
+reads come from a replica near the request. It is off by default; with it off,
+every query goes to the primary as before. Durable Objects and the cron always
+use the primary.
 
 ### Cloudflare AI Gateway
 

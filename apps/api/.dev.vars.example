@@ -14,3 +14,6 @@ ARTIFACT_SIGNING_SECRET=change-me-to-another-long-random-string
 # EMAIL_FROM=Myrel <myrel@example.com>
 # VAPID_PUBLIC_KEY=
 # VAPID_PRIVATE_KEY=
+# Optional Cloudflare Turnstile on sign-up (both or neither). Turnstile's test keys work locally.
+# TURNSTILE_SITE_KEY=
+# TURNSTILE_SECRET_KEY=

@@ -20,7 +20,7 @@ Requires Node 22+ and at least one of `claude`, `codex` or `gemini` on your `PAT
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
 npx myrel-runner service install                                      # runs now and at every login
-npx myrel-runner@latest update                                        # later: update and restart it
+npx myrel-runner@latest update                                        # later: update and restart it (waits for running tasks)
 ```
 
 Then add folders in Myrel > Devices with **Add folder**: it browses this computer's folders through the runner
@@ -44,9 +44,13 @@ cache) and registers it to start at login:
 It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `gemini`.
 On macOS and Linux it restarts after a crash, but not after a clean stop (the computer was removed in Myrel, or
 `myrel-runner start` was run somewhere else with the same pairing). `myrel-runner update` installs the newest version
-from npm and restarts the background runner on it (`service install` again also restarts it); `service status` shows its state and
-`service uninstall` removes it. On Linux it starts when you log in; to start at boot without logging in, run
-`loginctl enable-linger`.
+from npm and restarts the background runner on it once its running tasks finish (at most 10 minutes; `--now` restarts
+right away). `service install` again also restarts it; `service status` shows its state and `service uninstall`
+removes it. On Linux it starts when you log in; to start at boot without logging in, run `loginctl enable-linger`.
+
+If the runner shuts down while a task is running (an update or a restart of the service), it notes the task in
+`~/.myrel-runner/interrupted.json` and tells the server when it reconnects. From runner 0.12.0, Myrel then continues
+that turn on its own a few times, with growing waits, and says so in the thread instead of reporting a failure.
 
 ### Threads working at the same time
 
@@ -118,6 +122,7 @@ Projects without a local folder are worked in the cloud by OpenCode, in the thre
 ### For apps that run it (the desktop app)
 
 - `MYREL_SERVER` and `MYREL_RUNNER_TOKEN` override the saved pairing, and an env token is never written to disk.
+  From runner 0.12.1 the token is also removed from the environment of every CLI and command the runner starts.
   An app that already has the user's session can pair without a code: `POST /api/runners/pairing` (as the user)
   returns a code, and `POST /api/runner/pair` trades it for the runner token.
 - `MYREL_RUNNER_HOME` moves the config folder.

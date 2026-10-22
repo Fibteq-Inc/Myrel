@@ -30,8 +30,9 @@ and running on your own Cloudflare account.
   through Cloudflare AI Gateway. Bring your own key.
 - **Yours to run.** One Cloudflare Worker with Durable Objects, D1, R2 and
   Containers. No servers to manage.
-- **Apps that follow you.** Web, iOS and Android apps, and a desktop app on the
-  way, all connect to any Myrel server you point them at.
+- **Apps that follow you.** Web, iOS and Android apps, and a desktop app for
+  macOS, Windows and Linux with the runner built in, all connect to any Myrel
+  server you point them at.
 
 ## What it does
 
@@ -49,7 +50,9 @@ and running on your own Cloudflare account.
   GitHub) and your own MCP servers, for yourself or per project.
 - **Routines and notifications:** scheduled prompts, plus in-app, email and
   push notifications.
-- **Usage:** every model call and sandbox minute metered per project and thread.
+- **Usage:** every model call and sandbox minute metered per project and thread,
+  with an estimated cost under agent replies (turns on your own computer use
+  your CLI's login and show none).
 
 ## Architecture
 
@@ -158,7 +161,7 @@ connecting the apps.
 | 1.5 | Local `myrel-runner` with your own Claude Code, Codex or Gemini CLI | Done |
 | 2 | Cloud sandbox (OpenCode), project files on R2, GitHub (clone, branch, PR) | Done |
 | 3 | Artifacts, project memory, decision cards, mobile app | Done |
-| 4 | Routines, notifications, MCP connectors, skills, desktop app | Done except the desktop app (in review) |
+| 4 | Routines, notifications, MCP connectors, skills, desktop app | Done |
 | 5 | Members and roles, hosted plans and billing, one-click deploy | Done except one-click deploy |
 
 ## Contributing

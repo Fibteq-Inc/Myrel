@@ -18,8 +18,9 @@ Requires Node 22+ and pnpm 10.
 ```sh
 pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars    # set BETTER_AUTH_SECRET and a model key
+cp apps/artifacts/.dev.vars.example apps/artifacts/.dev.vars
 pnpm db:migrate:local
-pnpm dev                                            # API on :8787, web on http://localhost:5173
+pnpm dev                                            # API on :8787, artifacts on :8788, web on http://localhost:5173
 ```
 
 Useful commands:
@@ -32,7 +33,10 @@ Useful commands:
 | `pnpm db:generate` | Creates a D1 migration after you change `packages/db/src/schema.ts` |
 
 The API tests use a fake model (`apps/api/test/fake-llm.ts`), so they need no
-API key.
+API key. On a busy machine the API suite can hit timeouts that do not happen
+when a test file runs on its own; run it with fewer workers
+(`pnpm --filter @myrel/api exec vitest run --maxWorkers=2`) or one file at a time
+(`pnpm --filter @myrel/api exec vitest run test/<file>.test.ts`) before chasing them.
 
 [docs/architecture.md](docs/architecture.md) explains how the pieces fit
 together.
