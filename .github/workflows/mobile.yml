@@ -132,6 +132,17 @@ jobs:
         if: always() && steps.wanted.outputs.build == 'true'
         run: df -h / /tmp "$RUNNER_TEMP" || true
 
+      # Keeps the signed binary on the run, so a failed store upload can be retried or done by hand
+      # (Play needs the very first upload through the Play Console) without another 30-minute build.
+      - name: Keep the binary
+        if: steps.wanted.outputs.build == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: myrel-mobile-${{ matrix.platform }}-${{ inputs.tag }}
+          path: ${{ runner.temp }}/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Submit to the store
         if: steps.wanted.outputs.build == 'true'
         working-directory: apps/mobile
