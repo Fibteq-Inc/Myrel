@@ -106,8 +106,9 @@ export function ProjectHeader() {
               )}
             >
               <tab.icon size={15} strokeWidth={1.9} aria-hidden="true" />
-              <span className={tab.id === "chat" ? "@max-[560px]:sr-only" : "@max-[900px]:sr-only"}>{label}</span>
-              {count ? <span className="font-mono text-[11px] text-subtle @max-[900px]:hidden">{count}</span> : null}
+              {/* Only the selected tab spells out its name; the others are icons with a tooltip. */}
+              <span className={selected ? "@max-[560px]:sr-only" : "sr-only"}>{label}</span>
+              {count ? <span className="font-mono text-[11px] text-subtle @max-[560px]:hidden">{count}</span> : null}
             </button>
           );
         })}
