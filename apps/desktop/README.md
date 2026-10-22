@@ -12,7 +12,7 @@ before the app loads:
 | File picker | native open dialog |
 | Links | opened in the default browser |
 | `myrel://` links | `myrel://connect?server=https://myrel.example.com` switches server after a confirmation; any other path opens that page, e.g. `myrel://projects/<id>` |
-| Updates | checks GitHub releases at startup and every six hours while open, and offers to install |
+| Updates | checks GitHub releases at startup and every six hours while open, and offers to install; Settings → Account → App version shows the version and has a **Check for updates** button |
 | Local folders | the bundled `myrel-runner` (see below) |
 
 The app is not tied to one server: on first launch it asks for an Myrel address (hosted or self-hosted)
