@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.2.0...desktop-v0.2.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **desktop:** sign macOS releases again and write full release notes ([c7943a8](https://github.com/Fibteq-Inc/myrel/commit/c7943a897843c1a1fde6d5de5dae658193767947))
+* **desktop:** sign macOS releases again and write full release notes ([8238957](https://github.com/Fibteq-Inc/myrel/commit/823895701f8ad1c30cf12c2dcfe394e9e69ec55f))
+
 ## [0.2.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.1.0...desktop-v0.2.0) (2026-10-22)
 
 
