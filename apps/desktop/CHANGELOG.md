@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.5.0...desktop-v0.6.0) (2026-10-22)
+
+
+### Features
+
+* **api:** run each request on a D1 session, ready for read replication ([8b17368](https://github.com/Fibteq-Inc/myrel/commit/8b17368c88e161d27efc570f478fc8d31f01efa5))
+* **api:** run each request on a D1 session, ready for read replication ([a175ea3](https://github.com/Fibteq-Inc/myrel/commit/a175ea333dc69d5415b0f23fbaa914c5f3638874))
+* harden plan limits, sign-up and a few endpoints before going public ([ff79e7c](https://github.com/Fibteq-Inc/myrel/commit/ff79e7ceb1ca7f78e226f049b66a4284cee9c089))
+* open files agents mention in messages, by link or inline code ([44f8837](https://github.com/Fibteq-Inc/myrel/commit/44f8837b753aa1438a1d62bf91207facde5a54ef))
+
 ## [0.5.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.4.1...desktop-v0.5.0) (2026-10-22)
 
 
