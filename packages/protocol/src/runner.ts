@@ -160,6 +160,11 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     protocol: z.number().int().positive(),
     /** Tasks still running on the computer, e.g. after a reconnect. */
     running: z.array(TaskId).max(100).default([]),
+    /**
+     * Tasks the runner's previous process stopped when it shut down (an update, a restart), so the
+     * server can continue them instead of failing them. Older runners never send it.
+     */
+    interrupted: z.array(TaskId).max(100).default([]),
   }),
   /** A line of progress from the CLI (what it is doing now). Empty when only its usage changed. */
   z.object({ type: z.literal("task.progress"), taskId: TaskId, text: z.string().max(2000), usage: CliUsage.optional() }),

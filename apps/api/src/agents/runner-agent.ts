@@ -13,6 +13,7 @@ import {
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { notifyRunnerProjects, parseInfo, RUNNER_ID_HEADER } from "../runners";
+import { FLAP_MAX_CONNECTS, FLAP_WINDOW_MS } from "./auto-resume";
 
 export type TaskStart = {
   taskId: string;
@@ -64,6 +65,8 @@ export class RunnerAgent extends Agent<Env> {
       status TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`;
+    // When the computer connected lately, to tell a runner that keeps going down from one restart.
+    this.sql`CREATE TABLE IF NOT EXISTS connects (at INTEGER NOT NULL)`;
   }
 
   override shouldSendProtocolMessages(): boolean {
@@ -79,6 +82,9 @@ export class RunnerAgent extends Agent<Env> {
     for (const other of this.getConnections()) {
       if (other.id !== connection.id) other.close(4000, "replaced by a newer connection");
     }
+    const now = Date.now();
+    this.sql`DELETE FROM connects WHERE at < ${now - FLAP_WINDOW_MS}`;
+    this.sql`INSERT INTO connects (at) VALUES (${now})`;
     const [row] = await createDb(this.env.DB)
       .select({ name: schema.runners.name })
       .from(schema.runners)
@@ -105,15 +111,21 @@ export class RunnerAgent extends Agent<Env> {
           connection.close(4400, `unsupported runner protocol ${frame.protocol}; update myrel-runner`);
           return;
         }
-        const { type: _t, protocol: _p, running, ...info } = frame;
+        const { type: _t, protocol: _p, running, interrupted, ...info } = frame;
         await createDb(this.env.DB)
           .update(schema.runners)
           .set({ info: JSON.stringify(info), lastSeenAt: new Date() })
           .where(eq(schema.runners.id, this.name));
-        // Tasks we think are running but the computer no longer knows about died with it.
+        // Tasks we think are running but the computer no longer knows about died with it (its runner
+        // restarted, or the computer went away): their threads continue them, within limits.
         const alive = new Set(running);
+        const restarted = new Set(interrupted);
+        const [recent] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM connects WHERE at >= ${Date.now() - FLAP_WINDOW_MS}`;
         for (const task of this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running'`) {
-          if (!alive.has(task.id)) await this.finish(task, false, "The task stopped when the computer disconnected.");
+          if (alive.has(task.id)) continue;
+          const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
+          await thread.taskInterrupted(task.id, { restarted: restarted.has(task.id), flapping: (recent?.n ?? 0) > FLAP_MAX_CONNECTS });
+          this.sql`UPDATE tasks SET status = 'failed' WHERE id = ${task.id}`;
         }
         await notifyRunnerProjects(this.env, this.name);
         return;

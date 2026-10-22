@@ -21,6 +21,8 @@ const PROGRESS_EVERY_MS = 1000;
 export type TaskRunnerOptions = {
   config: () => RunnerConfig;
   sessions: SessionStore;
+  /** Called whenever a task starts or ends, e.g. to tell `myrel-runner update` what is running. */
+  onChange?: (running: string[]) => void;
   /** Kill a task after this long. Default 60 minutes. */
   timeoutMs?: number;
   /** For tests: replaces child_process.spawn. */
@@ -37,6 +39,8 @@ export class TaskRunner {
   private readonly worktrees = new Map<string, string>();
   /** Tasks the server asked to stop. */
   private readonly cancelled = new Set<string>();
+  /** Tasks stopped because this runner shuts down: the server continues them after it restarts. */
+  private readonly interrupted = new Set<string>();
   private send: Send = () => {};
 
   constructor(private readonly opts: TaskRunnerOptions) {}
@@ -160,6 +164,7 @@ export class TaskRunner {
       shell: process.platform === "win32",
     });
     this.running.set(task.taskId, child);
+    this.opts.onChange?.(this.runningIds());
 
     const state: ParseState = {};
     let stdout = "";
@@ -169,6 +174,7 @@ export class TaskRunner {
     let sentProgress: string | undefined;
     let sentUsage = "";
     let sentLimits: CliLimits | undefined;
+    let savedSession: string | undefined;
     const reportLimits = (limits: CliLimits | undefined) => {
       if (!limits || limits === sentLimits) return;
       sentLimits = limits;
@@ -196,6 +202,12 @@ export class TaskRunner {
       buffered = lines.pop()!;
       for (const line of lines) adapter.line(line.trim(), state);
       reportLimits(state.limits);
+      // Saved as soon as the CLI names it, not only at the end: a run stopped midway (the runner
+      // restarting for an update) is then continued in the same session instead of a new one.
+      if (state.sessionId && state.sessionId !== savedSession && RESUMES.has(task.cli)) {
+        savedSession = state.sessionId;
+        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }).catch(() => {});
+      }
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
       if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage)) flushProgress();
@@ -219,6 +231,12 @@ export class TaskRunner {
         void cleanup();
         this.running.delete(task.taskId);
         this.worktrees.delete(task.taskId);
+        this.opts.onChange?.(this.runningIds());
+        // The next runner reports it as interrupted; a failure sent now would end the turn instead.
+        if (this.interrupted.delete(task.taskId)) {
+          log(`■ ${adapter.id} task interrupted; it continues after the runner restarts`);
+          return resolve(false);
+        }
         if (this.cancelled.delete(task.taskId)) {
           log(`■ ${adapter.id} task stopped`);
           this.send({ type: "task.done", taskId: task.taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
@@ -245,7 +263,7 @@ export class TaskRunner {
       });
       // A stopped CLI can leave children holding its output open, so "close" may come late.
       child.on("exit", () => {
-        if (this.cancelled.has(task.taskId)) finish(false, "");
+        if (this.cancelled.has(task.taskId) || this.interrupted.has(task.taskId)) finish(false, "");
       });
       child.on("close", async (code, signal) => {
         if (buffered.trim()) adapter.line(buffered.trim(), state);
@@ -256,6 +274,14 @@ export class TaskRunner {
           done = true;
           clearTimeout(timer);
           this.running.delete(task.taskId);
+          // Stopping now: the new session would only be killed too.
+          if (this.interrupted.has(task.taskId)) {
+            this.interrupted.delete(task.taskId);
+            this.worktrees.delete(task.taskId);
+            this.opts.onChange?.(this.runningIds());
+            void cleanup();
+            return resolve(false);
+          }
           return resolve(true);
         }
         // The session now holds this turn too, so the next one can continue it with only what is new.
@@ -279,9 +305,17 @@ export class TaskRunner {
     setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 5000).unref();
   }
 
-  /** Stops every running task, e.g. when this computer is unpaired. */
-  stopAll() {
-    for (const child of this.running.values()) child.kill("SIGTERM");
+  /**
+   * Stops every running task as this runner shuts down (an update, a restart) and returns their ids,
+   * for the next runner to report as interrupted. No "task.done" is sent for them.
+   */
+  stopAll(): string[] {
+    const ids = this.runningIds();
+    for (const [taskId, child] of this.running) {
+      this.interrupted.add(taskId);
+      child.kill("SIGTERM");
+    }
+    return ids;
   }
 }
 

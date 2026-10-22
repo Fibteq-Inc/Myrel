@@ -43,7 +43,7 @@ async function pair(user: string) {
 }
 
 /** Plays the myrel-runner side of the WebSocket. */
-async function connectRunner(token: string, features: string[] = []) {
+async function connectRunner(token: string, features: string[] = [], hello: Record<string, unknown> = {}) {
   const res = await api("/api/runner/connect", { token, headers: { upgrade: "websocket" } });
   expect(res.status).toBe(101);
   const ws = res.webSocket!;
@@ -63,6 +63,7 @@ async function connectRunner(token: string, features: string[] = []) {
     clis: [{ id: "claude", version: "2.1.0" }],
     features,
     running: [],
+    ...hello,
   });
   return { ws, frames, send };
 }
@@ -623,6 +624,89 @@ describe("local workspace", () => {
     expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
     chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("continues a turn the runner's restart cut off, a bounded number of times", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    let runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const { projectAgent, threadAgent, thread } = await startThread(project.id, user);
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const startOn = (side: typeof runnerSide) => until(() => side.frames.find((f): f is Start => f.type === "task.start"), "task.start");
+    /** The runner restarts: a new connection whose hello reports the task as interrupted. */
+    const restart = async (taskId: string) => {
+      runnerSide.ws.close();
+      runnerSide = await connectRunner(token, ["cancel", "agent"], { interrupted: [taskId] });
+    };
+
+    const first = await startOn(runnerSide);
+    runnerSide.send({ type: "task.progress", taskId: first.taskId, text: "Bash: pnpm install" });
+    await until(async () => (await threadAgent.getTasks())[0]?.log.some((l) => l.text.includes("pnpm install")), "progress");
+    await restart(first.taskId);
+    await until(async () => (await bodies()).some((b) => b.includes("continues where it left off") && b.includes("(1/3)")), "resume notice");
+    expect((await projectAgent.getThread(thread.id))?.status).toBe("working");
+    expect((await bodies()).some((b) => b.includes("failed"))).toBe(false);
+
+    // The wait is over: the same session continues, told where it stopped.
+    await threadAgent.resumeInterrupted({ taskId: first.taskId });
+    const second = await startOn(runnerSide);
+    expect(second.prompt).toContain("Your last run was interrupted (automatic continue 1 of 3)");
+    expect(second.prompt).toContain("Bash: pnpm install");
+    expect(second.agent?.resume?.after).toBe(first.taskId);
+    expect(second.agent?.resume?.prompt).toContain("Your last run was interrupted");
+
+    // Cut off again before any step: that counts twice, so this is the last continue.
+    await restart(second.taskId);
+    await until(async () => (await bodies()).some((b) => b.includes("(2/3)")), "second resume notice");
+    await threadAgent.resumeInterrupted({ taskId: second.taskId });
+    const third = await startOn(runnerSide);
+    await restart(third.taskId);
+    await until(async () => (await bodies()).some((b) => b.includes("stopped continuing on its own")), "gave up");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "failed", "failed");
+    expect((await threadAgent.getTasks()).map((t) => t.status)).toEqual(["failed", "failed", "failed"]);
+    // Nothing is waiting to continue it any more.
+    await threadAgent.resumeInterrupted({ taskId: third.taskId });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    runnerSide.ws.close();
+  });
+
+  it("does not continue on its own when the computer keeps disconnecting", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    let runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const { projectAgent, thread } = await startThread(project.id, user);
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
+    await until(() => runnerSide.frames.find((f) => f.type === "task.start"), "task.start");
+    // Connections that come and go without a hello reporting tasks.
+    for (let i = 0; i < 5; i++) {
+      runnerSide.ws.close();
+      const res = await api("/api/runner/connect", { token, headers: { upgrade: "websocket" } });
+      res.webSocket!.accept();
+      runnerSide = { ...runnerSide, ws: res.webSocket! };
+    }
+    runnerSide.ws.close();
+    // An older runner: no interrupted list, so the task just disappeared.
+    runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await bodies()).some((b) => b.includes("keeps disconnecting")), "flapping notice");
+    expect((await bodies()).some((b) => b.includes("The task stopped when the computer disconnected."))).toBe(true);
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "failed", "failed");
     runnerSide.ws.close();
   });
 
