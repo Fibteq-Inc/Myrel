@@ -76,6 +76,8 @@ export function threadPrompt(input: {
   followUp?: boolean;
   /** Set when this turn continues one the runner's restart cut off (see auto-resume.ts). */
   resumeNote?: string;
+  /** The thread's plan belongs to a round that finished before the thread was reopened. */
+  planFinished?: boolean;
 }): string {
   const shown = input.followUp ? input.messages.filter((m) => m.seq > input.lastSeenSeq) : input.messages;
   const history = shown.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
@@ -107,7 +109,11 @@ export function threadPrompt(input: {
       : "",
     runs.length ? `## Routine runs (scheduled tasks; do the NEW ones now)\n${runs.join("\n")}` : "",
     mine.length ? `## Routines that wake this thread\n${mine.map(renderRoutine).join("\n")}` : "",
-    input.thread.statusText ? `## Your current plan, as the thread shows it\n${input.thread.statusText}` : "",
+    input.thread.statusText
+      ? input.planFinished
+        ? `## Your plan from the earlier round (finished before this thread was reopened)\n${input.thread.statusText}\n\nThis is new work: set a new plan with update_plan for it rather than adding steps to this one.`
+        : `## Your current plan, as the thread shows it\n${input.thread.statusText}`
+      : "",
     input.resumeNote ?? "",
     "Continue the work now.",
   ]
