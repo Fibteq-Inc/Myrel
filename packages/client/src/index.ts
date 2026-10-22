@@ -1,4 +1,5 @@
 export * from "./api";
+export * from "./external-links";
 export * from "./platform";
 export * from "./project-state";
 export * from "./server";
