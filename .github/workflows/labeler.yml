@@ -1,0 +1,21 @@
+name: Labeler
+
+# Puts `app:desktop` / `app:mobile` on pull requests by the paths they change (.github/labeler.yml), so each
+# app's release notes only list its own changes.
+# pull_request_target runs this file from main with a token that can write labels, also for pull requests
+# from forks. It must never check out or run the pull request's code: the labeler only reads the list of
+# changed files through the API.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0

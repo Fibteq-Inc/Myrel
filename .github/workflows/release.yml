@@ -1,0 +1,126 @@
+name: Release
+
+# Releases one app from the tip of main: Actions → Release → Run workflow, pick the app and the bump.
+# The version lives in the tag (`desktop-v0.7.0`, `mobile-v0.3.0`), so there's no version commit and no
+# Release PR. The release notes are GitHub's own generated notes since the app's previous tag, filtered by
+# the `app:*` labels the labeler puts on pull requests (.github/release-desktop.yml, release-mobile.yml).
+#
+# desktop: tags main, opens a draft release with the notes, builds the installers (desktop.yml) and
+#          publishes the release once every platform built. A failed platform leaves the draft: rerun the
+#          failed job, or rebuild with Actions → Desktop → Run workflow with the tag, then publish it.
+# mobile:  tags main and publishes the release; the tag starts the EAS store build
+#          (apps/mobile/.eas/workflows/store-release.yml). Mobile releases are never marked "latest",
+#          because the desktop updater reads releases/latest/download/latest.json.
+#
+# A release drafted by hand in the GitHub UI with a `desktop-v*` tag works too: publishing it starts the
+# desktop build (desktop.yml listens for published releases).
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App to release
+        type: choice
+        options: [desktop, mobile]
+        required: true
+      bump:
+        description: Version step (minor before 1.0 for anything users notice)
+        type: choice
+        options: [patch, minor, major]
+        default: minor
+        required: true
+
+concurrency:
+  group: release-${{ inputs.app }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases only run from main."
+          exit 1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Next version
+        id: version
+        shell: bash
+        env:
+          APP: ${{ inputs.app }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          prev="$(git tag --list "$APP-v*" --sort=-v:refname | head -n1)"
+          # The first release of an app starts from the version in its package.json.
+          current="${prev#"$APP-v"}"
+          [ -n "$current" ] || current="$(jq -r .version "apps/$APP/package.json")"
+          IFS=. read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          tag="$APP-v$major.$minor.$patch"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists."
+            exit 1
+          fi
+          echo "Releasing $tag (previous: ${prev:-none})"
+          { echo "tag=$tag"; echo "prev=$prev"; echo "version=$major.$minor.$patch"; } >> "$GITHUB_OUTPUT"
+
+      - name: Tag main and write the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP: ${{ inputs.app }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PREV: ${{ steps.version.outputs.prev }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A tag pushed with GITHUB_TOKEN doesn't start other GitHub workflows, so desktop.yml is called
+          # below; EAS reads the push through its own GitHub app and still starts the mobile store build.
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+
+          args=(-f "tag_name=$TAG" -f "configuration_file_path=.github/release-$APP.yml")
+          [ -z "$PREV" ] || args+=(-f "previous_tag_name=$PREV")
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+          if [ "$APP" = desktop ]; then
+            gh release create "$TAG" --verify-tag --draft --title "Myrel Desktop $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" --verify-tag --latest=false --title "Myrel Mobile $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+
+  desktop:
+    needs: tag
+    if: inputs.app == 'desktop'
+    uses: ./.github/workflows/desktop.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: write
+
+  publish:
+    needs: [tag, desktop]
+    if: inputs.app == 'desktop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the desktop release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

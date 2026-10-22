@@ -1,0 +1,22 @@
+# Labels pull requests by the app their files ship in (.github/workflows/labeler.yml). The Release workflow's
+# notes only list pull requests with the app's label (.github/release-desktop.yml, release-mobile.yml).
+
+# The desktop shell, the web UI it wraps, the bundled runner and the shared packages.
+"app:desktop":
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/desktop/**
+          - apps/web/**
+          - packages/client/**
+          - packages/i18n/**
+          - packages/protocol/**
+          - packages/myrel-runner/**
+          - packages/runner-core/**
+
+"app:mobile":
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/mobile/**
+          - packages/client/**
+          - packages/i18n/**
+          - packages/protocol/**

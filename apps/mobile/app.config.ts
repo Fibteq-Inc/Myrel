@@ -7,11 +7,16 @@ const easOwner = process.env.EAS_OWNER ?? "fibteqs-organization";
 
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
 
+// Store builds get their version from the release tag (MYREL_RELEASE_TAG=mobile-v0.3.0, set by
+// .eas/workflows/store-release.yml); local and manual builds use package.json's.
+const releaseVersion = process.env.MYREL_RELEASE_TAG?.match(/^mobile-v(\d+\.\d+\.\d+)$/)?.[1];
+const version = releaseVersion ?? (require("./package.json") as { version: string }).version;
+
 const config: ExpoConfig = {
   name: "Myrel",
   slug: "myrel",
   scheme: "myrel",
-  version: "0.2.0", // x-release-please-version
+  version,
   orientation: "portrait",
   // Four-petal mark, rendered from assets/icon.svg; re-export the PNGs when it changes.
   icon: "./assets/icon.png",

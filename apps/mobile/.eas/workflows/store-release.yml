@@ -1,5 +1,6 @@
 name: Store release
-# Runs when the mobile Release PR is merged (release-please tags mobile-vX.Y.Z), or by hand.
+# Runs when the Release workflow (.github/workflows/release.yml) tags mobile-vX.Y.Z, or by hand.
+# The tag is the store version: app.config.ts reads it from MYREL_RELEASE_TAG.
 # Builds both store binaries and uploads them to TestFlight and Play internal testing.
 # Sending a version for review stays a manual step.
 
@@ -12,6 +13,8 @@ jobs:
   build_ios:
     name: Build iOS
     type: build
+    env:
+      MYREL_RELEASE_TAG: ${{ github.ref_name }}
     params:
       platform: ios
       profile: production
@@ -19,6 +22,8 @@ jobs:
   build_android:
     name: Build Android
     type: build
+    env:
+      MYREL_RELEASE_TAG: ${{ github.ref_name }}
     params:
       platform: android
       profile: production
