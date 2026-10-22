@@ -1,6 +1,6 @@
 import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { decisionPicks, planChecklist } from "@myrel/protocol";
+import { decisionPicks, parsePlanUpdate, planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import {
   MessageView,
   PlanCard,
   PlanProgress,
+  PlanUpdateNote,
   PullRequestCards,
   ScrollToEnd,
   Thinking,
@@ -350,6 +351,7 @@ function Conversation({
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
   const planAnchor = (id: string) => `plan-${id}`;
+  const [planOpen, setPlanOpen] = useState(false);
   return (
     <section aria-label={t("thread.messages")} className={cn("min-w-0 flex-1 flex-col", className)}>
       {/* Stays once the work is done, so the finished plan is still one click away. */}
@@ -360,6 +362,8 @@ function Conversation({
             planKey={`${thread.id}\n${thread.statusText.split("\n", 1)[0]}`}
             text={thread.statusText}
             live={working}
+            open={planOpen}
+            onOpenChange={setPlanOpen}
             onJump={
               currentPlan
                 ? () => document.getElementById(planAnchor(currentPlan.id))?.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -384,6 +388,12 @@ function Conversation({
                   text={current && thread.statusText ? thread.statusText : plan}
                   live={current && working}
                 />
+              );
+            }
+            const update = m.authorKind === "agent" ? parsePlanUpdate(m.body) : null;
+            if (update) {
+              return (
+                <PlanUpdateNote key={m.id} update={update} onOpenPlan={thread.statusText ? () => setPlanOpen(true) : undefined} />
               );
             }
             return (

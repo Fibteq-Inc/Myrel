@@ -1,7 +1,8 @@
 import { type ChecklistItem, checklistProgress, freshSteps, parseChecklist } from "@myrel/client";
+import type { PlanUpdate } from "@myrel/protocol";
 import { useT } from "@myrel/i18n/react";
-import { ChevronDown, CircleCheck, CircleDashed, CircleMinus, CircleX } from "lucide-react-native";
-import { useReducer, useState } from "react";
+import { ChevronDown, CircleCheck, CircleDashed, CircleMinus, CircleX, ListChecks } from "lucide-react-native";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { colors, mono } from "../theme";
 import { Spinner } from "./ui";
@@ -91,6 +92,11 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   link: { color: colors.accent, fontSize: 13 },
+  note: { flex: 1, minWidth: 0, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: colors.edge },
+  noteHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  noteText: { flex: 1, color: colors.muted, fontSize: 13 },
+  noteBody: { gap: 6, paddingHorizontal: 12, paddingBottom: 10 },
+  noteMark: { width: 14, textAlign: "center", color: colors.subtle, fontSize: 14 },
   cardRow: { flexDirection: "row", gap: 12 },
   card: {
     flex: 1,
@@ -140,20 +146,35 @@ function useFreshSteps(key: string, items: ChecklistItem[]) {
  * is on and how many are done, with a badge when the agent added steps. Tapping
  * opens the whole plan right there, so nobody has to scroll back to the card.
  */
-export function PlanProgress({ planKey, text, live }: { planKey: string; text: string; live: boolean }) {
+export function PlanProgress({
+  planKey,
+  text,
+  live,
+  open,
+  onOpenChange,
+}: {
+  /** Which plan this is (thread and plan title), so new steps are told apart per plan. */
+  planKey: string;
+  text: string;
+  live: boolean;
+  /** Whether the whole plan is open under the line; a plan update note can open it too. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const t = useT();
   const { height } = useWindowDimensions();
-  const [open, setOpen] = useState(false);
   const { title, items } = parseChecklist(text);
   const { fresh, markSeen } = useFreshSteps(planKey, items);
+  // Closing the plan is when the person has seen the new steps.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) markSeen();
+    wasOpen.current = open;
+  });
   if (items.length === 0) return null;
   const { done, total } = checklistProgress(items);
   const step = items.findLast((i) => i.state === "active") ?? items.find((i) => i.state === "failed");
-  const toggle = () => {
-    // Closing the plan is when the person has seen the new steps.
-    if (open) markSeen();
-    setOpen(!open);
-  };
+  const toggle = () => onOpenChange(!open);
   return (
     <View style={{ gap: 12 }}>
       <Pressable
@@ -196,6 +217,62 @@ export function PlanProgress({ planKey, text, live }: { planKey: string; text: s
           <Checklist text={text} live={live} fresh={fresh} />
         </ScrollView>
       )}
+    </View>
+  );
+}
+
+/**
+ * A note at the end of the conversation that the agent added, dropped or failed
+ * plan steps while the plan card sat further up. It reads as one line; opening
+ * it shows just what changed, and from there the whole plan.
+ */
+export function PlanUpdateNote({ update, onOpenPlan }: { update: PlanUpdate; onOpenPlan?: () => void }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const parts = [
+    update.added.length > 0 && <Text style={{ color: colors.accent }}>{t("planUpdate.added", { count: update.added.length })}</Text>,
+    update.removed.length > 0 && <Text>{t("planUpdate.removed", { count: update.removed.length })}</Text>,
+    update.failed.length > 0 && <Text style={{ color: colors.bad }}>{t("planUpdate.failed", { count: update.failed.length })}</Text>,
+  ].filter(Boolean);
+  const rows = [
+    ...update.added.map((s) => ({ mark: "+", text: s, style: { color: colors.fg } })),
+    ...update.removed.map((s) => ({ mark: "−", text: s, style: { color: colors.subtle, textDecorationLine: "line-through" as const } })),
+    ...update.failed.map((s) => ({ mark: "✗", text: s, style: { color: colors.bad } })),
+  ];
+  return (
+    <View style={styles.cardRow}>
+      {/* Lines up with the agent's messages, under its mark. */}
+      <View style={{ width: 28 }} />
+      <View style={styles.note}>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} style={styles.noteHead}>
+          <ListChecks size={14} color={colors.subtle} />
+          <Text style={styles.noteText} numberOfLines={1}>
+            {t("planUpdate.title")}
+            {parts.map((p, i) => (
+              <Text key={i}>
+                {" · "}
+                {p}
+              </Text>
+            ))}
+          </Text>
+          <ChevronDown size={14} color={colors.subtle} style={open ? { transform: [{ rotate: "180deg" }] } : undefined} />
+        </Pressable>
+        {open && (
+          <View style={styles.noteBody}>
+            {rows.map((r, i) => (
+              <View key={i} style={styles.item}>
+                <Text style={styles.noteMark}>{r.mark}</Text>
+                <Text style={[styles.itemText, { fontSize: 14, lineHeight: 20 }, r.style]}>{r.text}</Text>
+              </View>
+            ))}
+            {onOpenPlan && (
+              <Pressable accessibilityRole="button" onPress={onOpenPlan} hitSlop={6}>
+                <Text style={styles.link}>{t("planUpdate.openPlan")}</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
     </View>
   );
 }

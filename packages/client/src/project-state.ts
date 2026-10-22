@@ -2,7 +2,7 @@ import {
   type Artifact,
   type Message,
   type MessageStats,
-  planChecklist,
+  isPlanMessage,
   type PullRequest,
   type Reaction,
   type Routine,
@@ -220,12 +220,12 @@ export function threadUsage(s: ProjectState, threadId: string): { tokens: number
   return total;
 }
 
-/** How many replies a thread has, not counting the agent's plan cards. */
+/** How many replies a thread has, not counting the agent's plan cards and plan update notes. */
 export function threadReplyCount(s: ProjectState, threadId: string): number {
   const messages = threadMessages(s, threadId);
   let count = replyCountCache.get(messages);
   if (count === undefined) {
-    count = messages.filter((m) => planChecklist(m.body) === null).length;
+    count = messages.filter((m) => !isPlanMessage(m.body)).length;
     replyCountCache.set(messages, count);
   }
   return count;

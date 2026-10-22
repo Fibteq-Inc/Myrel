@@ -1,10 +1,10 @@
-import { type Artifact, decisionPicks, type Message, planChecklist, type Reaction } from "@myrel/protocol";
+import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
-import { PlanCard } from "./checklist";
+import { PlanCard, PlanUpdateNote } from "./checklist";
 import { Composer } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
 
@@ -25,6 +25,7 @@ export function Conversation({
   onSend,
   header,
   plan,
+  onOpenPlan,
   footerFor,
   empty,
 }: {
@@ -42,6 +43,8 @@ export function Conversation({
   header?: ReactNode;
   /** The plan card the agent is moving along, drawn from the thread's fresh checklist. */
   plan?: { messageId: string; text: string; live: boolean };
+  /** Opens the whole plan above the conversation, from a plan update note. */
+  onOpenPlan?: () => void;
   /** Rendered under a message, e.g. the card of the thread it opened. */
   footerFor?: (message: Message) => ReactNode;
   empty?: ReactNode;
@@ -99,6 +102,8 @@ export function Conversation({
               const current = plan && item.id === plan.messageId ? plan : null;
               return <PlanCard text={current?.text ?? checklist} live={current?.live ?? false} />;
             }
+            const update = item.authorKind === "agent" ? parsePlanUpdate(item.body) : null;
+            if (update) return <PlanUpdateNote update={update} onOpenPlan={onOpenPlan} />;
             return (
               <MessageView
                 message={item}

@@ -12,7 +12,7 @@ import {
   type ArtifactRef,
   nextCronRun,
   normalizeFilePath,
-  planChecklist,
+  isPlanMessage,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -380,6 +380,12 @@ export class ProjectAgent extends Agent<Env> {
     const rows = this.sql<MessageRow>`
       SELECT * FROM messages WHERE seq > ${afterSeq} ORDER BY seq LIMIT ${limit + 1}`;
     return { messages: rows.slice(0, limit).map((r) => this.toMessage(r)), hasMore: rows.length > limit };
+  }
+
+  /** The id of a thread's newest message, or null when it has none. Callable over RPC. */
+  lastThreadMessageId(threadId: string): string | null {
+    const [row] = this.sql<{ id: string }>`SELECT id FROM messages WHERE thread_id = ${threadId} ORDER BY seq DESC LIMIT 1`;
+    return row?.id ?? null;
   }
 
   getMessage(id: string): Message | null {
@@ -764,11 +770,11 @@ export class ProjectAgent extends Agent<Env> {
 
   /**
    * Whether the coordinator should see a thread message: what a person writes there and the thread
-   * agent's replies, while another thread is open that it could matter to. Plan cards and
-   * attachment-only messages carry nothing to relay.
+   * agent's replies, while another thread is open that it could matter to. Plan cards, plan update
+   * notes and attachment-only messages carry nothing to relay.
    */
   private observable(m: Message): m is Message & { threadId: string } {
-    if (!m.threadId || !m.body.trim() || planChecklist(m.body) !== null) return false;
+    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body)) return false;
     if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
     return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
   }

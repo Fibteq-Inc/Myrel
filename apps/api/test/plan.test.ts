@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeStatus, renderPlan } from "../src/agents/plan";
+import { composeStatus, mergePlanUpdates, planChanges, renderPlan } from "../src/agents/plan";
 
 const plan = {
   title: "Hatayı düzelt",
@@ -27,5 +27,20 @@ describe("plan", () => {
     expect(composeStatus(null, "T\n\n✱ a")).toBe("T\n\n✱ a");
     expect(composeStatus(null, null)).toBeNull();
     expect(composeStatus(plan, null)).toBe(renderPlan(plan));
+  });
+});
+
+describe("plan changes", () => {
+  it("sees steps added, dropped and failed, not ticks or a task's nested steps", () => {
+    const prev = "T\n\n✓ a\n✱ b\n  ✱ task step\n○ c";
+    const next = "T\n\n✓ a\n✗ b\n  ✓ task step\n  ✱ other task step\n○ d";
+    expect(planChanges(prev, next)).toEqual({ added: ["d"], removed: ["c"], failed: ["b"] });
+    expect(planChanges(prev, "T\n\n✓ a\n✓ b\n✱ c")).toEqual({ added: [], removed: [], failed: [] });
+  });
+
+  it("merges changes in a row, cancelling a step added then dropped", () => {
+    expect(
+      mergePlanUpdates({ added: ["x", "y"], removed: ["z"], failed: [] }, { added: ["z", "w"], removed: ["x"], failed: ["y"] }),
+    ).toEqual({ added: ["y", "w"], removed: [], failed: ["y"] });
   });
 });
