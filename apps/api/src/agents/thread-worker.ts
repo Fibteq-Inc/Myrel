@@ -114,6 +114,14 @@ function renderPullRequest(pr: PullRequest): string {
   return `- ${pr.repo}#${pr.number} "${pr.title}" ${pr.url}: ${pr.draft && pr.state === "open" ? "draft" : pr.state}, ${ci}${review}`;
 }
 
+/** A reply past this many characters or lines should have been an artifact or a file. */
+const LONG_REPLY_CHARS = 1500;
+const LONG_REPLY_LINES = 15;
+
+export function isLongReply(text: string): boolean {
+  return text.length > LONG_REPLY_CHARS || text.trim().split("\n").length > LONG_REPLY_LINES;
+}
+
 export function threadTools(host: ThreadHost): Tool[] {
   return [
     tool({
@@ -133,11 +141,15 @@ export function threadTools(host: ThreadHost): Tool[] {
       }),
       run: async ({ text, needs, files }) => {
         await host.reply(text, needs, files);
+        // Long replies make threads hard to scroll; sending it anyway and nudging keeps the turn going.
+        const tooLong = isLongReply(text)
+          ? " That reply was long: keep the next ones to a few sentences, put longer content in an artifact or a project file, and ask for choices with ask_decision."
+          : "";
         // Weaker models read their opening note as the end of the turn; it is not. Some also skip
         // the plan and only set it once the work is done, when people no longer need it.
         if (!needs && !host.planned())
-          return "Sent. Unless that reply finished the turn, call update_plan next, before any other tool, so people follow your plan while you work.";
-        return "Sent.";
+          return `Sent.${tooLong} Unless that reply finished the turn, call update_plan next, before any other tool, so people follow your plan while you work.`;
+        return `Sent.${tooLong}`;
       },
     }),
     tool({
