@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CliId, CliLimits, RunnerCli } from "@myrel/protocol";
+import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
 import type { Access } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
 
@@ -15,6 +15,8 @@ export type ParseState = {
   result?: string;
   /** True when the CLI reported a failure in its own output. */
   failed?: boolean;
+  /** The last error the CLI reported, which may have been one it recovered from. */
+  error?: string;
   /** Tokens the CLI reported using so far, summed. */
   usage?: { inputTokens: number; outputTokens: number };
   /** The model the CLI says it uses. */
@@ -175,7 +177,7 @@ const claude: CliAdapter = {
       for (const part of content as Array<Record<string, unknown>>) {
         if (part.type === "tool_use") state.progress = describeTool(String(part.name), part.input);
         else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-          state.progress = firstLine(part.text);
+          state.progress = clip(part.text);
         }
       }
     }
@@ -232,20 +234,24 @@ const codex: CliAdapter = {
     if (!event) return;
     if (event.type === "thread.started" && typeof event.thread_id === "string") state.sessionId = event.thread_id;
     const item = event.item as Record<string, unknown> | undefined;
-    if (item?.type === "command_execution" && typeof item.command === "string") state.progress = `$ ${item.command}`;
+    if (item?.type === "command_execution" && typeof item.command === "string") state.progress = clip(`$ ${unwrapShell(item.command)}`);
     if (event.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string") {
       state.result = item.text;
-      state.progress = firstLine(item.text);
+      state.progress = clip(item.text);
     }
     if (event.type === "turn.completed" && event.usage) {
       const u = event.usage as Record<string, unknown>;
       addUsage(state, { inputTokens: count(u.input_tokens), outputTokens: count(u.output_tokens) });
     }
-    if (event.type === "turn.failed" || event.type === "error") {
+    // Codex also reports errors it recovers from this way ("Reconnecting... 1/5"), so only a failed
+    // turn (or its exit code) fails the run; a turn that completes after an error is fine.
+    const message = (event.error as { message?: string } | undefined)?.message ?? event.message;
+    if (event.type === "error" && typeof message === "string") state.error = message;
+    if (event.type === "turn.failed") {
       state.failed = true;
-      const message = (event.error as { message?: string } | undefined)?.message ?? event.message;
-      if (typeof message === "string") state.result = message;
+      state.result = typeof message === "string" ? message : state.error;
     }
+    if (event.type === "turn.completed") state.failed = false;
   },
   // `codex exec --json` leaves its rate limits out; the session file it writes has them.
   limits: (state) => readCodexLimits(state.sessionId),
@@ -343,7 +349,12 @@ function parseJson(line: string): Record<string, unknown> | null {
 function describeTool(name: string, input: unknown): string {
   const i = (input ?? {}) as Record<string, unknown>;
   const detail = i.command ?? i.file_path ?? i.path ?? i.pattern ?? i.description;
-  return typeof detail === "string" ? `${name}: ${firstLine(detail)}` : name;
+  return typeof detail === "string" ? clip(`${name}: ${detail}`) : name;
+}
+
+/** Progress text as the protocol takes it: whole, up to its limit. */
+function clip(text: string): string {
+  return text.trim().slice(0, 2000);
 }
 
 function firstLine(text: string): string {

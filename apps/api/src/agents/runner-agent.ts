@@ -124,8 +124,9 @@ export class RunnerAgent extends Agent<Env> {
         // Empty text: only the usage changed.
         if (!frame.text) return;
         const project = await getAgentByName(this.env.PROJECT_AGENT, task.project_id);
-        await project.setActivity(task.thread_id, true, frame.text.slice(0, 200));
-        await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.slice(0, 200) }]);
+        // The activity line takes the step's first line; the terminal keeps all of it (an agent's message, a long command).
+        await project.setActivity(task.thread_id, true, frame.text.trim().split("\n")[0]!.slice(0, 200));
+        await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.trim() }]);
         return;
       }
       case "task.folders": {
@@ -270,14 +271,20 @@ export class RunnerAgent extends Agent<Env> {
       .where(eq(schema.runners.id, this.name));
   }
 
+  /**
+   * Hands a task's result to its thread, then records it as finished. If the thread cannot take it
+   * (it is restarting for a new version of Myrel), the task stays running, so the result the runner
+   * sends again after reconnecting is delivered then.
+   */
   private async finish(task: TaskRow, ok: boolean, result: string, cancelled = false) {
-    this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
+    const detail = ok || cancelled ? undefined : result.trim().split("\n")[0]?.slice(0, 300) || undefined;
     const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
     await thread.taskEvents(task.id, [
       { type: "text", text: result },
-      ok ? { type: "phase", phase: "agent", state: "done" } : { type: "phase", phase: "agent", state: "failed" },
+      ok ? { type: "phase", phase: "agent", state: "done" } : { type: "phase", phase: "agent", state: "failed", ...(detail && { detail }) },
       cancelled ? { type: "done", ok: false, error: "Cancelled." } : { type: "done", ok },
     ]);
+    this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@fibteq/myrel-runner",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",
