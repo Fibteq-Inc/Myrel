@@ -60,6 +60,20 @@ npx eas-cli submit --platform ios                        # TestFlight / App Stor
 The bundle id / package is `io.fibteq.myrel` and the deep link scheme is `myrel://`.
 The API trusts the `myrel://` origin the app sends (see `apps/api/src/origins.ts`).
 
+## Releases
+
+JavaScript-only changes reach installed apps as EAS Updates: every push to `main` that touches the app
+runs `.eas/workflows/publish-update.yml`, which publishes for each platform that already has a store
+build with the same native fingerprint (`runtimeVersion` uses the fingerprint policy, so a version bump
+alone does not cut builds off).
+
+Store versions go through release-please. Commits under `apps/mobile` keep a "release mobile X.Y.Z"
+pull request up to date with the next version and a changelog. Merging it tags `mobile-vX.Y.Z`, and
+the tag runs `.eas/workflows/store-release.yml`: production builds for both platforms, uploaded to
+TestFlight and Play internal testing. Sending the version for review stays a manual step in App Store
+Connect and Play Console. Merge the release pull request whenever a native change (a new native module,
+config plugin or permission) is on `main`, since those can't ship as an update.
+
 ## Store listing
 
 The App Store listing (name, texts, keywords, age rating, review notes and screenshots) lives in
