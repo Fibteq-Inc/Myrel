@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.4.1...desktop-v0.5.0) (2026-10-22)
+
+
+### Features
+
+* **api:** wake the thread when its pull request starts to conflict ([c7c4d49](https://github.com/Fibteq-Inc/myrel/commit/c7c4d499cc279463ad7d42b9bc146a6bb240f5a8))
+* continue a turn the runner's restart cut off, a bounded number of times ([2f9de59](https://github.com/Fibteq-Inc/myrel/commit/2f9de59c31925303d56448a9f71618165074d42b))
+* **coordinator:** refuse duplicate threads and close mistaken ones ([d602a4b](https://github.com/Fibteq-Inc/myrel/commit/d602a4b256e6ef515b36a820e04ceab1b6679eeb))
+* **coordinator:** refuse duplicate threads and close mistaken ones ([e07d6c5](https://github.com/Fibteq-Inc/myrel/commit/e07d6c5b2b4a9efc00cd733074f6fe10b4ef1486))
+
 ## [0.4.1](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.4.0...desktop-v0.4.1) (2026-10-22)
 
 
