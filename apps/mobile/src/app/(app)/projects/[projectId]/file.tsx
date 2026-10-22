@@ -31,20 +31,25 @@ function readBlob(blob: Blob, as: "text" | "dataURL") {
   });
 }
 
-/** A preview of one project file: text and images; other kinds just show their name. */
+/**
+ * A preview of one project file, or with `local`, one in the project's folder on this person's
+ * computer (an agent's message pointed to it; `thread` is where its worktree is): text and images;
+ * other kinds just show their name.
+ */
 export default function FileScreen() {
   const { t } = useI18n();
-  const { path } = useLocalSearchParams<{ path: string }>();
+  const { path, local, thread } = useLocalSearchParams<{ path: string; local?: string; thread?: string }>();
   const { api, server } = useSession();
   const { projectId } = useProject();
   const preview = useQuery({
-    queryKey: ["file", server, projectId, path],
+    queryKey: local ? ["local-file", server, projectId, thread ?? null, path] : ["file", server, projectId, path],
     queryFn: async (): Promise<Preview> => {
-      const blob = await api.getFile(projectId, path);
+      const blob = local ? await api.getLocalFile(projectId, path, thread) : await api.getFile(projectId, path);
       if (blob.type.startsWith("image/")) return { kind: "image", uri: await readBlob(blob, "dataURL") };
       if (isText(blob.type, path)) return { kind: "text", text: (await readBlob(blob, "text")).slice(0, MAX_TEXT) };
       return { kind: "none" };
     },
+    retry: local ? false : undefined,
   });
   const name = path.split("/").pop() ?? path;
 

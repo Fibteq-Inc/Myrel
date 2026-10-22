@@ -20,6 +20,7 @@ export function Conversation({
   reactions,
   artifacts,
   projectId,
+  threadId,
   working,
   placeholder,
   onSend,
@@ -35,6 +36,8 @@ export function Conversation({
   reactions: Record<string, Reaction[]>;
   artifacts: Record<string, Artifact>;
   projectId: string;
+  /** The thread this is, for file links that point into its worktree. */
+  threadId?: string;
   /** Null when idle; otherwise what to show while the agent works. */
   working: string | null;
   placeholder: string;
@@ -50,7 +53,7 @@ export function Conversation({
   empty?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
-  const openLink = useOpenLink(projectId);
+  const openLink = useOpenLink(projectId, threadId);
   const openArtifact = useOpenArtifact(projectId);
   const answers = useMemo(() => decisionAnswers(messages), [messages]);
   // A tap on a card is shown on the card itself, not again as a bubble.
