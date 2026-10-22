@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
+import { BOOKMARK_HEADER, withD1Session } from "./d1-session";
 import { authLimit } from "./auth-limit";
 import { legalLinks, sellsPlans } from "./extensions";
 import { signUpEnabled } from "./instance";
@@ -40,8 +41,8 @@ const app = new Hono<AppEnv>()
     cors({
       origin: trustedOrigins(c.env),
       credentials: true,
-      allowHeaders: ["authorization", "content-type"],
-      exposeHeaders: ["set-auth-token"],
+      allowHeaders: ["authorization", "content-type", BOOKMARK_HEADER],
+      exposeHeaders: ["set-auth-token", BOOKMARK_HEADER],
     })(c, next),
   )
   .get("/health", (c) => c.json({ ok: true }))
@@ -164,6 +165,6 @@ async function scheduled(_controller: ScheduledController, env: Env) {
 }
 
 export default {
-  fetch: root.fetch,
+  fetch: withD1Session(root.fetch),
   scheduled,
 } satisfies ExportedHandler<Env>;

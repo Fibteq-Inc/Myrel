@@ -19,7 +19,10 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const token = c.req.query("token");
   if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
 
-  const session = await createAuth(c.env).api.getSession({ headers });
+  let session = await createAuth(c.env).api.getSession({ headers });
+  // A session made a moment ago may not have reached the replica this request reads from yet.
+  const signedIn = headers.has("authorization") || headers.has("cookie");
+  if (!session && signedIn && c.env.DB_PRIMARY) session = await createAuth({ ...c.env, DB: c.env.DB_PRIMARY }).api.getSession({ headers });
   if (!session) return c.json({ error: "unauthorized" }, 401);
 
   const { id, name, email, role, emailVerified } = session.user;
