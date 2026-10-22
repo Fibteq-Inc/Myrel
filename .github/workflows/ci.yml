@@ -15,14 +15,29 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # Pull requests only check the packages they change, plus every package that depends on them
+      # (turbo --affected follows the workspace graph). The checkout is the PR's merge commit, so its
+      # first parent is the base branch and the diff is exactly the PR. Changes to turbo.json, the
+      # lockfile, root package.json or turbo.json's globalDependencies (this file included) check
+      # everything. Pushes to main always check everything; the turbo cache skips unchanged work there.
+      AFFECTED: ${{ github.event_name == 'pull_request' && '--affected' || '' }}
+      TURBO_SCM_BASE: HEAD^1
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+      - run: pnpm turbo run typecheck $AFFECTED
+      - run: pnpm turbo run test $AFFECTED
+      - run: pnpm turbo run build $AFFECTED
