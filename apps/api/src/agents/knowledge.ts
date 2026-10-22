@@ -161,6 +161,11 @@ export class KnowledgeStore {
     return this.getFile(file.path)!;
   }
 
+  /** Bytes the project's files take, leaving out `except` (a file about to be replaced). */
+  filesBytes(except?: string): number {
+    return this.sql<{ n: number | null }>`SELECT SUM(size) AS n FROM files WHERE path != ${except ?? ""}`[0]?.n ?? 0;
+  }
+
   forgetFile(path: string): boolean {
     const existed = !!this.getFile(path);
     this.sql`DELETE FROM files WHERE path = ${path}`;

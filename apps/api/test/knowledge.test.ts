@@ -99,6 +99,12 @@ describe("project knowledge API", () => {
 
     expect((await api(`${base}/files/content?path=notes/plan.md`, { token, method: "DELETE" })).status).toBe(200);
     expect((await api(`${base}/files/content?path=notes/plan.md`, { token })).status).toBe(404);
+
+    // Storing files waits for a verified address.
+    const me = (await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } };
+    await env.DB.prepare("UPDATE user SET email_verified = 0 WHERE id = ?").bind(me.user.id).run();
+    expect((await api(`${base}/files/content?path=a.md`, { token, method: "PUT", body: "x" })).status).toBe(403);
+    expect((await api(`${base}/uploads?name=a.md`, { token, method: "POST", body: "x" })).status).toBe(403);
   });
 });
 

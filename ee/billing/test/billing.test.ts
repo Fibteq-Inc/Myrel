@@ -210,6 +210,14 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canUseSandbox!(workerEnv, project.id)).toEqual({ ok: true });
   });
 
+  it("limits how much a project's files take on Free", async () => {
+    const { token } = await signUp();
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    expect(await billingExtensions.canStoreFile!(workerEnv, project.id, 900_000_000)).toEqual({ ok: true });
+    const full = await billingExtensions.canStoreFile!(workerEnv, project.id, 1_100_000_000);
+    expect(full.ok || full.reason).toContain("1 GB");
+  });
+
   it("spends nothing of the service's on a project whose owner has not verified their address", async () => {
     const { token, userId } = await signUp();
     const project = ((await (await createProject(token)).json()) as { project: Project }).project;

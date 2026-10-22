@@ -1113,6 +1113,11 @@ export class ProjectAgent extends Agent<Env> {
     return this.knowledge.recordFile(file, by);
   }
 
+  /** Bytes the project's files take, leaving out `except`. Callable over RPC. */
+  filesBytes(except?: string) {
+    return this.knowledge.filesBytes(except);
+  }
+
   forgetFile(path: string) {
     return this.knowledge.forgetFile(path);
   }

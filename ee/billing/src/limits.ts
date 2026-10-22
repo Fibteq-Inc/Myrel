@@ -36,6 +36,16 @@ export const billingExtensions: Extensions = {
       : refuse(`Your plan includes ${max} projects. ${UPGRADE}, or delete a project you no longer need.`);
   },
 
+  async canStoreFile(env, projectId, total) {
+    const project = await projectOwner(env.DB, projectId);
+    if (!project) return OK;
+    const standing = await standingOf(env, project.owner);
+    const max = standing.limits.storageBytes;
+    if (max === null || total <= max) return OK;
+    const gb = Math.round(max / 1e8) / 10;
+    return refuse(`This project's files can take up to ${gb} GB on its plan. ${UPGRADE}, or delete files it no longer needs.`);
+  },
+
   async canAddConnector(env, owner) {
     const userId = "userId" in owner ? owner.userId : (await projectOwner(env.DB, owner.projectId))?.owner;
     if (!userId) return OK;
