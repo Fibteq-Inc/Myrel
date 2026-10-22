@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
+import { BOOKMARK_HEADER, withD1Session } from "./d1-session";
 import { authLimit } from "./auth-limit";
 import { CAPTCHA_HEADER, captchaConfig } from "./captcha";
 import { legalLinks, sellsPlans } from "./extensions";
@@ -41,8 +42,8 @@ const app = new Hono<AppEnv>()
     cors({
       origin: trustedOrigins(c.env),
       credentials: true,
-      allowHeaders: ["authorization", "content-type", CAPTCHA_HEADER],
-      exposeHeaders: ["set-auth-token"],
+      allowHeaders: ["authorization", "content-type", BOOKMARK_HEADER, CAPTCHA_HEADER],
+      exposeHeaders: ["set-auth-token", BOOKMARK_HEADER],
     })(c, next),
   )
   .get("/health", (c) => c.json({ ok: true }))
@@ -171,6 +172,6 @@ async function scheduled(_controller: ScheduledController, env: Env) {
 }
 
 export default {
-  fetch: root.fetch,
+  fetch: withD1Session(root.fetch),
   scheduled,
 } satisfies ExportedHandler<Env>;

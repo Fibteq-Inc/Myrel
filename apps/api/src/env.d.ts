@@ -1,6 +1,8 @@
 // Secrets, set with `wrangler secret put` (see wrangler.jsonc). Only the model key of the
 // provider in use is needed.
 interface Env {
+  /** Set per request by withD1Session (d1-session.ts): the primary, while DB is the request's session. */
+  DB_PRIMARY?: D1Database;
   BETTER_AUTH_SECRET: string;
   /** Encrypts stored model keys. Falls back to BETTER_AUTH_SECRET; set it once and keep it. */
   KEY_ENCRYPTION_SECRET?: string;

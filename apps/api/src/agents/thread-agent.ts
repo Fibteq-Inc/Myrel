@@ -252,6 +252,7 @@ export class ThreadAgent extends Agent<Env> {
   async wake(reason: ThreadWake): Promise<void> {
     // Someone writing in a closed thread, the coordinator sending it work or a routine resumed for it opens it again.
     if (reason.kind !== "github") this.deleteMeta("closed");
+    if (reason.kind !== "github" && reason.reopened) this.startPlanRound();
     // An answer to a folder card the running turn waits on goes to that turn, not to a new one.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
     // A tap on the repository card connects it first, so the turn it starts has it.
@@ -272,6 +273,16 @@ export class ThreadAgent extends Agent<Env> {
         VALUES (${reason.name}, ${reason.prompt}, ${new Date().toISOString()}, ${reason.actor ?? null})`;
     }
     await this.markDirty();
+  }
+
+  /**
+   * A resolved thread got new work: the next plan opens a new card at the end of the conversation,
+   * under the message that asked for it, instead of growing the finished card further up. The old
+   * card keeps its last state, and the thread shows the old plan until the agent sets a new one.
+   */
+  private startPlanRound() {
+    for (const key of ["plan", "plan_card_id", "plan_card_text", "plan_update_id", "plan_update"]) this.deleteMeta(key);
+    this.setMeta("plan_finished", "1");
   }
 
   /** The plan the agent set has steps still to do. */
@@ -388,7 +399,7 @@ export class ThreadAgent extends Agent<Env> {
     // This turn continues one a runner restart cut off, whether its wait ran out or a message came first.
     const pending = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; lastStep: string | null } | null;
     this.deleteMeta("resume_pending");
-    const note = pending ? { resumeNote: resumeNote(pending) } : {};
+    const note = { ...(pending ? { resumeNote: resumeNote(pending) } : {}), planFinished: this.getMeta("plan_finished") === "1" };
     await this.startAgentTurn({
       prompt: threadPrompt({ ...promptInput, ...note }),
       followUp: threadPrompt({ ...promptInput, followUp: true, ...note }),
@@ -1123,6 +1134,7 @@ export class ThreadAgent extends Agent<Env> {
         },
         setPlan: async (plan) => {
           this.setMeta("plan", JSON.stringify(plan));
+          this.deleteMeta("plan_finished");
           // A plan with work left (again) keeps the turn going after a reply.
           save({ planDone: plan.steps.every((s) => s.state !== "todo" && s.state !== "active"), doneReplyAt: undefined });
           await this.showStatus();

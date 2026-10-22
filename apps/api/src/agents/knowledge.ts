@@ -302,7 +302,7 @@ export type KnowledgeHost = {
 export const KNOWLEDGE_GUIDE = `Project knowledge:
 - Project instructions are set by members. Follow them in everything you do.
 - Project memory is shared by every agent in this project and outlives this conversation. Save what a later agent would otherwise have to ask again or rediscover: how people want you to work, decisions they made, facts about the project. Keep one memory file per subject (memory_write replaces the whole file, so read it first and keep what is still true), and keep MEMORY short: it is the index everyone reads in full. Do not save what only matters to this conversation, and never save secrets.
-- Project files are the project's shared folder. Files people attach to messages land in uploads/. Read a file before relying on it (read_file hands you a download command for images, PDFs and other binary files); put results others will need in a file under a folder named for the work (write_file for text, file_upload_url for anything else), and mention the path in your reply.`;
+- Project files are the project's shared folder. Files people attach to messages land in uploads/. Read a file before relying on it (read_file hands you a download command for images, PDFs and other binary files); put results others will need in a file under a folder named for the work (write_file for text, file_upload_url for anything else), and mention it in your reply as a link with its path, such as [rapor.md](notes/rapor.md), which opens it for people.`;
 
 export function knowledgeTools(host: KnowledgeHost): Tool[] {
   return [

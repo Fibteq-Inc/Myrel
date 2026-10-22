@@ -9,6 +9,7 @@ export const en = {
   "common.error": "Something went wrong",
   "common.copy": "Copy",
   "common.copied": "Copied",
+  "common.close": "Close",
   "common.member": "Member",
   "common.comingSoon": "{label} (coming soon)",
   "common.comingSoonTitle": "{label} · coming soon",
@@ -693,6 +694,8 @@ export const en = {
   "files.closePreview": "Close preview",
   "files.loading": "Loading…",
   "files.loadFailed": "This file could not be loaded.",
+  "files.onOtherComputer": "On another member's computer",
+  "files.onOtherComputerBody": "This file is in the project's folder on another member's computer, so only they can open it. If you need it too, ask the agent to put it in the project files.",
   "files.noPreview": "No preview for this kind of file. Use the download button.",
 
   // Tasks (terminal and changes tabs)

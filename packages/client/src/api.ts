@@ -92,6 +92,8 @@ export class ApiClient {
   private readonly fetchImpl: typeof fetch;
   private readonly headers: Record<string, string>;
   private readonly credentials: RequestCredentials;
+  /** The server's D1 bookmark from the latest answer: lets the next request read from a replica that has it. */
+  private bookmark: string | null = null;
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -120,6 +122,7 @@ export class ApiClient {
     if (init.contentType) headers["content-type"] = init.contentType;
     const token = await this.tokens?.get();
     if (token) headers.authorization = `Bearer ${token}`;
+    if (this.bookmark) headers["x-d1-bookmark"] = this.bookmark;
 
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: init.method ?? "GET",
@@ -127,6 +130,9 @@ export class ApiClient {
       body: init.body,
       credentials: this.credentials,
     });
+    // Bookmarks sort by position in the database's history; answers may arrive out of order.
+    const bookmark = res.headers.get("x-d1-bookmark");
+    if (bookmark && (!this.bookmark || bookmark > this.bookmark)) this.bookmark = bookmark;
     // Better Auth's bearer plugin returns the session token in this header.
     const issued = res.headers.get("set-auth-token");
     if (issued) await this.tokens?.set(issued);

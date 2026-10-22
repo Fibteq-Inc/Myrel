@@ -1,13 +1,23 @@
 import { useT } from "@myrel/i18n/react";
-import { DECISION_LANG, parseDecision, threadIdFromHref } from "@myrel/protocol";
+import {
+  DECISION_LANG,
+  type FileRef,
+  type FileRefContext,
+  isLocalHref,
+  mayBeFileName,
+  parseDecision,
+  resolveFileCode,
+  resolveFileHref,
+  threadIdFromHref,
+} from "@myrel/protocol";
 import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, FileText, MessagesSquare } from "lucide-react";
-import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Check, Copy, FileText, MessagesSquare, MonitorSmartphone } from "lucide-react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { workspaceQuery } from "../../lib/api";
+import { filesQuery, runnersQuery, workspaceQuery } from "../../lib/api";
 import { FilePreview } from "../files";
 import { DecisionCard } from "./decision-card";
 
@@ -42,8 +52,11 @@ const MarkdownBody = memo(function MarkdownBody({
     code: ({ className, children }) => {
       const lang = /language-([\w-]+)/.exec(className ?? "")?.[1];
       const text = String(children ?? "");
-      // Inline code has no language and no newline.
-      if (!lang && !text.includes("\n")) return <code>{children}</code>;
+      // Inline code has no language and no newline. A file's path in it opens the file.
+      if (!lang && !text.includes("\n")) {
+        if (projectId && mayBeFileName(text)) return <FileCode projectId={projectId} threadId={threadId} code={text} />;
+        return <code>{children}</code>;
+      }
       if (lang === DECISION_LANG) {
         const parsed = parseDecision(text);
         if (parsed) return <DecisionCard decision={parsed} answer={answer} onChoose={onChoose} />;
@@ -54,12 +67,12 @@ const MarkdownBody = memo(function MarkdownBody({
       // [Title](#thr_…) opens that thread's panel.
       const linked = threadIdFromHref(href);
       if (linked && projectId) return <ThreadLink projectId={projectId} threadId={linked}>{children}</ThreadLink>;
-      // A file the agent wrote in the project's folders on the person's computer (DURUM.md, /Users/…/notes.md).
-      if (href && projectId && isLocalPath(href)) {
+      // A file: in the project's files, or one the agent wrote in the project's folders on a computer (DURUM.md, /Users/…/notes.md).
+      if (href && projectId && isLocalHref(href)) {
         return (
-          <LocalFileLink projectId={projectId} threadId={threadId} path={href}>
+          <FileLink projectId={projectId} threadId={threadId} href={href}>
             {children}
-          </LocalFileLink>
+          </FileLink>
         );
       }
       return (
@@ -78,45 +91,73 @@ const MarkdownBody = memo(function MarkdownBody({
   );
 });
 
-/** A link that is a file path rather than a web address: no scheme (or file://), not an anchor or app route. */
-function isLocalPath(href: string): boolean {
-  if (href.startsWith("file://")) return true;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || /^(#|\?|\/\/|\/api\/|\/projects\/)/.test(href)) return false;
-  return /[\w.-]/.test(href);
+/** What file paths in this project's messages can open: its files, and its local folder if it has one. */
+function useFileRefContext(projectId: string): FileRefContext {
+  const files = useQuery({ ...filesQuery(projectId), staleTime: 30_000 });
+  const workspace = useQuery(workspaceQuery(projectId));
+  const runners = useQuery({ ...runnersQuery, enabled: !!workspace.data });
+  const runnerId = workspace.data?.runnerId;
+  const mine = !!runnerId && !!runners.data?.some((r) => r.id === runnerId);
+  const projectFiles = useMemo(() => new Set(files.data?.map((f) => f.path)), [files.data]);
+  return { projectFiles, workspace: runnerId ? (mine ? "mine" : "other") : null };
 }
 
-/**
- * Opens a local file link in a preview, read from the computer the project's folder is on. Without
- * a local folder (a cloud project), it stays an ordinary link.
- */
-function LocalFileLink({ projectId, threadId, path, children }: { projectId: string; threadId?: string; path: string; children: ReactNode }) {
-  const workspace = useQuery(workspaceQuery(projectId));
-  const [open, setOpen] = useState(false);
-  if (!workspace.data) {
+/** A link to a path: a file chip when it can be opened, otherwise an ordinary link. */
+function FileLink({ projectId, threadId, href, children }: { projectId: string; threadId?: string; href: string; children: ReactNode }) {
+  const file = resolveFileHref(href, useFileRefContext(projectId));
+  if (!file) {
     return (
-      <a href={path} target="_blank" rel="noreferrer">
+      <a href={href} target="_blank" rel="noreferrer">
         {children}
       </a>
     );
   }
   return (
+    <FileChip projectId={projectId} threadId={threadId} file={file}>
+      {children}
+    </FileChip>
+  );
+}
+
+/** Inline code naming a file: a file chip when it can be opened, otherwise just code. */
+function FileCode({ projectId, threadId, code }: { projectId: string; threadId?: string; code: string }) {
+  const file = resolveFileCode(code, useFileRefContext(projectId));
+  if (!file) return <code>{code}</code>;
+  return (
+    <FileChip projectId={projectId} threadId={threadId} file={file}>
+      <code className="bg-transparent p-0">{code}</code>
+    </FileChip>
+  );
+}
+
+/** Opens a file in a preview: a project file, or one read from the computer the project's folder is on. */
+function FileChip({ projectId, threadId, file, children }: { projectId: string; threadId?: string; file: FileRef; children: ReactNode }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const elsewhere = file.kind === "elsewhere";
+  return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={path}
-        className="inline-flex items-baseline gap-1 rounded-md border border-line bg-raised px-1.5 font-medium text-fg transition-colors hover:border-edge"
+        title={elsewhere ? t("files.onOtherComputer") : file.path}
+        className={`inline-flex items-baseline gap-1 rounded-md border border-line bg-raised px-1.5 font-medium transition-colors hover:border-edge ${elsewhere ? "text-muted" : "text-fg"}`}
       >
-        <FileText size={13} className="flex-none self-center text-subtle" aria-hidden="true" />
+        {elsewhere ? (
+          <MonitorSmartphone size={13} className="flex-none self-center text-subtle" aria-hidden="true" />
+        ) : (
+          <FileText size={13} className="flex-none self-center text-subtle" aria-hidden="true" />
+        )}
         {children}
       </button>
       {/* In a portal: the link sits inside a paragraph, which cannot hold the preview's blocks. */}
-      {open && createPortal(<LocalFileDialog projectId={projectId} threadId={threadId} path={path} onClose={() => setOpen(false)} />, document.body)}
+      {open && createPortal(<FileDialog projectId={projectId} threadId={threadId} file={file} onClose={() => setOpen(false)} />, document.body)}
     </>
   );
 }
 
-function LocalFileDialog({ projectId, threadId, path, onClose }: { projectId: string; threadId?: string; path: string; onClose: () => void }) {
+function FileDialog({ projectId, threadId, file, onClose }: { projectId: string; threadId?: string; file: FileRef; onClose: () => void }) {
+  const t = useT();
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -124,14 +165,27 @@ function LocalFileDialog({ projectId, threadId, path, onClose }: { projectId: st
     dialog.showModal();
     return () => dialog.close();
   }, []);
+  const elsewhere = file.kind === "elsewhere";
   return (
     <dialog
       ref={ref}
       onClose={onClose}
       onClick={(e) => e.target === e.currentTarget && onClose()}
-      className="m-auto h-[min(80vh,900px)] open:flex w-[min(860px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-line bg-ground p-0 text-[13px] text-fg shadow-2xl backdrop:bg-black/60"
+      className={`m-auto open:flex w-[min(860px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-line bg-ground p-0 text-[13px] text-fg shadow-2xl backdrop:bg-black/60 ${elsewhere ? "" : "h-[min(80vh,900px)]"}`}
     >
-      <FilePreview projectId={projectId} path={path} local={{ threadId }} onClose={onClose} />
+      {elsewhere ? (
+        <div className="flex flex-col gap-3 p-5">
+          <p className="truncate font-mono text-[12.5px] text-muted" title={file.path}>
+            {file.path}
+          </p>
+          <p className="text-body">{t("files.onOtherComputerBody")}</p>
+          <button type="button" onClick={onClose} className="self-end rounded-lg border border-edge px-3 py-1.5 hover:bg-hover">
+            {t("common.close")}
+          </button>
+        </div>
+      ) : (
+        <FilePreview projectId={projectId} path={file.path} local={file.kind === "local" ? { threadId } : undefined} onClose={onClose} />
+      )}
     </dialog>
   );
 }
