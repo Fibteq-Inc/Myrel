@@ -14,7 +14,7 @@ export type AccessAnswer = "once" | "always" | "deny";
  * a command inside the folders that the runner's access level does not run on its own; `folder`
  * then holds the command, and "always" means every command for the rest of this turn.
  */
-export type AccessRequest = { id: string; folder: string; kind?: "command"; answer?: AccessAnswer };
+export type AccessRequest = { id: string; folder: string; kind?: "command"; answer?: AccessAnswer; messageId?: string };
 
 /** How long the agent waits for the person before carrying on without the folder. */
 export const ACCESS_WAIT_MS = 10 * 60 * 1000;
@@ -32,16 +32,19 @@ const LABELS: Record<"en" | "tr", Record<AccessAnswer, { label: string; conseque
   },
 };
 
+function folderDecision(folder: string, lang: "en" | "tr"): DecisionInput {
+  const short = folder.length > 200 ? `…${folder.slice(-199)}` : folder;
+  return {
+    question: lang === "tr" ? `Ajan şu klasöre erişebilsin mi? ${short}` : `Can the agent use this folder? ${short}`,
+    options: (["once", "always", "deny"] as const).map((a) => LABELS[lang][a]),
+    recommended: 0,
+  };
+}
+
 /** The message carrying the card: what the agent tried, then the question with its three options. */
 export function accessMessage(folder: string, what: string, language: string): string {
   const lang = language === "tr" ? "tr" : "en";
-  const labels = LABELS[lang];
-  const short = folder.length > 200 ? `…${folder.slice(-199)}` : folder;
-  const decision: DecisionInput = {
-    question: lang === "tr" ? `Ajan şu klasöre erişebilsin mi? ${short}` : `Can the agent use this folder? ${short}`,
-    options: (["once", "always", "deny"] as const).map((a) => labels[a]),
-    recommended: 0,
-  };
+  const decision = folderDecision(folder, lang);
   const intro =
     lang === "tr"
       ? `Ajan, projenin klasörleri dışında bir yere erişmek istiyor (${what}). Yanıtını bekliyor.`
@@ -73,13 +76,29 @@ export function describeCommand(toolName: string, input: Record<string, unknown>
  * The card for a command the runner's access level does not run on its own (`myrel-runner start`
  * without `--access full`), so the person can allow it here instead of restarting the runner.
  */
-export function commandMessage(command: string, language: string): string {
-  const lang = language === "tr" ? "tr" : "en";
-  const decision: DecisionInput = {
+function commandDecision(lang: "en" | "tr"): DecisionInput {
+  return {
     question: lang === "tr" ? "Ajan bu komutu bilgisayarında çalıştırabilsin mi?" : "Can the agent run this command on your computer?",
     options: (["once", "always", "deny"] as const).map((a) => COMMAND_LABELS[lang][a]),
     recommended: 0,
   };
+}
+
+/**
+ * What an answered card's message becomes: just the card (and the command it was about), which
+ * clients show as one line with the pick. The explanation was for while it waited.
+ */
+export function answeredAccessMessage(request: AccessRequest, language: string): string {
+  const lang = language === "tr" ? "tr" : "en";
+  if (request.kind !== "command") return formatDecision(folderDecision(request.folder, lang));
+  const command = request.folder.replace(/\s+/g, " ").replaceAll("`", "'");
+  const short = command.length > 160 ? `${command.slice(0, 159)}…` : command;
+  return `\`${short}\`\n\n${formatDecision(commandDecision(lang))}`;
+}
+
+export function commandMessage(command: string, language: string): string {
+  const lang = language === "tr" ? "tr" : "en";
+  const decision = commandDecision(lang);
   const intro =
     lang === "tr"
       ? "myrel-runner'ın bu bilgisayardaki erişim seviyesi komutları sormadan çalıştırmıyor. Ajan şunu çalıştırmak istiyor ve yanıtını bekliyor:"
@@ -195,6 +214,14 @@ export function denyAnswer(message: string): string {
 /** Why a file change inside the project's folders is not allowed: the runner is read-only there. */
 export const ACCESS_LEVEL_DENIED =
   "myrel-runner's access level on this computer (read) does not let you change files. If the work needs it, say so in a reply; the person can change it with `myrel-runner start --access edit` or `--access full`.";
+
+/** A shell command that opens a pull request with the GitHub CLI. */
+export function opensPullRequest(input: Record<string, unknown>): boolean {
+  return typeof input.command === "string" && /\bgh\s+pr\s+(create|new)\b/.test(input.command);
+}
+
+export const USE_OPEN_PULL_REQUEST =
+  "Do not open pull requests with gh here. Push the branch with git, then call Myrel's open_pull_request tool: it opens the pull request through Myrel's GitHub App, credits the person and follows it.";
 
 /** A short description of the request for the card, e.g. "Read /Users/a/notes/todo.md". */
 export function describeRequest(toolName: string, target: AccessTarget): string {

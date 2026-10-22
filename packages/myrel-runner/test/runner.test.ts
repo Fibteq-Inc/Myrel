@@ -163,7 +163,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
       { transport: "stdio" as const, name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } },
     ];
     const claude = await ADAPTERS.claude.agent({ ...mcp(), connectors });
-    expect(claude.args.slice(-2)).toEqual(["--allowedTools", "mcp__myrel,mcp__linear,mcp__db"]);
+    expect(claude.args.slice(-4)).toEqual(["--allowedTools", "mcp__myrel,mcp__linear,mcp__db", "--disallowedTools", "Bash(gh pr create:*)"]);
     const config = JSON.parse(await readFile(claude.args[1]!, "utf8"));
     expect(config.mcpServers.linear).toEqual({ type: "http", url: connectors[0]!.url, headers: { Authorization: `Bearer ${"t".repeat(32)}` } });
     expect(config.mcpServers.db).toEqual({ type: "stdio", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } });

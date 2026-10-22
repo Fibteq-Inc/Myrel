@@ -1,6 +1,6 @@
 import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { planChecklist } from "@myrel/protocol";
+import { decisionPicks, planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -339,6 +339,8 @@ function Conversation({
   const messages = threadMessages(state, thread.id);
   const history = useHistoryWindow(messages);
   const answers = decisionAnswers(messages);
+  // A tap on a card is shown on the card itself, not again as a bubble.
+  const picks = decisionPicks(messages);
   const choose = useCallback((label: string) => send(label, threadId), [send, threadId]);
   // Each pull request shows under the message that links it; one no message linked yet shows at the end.
   const pullRequests = threadPullRequests(state, thread.id);
@@ -368,6 +370,7 @@ function Conversation({
           {root && !history.hidden && <MessageView message={root} me={me} names={names} />}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
+            if (picks.has(m.id)) return null;
             const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
             if (plan !== null) {
               const current = m.id === currentPlan?.id;

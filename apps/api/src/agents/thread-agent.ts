@@ -55,12 +55,15 @@ import {
   type AccessRequest,
   accessTargets,
   allowAnswer,
+  answeredAccessMessage,
   commandAnswer,
   commandMessage,
   denyAnswer,
   describeCommand,
   describeRequest,
   insideAny,
+  opensPullRequest,
+  USE_OPEN_PULL_REQUEST,
 } from "./folder-access";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
@@ -730,6 +733,8 @@ export class ThreadAgent extends Agent<Env> {
         // A command the runner's access level does not run on its own: the person decides here,
         // instead of restarting the runner with --access full.
         if (!outside.length) {
+          // Pull requests go through Myrel's GitHub App, which credits the person and follows them.
+          if (opensPullRequest(input)) return denyAnswer(USE_OPEN_PULL_REQUEST);
           if (this.getMeta("access_commands")) return allowAnswer(input);
           const command = describeCommand(tool_name, input);
           const answer = await this.askAccess(command, command, "command");
@@ -779,6 +784,8 @@ export class ThreadAgent extends Agent<Env> {
       const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
       // Not news for the next turn, unless someone wrote in between.
       if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      const id = request.id;
+      this.setMeta("access_requests", JSON.stringify(this.accessRequests().map((r) => (r.id === id ? { ...r, messageId: m.id } : r))));
       await project.updateThread(threadId, { status: "blocked" });
       await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
     }
@@ -820,6 +827,13 @@ export class ThreadAgent extends Agent<Env> {
     }
     this.setMeta("access_grants", JSON.stringify(grants));
     this.setMeta("access_requests", JSON.stringify(this.accessRequests().map((r) => open.find((o) => o.id === r.id) ?? r)));
+    // The answered card shrinks to one line; the explanation was for while it waited.
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    for (const r of open) {
+      if (!r.messageId) continue;
+      await project.editMessage(r.messageId, answeredAccessMessage(r, turn?.language ?? "en")).catch((err) => console.warn("access card not shortened", err));
+    }
     // The answer was for this turn: it is not news for the next one.
     if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(reason.seq));
     return true;
@@ -943,7 +957,8 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
     const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
-    // A pull request a reply only mentions is followed but not credited: it may not be this thread's.
+    // A pull request a reply only mentions is credited only when it was opened during this turn,
+    // which makes it this agent's (opened with gh, say); an older one may not be this thread's.
     const track = (url: string, credit?: PullCredit) => trackPullRequest(this.env, projectId, threadId, url, credit);
     const local = this.runningTask()?.backend === "local";
     return [
@@ -974,7 +989,10 @@ export class ThreadAgent extends Agent<Env> {
           // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
           if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
           // A pull request it links to is followed even when it forgot track_pull_request.
-          for (const url of pullRequestUrls(text)) await track(url).catch((err) => console.warn("tracking pull request failed", url, err));
+          const urls = pullRequestUrls(text);
+          const started = this.runningTask()?.created_at;
+          const credit = urls.length && started ? { ...(await this.pullCredit()), since: new Date(Date.parse(started) - 60_000).toISOString() } : undefined;
+          for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
           return m;
         },
         publishArtifact: async (input) => {

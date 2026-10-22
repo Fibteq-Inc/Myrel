@@ -428,6 +428,18 @@ describe("pull requests", () => {
     fakeGithub.pulls[`acme/app#${o}`] = pull({ number: o, html_url: old, body: "Old.", created_at: "2020-01-01T00:00:00Z" });
     await trackPullRequest(env, project.id, thread.id, old, credit);
     expect((fakeGithub.pulls[`acme/app#${o}`] as { body: string }).body).toBe("Old.");
+    // A reply's link counts as the agent's own when the pull request was opened during its turn.
+    const turnStart = new Date(Date.now() - 5 * 60_000).toISOString();
+    const g = number + 4;
+    const viaGh = `https://github.com/acme/app/pull/${g}`;
+    fakeGithub.pulls[`acme/app#${g}`] = pull({ number: g, html_url: viaGh, body: "Via gh.", created_at: new Date().toISOString() });
+    await trackPullRequest(env, project.id, thread.id, viaGh, { ...credit, since: turnStart });
+    expect((fakeGithub.pulls[`acme/app#${g}`] as { body: string }).body).toBe(`${attributionBlock(credit)}\n\nVia gh.`);
+    const b = number + 5;
+    const before2 = `https://github.com/acme/app/pull/${b}`;
+    fakeGithub.pulls[`acme/app#${b}`] = pull({ number: b, html_url: before2, body: "Earlier.", created_at: new Date(Date.now() - 10 * 60_000).toISOString() });
+    await trackPullRequest(env, project.id, thread.id, before2, { ...credit, since: turnStart });
+    expect((fakeGithub.pulls[`acme/app#${b}`] as { body: string }).body).toBe("Earlier.");
   });
 
   it("ignores events about pull requests no thread opened", async () => {

@@ -131,7 +131,8 @@ const claude: CliAdapter = {
     // The skills come as a plugin (myrel:<name>); their folder may be read without asking.
     const skillArgs = skills ? ["--plugin-dir", quotePath(skills.plugin), "--add-dir", quotePath(skills.dir)] : [];
     return {
-      args: ["--mcp-config", config, "--allowedTools", allowed.join(","), ...skillArgs],
+      // Pull requests go through Myrel's open_pull_request tool (the GitHub App), never the person's gh.
+      args: ["--mcp-config", config, "--allowedTools", allowed.join(","), "--disallowedTools", "Bash(gh pr create:*)", ...skillArgs],
       ...(asks && { env: { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) } }),
     };
   },

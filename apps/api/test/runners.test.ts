@@ -473,6 +473,11 @@ describe("local workspace", () => {
     expect(await Promise.race([run.then(() => "answered"), new Promise((r) => setTimeout(() => r("waiting"), 300))])).toBe("waiting");
     await answer("Çalıştır");
     expect((await run).behavior).toBe("allow");
+    // Answered, the card shrinks to the command and the card, without the explanation.
+    await until(async () => !(await cards())[5]!.body.includes("erişim seviyesi"), "shortened card");
+    expect((await cards())[5]!.body.startsWith("`git push -u origin myrel/readme`")).toBe(true);
+    // Pull requests go through Myrel's GitHub App, never gh, whatever the person allowed.
+    expect(await ask("Bash", { command: "git push && gh pr create --fill" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("open_pull_request") });
     const denied = ask("Bash", { command: "rm -rf build" });
     await until(async () => (await cards()).length === 7, "second command card");
     await answer("Çalıştırma");

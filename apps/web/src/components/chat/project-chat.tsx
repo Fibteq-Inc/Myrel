@@ -1,5 +1,6 @@
 import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
+import { decisionPicks } from "@myrel/protocol";
 import { LoaderCircle, MessagesSquare } from "lucide-react";
 import { useCallback } from "react";
 import { api } from "../../lib/api";
@@ -21,6 +22,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   const choose = useCallback((label: string) => send(label), [send]);
   const roots = threadByCard(state);
   const answers = decisionAnswers(chat);
+  // A tap on a card is shown on the card itself, not again as a bubble.
+  const picks = decisionPicks(chat);
   const thinking = !!state.active[""];
 
   return (
@@ -31,6 +34,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
             const thread = roots.get(m.id);
+            // A pick that opened a thread keeps its bubble, which carries the thread's card.
+            if (picks.has(m.id) && !thread) return null;
             return (
               <MessageView
                 key={m.id}
