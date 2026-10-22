@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="https://myrel.fibteq.io">Try it</a> ·
+  <a href="https://docs.myrel.fibteq.io">Docs</a> ·
   <a href="#download">Download</a> ·
   <a href="docs/self-hosting.md">Self-host</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
