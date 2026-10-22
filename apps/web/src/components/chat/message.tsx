@@ -1,9 +1,10 @@
 import { useT } from "@myrel/i18n/react";
-import { type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
+import { DECISION_LANG, type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
 import { AlarmClock, CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { MyrelMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
+import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
@@ -66,7 +67,9 @@ export function MessageView({
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
           ) : (
-            <MessageMarkdown body={message.body} decision={decision} />
+            <FoldIfLong body={message.body}>
+              <MessageMarkdown body={message.body} decision={decision} />
+            </FoldIfLong>
           )}
           <AttachmentList attachments={message.attachments} />
           {children}
@@ -91,7 +94,7 @@ export function MessageView({
       {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? t("common.member")}</span>}
       {message.body && (
         <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
-          {message.body}
+          <Collapsible lines={10}>{message.body}</Collapsible>
         </div>
       )}
       <div className="flex max-w-[85%] justify-end">
@@ -101,6 +104,15 @@ export function MessageView({
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
     </div>
   );
+}
+
+/**
+ * Agent replies fold later than people's messages, and never when they carry
+ * a decision card: the card sits at the end and must stay in reach.
+ */
+function FoldIfLong({ body, children }: { body: string; children: ReactNode }) {
+  if (body.includes("```" + DECISION_LANG)) return children;
+  return <Collapsible lines={24}>{children}</Collapsible>;
 }
 
 function Reactions({ reactions }: { reactions?: Reaction[] }) {

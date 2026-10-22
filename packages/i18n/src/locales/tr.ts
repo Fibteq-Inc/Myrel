@@ -101,6 +101,8 @@ export const tr: Catalog = {
 
   // Messages
   "message.copy": "Mesajı kopyala",
+  "message.showMore": "Devamını göster",
+  "message.showLess": "Daha az göster",
   "message.thinking": "Düşünüyor",
   "message.working": "Çalışıyor",
   "stats.label": "Bu cevap nasıl üretildi",
