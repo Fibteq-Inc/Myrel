@@ -5,6 +5,7 @@ export const tr: Catalog = {
   "common.error": "Bir şeyler ters gitti",
   "common.copy": "Kopyala",
   "common.copied": "Kopyalandı",
+  "common.close": "Kapat",
   "common.member": "Üye",
   "common.comingSoon": "{label} (yakında)",
   "common.comingSoonTitle": "{label} · yakında",
@@ -688,6 +689,8 @@ export const tr: Catalog = {
   "files.closePreview": "Önizlemeyi kapat",
   "files.loading": "Yükleniyor…",
   "files.loadFailed": "Bu dosya yüklenemedi.",
+  "files.onOtherComputer": "Başka bir üyenin bilgisayarında",
+  "files.onOtherComputerBody": "Bu dosya projenin başka bir üyenin bilgisayarındaki klasöründe, bu yüzden yalnızca o açabilir. Sana da lazımsa ajandan dosyayı proje dosyalarına koymasını iste.",
   "files.noPreview": "Bu dosya türü için önizleme yok. İndirme düğmesini kullan.",
 
   // Tasks (terminal and changes tabs)

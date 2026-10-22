@@ -100,6 +100,7 @@ export default function ThreadScreen() {
         }}
       />
       <Conversation
+        threadId={threadId}
         messages={messages}
         me={user?.id ?? ""}
         names={names}

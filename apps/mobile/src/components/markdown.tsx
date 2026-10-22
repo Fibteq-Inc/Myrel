@@ -1,16 +1,18 @@
 import { useT } from "@myrel/i18n/react";
+import { mayBeFileName, resolveFileCode } from "@myrel/protocol";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
 import { type MarkedStyles, Renderer, useMarkdown } from "react-native-marked";
 import { DECISION_LANG, parseDecision } from "../lib/decision";
+import { useFileRefContext } from "../lib/file-refs";
 import { colors, mono, radius } from "../theme";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
 
-/** Draws ```decision blocks as cards, code with a copy button, and routes links to `onLink`. */
+/** Draws ```decision blocks as cards, code with a copy button, and routes links (and file paths in code) to `onLink`. */
 class MyrelRenderer extends Renderer {
   constructor(
     private readonly decision: DecisionHandlers | undefined,
@@ -27,6 +29,11 @@ class MyrelRenderer extends Renderer {
     return <CodeBlock key={this.getKey()} text={text} language={language} containerStyle={containerStyle} textStyle={textStyle} />;
   }
 
+  override codespan(text: string, styles?: TextStyle): ReactNode {
+    if (!mayBeFileName(text)) return super.codespan(text, styles);
+    return <FileCodespan key={this.getKey()} text={text} style={styles} onLink={this.onLink} />;
+  }
+
   override link(children: string | ReactNode[], href: string, styles?: TextStyle): ReactNode {
     return (
       <Text key={this.getKey()} accessibilityRole="link" style={styles} onPress={() => this.onLink(href)}>
@@ -34,6 +41,23 @@ class MyrelRenderer extends Renderer {
       </Text>
     );
   }
+}
+
+/** Inline code naming a file: tappable when the file can be opened (see useOpenLink), otherwise just code. */
+function FileCodespan({ text, style, onLink }: { text: string; style?: TextStyle; onLink: (href: string) => void }) {
+  const file = resolveFileCode(text, useFileRefContext());
+  if (!file) {
+    return (
+      <Text selectable style={style}>
+        {text}
+      </Text>
+    );
+  }
+  return (
+    <Text accessibilityRole="link" style={[style, styles.fileCode]} onPress={() => onLink(file.path)}>
+      {text}
+    </Text>
+  );
 }
 
 function CodeBlock({
@@ -131,4 +155,5 @@ const styles = StyleSheet.create({
   },
   codeLang: { color: colors.subtle, fontFamily: mono, fontSize: 13 },
   codeText: { fontFamily: mono, fontSize: 13, lineHeight: 19, color: colors.body },
+  fileCode: { color: colors.link, textDecorationLine: "underline" },
 });
