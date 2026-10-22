@@ -8,6 +8,7 @@ import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
+import { RelayNote } from "./relay-note";
 
 export type Names = Record<string, string>;
 
@@ -71,6 +72,7 @@ export function MessageView({
               <MessageMarkdown body={message.body} decision={decision} />
             </FoldIfLong>
           )}
+          {message.relay && <RelayNote relay={message.relay} />}
           <AttachmentList attachments={message.attachments} />
           {children}
           {message.stats && <MessageStatsLine stats={message.stats} />}

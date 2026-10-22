@@ -91,7 +91,7 @@ export function threadPrompt(input: {
     input.followUp
       ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already)\n${history.join("\n\n") || "(no new messages)"}`
       : `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
-    notes.length ? `## Notes from the coordinator (not visible to people)\n${notes.join("\n")}` : "",
+    notes.length ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${notes.join("\n")}` : "",
     pulls.length ? `## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}` : "",
     github.length ? `## GitHub events on those pull requests (NEW = since your last turn)\n${github.join("\n\n")}` : "",
     input.artifacts?.length
