@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.2.1...desktop-v0.3.0) (2026-10-22)
+
+
+### Features
+
+* **chat:** open the whole plan from the pinned progress line ([ae133c4](https://github.com/Fibteq-Inc/myrel/commit/ae133c4f30640f26492b46d3281face05668da6d))
+* **chat:** open the whole plan from the pinned progress line ([b36fd8e](https://github.com/Fibteq-Inc/myrel/commit/b36fd8eaa48fd72006bee47fc2f210b084ef27fa))
+
 ## [0.2.1](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.2.0...desktop-v0.2.1) (2026-10-22)
 
 
