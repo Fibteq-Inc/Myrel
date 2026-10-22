@@ -4,6 +4,8 @@ import {
   type CliId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerDirListing,
+  type RunnerFeature,
+  type RunnerFile,
   type RunnerFolder,
   RunnerToServer,
   type ServerToRunner,
@@ -216,6 +218,18 @@ export class RunnerAgent extends Agent<Env> {
     return { ok: true, listing };
   }
 
+  /**
+   * One file in a project's folders (`folders`, each shared on the computer) or in the thread's
+   * worktree of them, e.g. one an agent's message links to. Callable over RPC.
+   */
+  async readFile(input: { path: string; folders: string[]; threadId?: string }): Promise<RunnerResult<{ file: RunnerFile }>> {
+    const answer = await this.ask({ type: "file.read", ...input }, "files");
+    if (answer.ok === false) return answer;
+    if (answer.type !== "file") return { ok: false, reason: "Unexpected answer from the computer." };
+    const { type: _t, requestId: _r, ...file } = answer;
+    return { ok: true, file };
+  }
+
   /** Shares or stops sharing a folder on the computer. Callable over RPC. */
   async setShared(path: string, shared: boolean): Promise<RunnerResult<{ folders: RunnerFolder[] }>> {
     const answer = await this.ask({ type: shared ? "folder.share" : "folder.unshare", path });
@@ -236,6 +250,7 @@ export class RunnerAgent extends Agent<Env> {
   /** Sends a folder request to the computer and waits for its answer. */
   private async ask(
     question: DistributiveOmit<Question, "requestId">,
+    feature: RunnerFeature = "folders",
   ): Promise<{ ok: false; reason: string } | (Answer & { ok?: undefined })> {
     const [connection] = this.getConnections();
     if (!connection) return { ok: false, reason: "The computer is offline. Start myrel-runner on it first." };
@@ -243,8 +258,14 @@ export class RunnerAgent extends Agent<Env> {
       .select({ info: schema.runners.info })
       .from(schema.runners)
       .where(eq(schema.runners.id, this.name));
-    if (!parseInfo(row?.info ?? null)?.features.includes("folders")) {
-      return { ok: false, reason: "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update)." };
+    if (!parseInfo(row?.info ?? null)?.features.includes(feature)) {
+      return {
+        ok: false,
+        reason:
+          feature === "files"
+            ? "Update myrel-runner on this computer to open its files from here (npx myrel-runner@latest update)."
+            : "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update).",
+      };
     }
     const requestId = crypto.randomUUID();
     const answer = await new Promise<Answer | null>((resolve) => {

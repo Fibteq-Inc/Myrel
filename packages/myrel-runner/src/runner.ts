@@ -10,12 +10,13 @@ import {
 } from "@myrel/protocol";
 import { detectClis } from "./clis";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
+import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
 import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.11.1";
+export const RUNNER_VERSION = "0.11.2";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -134,7 +135,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       platform: platform(),
       folders: config.folders,
       clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
-      features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders"],
+      features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders", "files"],
       running: tasks.runningIds(),
     });
   tasks.setSender(send);
@@ -174,6 +175,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const answer = async (frame: Extract<ServerToRunner, { requestId: string }>) => {
     const { requestId } = frame;
     if (frame.type === "dirs.list") return send({ type: "dirs", requestId, ...(await listDirs(frame.path)) });
+    if (frame.type === "file.read") return send({ type: "file", requestId, ...(await readProjectFile(config, frame)) });
     config = await loadConfig();
     if (frame.type === "folder.share") {
       const path = await shareableFolder(frame.path);
@@ -212,7 +214,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         void tasks.start(frame);
       }
       if (frame.type === "task.cancel") tasks.cancel(frame.taskId);
-      if (frame.type === "dirs.list" || frame.type === "folder.share" || frame.type === "folder.unshare") {
+      if ("requestId" in frame) {
         void answer(frame).catch((err: unknown) =>
           send({ type: "request.failed", requestId: frame.requestId, message: errorText(err) }),
         );

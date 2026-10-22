@@ -1,10 +1,14 @@
 import { useT } from "@myrel/i18n/react";
 import { DECISION_LANG, parseDecision, threadIdFromHref } from "@myrel/protocol";
 import { Link, useParams } from "@tanstack/react-router";
-import { Check, Copy, MessagesSquare } from "lucide-react";
-import { memo, type ReactNode, useCallback, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Check, Copy, FileText, MessagesSquare } from "lucide-react";
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { workspaceQuery } from "../../lib/api";
+import { FilePreview } from "../files";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = {
@@ -32,7 +36,7 @@ const MarkdownBody = memo(function MarkdownBody({
   answer?: string;
   onChoose?: (label: string) => void;
 }) {
-  const { projectId } = useParams({ strict: false });
+  const { projectId, threadId } = useParams({ strict: false });
   const components: Components = {
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
@@ -48,8 +52,16 @@ const MarkdownBody = memo(function MarkdownBody({
     },
     a: ({ href, children }) => {
       // [Title](#thr_…) opens that thread's panel.
-      const threadId = threadIdFromHref(href);
-      if (threadId && projectId) return <ThreadLink projectId={projectId} threadId={threadId}>{children}</ThreadLink>;
+      const linked = threadIdFromHref(href);
+      if (linked && projectId) return <ThreadLink projectId={projectId} threadId={linked}>{children}</ThreadLink>;
+      // A file the agent wrote in the project's folders on the person's computer (DURUM.md, /Users/…/notes.md).
+      if (href && projectId && isLocalPath(href)) {
+        return (
+          <LocalFileLink projectId={projectId} threadId={threadId} path={href}>
+            {children}
+          </LocalFileLink>
+        );
+      }
       return (
         <a href={href} target="_blank" rel="noreferrer">
           {children}
@@ -65,6 +77,64 @@ const MarkdownBody = memo(function MarkdownBody({
     </div>
   );
 });
+
+/** A link that is a file path rather than a web address: no scheme (or file://), not an anchor or app route. */
+function isLocalPath(href: string): boolean {
+  if (href.startsWith("file://")) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || /^(#|\?|\/\/|\/api\/|\/projects\/)/.test(href)) return false;
+  return /[\w.-]/.test(href);
+}
+
+/**
+ * Opens a local file link in a preview, read from the computer the project's folder is on. Without
+ * a local folder (a cloud project), it stays an ordinary link.
+ */
+function LocalFileLink({ projectId, threadId, path, children }: { projectId: string; threadId?: string; path: string; children: ReactNode }) {
+  const workspace = useQuery(workspaceQuery(projectId));
+  const [open, setOpen] = useState(false);
+  if (!workspace.data) {
+    return (
+      <a href={path} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={path}
+        className="inline-flex items-baseline gap-1 rounded-md border border-line bg-raised px-1.5 font-medium text-fg transition-colors hover:border-edge"
+      >
+        <FileText size={13} className="flex-none self-center text-subtle" aria-hidden="true" />
+        {children}
+      </button>
+      {/* In a portal: the link sits inside a paragraph, which cannot hold the preview's blocks. */}
+      {open && createPortal(<LocalFileDialog projectId={projectId} threadId={threadId} path={path} onClose={() => setOpen(false)} />, document.body)}
+    </>
+  );
+}
+
+function LocalFileDialog({ projectId, threadId, path, onClose }: { projectId: string; threadId?: string; path: string; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      onClose={onClose}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className="m-auto h-[min(80vh,900px)] open:flex w-[min(860px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-line bg-ground p-0 text-[13px] text-fg shadow-2xl backdrop:bg-black/60"
+    >
+      <FilePreview projectId={projectId} path={path} local={{ threadId }} onClose={onClose} />
+    </dialog>
+  );
+}
 
 function ThreadLink({ projectId, threadId, children }: { projectId: string; threadId: string; children: ReactNode }) {
   return (

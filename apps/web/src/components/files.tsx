@@ -1,4 +1,5 @@
 import { useT } from "@myrel/i18n/react";
+import { ApiError } from "@myrel/client";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
@@ -99,23 +100,29 @@ export function PendingAttachments({
   );
 }
 
-/** A file's content, fetched with the API client so bearer-token apps can preview too. */
+/**
+ * A file's content, fetched with the API client so bearer-token apps can preview too: a project
+ * file, or with `local`, one in the project's folders on a computer (see api.getLocalFile).
+ */
 export function FilePreview({
   projectId,
   path,
   contentType,
+  local,
   onClose,
 }: {
   projectId: string;
   path: string;
   contentType?: string;
+  local?: { threadId?: string };
   onClose?: () => void;
 }) {
   const t = useT();
   const blob = useQuery({
-    queryKey: ["projects", projectId, "file", path],
-    queryFn: () => api.getFile(projectId, path),
+    queryKey: local ? ["projects", projectId, "local-file", local.threadId ?? null, path] : ["projects", projectId, "file", path],
+    queryFn: () => (local ? api.getLocalFile(projectId, path, local.threadId) : api.getFile(projectId, path)),
     staleTime: 5_000,
+    retry: local ? false : undefined,
   });
   const type = contentType ?? blob.data?.type ?? "";
   const kind = kindOf(path, type);
@@ -152,7 +159,11 @@ export function FilePreview({
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {blob.isPending && <p className="p-5 text-[13px] text-subtle">{t("files.loading")}</p>}
-        {blob.isError && <p className="p-5 text-[13px] text-bad">{t("files.loadFailed")}</p>}
+        {blob.isError && (
+          <p className="p-5 text-[13px] text-bad">
+            {blob.error instanceof ApiError && blob.error.status !== 404 && blob.error.status < 500 ? blob.error.message : t("files.loadFailed")}
+          </p>
+        )}
         {url && kind === "image" && <img src={url} alt={displayName(path)} className="mx-auto max-w-full p-5" />}
         {url && kind === "pdf" && <iframe src={url} title={path} className="size-full min-h-[70vh] bg-white" />}
         {text !== null && kind === "markdown" && (
