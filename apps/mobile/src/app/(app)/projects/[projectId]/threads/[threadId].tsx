@@ -3,7 +3,7 @@ import { useI18n, useT } from "@myrel/i18n/react";
 import { planChecklist } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { CircleCheck, RotateCcw } from "lucide-react-native";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
 import { Conversation } from "../../../../../components/conversation";
@@ -39,10 +39,19 @@ export default function ThreadScreen() {
   const onSend = useCallback((body: string) => send(body, threadId), [send, threadId]);
 
   const live = thread?.status === "working" && !thread.resolved;
-  // Only the progress line is pinned; the full list is the plan card in the conversation.
-  const header = thread?.statusText && !thread.resolved ? (
+  const [planOpen, setPlanOpen] = useState(false);
+  // The progress line is pinned and opens the whole plan in place; the plan card stays where the work
+  // started. It stays once the work is done, so the finished plan is still one tap away.
+  const header = thread?.statusText ? (
     <View style={styles.panel}>
-      <PlanProgress text={thread.statusText} live={live} />
+      <PlanProgress
+        key={threadId}
+        planKey={`${threadId}\n${thread.statusText.split("\n", 1)[0]}`}
+        text={thread.statusText}
+        live={live}
+        open={planOpen}
+        onOpenChange={setPlanOpen}
+      />
     </View>
   ) : null;
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
@@ -102,6 +111,7 @@ export default function ThreadScreen() {
         onSend={onSend}
         header={header}
         plan={plan}
+        onOpenPlan={thread?.statusText ? () => setPlanOpen(true) : undefined}
       />
     </>
   );

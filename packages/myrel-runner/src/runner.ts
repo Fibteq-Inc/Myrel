@@ -1,6 +1,8 @@
 import { watchFile, unwatchFile } from "node:fs";
 import { hostname, platform } from "node:os";
 import {
+  type CliId,
+  type CliLimits,
   PairRunnerResult,
   RUNNER_PROTOCOL_VERSION,
   type RunnerToServer,
@@ -8,11 +10,13 @@ import {
 } from "@myrel/protocol";
 import { detectClis } from "./clis";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
+import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
+import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.9.0";
+export const RUNNER_VERSION = "0.11.2";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -52,6 +56,9 @@ export async function checkPairing(config: Pick<RunnerConfig, "server" | "token"
 const UNPAIRED =
   "This computer is not paired with Myrel any more (it was removed, or paired again elsewhere). Get a new code in Myrel > Devices and run `myrel-runner pair <code> --server <url>`.";
 
+/** How long a task's result is sent again after each reconnect. */
+const RESEND_RESULTS_MS = 15 * 60 * 1000;
+
 export type RunnerHandle = { stop(): void; done: Promise<void> };
 
 /** Machine-readable state changes, for apps that embed or supervise the runner. */
@@ -81,7 +88,20 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   if (!config.server || !config.token) throw new Error("This computer is not paired yet. Run `myrel-runner pair <code> --server <url>` first.");
 
   const clis = await detectClis();
-  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log });
+  // The last limits each CLI reported; hello carries them with the CLI's version.
+  const limits = await loadLimits();
+  const setLimits = (cli: CliId, next: CliLimits | undefined) => {
+    const prev = limits[cli];
+    if (!next || (prev && prev.at >= next.at)) return;
+    limits[cli] = next;
+    void saveLimits(limits).catch(() => {});
+    if (JSON.stringify({ ...prev, at: "" }) !== JSON.stringify({ ...next, at: "" })) hello();
+  };
+  // Codex writes its limits whenever the person uses it, in Myrel or not; looked at now and then.
+  const readCodex = () => {
+    if (clis.some((c) => c.id === "codex")) void readCodexLimits().then((l) => setLimits("codex", l), () => {});
+  };
+  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log, onLimits: setLimits });
   let stopReason: Extract<RunnerStatus, { state: "stopped" }>["reason"] = "stopped";
   let socket: WebSocket | null = null;
   let stopped = false;
@@ -89,12 +109,22 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   let finish!: () => void;
   const done = new Promise<void>((r) => (finish = r));
 
-  // Results of tasks that finished while offline, sent first thing after reconnecting.
-  const pending: RunnerToServer[] = [];
+  // Results of recent tasks, sent again first thing after reconnecting: a result sent just as the
+  // connection dropped (a new version of Myrel being deployed) may never have arrived. The server
+  // ignores results of tasks it already finished.
+  const results = new Map<string, { frame: RunnerToServer; at: number }>();
   const send = (frame: RunnerToServer) => {
-    if (frame.type === "task.done") status({ state: "task", taskId: frame.taskId, event: "done", ok: frame.ok });
+    if (frame.type === "task.done") {
+      status({ state: "task", taskId: frame.taskId, event: "done", ok: frame.ok });
+      results.set(frame.taskId, { frame, at: Date.now() });
+    }
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
-    else if (frame.type === "task.done") pending.push(frame);
+  };
+  const resendResults = () => {
+    for (const [taskId, { frame, at }] of results) {
+      if (Date.now() - at > RESEND_RESULTS_MS) results.delete(taskId);
+      else send(frame);
+    }
   };
   const hello = () =>
     send({
@@ -104,8 +134,8 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       hostname: hostname(),
       platform: platform(),
       folders: config.folders,
-      clis,
-      features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders"],
+      clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
+      features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders", "files"],
       running: tasks.runningIds(),
     });
   tasks.setSender(send);
@@ -118,6 +148,9 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   watchFile(configPath(), { interval: 2000 }, onConfigChange);
 
   const ping = setInterval(() => send({ type: "ping" }), 25_000);
+  readCodex();
+  const codexLimits = setInterval(readCodex, 10 * 60 * 1000);
+  codexLimits.unref?.();
   // Removes the worktrees of threads whose work is merged (see pruneWorktrees).
   const prune = () =>
     void pruneWorktrees((w) => tasks.inUse(w))
@@ -130,6 +163,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     stopped = true;
     clearInterval(ping);
     clearInterval(pruning);
+    clearInterval(codexLimits);
     unwatchFile(configPath(), onConfigChange);
     tasks.stopAll();
     socket?.close(1000);
@@ -141,6 +175,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const answer = async (frame: Extract<ServerToRunner, { requestId: string }>) => {
     const { requestId } = frame;
     if (frame.type === "dirs.list") return send({ type: "dirs", requestId, ...(await listDirs(frame.path)) });
+    if (frame.type === "file.read") return send({ type: "file", requestId, ...(await readProjectFile(config, frame)) });
     config = await loadConfig();
     if (frame.type === "folder.share") {
       const path = await shareableFolder(frame.path);
@@ -163,7 +198,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       opened = true;
       attempt = 0;
       // Before hello: the server fails any task that hello does not list as running.
-      for (const frame of pending.splice(0)) send(frame);
+      resendResults();
       hello();
     };
     ws.onmessage = (e) => {
@@ -179,7 +214,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         void tasks.start(frame);
       }
       if (frame.type === "task.cancel") tasks.cancel(frame.taskId);
-      if (frame.type === "dirs.list" || frame.type === "folder.share" || frame.type === "folder.unshare") {
+      if ("requestId" in frame) {
         void answer(frame).catch((err: unknown) =>
           send({ type: "request.failed", requestId: frame.requestId, message: errorText(err) }),
         );

@@ -2,8 +2,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunnerToServer, ServerToRunner } from "@myrel/protocol";
-import { ADAPTERS, type ParseState } from "./clis";
+import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
+import { ADAPTERS, type CliAdapter, type ParseState } from "./clis";
 import type { RunnerConfig, SessionStore } from "./config";
 import { downloadSkills, type RunSkills } from "./skills";
 import { threadWorktree, type Worktree } from "./worktrees";
@@ -11,6 +11,8 @@ import { threadWorktree, type Worktree } from "./worktrees";
 type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
 
+/** The CLIs whose sessions a thread's next turn continues. */
+const RESUMES = new Set<CliId>(["claude", "codex"]);
 /** Results are cut to fit the protocol's limit. */
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
@@ -24,6 +26,8 @@ export type TaskRunnerOptions = {
   /** For tests: replaces child_process.spawn. */
   spawn?: typeof spawn;
   log?: (line: string) => void;
+  /** The subscription limits a CLI reported during or after a run. */
+  onLimits?: (cli: CliId, limits: CliLimits) => void;
 };
 
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
@@ -82,8 +86,10 @@ export class TaskRunner {
     const adapter = ADAPTERS[task.cli];
     // Claude Code asks the person through Myrel before stepping outside those folders.
     const asks = !!task.agent && task.cli === "claude";
-    // A Claude Code session belongs to the folder it ran in, so a new worktree starts a new one.
-    const resume = task.cli === "claude" && !isolated?.created ? await this.opts.sessions.get(task.threadId) : undefined;
+    // A CLI session belongs to the folder it ran in, so a new worktree starts a new one.
+    const session = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli) : undefined;
+    // A session that saw the thread's last turn already holds the thread: it only needs what is new.
+    const short = session && task.agent?.resume && session.task === task.agent.resume.after ? task.agent.resume.prompt : undefined;
     log(`▶ ${adapter.id} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
 
     // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
@@ -109,7 +115,43 @@ export class TaskRunner {
     }
     const cleanup = () => (agentDir ? rm(agentDir, { recursive: true, force: true }).catch(() => {}) : Promise.resolve());
 
-    const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: asks && !!agentDir });
+    // Tells Myrel where the work is, since it is not in the shared folder itself.
+    const where = isolated
+      ? `\n\n(myrel-runner: worked on branch ${isolated.worktree.branch} in ${isolated.cwd}, a git worktree of ${folder}.)`
+      : "";
+    if (isolated) this.worktrees.set(task.taskId, isolated.worktree.path);
+    // Where the CLI works without asking, so Myrel only asks about what is really outside.
+    if (task.agent) this.send({ type: "task.folders", taskId: task.taskId, folders: [cwd, ...dirs] });
+
+    // A session that cannot be resumed (deleted, or from another CLI version) fails before any
+    // output: the turn then starts a new session with the whole thread.
+    const retry = await this.attempt(task, { cwd, adapter, agent, dirs, asks: asks && !!agentDir, skills, where, cleanup }, session?.id, short ?? task.prompt);
+    if (retry) {
+      log(`  could not resume the ${adapter.id} session; starting a new one`);
+      await this.attempt(task, { cwd, adapter, agent, dirs, asks: asks && !!agentDir, skills, where, cleanup }, undefined, task.prompt);
+    }
+  }
+
+  /** One run of the CLI. True when a resumed session failed before any output, so the caller can start a new one. */
+  private async attempt(
+    task: TaskStart,
+    run: {
+      cwd: string;
+      adapter: CliAdapter;
+      agent: { args: string[]; env?: Record<string, string> };
+      dirs: string[];
+      asks: boolean;
+      skills: RunSkills | null;
+      where: string;
+      cleanup: () => Promise<unknown>;
+    },
+    resume: string | undefined,
+    prompt: string,
+  ): Promise<boolean> {
+    const config = this.opts.config();
+    const log = this.opts.log ?? (() => {});
+    const { cwd, adapter, agent, dirs, skills, where, cleanup } = run;
+    const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: run.asks });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: { ...process.env, ...agent.env },
@@ -118,13 +160,6 @@ export class TaskRunner {
       shell: process.platform === "win32",
     });
     this.running.set(task.taskId, child);
-    if (isolated) this.worktrees.set(task.taskId, isolated.worktree.path);
-    // Where the CLI works without asking, so Myrel only asks about what is really outside.
-    if (task.agent) this.send({ type: "task.folders", taskId: task.taskId, folders: [cwd, ...dirs] });
-    // Tells Myrel where the work is, since it is not in the shared folder itself.
-    const where = isolated
-      ? `\n\n(myrel-runner: worked on branch ${isolated.worktree.branch} in ${isolated.cwd}, a git worktree of ${folder}.)`
-      : "";
 
     const state: ParseState = {};
     let stdout = "";
@@ -133,6 +168,12 @@ export class TaskRunner {
     let lastProgress = 0;
     let sentProgress: string | undefined;
     let sentUsage = "";
+    let sentLimits: CliLimits | undefined;
+    const reportLimits = (limits: CliLimits | undefined) => {
+      if (!limits || limits === sentLimits) return;
+      sentLimits = limits;
+      this.opts.onLimits?.(task.cli, limits);
+    };
     /** The CLI's usage so far, for the server to show under the agent's replies. */
     const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
     const flushProgress = () => {
@@ -154,6 +195,7 @@ export class TaskRunner {
       const lines = buffered.split("\n");
       buffered = lines.pop()!;
       for (const line of lines) adapter.line(line.trim(), state);
+      reportLimits(state.limits);
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
       if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage)) flushProgress();
@@ -164,11 +206,11 @@ export class TaskRunner {
     });
     child.stdin!.on("error", () => {}); // the CLI may exit before reading all of stdin
     // The prompt lists the skills; only the runner knows where they are on this computer.
-    child.stdin!.end(skills ? `${task.prompt}\n\nSkills folder for this run: ${skills.skills}` : task.prompt);
+    child.stdin!.end(skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
 
-    await new Promise<void>((resolve) => {
+    return await new Promise<boolean>((resolve) => {
       let done = false;
       const finish = (ok: boolean, result: string) => {
         if (done) return;
@@ -180,7 +222,7 @@ export class TaskRunner {
         if (this.cancelled.delete(task.taskId)) {
           log(`■ ${adapter.id} task stopped`);
           this.send({ type: "task.done", taskId: task.taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
-          return resolve();
+          return resolve(false);
         }
         log(`${ok ? "✓" : "✗"} ${adapter.id} task finished`);
         const u = usage();
@@ -191,7 +233,7 @@ export class TaskRunner {
           result: result.slice(0, MAX_RESULT - where.length) + where,
           ...(u && { usage: u }),
         });
-        resolve();
+        resolve(false);
       };
       child.on("error", (err: NodeJS.ErrnoException) => {
         finish(
@@ -208,11 +250,21 @@ export class TaskRunner {
       child.on("close", async (code, signal) => {
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
-        if (state.sessionId && task.cli === "claude") await this.opts.sessions.set(task.threadId, state.sessionId).catch(() => {});
+        reportLimits(state.limits ?? (await adapter.limits?.(state).catch(() => undefined)));
         const ok = code === 0 && !state.failed;
+        if (resume && !ok && !state.usage && !state.progress && !this.cancelled.has(task.taskId)) {
+          done = true;
+          clearTimeout(timer);
+          this.running.delete(task.taskId);
+          return resolve(true);
+        }
+        // The session now holds this turn too, so the next one can continue it with only what is new.
+        if (state.sessionId && RESUMES.has(task.cli)) {
+          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }).catch(() => {});
+        }
         const result =
           state.result ??
-          (ok ? stdout.trim() : `${adapter.bin} exited with ${signal ?? `code ${code}`}.\n${stderr.trim() || stdout.trim()}`);
+          (ok ? stdout.trim() : `${adapter.bin} exited with ${signal ?? `code ${code}`}.\n${state.error ?? (stderr.trim() || stdout.trim())}`);
         finish(ok, result || "(no output)");
       });
     });

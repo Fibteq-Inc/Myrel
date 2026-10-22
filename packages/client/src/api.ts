@@ -506,6 +506,14 @@ export class ApiClient {
     return res.blob();
   }
 
+  /** A file in the project's local folders, read from the computer (only its owner can). */
+  async getLocalFile(projectId: string, path: string, threadId?: string): Promise<Blob> {
+    const thread = threadId ? `&thread=${encodeURIComponent(threadId)}` : "";
+    const res = await this.send(`${projectPath(projectId)}/workspace/file?path=${encodeURIComponent(path)}${thread}`);
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    return res.blob();
+  }
+
   async putFile(projectId: string, path: string, body: Blob) {
     const url = `${projectPath(projectId)}/files/content?path=${encodeURIComponent(path)}`;
     const init = { method: "PUT", body, contentType: body.type || "application/octet-stream" };

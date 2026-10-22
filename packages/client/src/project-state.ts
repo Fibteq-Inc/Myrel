@@ -2,7 +2,7 @@ import {
   type Artifact,
   type Message,
   type MessageStats,
-  planChecklist,
+  isPlanMessage,
   type PullRequest,
   type Reaction,
   type Routine,
@@ -220,12 +220,12 @@ export function threadUsage(s: ProjectState, threadId: string): { tokens: number
   return total;
 }
 
-/** How many replies a thread has, not counting the agent's plan cards. */
+/** How many replies a thread has, not counting the agent's plan cards and plan update notes. */
 export function threadReplyCount(s: ProjectState, threadId: string): number {
   const messages = threadMessages(s, threadId);
   let count = replyCountCache.get(messages);
   if (count === undefined) {
-    count = messages.filter((m) => planChecklist(m.body) === null).length;
+    count = messages.filter((m) => !isPlanMessage(m.body)).length;
     replyCountCache.set(messages, count);
   }
   return count;
@@ -276,4 +276,13 @@ export function parseChecklist(text: string): { title: string; items: ChecklistI
 export function checklistProgress(items: ChecklistItem[]): { done: number; total: number } {
   const steps = items.filter((i) => i.depth === 0 && i.state !== "skipped");
   return { done: steps.filter((i) => i.state === "done").length, total: steps.length };
+}
+
+/**
+ * The plan's top-level steps the person has not seen yet: those whose text is
+ * not in `seen`, the step texts they had in view last time. A step the agent
+ * only ticks keeps its text, so it never counts as new.
+ */
+export function freshSteps(items: ChecklistItem[], seen: ReadonlySet<string>): Set<string> {
+  return new Set(items.filter((i) => i.depth === 0 && !seen.has(i.text)).map((i) => i.text));
 }

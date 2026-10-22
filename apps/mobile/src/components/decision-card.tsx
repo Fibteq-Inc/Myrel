@@ -24,6 +24,20 @@ export function DecisionCard({
   const answered = answer !== undefined;
   const chosen = chosenOption(decision, answer);
 
+  // Answered: one line with the question and the pick, so the conversation moves on.
+  if (answered) {
+    const picked = chosen >= 0 ? decision.options[chosen]!.label : answer;
+    return (
+      <View accessibilityRole="none" style={[styles.compact, styles.cardAnswered]}>
+        <CircleCheck size={15} color={colors.accent} accessibilityLabel={t("decision.answered")} />
+        <Text style={styles.compactQuestion}>{decision.question}</Text>
+        <Text style={styles.compactPick} accessibilityLabel={`${t("decision.chosen")}: ${picked}`}>
+          {picked.length > 80 ? `${picked.slice(0, 80)}…` : picked}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View accessibilityRole="none" style={[styles.card, answered ? styles.cardAnswered : styles.cardOpen]}>
       <View style={styles.kicker}>
@@ -82,6 +96,19 @@ const styles = StyleSheet.create({
   card: { gap: 12, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
   cardOpen: { borderColor: colors.warnLine, backgroundColor: colors.warnSoft },
   cardAnswered: { borderColor: colors.line, backgroundColor: colors.raised },
+  compact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: 8,
+    rowGap: 4,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  compactQuestion: { flexShrink: 1, color: colors.muted, fontSize: 14, lineHeight: 20 },
+  compactPick: { marginLeft: "auto", color: colors.fg, fontSize: 14, fontWeight: "600" },
   kicker: { flexDirection: "row", alignItems: "center", gap: 8 },
   question: { color: colors.fg, fontSize: 16, fontWeight: "600", lineHeight: 22 },
   option: { gap: 3, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },

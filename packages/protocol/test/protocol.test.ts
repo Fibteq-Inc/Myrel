@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ClientEvent,
+  decisionPicks,
+  decisionsIn,
   CreateRoutineInput,
   CronExpression,
   createId,
@@ -199,5 +201,22 @@ describe("connector suggestion cards", () => {
     expect(parseConnectorSuggestion(body)).toMatchObject({ state: "open", offers: [{ name: "Cloudflare", headerHint: null, featured: false }] });
     expect(parseConnectorSuggestion("```connectors\n{}\n```")).toBeNull();
     expect(parseConnectorSuggestion(`Look:\n${body}`)).toBeNull();
+  });
+});
+
+describe("decision picks", () => {
+  const card = formatDecision({ question: "Run it?", options: [{ label: "Çalıştır" }, { label: "Çalıştırma" }] });
+  it("leaves out a person's message that only picks an option on the card above it", () => {
+    const messages = [
+      { id: "a", authorKind: "agent", body: `Waiting.\n\n${card}` },
+      { id: "b", authorKind: "user", body: " çalıştır " },
+      { id: "c", authorKind: "user", body: "Çalıştırma" },
+      { id: "d", authorKind: "agent", body: card },
+      { id: "e", authorKind: "user", body: "Not now, explain first" },
+      { id: "f", authorKind: "agent", body: card },
+      { id: "g", authorKind: "user", body: "Çalıştır", attachments: [{}] },
+    ];
+    expect([...decisionPicks(messages)]).toEqual(["b"]);
+    expect(decisionsIn(`${card}\n\n${card}`)).toHaveLength(2);
   });
 });

@@ -24,7 +24,7 @@ Usage:
   myrel-runner service uninstall
                                  Stop the background runner and remove it from login
   myrel-runner service status   Show whether the background runner is installed and running
-  myrel-runner start [--access read|edit|full] [--json]
+  myrel-runner start [--access read|edit|auto|full] [--json]
                                  Connect and run tasks in this terminal until stopped (Ctrl+C)
   myrel-runner worktrees [on|off|prune|remove <path> [--force]]
                                  List, turn on or off, or clean up the threads' git worktrees
@@ -32,8 +32,10 @@ Usage:
   myrel-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
-edit (change files; the default) or full (also run any command). It is saved,
-so the background runner uses it too.
+edit (change files; the default), auto (Claude Code's auto mode: it runs the
+steps it judges safe and asks you in Myrel about the rest; like edit for other
+CLIs) or full (also run any command). It is saved, so the background runner
+uses it too.
 
 In a git repository, each thread works in its own git worktree on its own
 branch (myrel/thr-…), so threads working at the same time never touch each
@@ -206,7 +208,7 @@ async function main(argv: string[]) {
 }
 
 async function saveAccess(access: string) {
-  if (!["read", "edit", "full"].includes(access)) throw new Error("--access must be read, edit or full");
+  if (!["read", "edit", "auto", "full"].includes(access)) throw new Error("--access must be read, edit, auto or full");
   const config = await loadConfig();
   config.access = access as Access;
   await saveConfig(config);

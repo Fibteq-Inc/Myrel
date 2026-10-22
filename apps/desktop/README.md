@@ -46,20 +46,28 @@ Regenerate icons from `icon.svg` with `pnpm --filter @myrel/desktop icons`.
 
 ## Release
 
-`.github/workflows/desktop.yml` builds every pull request that touches the app and uploads the
-installers as workflow artifacts. To publish, bump `version` in `src-tauri/Cargo.toml`, then push a tag
-with the same version:
+Releases go through a Release PR ([release-please](https://github.com/googleapis/release-please), config in
+`release-please-config.json`). Every `feat:` or `fix:` commit on main that changes what ships in the app
+(anything outside `apps/api`, `apps/artifacts`, `apps/mobile`, `docs`, `ee`, `scripts` and `.github`, so the
+web UI and the runner count) updates an open "chore(main): release desktop x.y.z" PR with the next version (in
+`package.json` and `src-tauri/Cargo.toml`) and `CHANGELOG.md`. Merging that PR tags `desktop-vx.y.z`, creates
+the GitHub release and starts `.github/workflows/desktop.yml`, which attaches the signed installers and
+`latest.json`. The release notes then list every pull request since the previous desktop tag that changed
+the app (`scripts/release-notes.sh`), whatever its title.
 
-```sh
-git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
-```
+If one platform fails, fix the cause on main and rebuild the release with a manual run (Actions → Desktop →
+Run workflow on main, with the tag): it builds the tagged commit and replaces the release's installers.
 
-While the repository is private, tags and manual runs build macOS on the org's self-hosted Mac runner (labels
-`self-hosted`, `macOS`), so that Mac must be on and awake while a release builds. Pull requests, and every run once
-the repository is public, use GitHub's hosted runners.
+The app only builds from main: through the Release PR, a `desktop-v*` tag pushed by hand on a main commit, or
+a manual run (Actions → Desktop → Run workflow) on main, which uploads the installers as workflow artifacts.
+Pull requests don't build it; CI's typecheck and build cover its TypeScript.
 
-The workflow creates a draft GitHub release with the installers and, when the updater key is set,
-`latest.json` for in-app updates. Publishing the draft makes it live.
+While the repository is private, macOS builds on the org's self-hosted Mac runner (labels `self-hosted`,
+`macOS`), so that Mac must be on and awake while a release builds. Once the repository is public, it uses
+GitHub's hosted runners.
+
+When the updater key is set, the release also gets `latest.json`, which installed apps check for updates.
+A tag pushed by hand gets a draft release instead, which goes live when published.
 
 The updater downloads from public GitHub release URLs, so it only works once the repository is public
 (or after pointing `plugins.updater.endpoints` in `src-tauri/tauri.conf.json` at public storage such as R2).
