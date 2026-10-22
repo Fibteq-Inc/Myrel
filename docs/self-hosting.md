@@ -228,7 +228,7 @@ supply the D1 id.
 | `ARTIFACTS` | R2 bucket `myrel-artifacts` | Artifact versions. Create the bucket before the first deploy that includes it. |
 | `SANDBOX` | Durable Object (`Sandbox`) + Container | One Linux container per thread for its cloud agent (see [Code sandbox](#code-sandbox)) |
 | `WORKSPACES` | Artifacts namespace `myrel` | Optional. Keeps each thread's work between tasks (see [Thread workspaces](#thread-workspaces)) |
-| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) and address verification: with it, invitations, the `ADMIN_EMAILS` admin role and the cloud sandbox wait until a person follows the link sent at sign-up. Without it, every address counts as verified. |
+| `EMAIL` | Email Service (`send_email`) | Optional. Notification emails (see [Notifications](#notifications)) and address verification: with it, invitations, the `ADMIN_EMAILS` admin role, file uploads and the cloud sandbox wait until a person follows the link sent at sign-up. Without it, every address counts as verified. |
 | `AUTH_LIMIT` | Rate limiting (`ratelimits`) | Sign-up, sign-in and their emails: 10 a minute per client IP. Optional; its `namespace_id` must be unique in your Cloudflare account. |
 
 ## Optional features
@@ -409,7 +409,10 @@ Connector credentials are encrypted with `KEY_ENCRYPTION_SECRET`.
 
 `ee/billing` holds the plans and Stripe billing of the hosted service at
 myrel.fibteq.io, under a separate license. A self-hosted server does not use it
-and has no limits.
+and has no limits. To add your own, set the hooks in `apps/api/src/extensions.ts`
+(`canCreateProject`, `canUseSandbox`, `canUseCoordinator`, `canAddConnector`,
+`canAddSkill`, `canStoreFile`) with `setExtensions` in your own Worker entry, as
+`ee/billing/src/worker.ts` does.
 
 ### Notifications
 

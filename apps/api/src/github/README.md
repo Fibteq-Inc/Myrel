@@ -108,5 +108,8 @@ signed-in session. The desktop and mobile apps will get their own flow.
 - `../routes/projects.ts`: `/api/projects/:id/repos`.
 
 Who can use an installation is checked when they connect: GitHub's `/user/installations`
-lists only the installations that person can reach. A user who can reach an installation can
-connect any repository the app was given on it.
+lists only the installations that person can reach. Of the repositories the app was given on
+it, a person can connect only those they can push to themselves (push, maintain or admin),
+since connecting one gives Myrel's agents the app's write access to it. That list comes from
+the person's last GitHub sign-in, so after migration 0027 everyone signs in to GitHub once
+more the next time they pick a repository.
