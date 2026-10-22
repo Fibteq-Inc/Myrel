@@ -63,18 +63,25 @@ The API trusts the `myrel://` origin the app sends (see `apps/api/src/origins.ts
 ## Releases
 
 JavaScript-only changes reach installed apps as EAS Updates: every push to `main` that touches the app
-runs `.eas/workflows/publish-update.yml`, which publishes for each platform that already has a store
-build with the same native fingerprint (`runtimeVersion` uses the fingerprint policy, so a version bump
-alone does not cut builds off).
+runs `.github/workflows/mobile-update.yml`, which publishes an update for each platform with `eas update`.
+`runtimeVersion` uses the fingerprint policy, so an update only reaches store builds with the same native
+fingerprint; a change that needs a new store build reaches users with that build instead.
 
 Store versions start by hand: Actions → Release → Run workflow, app `mobile`, and the version step. The
-workflow (`.github/workflows/release.yml`) tags the tip of main `mobile-vX.Y.Z` and publishes a GitHub
-release with the generated notes (pull requests labelled `app:mobile`, `.github/release-mobile.yml`). The
-tag runs `.eas/workflows/store-release.yml`: production builds for both platforms, uploaded to TestFlight
-and Play internal testing. The tag is the store version (`app.config.ts` reads it from `MYREL_RELEASE_TAG`);
-`package.json` isn't bumped. Sending the version for review stays a manual step in App Store Connect and
-Play Console. Release whenever a native change (a new native module, config plugin or permission) is on
-`main`, since those can't ship as an update.
+workflow (`.github/workflows/release.yml`) tags the tip of main `mobile-vX.Y.Z`, publishes a GitHub
+release with the generated notes (pull requests labelled `app:mobile`, `.github/release-mobile.yml`) and
+runs `.github/workflows/mobile.yml`: production builds on GitHub's runners with `eas build --local` (iOS on
+macOS, Android on Linux), so no EAS build credits are used, uploaded with `eas submit` to TestFlight and
+Play internal testing. Signing credentials, store keys and build numbers stay on EAS. The tag is the store
+version (`app.config.ts` reads it from `MYREL_RELEASE_TAG`); `package.json` isn't bumped. If one platform
+fails, rebuild it with Actions → Mobile → Run workflow and the tag. Sending the version for review stays a
+manual step in App Store Connect and Play Console. Release whenever a native change (a new native module,
+config plugin or permission) is on `main`, since those can't ship as an update.
+
+Both workflows need two secrets in the repository's `store` environment (Settings → Environments, limited
+to `main`): `EXPO_TOKEN`, an Expo robot user's token with access to the project, and
+`GOOGLE_SERVICES_JSON`, the content of `google-services.json` (EAS keeps it as a secret variable, which
+local builds can't read).
 
 ## Store listing
 
