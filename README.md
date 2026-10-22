@@ -167,6 +167,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first; you
 will be asked to sign the [Contributor License Agreement](CLA.md) on your first
 pull request. Report vulnerabilities privately as described in
 [SECURITY.md](SECURITY.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Questions about a change are welcome in its pull request.
 
 ## License
 
