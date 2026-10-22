@@ -74,6 +74,8 @@ export function threadPrompt(input: {
    * messages that arrived since, without the message the thread started from.
    */
   followUp?: boolean;
+  /** Set when this turn continues one the runner's restart cut off (see auto-resume.ts). */
+  resumeNote?: string;
 }): string {
   const shown = input.followUp ? input.messages.filter((m) => m.seq > input.lastSeenSeq) : input.messages;
   const history = shown.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
@@ -106,6 +108,7 @@ export function threadPrompt(input: {
     runs.length ? `## Routine runs (scheduled tasks; do the NEW ones now)\n${runs.join("\n")}` : "",
     mine.length ? `## Routines that wake this thread\n${mine.map(renderRoutine).join("\n")}` : "",
     input.thread.statusText ? `## Your current plan, as the thread shows it\n${input.thread.statusText}` : "",
+    input.resumeNote ?? "",
     "Continue the work now.",
   ]
     .filter(Boolean)

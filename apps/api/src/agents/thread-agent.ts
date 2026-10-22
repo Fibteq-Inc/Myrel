@@ -70,6 +70,7 @@ import {
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
+import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, resumeNote, resumingMessage } from "./auto-resume";
 import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
@@ -372,9 +373,13 @@ export class ThreadAgent extends Agent<Env> {
       now: new Date(),
     };
     const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
+    // This turn continues one a runner restart cut off, whether its wait ran out or a message came first.
+    const pending = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; lastStep: string | null } | null;
+    this.deleteMeta("resume_pending");
+    const note = pending ? { resumeNote: resumeNote(pending) } : {};
     await this.startAgentTurn({
-      prompt: threadPrompt(promptInput),
-      followUp: threadPrompt({ ...promptInput, followUp: true }),
+      prompt: threadPrompt({ ...promptInput, ...note }),
+      followUp: threadPrompt({ ...promptInput, followUp: true, ...note }),
       requester,
       place,
       timezone: ctx.defaultTimezone,
@@ -593,6 +598,9 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     let pending = turn?.pending ?? [];
     const replied = turn?.replied ?? false;
+    const resuming = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; delaySec: number } | null;
+    // A turn that ended on its own ends the chain of automatic continues.
+    if (!resuming) this.deleteMeta("auto_resume");
     let lastText: string | null = null;
     // The usage since its last message goes on the message that ends the turn, if there is one.
     const tail = this.runStats(row, turn?.mark).stats;
@@ -603,6 +611,24 @@ export class ThreadAgent extends Agent<Env> {
       await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: row.summary, artifacts: pending, stats: tail });
       pending = [];
       sentTail = true;
+    } else if (resuming) {
+      // Cut off by the runner going away: one line instead of a failure report; the turn continues.
+      const tr = (this.getMeta("language") ?? row.language).startsWith("tr");
+      await project.sendMessage({
+        threadId,
+        authorKind: "system",
+        authorId: SYSTEM_ID,
+        body: resumingMessage(tr, resuming.resumes, resuming.delaySec),
+        artifacts: pending,
+        stats: tail,
+      });
+      pending = [];
+      sentTail = true;
+      await project.updateThread(threadId, { status: "working" });
+      await project.setActivity(threadId, false);
+      // Someone wrote meanwhile: their turn continues the work now (it gets the same note).
+      if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
+      return;
     } else if (row.status !== "done") {
       await project.sendMessage({
         threadId,
@@ -1387,6 +1413,50 @@ export class ThreadAgent extends Agent<Env> {
 
   async conflictCheck(payload: ConflictCheck): Promise<void> {
     await checkConflict(this.env, payload.repoId, payload.number, payload.attempt);
+  }
+
+  /**
+   * The runner lost this task: it restarted (an update) or the computer disconnected, and its CLI
+   * stopped with it. An agent turn continues on its own, within the limits in auto-resume.ts;
+   * anything else fails as before. Callable over RPC by the runner's RunnerAgent.
+   */
+  async taskInterrupted(taskId: string, input: { restarted: boolean; flapping: boolean }): Promise<void> {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (!row || row.status !== "running") return;
+    const spec = JSON.parse(row.spec) as StoredSpec;
+    const [last] = this.sql<{ text: string }>`SELECT text FROM task_log WHERE task_id = ${taskId} AND tool = 1 ORDER BY id DESC LIMIT 1`;
+    const decision = decideResume({
+      state: JSON.parse(this.getMeta("auto_resume") ?? "null") as ResumeState | null,
+      // A run cut off before its first step may be what brings the runner down: it counts twice.
+      progressed: !!last,
+      flapping: input.flapping,
+      // A turn that already resolved the thread has nothing left to continue.
+      agent: !!spec.agent && !(JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.resolved,
+    });
+    if (decision.resume) {
+      this.setMeta("auto_resume", JSON.stringify(decision.state));
+      const lastStep = last ? last.text.replace(/^→ /, "").split("\n")[0]!.slice(0, 300) : null;
+      this.setMeta("resume_pending", JSON.stringify({ resumes: decision.state.resumes, delaySec: decision.delaySec, lastStep }));
+      await this.schedule(decision.delaySec, "resumeInterrupted", { taskId });
+    } else {
+      this.deleteMeta("auto_resume");
+    }
+    const reason = interruptedReason(input.restarted);
+    await this.taskEvents(taskId, [
+      { type: "phase", phase: "agent", state: "failed", detail: reason },
+      { type: "done", ok: false, error: reason },
+    ]);
+    if (!decision.resume && decision.reason !== "not-agent") {
+      const { projectId, threadId } = this.ids();
+      const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+      await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: gaveUpMessage(this.getMeta("language") === "tr", decision.reason) });
+    }
+  }
+
+  /** The wait after an interrupted turn is over: continue it, unless a message already did. */
+  async resumeInterrupted(_payload: { taskId: string }): Promise<void> {
+    if (!this.getMeta("resume_pending")) return;
+    await this.markDirty();
   }
 
   async taskWatchdog(payload: { taskId: string }): Promise<void> {

@@ -5,6 +5,7 @@ import type { RunnerToServer } from "@myrel/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ADAPTERS, type ParseState } from "../src/clis";
 import { loadConfig, type RunnerConfig, SessionStore, saveConfig, shareFolder, unshareFolder } from "../src/config";
+import { readRunning, saveInterrupted, takeInterrupted, writeRunning } from "../src/restart";
 import { RUNNER_VERSION } from "../src/runner";
 import { sharedFolder, TaskRunner } from "../src/tasks";
 import { isNewer } from "../src/update";
@@ -277,6 +278,40 @@ describe.skipIf(process.platform === "win32")("TaskRunner", () => {
     await done;
     expect(frames.at(-1)).toEqual({ type: "task.done", taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
     expect(runner.runningIds()).toEqual([]);
+  });
+
+  it("stops tasks as the runner shuts down without failing them, its session already saved", async () => {
+    await fakeClaude(`read prompt
+echo '{"type":"system","subtype":"init","session_id":"sess-7"}'
+sleep 30`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const config: RunnerConfig = { folders: [{ path: folder, name: "proj" }], access: "edit" };
+    const frames: RunnerToServer[] = [];
+    const changes: string[][] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore(), onChange: (r) => changes.push(r) });
+    runner.setSender((f) => frames.push(f));
+    const taskId = "task_01JTEST0000000000000000003";
+    const threadId = "thr_01JTEST0000000000000000000";
+    const done = runner.start({ type: "task.start", taskId, threadId, folder, cli: "claude", prompt: "x" });
+    // The session is saved once the CLI names it, before the run ends.
+    for (let i = 0; i < 200 && !(await new SessionStore().get(threadId, "claude")); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(await new SessionStore().get(threadId, "claude")).toEqual({ id: "sess-7", task: taskId });
+    expect(runner.stopAll()).toEqual([taskId]);
+    await done;
+    expect(frames.some((f) => f.type === "task.done")).toBe(false);
+    expect(changes).toEqual([[taskId], []]);
+  });
+
+  it("hands the tasks it stopped to the next runner once", () => {
+    const now = Date.now();
+    saveInterrupted(["task_01JTEST0000000000000000004"], now - 2 * 60 * 60 * 1000);
+    saveInterrupted(["task_01JTEST0000000000000000005"], now);
+    // Too old to report: the server gave it up long ago.
+    expect(takeInterrupted(now)).toEqual(["task_01JTEST0000000000000000005"]);
+    expect(takeInterrupted(now)).toEqual([]);
+    writeRunning(["task_01JTEST0000000000000000006"]);
+    expect(readRunning()).toEqual(["task_01JTEST0000000000000000006"]);
   });
 
   it("runs the CLI in the shared folder with the prompt on stdin and reports the result", async () => {

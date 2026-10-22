@@ -6,6 +6,7 @@ import { detectClis } from "./clis";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
+import { readRunning } from "./restart";
 import { isNewer, latestVersion, runVersion } from "./update";
 import { listWorktrees, pruneWorktrees, removeWorktree, worktreeState } from "./worktrees";
 
@@ -28,7 +29,8 @@ Usage:
                                  Connect and run tasks in this terminal until stopped (Ctrl+C)
   myrel-runner worktrees [on|off|prune|remove <path> [--force]]
                                  List, turn on or off, or clean up the threads' git worktrees
-  myrel-runner update           Update to the newest version and restart the background runner
+  myrel-runner update [--now]   Update to the newest version and restart the background runner,
+                                 after its running tasks finish (at most 10 minutes; --now: right away)
   myrel-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
@@ -57,6 +59,7 @@ async function main(argv: string[]) {
       access: { type: "string" },
       json: { type: "boolean" },
       force: { type: "boolean" },
+      now: { type: "boolean" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -149,6 +152,7 @@ async function main(argv: string[]) {
         return;
       }
       if (values.access) await saveAccess(values.access);
+      if (!values.now) await waitForTasks();
       // Replaces the background runner's copy with this version and restarts it.
       const info = await installService(fileURLToPath(import.meta.url));
       console.log(`Restarted the background runner on ${RUNNER_VERSION}.`);
@@ -204,6 +208,29 @@ async function main(argv: string[]) {
     }
     default:
       throw new Error(`Unknown command "${command}". Run myrel-runner --help.`);
+  }
+}
+
+/** How long `update` waits for the background runner's tasks before restarting it anyway. */
+const UPDATE_WAIT_MS = 10 * 60 * 1000;
+
+/**
+ * Waits until the background runner has no task running, or UPDATE_WAIT_MS. A task stopped by the
+ * restart is continued by Myrel afterwards, but one that finishes first loses nothing.
+ */
+async function waitForTasks() {
+  const until = Date.now() + UPDATE_WAIT_MS;
+  let said = 0;
+  for (let running = readRunning(); running.length; running = readRunning()) {
+    if (Date.now() >= until) {
+      console.log(`Restarting now; Myrel continues the ${running.length} task(s) still running after the restart.`);
+      return;
+    }
+    if (running.length !== said) {
+      said = running.length;
+      console.log(`${said} task(s) running; restarting once they finish (at most 10 minutes; --now to restart right away)…`);
+    }
+    await new Promise((r) => setTimeout(r, 5000));
   }
 }
 

@@ -13,10 +13,11 @@ import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, sh
 import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
 import { loadLimits, readCodexLimits, saveLimits } from "./limits";
+import { saveInterrupted, takeInterrupted, writeRunning } from "./restart";
 import { TaskRunner } from "./tasks";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.11.3";
+export const RUNNER_VERSION = "0.12.0";
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -101,7 +102,11 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const readCodex = () => {
     if (clis.some((c) => c.id === "codex")) void readCodexLimits().then((l) => setLimits("codex", l), () => {});
   };
-  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log, onLimits: setLimits });
+  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log, onLimits: setLimits, onChange: writeRunning });
+  // What the previous runner was doing when it stopped (an update, a restart): the server continues it.
+  const interrupted = takeInterrupted();
+  if (interrupted.length) log(`${interrupted.length} task(s) stopped when the runner restarted; Myrel continues them.`);
+  writeRunning([]);
   let stopReason: Extract<RunnerStatus, { state: "stopped" }>["reason"] = "stopped";
   let socket: WebSocket | null = null;
   let stopped = false;
@@ -137,6 +142,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
       features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders", "files"],
       running: tasks.runningIds(),
+      interrupted,
     });
   tasks.setSender(send);
 
@@ -165,7 +171,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     clearInterval(pruning);
     clearInterval(codexLimits);
     unwatchFile(configPath(), onConfigChange);
-    tasks.stopAll();
+    saveInterrupted(tasks.stopAll());
     socket?.close(1000);
     status({ state: "stopped", reason: stopReason });
     finish();
