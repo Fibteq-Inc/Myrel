@@ -1,5 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import { createId, type MessageStats, type Runtime, type TaskStats } from "@myrel/protocol";
+import { eq } from "drizzle-orm";
 import { type CallRecord, costMicros, DEFAULT_PRICES, type LlmEnv, metered, type ModelProvider, parsePrices, type Price, priceFor } from "./llm";
 
 /** Who a turn's model calls are billed to. */
@@ -152,13 +153,23 @@ export async function recordTaskUsage(
     });
 }
 
+/** Marks an agent turn as running in a cloud sandbox now (see schema.sandboxActive), until recordSandboxRun. */
+export async function markSandboxActive(d1: D1Database, run: { taskId: string; projectId: string; startedAt: Date }) {
+  await createDb(d1)
+    .insert(schema.sandboxActive)
+    .values({ id: run.taskId, projectId: run.projectId, startedAt: run.startedAt, billedTo: (await billing(d1, run.projectId)).billedTo })
+    .onConflictDoNothing();
+}
+
 /** One row for a finished agent turn that ran in a cloud sandbox: how long it ran. */
 export async function recordSandboxRun(
   d1: D1Database,
   run: { taskId: string; projectId: string; threadId: string; startedAt: Date; endedAt: Date },
 ) {
   const seconds = Math.max(0, Math.round((run.endedAt.getTime() - run.startedAt.getTime()) / 1000));
-  await createDb(d1)
+  const db = createDb(d1);
+  await db.delete(schema.sandboxActive).where(eq(schema.sandboxActive.id, run.taskId));
+  await db
     .insert(schema.sandboxRuns)
     .values({
       id: run.taskId,

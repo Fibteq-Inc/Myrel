@@ -103,11 +103,12 @@ export class ApiClient {
     this.credentials = options.credentials ?? "include";
   }
 
-  async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  async request<T>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
     const res = await this.send(path, {
       method: init.method,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       contentType: init.body === undefined ? undefined : "application/json",
+      headers: init.headers,
     });
     const text = await res.text();
     const data: unknown = text ? JSON.parse(text) : null;
@@ -116,8 +117,8 @@ export class ApiClient {
   }
 
   /** Raw fetch with auth applied. Use `request` for JSON endpoints. */
-  async send(path: string, init: { method?: string; body?: BodyInit; contentType?: string } = {}): Promise<Response> {
-    const headers: Record<string, string> = { ...this.headers, accept: "application/json" };
+  async send(path: string, init: { method?: string; body?: BodyInit; contentType?: string; headers?: Record<string, string> } = {}): Promise<Response> {
+    const headers: Record<string, string> = { ...this.headers, ...init.headers, accept: "application/json" };
     if (init.contentType) headers["content-type"] = init.contentType;
     const token = await this.tokens?.get();
     if (token) headers.authorization = `Bearer ${token}`;
@@ -148,9 +149,16 @@ export class ApiClient {
 
   // --- auth (Better Auth endpoints) ---
 
-  /** `acceptTerms` is required when the server's info lists legal documents. */
-  signUp(input: { email: string; password: string; name: string; acceptTerms?: boolean }) {
-    return this.request<{ user: SessionUser }>("/api/auth/sign-up/email", { method: "POST", body: input });
+  /**
+   * `acceptTerms` is required when the server's info lists legal documents, and `captchaToken` (a
+   * solved Turnstile challenge) when it lists a captcha.
+   */
+  signUp({ captchaToken, ...input }: { email: string; password: string; name: string; acceptTerms?: boolean; captchaToken?: string }) {
+    return this.request<{ user: SessionUser }>("/api/auth/sign-up/email", {
+      method: "POST",
+      body: input,
+      ...(captchaToken && { headers: { "x-captcha-response": captchaToken } }),
+    });
   }
 
   signIn(input: { email: string; password: string }) {

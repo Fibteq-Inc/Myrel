@@ -35,4 +35,10 @@ interface Env {
   TERMS_URL?: string;
   PRIVACY_URL?: string;
   LEGAL_VERSION?: string;
+  /**
+   * Cloudflare Turnstile on sign-up, against bots creating accounts: the widget's site key (a var) and
+   * its secret key (a secret). Off unless both are set (see captcha.ts).
+   */
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
 }

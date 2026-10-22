@@ -17,7 +17,7 @@ use tauri_plugin_shell::{
 };
 
 pub const STATUS_EVENT: &str = "runner://status";
-const LOGIN_KEY: &str = "runner-login";
+pub const LOGIN_KEY: &str = "runner-login";
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +28,7 @@ struct Login {
 }
 
 fn load_login() -> Option<Login> {
-    let raw = crate::secrets::secret_get(LOGIN_KEY.into()).ok()??;
+    let raw = crate::secrets::get(LOGIN_KEY).ok()??;
     serde_json::from_str(&raw).ok()
 }
 
@@ -97,7 +97,7 @@ pub async fn runner_info<R: Runtime>(app: AppHandle<R>, runner: State<'_, Runner
 #[tauri::command]
 pub fn runner_connect<R: Runtime>(app: AppHandle<R>, server: String, runner_id: String, token: String) -> Result<(), String> {
     let login = serde_json::to_string(&Login { server, runner_id, token }).map_err(|e| e.to_string())?;
-    crate::secrets::secret_set(LOGIN_KEY.into(), Some(login))?;
+    crate::secrets::set(LOGIN_KEY, Some(login))?;
     start(&app)
 }
 
@@ -115,7 +115,7 @@ pub async fn runner_set_access<R: Runtime>(app: AppHandle<R>, access: String) ->
 #[tauri::command]
 pub fn runner_logout<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     stop(&app);
-    crate::secrets::secret_set(LOGIN_KEY.into(), None)
+    crate::secrets::set(LOGIN_KEY, None)
 }
 
 #[tauri::command]

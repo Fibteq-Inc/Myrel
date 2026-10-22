@@ -5,7 +5,7 @@ import {
   NotificationSettings,
   PushSubscriptionInput,
 } from "@myrel/protocol";
-import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AppEnv, requireUser } from "../middleware";
@@ -66,11 +66,20 @@ export const notificationRoutes = new Hono<AppEnv>()
       input.data.kind === "webpush"
         ? { kind: "webpush" as const, endpoint: input.data.endpoint, ...input.data.keys }
         : { kind: "expo" as const, endpoint: input.data.token, p256dh: null, auth: null };
-    // A device belongs to whoever registered it last (shared browsers, re-logins).
-    await createDb(c.env.DB)
+    // A device belongs to whoever registered it last (shared browsers, re-logins). A browser's
+    // subscription moves to another account only with its own keys, which only that browser has: an
+    // endpoint alone (seen in a log, say) cannot take someone's notifications.
+    const moves = row.kind === "expo" ? undefined : and(eq(pushSubscriptions.p256dh, row.p256dh), eq(pushSubscriptions.auth, row.auth));
+    const [saved] = await createDb(c.env.DB)
       .insert(pushSubscriptions)
       .values({ id: crypto.randomUUID(), userId, ...row })
-      .onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: { userId, p256dh: row.p256dh, auth: row.auth } });
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: { userId, p256dh: row.p256dh, auth: row.auth },
+        ...(moves && { setWhere: or(eq(pushSubscriptions.userId, userId), moves) }),
+      })
+      .returning({ id: pushSubscriptions.id });
+    if (!saved) return c.json({ error: "subscription_taken" }, 409);
     return c.json({ ok: true }, 201);
   })
   .delete("/subscriptions", async (c) => {

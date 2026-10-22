@@ -19,6 +19,11 @@ export const ServerInfo = z.object({
     signUp: z.boolean().default(true),
     /** Whether this server verifies email addresses: invitations, admin rights and the cloud sandbox wait for it. */
     emailVerification: z.boolean().default(false),
+    /**
+     * A Cloudflare Turnstile challenge sign-up asks for: its token goes in the x-captcha-response
+     * header. Null when the server has none (older servers do not send it).
+     */
+    captcha: z.object({ provider: z.literal("turnstile"), siteKey: z.string() }).nullable().default(null),
   }),
   /** Whether this server sells plans (the hosted service); self-hosted servers have none. */
   billing: z.boolean().default(false),

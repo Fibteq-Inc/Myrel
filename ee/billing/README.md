@@ -28,6 +28,7 @@ and hands everything else to the core Worker. The core never imports this packag
 | Price | $0 | $15/month, $144/year (in the mobile app: $17.99/month, $179.99/year) | $25/person/month, $240/person/year, at least 2 |
 | Projects owned | 3 | Unlimited | Unlimited |
 | Cloud sandbox | 2 h/month | 100 h/month | 150 h/person/month, pooled |
+| Cloud turns at once | 1 | Unlimited | Unlimited |
 | Included model usage | $1/month | $5/month | $5/person/month, pooled |
 | Connectors (own + on owned projects) | 2 | Unlimited | Unlimited |
 
@@ -36,6 +37,11 @@ cloud thread agent spend on the service's model keys, for projects without a key
 (a server-wide key counts as the service's). Unpriced model calls count as
 `BILLING_UNPRICED_CALL_MICROS` each (default 20000, $0.02). Work on a person's own computer is
 never limited.
+
+Limits are checked when a cloud turn starts and again every minute while it runs, counting what the
+turn has used so far, so a long turn ends (with the reason) once it reaches them. Free runs one cloud
+turn at a time across a person's projects. The service's model keys and cloud sandbox are used only on
+projects whose owner has verified their email address.
 
 Free has a second, service-wide guard: once everyone on Free together has cost
 `BILLING_FREE_MONTHLY_BUDGET_USD` this month (default 200; model spend plus sandbox time at

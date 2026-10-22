@@ -95,6 +95,9 @@
   // INSTANCE_NAME: shown to apps that connect to this server, e.g. "Acme Myrel".
   // SIGNUP_ENABLED: "true" lets anyone create an account; otherwise only existing accounts and invited
   // people can. Admins can change it at runtime in Settings, which then takes precedence.
+  // TURNSTILE_SITE_KEY (var) and TURNSTILE_SECRET_KEY (secret): a Cloudflare Turnstile widget (dashboard >
+  // Turnstile, with this server's hostname) that sign-up then asks to solve, against bots opening accounts.
+  // Off unless both are set. The desktop and mobile apps send people to the web page to sign up then.
   // ADMIN_EMAILS (secret): comma-separated addresses of the server's admins. They may sign up while
   // sign-ups are closed. Unset = the first account becomes the admin, so set it before opening sign-ups.
   //

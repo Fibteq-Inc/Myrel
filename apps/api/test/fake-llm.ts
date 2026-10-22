@@ -29,7 +29,7 @@ const realFetch = globalThis.fetch;
 /** A notification request an agent sent out (email, Web Push, Expo), captured instead of sent. */
 export type Outbound = { url: string; headers: Headers; body: Uint8Array };
 export const outbound: Outbound[] = [];
-const OUTBOUND = ["https://exp.host/", "https://push.example.test/"];
+const OUTBOUND = ["https://exp.host/", "https://fcm.googleapis.com/"];
 /** Status the fake push service answers with, per endpoint. Default 201. */
 export const pushStatus = new Map<string, number>();
 

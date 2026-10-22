@@ -128,6 +128,8 @@ function SignInForm() {
   const [pending, setPending] = useState(false);
   const signUpAllowed = session.info?.auth.signUp !== false;
   const legal = mode === "signup" ? session.info?.legal : null;
+  // A server with a sign-up challenge (Turnstile) creates accounts on its own web page, where it can show it.
+  const signUpInBrowser = mode === "signup" && session.info?.auth.captcha != null;
 
   async function submit() {
     setPending(true);
@@ -144,55 +146,66 @@ function SignInForm() {
   return (
     <View style={styles.form}>
       <Text style={styles.title}>{mode === "signin" ? t("login.signInTitle") : t("login.signUpTitle")}</Text>
-      {mode === "signup" && (
-        <Input value={name} onChangeText={setName} placeholder={t("login.name")} autoCapitalize="words" textContentType="name" />
-      )}
-      <Input
-        value={email}
-        onChangeText={setEmail}
-        placeholder={t("login.email")}
-        keyboardType="email-address"
-        textContentType="emailAddress"
-        autoComplete="email"
-      />
-      <Input
-        value={password}
-        onChangeText={setPassword}
-        placeholder={t("login.password")}
-        secureTextEntry
-        textContentType={mode === "signin" ? "password" : "newPassword"}
-        autoComplete={mode === "signin" ? "current-password" : "new-password"}
-        returnKeyType="go"
-        onSubmitEditing={submit}
-      />
-      {legal && (
-        <View style={styles.accept}>
-          <Pressable
-            onPress={() => setAccepted(!accepted)}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: accepted }}
-            hitSlop={10}
-            style={[styles.box, accepted && styles.boxOn]}
-          >
-            {accepted && <Check size={14} color={colors.ground} strokeWidth={3} />}
-          </Pressable>
-          <Text style={[styles.hint, { flex: 1 }]}>
-            {t("login.accept.before")}
-            <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.terms)}>
-              {t("legal.terms")}
-            </Text>
-            {t("login.accept.and")}
-            <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.privacy)}>
-              {t("legal.privacy")}
-            </Text>
-            {t("login.accept.after")}
-          </Text>
-        </View>
+      {!signUpInBrowser && (
+        <>
+          {mode === "signup" && (
+            <Input value={name} onChangeText={setName} placeholder={t("login.name")} autoCapitalize="words" textContentType="name" />
+          )}
+          <Input
+            value={email}
+            onChangeText={setEmail}
+            placeholder={t("login.email")}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            autoComplete="email"
+          />
+          <Input
+            value={password}
+            onChangeText={setPassword}
+            placeholder={t("login.password")}
+            secureTextEntry
+            textContentType={mode === "signin" ? "password" : "newPassword"}
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            returnKeyType="go"
+            onSubmitEditing={submit}
+          />
+          {legal && (
+            <View style={styles.accept}>
+              <Pressable
+                onPress={() => setAccepted(!accepted)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: accepted }}
+                hitSlop={10}
+                style={[styles.box, accepted && styles.boxOn]}
+              >
+                {accepted && <Check size={14} color={colors.ground} strokeWidth={3} />}
+              </Pressable>
+              <Text style={[styles.hint, { flex: 1 }]}>
+                {t("login.accept.before")}
+                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.terms)}>
+                  {t("legal.terms")}
+                </Text>
+                {t("login.accept.and")}
+                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.privacy)}>
+                  {t("legal.privacy")}
+                </Text>
+                {t("login.accept.after")}
+              </Text>
+            </View>
+          )}
+        </>
       )}
       {error && <Text style={styles.error}>{error}</Text>}
-      <Button onPress={submit} pending={pending} disabled={!email || password.length < 8 || (legal != null && !accepted)}>
-        {mode === "signin" ? t("login.signIn") : t("login.signUp")}
-      </Button>
+      {signUpInBrowser ? (
+        <>
+          <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.signUpInBrowser")}</Text>
+          <Button onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?signup`)}>{t("login.openSignUp")}</Button>
+        </>
+      ) : (
+        <Button onPress={submit} pending={pending} disabled={!email || password.length < 8 || (legal != null && !accepted)}>
+          {mode === "signin" ? t("login.signIn") : t("login.signUp")}
+        </Button>
+      )}
       {signUpAllowed ? (
         <Pressable onPress={() => setMode(mode === "signin" ? "signup" : "signin")} accessibilityRole="button">
           <Text style={[styles.hint, { textAlign: "center" }]}>

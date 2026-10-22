@@ -1,11 +1,23 @@
 import type { Extensions, LimitCheck } from "../../../apps/api/src/extensions";
-import { freeBudgetMicros, freeSpendMicros, projectOwner, type Standing, standingOf, usageOf } from "./store";
+import { userVerified } from "../../../apps/api/src/verification";
+import {
+  activeSandboxes,
+  freeBudgetMicros,
+  freeSpendMicros,
+  projectOwner,
+  SANDBOX_MICROS_PER_SECOND,
+  type Standing,
+  standingOf,
+  usageOf,
+} from "./store";
 
 const OK: LimitCheck = { ok: true };
 const refuse = (reason: string): LimitCheck => ({ ok: false, reason });
 
 const UPGRADE = "Upgrade your plan in Settings > Plan and billing";
 const KEY_HINT = "add your own model key in the project's settings";
+/** The service pays for cloud turns and its model keys only on projects whose owner verified their address. */
+const UNVERIFIED_OWNER = "The project's owner needs to verify their email address first: open the link Myrel sent them, or send a new one from the banner.";
 
 /** The hosted service's plan limits, plugged into the core (see apps/api/src/extensions.ts). */
 export const billingExtensions: Extensions = {
@@ -35,13 +47,25 @@ export const billingExtensions: Extensions = {
       : refuse(`Your plan includes ${max} connectors. ${UPGRADE}, or remove a connector you no longer use.`);
   },
 
-  async canUseSandbox(env, projectId) {
+  async canUseSandbox(env, projectId, running) {
     const project = await projectOwner(env.DB, projectId);
     if (!project) return OK;
     const standing = await standingOf(env, project.owner);
     if (standing.plan === "admin") return OK;
+    if (!(await userVerified(env, project.owner))) return refuse(UNVERIFIED_OWNER);
     const usage = await usageOf(env, standing, project.owner);
-    const { modelMicros, sandboxSeconds } = standing.limits;
+    // A running turn's use is not in the usage tables until it ends.
+    const turnMicros = project.ownKey ? 0 : (running?.modelMicros ?? 0);
+    usage.modelMicros += turnMicros;
+    usage.sandboxSeconds += running?.seconds ?? 0;
+    const { modelMicros, sandboxSeconds, concurrentSandboxes } = standing.limits;
+    // Only a new turn waits for the others; a running one is already counted among them.
+    if (!running && concurrentSandboxes !== null && (await activeSandboxes(env, standing)) >= concurrentSandboxes) {
+      return refuse(
+        `Your plan runs ${concurrentSandboxes} cloud ${concurrentSandboxes === 1 ? "turn" : "turns"} at a time and that many are running. ` +
+          `Wait for one to finish, upgrade your plan in Settings > Plan and billing, or connect a folder on your computer.`,
+      );
+    }
     // The cloud agent runs on the service's model key unless the project has its own.
     if (!project.ownKey && modelMicros !== null && usage.modelMicros >= modelMicros) {
       return refuse(`This project's plan has used its included model usage this month. ${UPGRADE}, or ${KEY_HINT}.`);
@@ -53,7 +77,8 @@ export const billingExtensions: Extensions = {
           `${UPGRADE}, or connect a folder on your computer to keep working there.`,
       );
     }
-    if (unpaid(standing) && (await freeSpendMicros(env)) >= freeBudgetMicros(env)) {
+    const turnSpend = turnMicros + (running?.seconds ?? 0) * SANDBOX_MICROS_PER_SECOND;
+    if (unpaid(standing) && (await freeSpendMicros(env)) + turnSpend >= freeBudgetMicros(env)) {
       return refuse(`Free cloud sandbox time is used up for this month. ${UPGRADE}, or connect a folder on your computer.`);
     }
     return OK;
@@ -65,6 +90,7 @@ export const billingExtensions: Extensions = {
     if (!project || project.ownKey) return OK;
     const standing = await standingOf(env, project.owner);
     if (standing.plan === "admin") return OK;
+    if (!(await userVerified(env, project.owner))) return refuse(UNVERIFIED_OWNER);
     const usage = await usageOf(env, standing, project.owner);
     const max = standing.limits.modelMicros;
     if (max !== null && usage.modelMicros >= max) {

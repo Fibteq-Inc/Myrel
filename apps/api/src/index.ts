@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { BOOKMARK_HEADER, withD1Session } from "./d1-session";
 import { authLimit } from "./auth-limit";
+import { CAPTCHA_HEADER, captchaConfig } from "./captcha";
 import { legalLinks, sellsPlans } from "./extensions";
 import { signUpEnabled } from "./instance";
 import { verificationRequired } from "./verification";
@@ -41,7 +42,7 @@ const app = new Hono<AppEnv>()
     cors({
       origin: trustedOrigins(c.env),
       credentials: true,
-      allowHeaders: ["authorization", "content-type", BOOKMARK_HEADER],
+      allowHeaders: ["authorization", "content-type", BOOKMARK_HEADER, CAPTCHA_HEADER],
       exposeHeaders: ["set-auth-token", BOOKMARK_HEADER],
     })(c, next),
   )
@@ -52,7 +53,12 @@ const app = new Hono<AppEnv>()
       app: "myrel",
       apiVersion: API_VERSION,
       name: c.env.INSTANCE_NAME || "Myrel",
-      auth: { emailPassword: true, signUp: await signUpEnabled(c.env), emailVerification: verificationRequired(c.env) },
+      auth: {
+        emailPassword: true,
+        signUp: await signUpEnabled(c.env),
+        emailVerification: verificationRequired(c.env),
+        captcha: captchaConfig(c.env),
+      },
       billing: sellsPlans(),
       legal: legalLinks(c.env, new URL(c.req.url).origin),
     } satisfies ServerInfo),
@@ -133,6 +139,7 @@ const app = new Hono<AppEnv>()
   .route("/projects", knowledgeRoutes)
   .route("/usage", usageRoutes)
   .route("/github", githubRoutes)
+  .use("/runner/pair", authLimit)
   .route("/runner", runnerDeviceRoutes)
   .route("/runners", runnerRoutes)
   .route("/notifications", notificationRoutes)

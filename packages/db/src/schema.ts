@@ -200,6 +200,24 @@ export const sandboxRuns = sqliteTable(
   (t) => [index("sandbox_runs_project_ended_idx").on(t.projectId, t.endedAt), index("sandbox_runs_billed_ended_idx").on(t.billedTo, t.endedAt)],
 );
 
+/**
+ * One row per agent turn running in a cloud sandbox right now, removed when it ends (it then has a
+ * sandbox_runs row). The hosted plans limit how many run at once with it. A row whose turn was lost
+ * without ending is ignored once older than the longest a turn may run.
+ */
+export const sandboxActive = sqliteTable(
+  "sandbox_active",
+  {
+    /** The task's id. */
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    /** Whose plan the run counts against (see sandboxRuns.billedTo). */
+    billedTo: text("billed_to"),
+  },
+  (t) => [index("sandbox_active_billed_idx").on(t.billedTo, t.startedAt)],
+);
+
 /** Pending invitations to a project. The invitee accepts after signing in with `email`. */
 export const projectInvites = sqliteTable(
   "project_invites",

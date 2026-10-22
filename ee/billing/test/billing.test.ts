@@ -183,6 +183,42 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canUseCoordinator!(workerEnv, fresh.id)).toEqual({ ok: true });
   });
 
+  it("counts a running cloud turn's use and runs one at a time on Free", async () => {
+    const { token, userId } = await signUp();
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    // Nothing recorded yet, but the turn itself has spent the month's $1.
+    const spent = await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 1_000_000, seconds: 60 });
+    expect(spent.ok || spent.reason).toContain("model usage");
+    const long = await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 0, seconds: 7200 });
+    expect(long.ok || long.reason).toContain("2 hours");
+    expect(await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 10_000, seconds: 60 })).toEqual({ ok: true });
+
+    // Another turn running: a new one waits, the running one carries on.
+    const now = Date.now();
+    await env.DB.prepare("INSERT INTO sandbox_active (id, project_id, started_at, billed_to) VALUES (?, ?, ?, ?)")
+      .bind(`task_${crypto.randomUUID()}`, project.id, now, userId)
+      .run();
+    const second = await billingExtensions.canUseSandbox!(workerEnv, project.id);
+    expect(second.ok || second.reason).toContain("at a time");
+    expect(await billingExtensions.canUseSandbox!(workerEnv, project.id, { modelMicros: 0, seconds: 60 })).toEqual({ ok: true });
+
+    // A row left by a turn lost long ago no longer counts.
+    await env.DB.prepare("UPDATE sandbox_active SET started_at = ? WHERE billed_to = ?").bind(now - 2 * 3600_000, userId).run();
+    expect(await billingExtensions.canUseSandbox!(workerEnv, project.id)).toEqual({ ok: true });
+  });
+
+  it("spends nothing of the service's on a project whose owner has not verified their address", async () => {
+    const { token, userId } = await signUp();
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    await env.DB.prepare("UPDATE user SET email_verified = 0 WHERE id = ?").bind(userId).run();
+    for (const check of [
+      await billingExtensions.canUseSandbox!(workerEnv, project.id),
+      await billingExtensions.canUseCoordinator!(workerEnv, project.id),
+    ]) {
+      expect(check.ok || check.reason).toContain("verify their email address");
+    }
+  });
+
   it("sets a Team switched to in the billing portal to at least two seats", async () => {
     const { userId } = await signUp();
     const calls: { url: string; body: string }[] = [];
