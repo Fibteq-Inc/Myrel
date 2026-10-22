@@ -46,21 +46,22 @@ Regenerate icons from `icon.svg` with `pnpm --filter @myrel/desktop icons`.
 
 ## Release
 
-`.github/workflows/desktop.yml` builds the app only from main: a `desktop-v*` tag on a main commit, or a
-manual run (Actions → Desktop → Run workflow) on main, which uploads the installers as workflow artifacts.
-Pull requests don't build it; CI's typecheck and build cover its TypeScript. To publish, bump `version` in
-`src-tauri/Cargo.toml` on main, then tag that main commit with the same version:
+Releases go through a Release PR ([release-please](https://github.com/googleapis/release-please), config in
+`release-please-config.json`). Every `feat:` or `fix:` commit on main that touches `apps/desktop` updates an
+open "chore(main): release desktop x.y.z" PR with the next version (in `package.json` and
+`src-tauri/Cargo.toml`) and `CHANGELOG.md`. Merging that PR tags `desktop-vx.y.z`, creates the GitHub release
+and starts `.github/workflows/desktop.yml`, which attaches the signed installers and `latest.json`.
 
-```sh
-git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
-```
+The app only builds from main: through the Release PR, a `desktop-v*` tag pushed by hand on a main commit, or
+a manual run (Actions → Desktop → Run workflow) on main, which uploads the installers as workflow artifacts.
+Pull requests don't build it; CI's typecheck and build cover its TypeScript.
 
 While the repository is private, macOS builds on the org's self-hosted Mac runner (labels `self-hosted`,
 `macOS`), so that Mac must be on and awake while a release builds. Once the repository is public, it uses
 GitHub's hosted runners.
 
-The workflow creates a draft GitHub release with the installers and, when the updater key is set,
-`latest.json` for in-app updates. Publishing the draft makes it live.
+When the updater key is set, the release also gets `latest.json`, which installed apps check for updates.
+A tag pushed by hand gets a draft release instead, which goes live when published.
 
 The updater downloads from public GitHub release URLs, so it only works once the repository is public
 (or after pointing `plugins.updater.endpoints` in `src-tauri/tauri.conf.json` at public storage such as R2).
