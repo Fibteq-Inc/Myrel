@@ -13,4 +13,4 @@ openLinksExternally(window, platform.openExternal);
 await import("@myrel/web/main");
 
 void handleDeepLinks(platform);
-if (!import.meta.env.DEV) startUpdateChecks();
+if (!import.meta.env.DEV && platform.updater) startUpdateChecks(platform.updater);

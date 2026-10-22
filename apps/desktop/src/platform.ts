@@ -6,6 +6,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { desktopComputer } from "./computer";
+import { desktopUpdater } from "./updater";
 
 /** Settings (chosen server and the like) in the app's data folder. */
 function settingsStore(): KeyValueStore {
@@ -119,5 +120,6 @@ export function desktopPlatform(): Platform {
     openExternal: (url) => openUrl(url),
     pickFiles,
     computer: desktopComputer(),
+    updater: desktopUpdater(),
   };
 }
