@@ -1,9 +1,12 @@
 name: Desktop
 
 # Builds the Tauri app for macOS, Windows and Linux.
-# Builds only run from main: a `desktop-v*` tag on a main commit, or a manual run on main. Pull requests
-# don't build the app; CI's typecheck and build already cover the desktop and runner TypeScript.
-# Tags `desktop-v*`: signed builds (when the secrets below exist) attached to a draft GitHub release,
+# Builds only run from main. Pull requests don't build the app; CI's typecheck and build already cover
+# the desktop and runner TypeScript.
+# Releases: merging the desktop Release PR (release-please.yml) tags `desktop-v*`, creates the GitHub
+# release and calls this workflow with that tag. A `desktop-v*` tag pushed by hand works the same way.
+# Manual runs on main upload unsigned-for-release installers as workflow artifacts.
+# Release builds: signed builds (when the secrets below exist) attached to a draft GitHub release,
 # plus `latest.json` for the in-app updater.
 #
 # Optional secrets (the build still runs without them, just unsigned):
@@ -20,9 +23,15 @@ on:
   push:
     tags: ["desktop-v*"]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build and attach the installers to, e.g. desktop-v0.2.0
+        type: string
+        required: true
 
 concurrency:
-  group: desktop-${{ github.ref }}
+  group: desktop-${{ inputs.tag || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -46,6 +55,9 @@ jobs:
 
   build:
     needs: from-main
+    env:
+      # The release to attach installers to: the Release PR's tag, a pushed tag, or none for manual runs.
+      RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name) || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -125,13 +137,13 @@ jobs:
           tauriScript: pnpm tauri
           args: ${{ matrix.args }} ${{ env.TAURI_EXTRA_ARGS }}
           includeUpdaterJson: ${{ env.UPDATER_JSON == 'true' }}
-          tagName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && 'Myrel Desktop __VERSION__' || '' }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_TAG && 'Myrel Desktop __VERSION__' || '' }}
           releaseDraft: true
           prerelease: false
 
       - name: Upload installers
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: env.RELEASE_TAG == ''
         uses: actions/upload-artifact@v4
         with:
           name: myrel-desktop-${{ runner.os }}
