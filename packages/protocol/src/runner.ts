@@ -28,8 +28,38 @@ export const CLI_NAMES: Record<CliId, string> = {
 export const RunnerFolder = z.object({ path: z.string().min(1).max(1024), name: z.string().max(255) });
 export type RunnerFolder = z.infer<typeof RunnerFolder>;
 
+/**
+ * One usage window of a CLI's subscription. kind: "session" (5 hours), "weekly", "weekly_opus",
+ * "weekly_sonnet", or another name a newer runner knows; the web app skips kinds it does not know.
+ */
+export const CliLimitWindow = z.object({
+  kind: z.string().max(40),
+  /** Share of the window used, 0-100; can pass 100 when the CLI lets usage run over. */
+  usedPercent: z.number().min(0).max(1000).nullable(),
+  resetsAt: Timestamp.nullable(),
+});
+export type CliLimitWindow = z.infer<typeof CliLimitWindow>;
+
+/**
+ * A CLI's subscription limits, as the CLI itself last reported them: Claude Code in its
+ * rate_limit_event, Codex in its session files. Never asked from the providers' APIs.
+ */
+export const CliLimits = z.object({
+  /** "limited" when the CLI refuses work until a window resets. */
+  status: z.enum(["ok", "warning", "limited"]).optional(),
+  windows: z.array(CliLimitWindow).max(8),
+  /** When the CLI reported them. */
+  at: Timestamp,
+});
+export type CliLimits = z.infer<typeof CliLimits>;
+
 /** A CLI the runner found installed on the computer. */
-export const RunnerCli = z.object({ id: CliId, version: z.string().max(200).nullable() });
+export const RunnerCli = z.object({
+  id: CliId,
+  version: z.string().max(200).nullable(),
+  /** Older runners never send it; a malformed one is dropped, not the whole hello. */
+  limits: CliLimits.optional().catch(undefined),
+});
 export type RunnerCli = z.infer<typeof RunnerCli>;
 
 /**
