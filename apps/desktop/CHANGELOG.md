@@ -5,11 +5,29 @@
 
 ### Features
 
-* **desktop:** bundle altair-runner and connect this computer in one click ([903a031](https://github.com/Fibteq-Inc/myrel/commit/903a03157208aadea8e658c0c7d9d6c2f8be45ff))
-* **desktop:** Tauri 2 desktop app with the runner built in ([d9fef80](https://github.com/Fibteq-Inc/myrel/commit/d9fef80ede71722a9a62540100d3515b095f97ed))
-* **desktop:** Tauri 2 desktop app wrapping apps/web ([c2f355f](https://github.com/Fibteq-Inc/myrel/commit/c2f355f1650be287ab8ef38b2acc0872626e4800))
+- feat(connectors): thread agent offers a connector as a card in the thread ([#133](https://github.com/Fibteq-Inc/myrel/pull/133))
+- feat(billing): sell Pro in the mobile app (App Store, Google Play via RevenueCat) ([#110](https://github.com/Fibteq-Inc/myrel/pull/110))
 
+### Changes
 
-### Bug Fixes
-
-* **desktop:** point the updater at the renamed Fibteq-Inc/myrel repository ([b3cd94b](https://github.com/Fibteq-Inc/myrel/commit/b3cd94b870e1805f9f97e30fd46da9d7c316fe6a))
+- Sandbox agent: use its folders, clone over HTTPS, show what it waits on ([#113](https://github.com/Fibteq-Inc/myrel/pull/113))
+- Sandbox: prebuilt image, repo work kept on GitHub, merges settled without a turn ([#115](https://github.com/Fibteq-Inc/myrel/pull/115))
+- Plan before work, faster clones, readable git progress, sandbox start breakdown ([#116](https://github.com/Fibteq-Inc/myrel/pull/116))
+- Remind OpenCode of its active plan step between tool calls ([#120](https://github.com/Fibteq-Inc/myrel/pull/120))
+- Show a project's model cost on its card ([#123](https://github.com/Fibteq-Inc/myrel/pull/123))
+- Verify emails, keep local runs to the computer's owner, bind connector sign-ins ([#125](https://github.com/Fibteq-Inc/myrel/pull/125))
+- Fix ServerInfo tests after email verification ([#127](https://github.com/Fibteq-Inc/myrel/pull/127))
+- Open projects without a connection flash and keep long conversations fast ([#128](https://github.com/Fibteq-Inc/myrel/pull/128))
+- Send email from the onboarded mail.fibteq.app domain ([#129](https://github.com/Fibteq-Inc/myrel/pull/129))
+- Connector catalog from the official MCP Registry ([#130](https://github.com/Fibteq-Inc/myrel/pull/130))
+- Connector catalog: categories, recommended Fibteq connectors, wider page ([#131](https://github.com/Fibteq-Inc/myrel/pull/131))
+- Security fixes from the Codex review (13 findings + 3 follow-ups) ([#132](https://github.com/Fibteq-Inc/myrel/pull/132))
+- Harden workflows and self-host docs before going public ([#136](https://github.com/Fibteq-Inc/myrel/pull/136))
+- Show CLI versions and subscription limits on the Devices page ([#138](https://github.com/Fibteq-Inc/myrel/pull/138))
+- Credit thread pull requests and open them through the GitHub App ([#137](https://github.com/Fibteq-Inc/myrel/pull/137))
+- Compact answered cards and keep thread PRs on the GitHub App ([#140](https://github.com/Fibteq-Inc/myrel/pull/140))
+- Project tabs: only the selected tab shows its name ([#142](https://github.com/Fibteq-Inc/myrel/pull/142))
+- runner: start Claude Code without the 30s wait on the person's own MCP servers ([#141](https://github.com/Fibteq-Inc/myrel/pull/141))
+- Add an auto access level that runs Claude Code in auto mode ([#143](https://github.com/Fibteq-Inc/myrel/pull/143))
+- Local runs survive deploys; clearer Codex terminal ([#144](https://github.com/Fibteq-Inc/myrel/pull/144))
+- Fix open_pull_request's token scope; only connect repos the person can reach ([#145](https://github.com/Fibteq-Inc/myrel/pull/145))
