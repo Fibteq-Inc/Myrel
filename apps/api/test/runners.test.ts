@@ -416,9 +416,8 @@ describe("local workspace", () => {
       await agent.wake({ kind: "message", messageId: m.id, body, authorId: me, seq: m.seq });
     };
 
-    // Inside its folders, a question is about the runner's access level, which stays as it is.
-    expect(await ask("Bash", { command: "rm -rf build" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("access level") });
-    expect((await ask("Edit", { file_path: "src/../src/a.ts" })).behavior).toBe("deny");
+    // A file inside its folders asks only when the runner is read-only, which stays as it is.
+    expect(await ask("Edit", { file_path: "src/../src/a.ts" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("access level") });
     expect(await cards()).toHaveLength(0);
 
     // Outside them, the person is asked and the step waits for the answer.
@@ -464,11 +463,45 @@ describe("local workspace", () => {
     expect((await always).behavior).toBe("allow");
     expect((await workspace()).folders).toEqual(["/Users/ismail/docs", "/Users/ismail/code/site"]);
     expect(shared.map((f) => f.path)).toContain("/Users/ismail/code/site");
+
+    // A command the runner does not run on its own is put to the person instead of a restart.
+    const run = ask("Bash", { command: "git push -u origin myrel/readme" });
+    await until(async () => (await cards()).length === 6, "command card");
+    expect((await cards())[5]!.body).toContain("git push -u origin myrel/readme");
+    // A folder card's answer is not an answer to it.
+    await answer("Bu sefer izin ver");
+    expect(await Promise.race([run.then(() => "answered"), new Promise((r) => setTimeout(() => r("waiting"), 300))])).toBe("waiting");
+    await answer("Çalıştır");
+    expect((await run).behavior).toBe("allow");
+    // Answered, the card shrinks to the command and the card, without the explanation.
+    await until(async () => !(await cards())[5]!.body.includes("erişim seviyesi"), "shortened card");
+    expect((await cards())[5]!.body.startsWith("`git push -u origin myrel/readme`")).toBe(true);
+    // Pull requests go through Myrel's GitHub App, never gh, whatever the person allowed.
+    expect(await ask("Bash", { command: "git push && gh pr create --fill" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("open_pull_request") });
+    const denied = ask("Bash", { command: "rm -rf build" });
+    await until(async () => (await cards()).length === 7, "second command card");
+    await answer("Çalıştırma");
+    expect((await denied).behavior).toBe("deny");
+    const all = ask("Bash", { command: "pnpm test" });
+    await until(async () => (await cards()).length === 8, "third command card");
+    await answer("Bu çalışmada hep izin ver");
+    expect((await all).behavior).toBe("allow");
+    // Commands are allowed for the rest of the turn.
+    expect((await ask("Bash", { command: "git status" })).behavior).toBe("allow");
+    expect(await cards()).toHaveLength(8);
     // Answers to the cards did not queue another turn; Ada's message, an ordinary one, queued one.
     runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
     await new Promise((r) => setTimeout(r, 200));
-    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(2);
+    const turns = runnerSide.frames.filter((f): f is Start => f.type === "task.start");
+    expect(turns).toHaveLength(2);
+    // The first turn has no session to continue; the second can continue the first's with only what is new.
+    expect(turns[0]!.agent?.resume).toBeUndefined();
+    expect(turns[1]!.agent?.resume?.after).toBe(start.taskId);
+    expect(turns[1]!.agent!.resume!.prompt).toContain("New in the thread since your last turn");
+    expect(turns[1]!.agent!.resume!.prompt).toContain("Bu sefer izin ver");
+    expect(turns[1]!.agent!.resume!.prompt).not.toContain("The message this thread started from");
+    expect(turns[1]!.prompt).toContain("The message this thread started from");
     runnerSide.ws.close();
   });
 

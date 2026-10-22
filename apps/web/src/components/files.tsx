@@ -1,4 +1,5 @@
 import { useT } from "@myrel/i18n/react";
+import { ApiError } from "@myrel/client";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
@@ -59,13 +60,23 @@ export function AttachmentList({ attachments }: { attachments?: Attachment[] }) 
   );
 }
 
-/** Files picked in the composer, before sending. */
-export function PendingAttachments({
+type PendingItem = { id: string; name: string; file?: ProjectFile; error?: string };
+
+/**
+ * Files picked in the composer, before sending. With `onInline`, items that
+ * `canInline` (a long paste turned into a file) offer to go back into the
+ * message as text.
+ */
+export function PendingAttachments<T extends PendingItem>({
   items,
   onRemove,
+  onInline,
+  canInline,
 }: {
-  items: { id: string; name: string; file?: ProjectFile; error?: string }[];
+  items: T[];
   onRemove: (id: string) => void;
+  onInline?: (id: string) => void;
+  canInline?: (item: T) => boolean;
 }) {
   const t = useT();
   if (items.length === 0) return null;
@@ -74,7 +85,7 @@ export function PendingAttachments({
       {items.map((item) => (
         <span
           key={item.id}
-          className={`flex max-w-[240px] items-center gap-2 rounded-lg border bg-panel py-1 pl-2.5 pr-1 text-[13px] ${
+          className={`flex max-w-[320px] items-center gap-2 rounded-lg border bg-panel py-1 pl-2.5 pr-1 text-[13px] ${
             item.error ? "border-bad/60 text-bad" : "border-edge"
           }`}
           title={item.error}
@@ -85,6 +96,15 @@ export function PendingAttachments({
             <LoaderCircle size={13} className="flex-none animate-spin text-muted" aria-hidden="true" />
           ) : null}
           <span className="truncate">{item.name}</span>
+          {onInline && canInline?.(item) && (
+            <button
+              type="button"
+              onClick={() => onInline(item.id)}
+              className="flex-none rounded px-1 text-xs text-accent hover:bg-hover"
+            >
+              {t("composer.insertAsText")}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onRemove(item.id)}
@@ -99,23 +119,29 @@ export function PendingAttachments({
   );
 }
 
-/** A file's content, fetched with the API client so bearer-token apps can preview too. */
+/**
+ * A file's content, fetched with the API client so bearer-token apps can preview too: a project
+ * file, or with `local`, one in the project's folders on a computer (see api.getLocalFile).
+ */
 export function FilePreview({
   projectId,
   path,
   contentType,
+  local,
   onClose,
 }: {
   projectId: string;
   path: string;
   contentType?: string;
+  local?: { threadId?: string };
   onClose?: () => void;
 }) {
   const t = useT();
   const blob = useQuery({
-    queryKey: ["projects", projectId, "file", path],
-    queryFn: () => api.getFile(projectId, path),
+    queryKey: local ? ["projects", projectId, "local-file", local.threadId ?? null, path] : ["projects", projectId, "file", path],
+    queryFn: () => (local ? api.getLocalFile(projectId, path, local.threadId) : api.getFile(projectId, path)),
     staleTime: 5_000,
+    retry: local ? false : undefined,
   });
   const type = contentType ?? blob.data?.type ?? "";
   const kind = kindOf(path, type);
@@ -152,7 +178,11 @@ export function FilePreview({
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {blob.isPending && <p className="p-5 text-[13px] text-subtle">{t("files.loading")}</p>}
-        {blob.isError && <p className="p-5 text-[13px] text-bad">{t("files.loadFailed")}</p>}
+        {blob.isError && (
+          <p className="p-5 text-[13px] text-bad">
+            {blob.error instanceof ApiError && blob.error.status !== 404 && blob.error.status < 500 ? blob.error.message : t("files.loadFailed")}
+          </p>
+        )}
         {url && kind === "image" && <img src={url} alt={displayName(path)} className="mx-auto max-w-full p-5" />}
         {url && kind === "pdf" && <iframe src={url} title={path} className="size-full min-h-[70vh] bg-white" />}
         {text !== null && kind === "markdown" && (

@@ -1,4 +1,4 @@
-import { formatPlan, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
+import { formatPlan, formatPlanUpdate, isPlanMessage, type Message, type Project, type ServerEvent, type Thread, type UsageSummary } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
@@ -74,6 +74,9 @@ describe("coordinator and thread agent", () => {
       ["coordinator", "Aldım, başlıyorum."],
     ]);
     expect(thread.ackMessageId).toBe(chat[1]!.id);
+    // People can open the brief under the "on it" line and under the thread's opening line.
+    const brief = { kind: "brief", threadId: thread.id, note: "Explain Durable Objects briefly." };
+    expect(chat[1]!.relay).toEqual(brief);
 
     const ctx = (await agent.getThreadContext(thread.id))!;
     expect(ctx.root.body).toBe("Durable Objects'i araştır");
@@ -84,6 +87,7 @@ describe("coordinator and thread agent", () => {
       ["agent", "thread-agent", formatPlan("Durable Objects\n\n✓ Researched\n– Benchmarks")],
       ["agent", "thread-agent", "Durable Objects are single-instance actors with storage."],
     ]);
+    expect(ctx.messages[0]!.relay).toEqual(brief);
     const card = ctx.messages[2]!;
     expect(
       events.some((e) => e.type === "message.created" && e.message.id === card.id && e.message.body.includes("✱ Researched")),
@@ -103,6 +107,53 @@ describe("coordinator and thread agent", () => {
     await until(() => events.some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active), "idle");
     expect(events.some((e) => e.type === "thread.updated" && e.thread.id === thread.id)).toBe(true);
     expect(project.id).toBe(thread.projectId);
+    ws.close();
+  });
+
+  it("notes plan steps added while the plan card sits further up, one note for changes in a row", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [
+          call("start_thread", { message_id: newMessageId(req.prompt), title: "Fix", instructions: "Fix it.", project_ack: "Tamam." }),
+        ],
+      };
+    });
+    const plan = (...steps: [string, string][]) => ({ title: "Fix", steps: steps.map(([text, state]) => ({ text, state })) });
+    const play: Play = async (turn) => {
+      await turn.call("update_plan", plan(["Read", "active"], ["Fix", "todo"]));
+      // The card is still the last message: an added step is in view, no note.
+      await turn.call("update_plan", plan(["Read", "active"], ["Fix", "todo"], ["Test", "todo"]));
+      await turn.call("reply", { text: "Read the code." });
+      // Ticks alone make no note.
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "active"], ["Test", "todo"]));
+      // Now the card is behind the reply: a note, then a second change lands in the same note.
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "active"], ["Test", "todo"], ["Mobile", "todo"]));
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "failed"], ["Mobile", "todo"], ["Docs", "todo"]));
+      await turn.call("reply", { text: "Fix failed." });
+      // After another message, a new note.
+      await turn.call("update_plan", plan(["Read", "done"], ["Fix", "failed"], ["Mobile", "todo"], ["Docs", "todo"], ["Retry", "active"]));
+      return "Done.";
+    };
+
+    const { ws, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "Fix it" }));
+    const thread = await until(async () => {
+      const t = (await agent.listThreads())[0];
+      return t?.status === "review_ready" ? t : null;
+    }, "thread done");
+
+    const ctx = (await agent.getThreadContext(thread.id))!;
+    expect(ctx.messages.filter((m) => m.authorId === "thread-agent").map((m) => m.body)).toEqual([
+      formatPlan("Fix\n\n✓ Read\n✗ Fix\n○ Mobile\n○ Docs\n✱ Retry"),
+      "Read the code.",
+      formatPlanUpdate({ added: ["Mobile", "Docs"], removed: ["Test"], failed: ["Fix"] }),
+      "Fix failed.",
+      formatPlanUpdate({ added: ["Retry"], removed: [], failed: [] }),
+    ]);
+    // The notes are the plan's bookkeeping, not replies.
+    expect(ctx.messages.filter((m) => m.authorId === "thread-agent" && !isPlanMessage(m.body))).toHaveLength(2);
     ws.close();
   });
 
@@ -164,6 +215,10 @@ describe("coordinator and thread agent", () => {
     const bodies = async () => ((await agent.getThreadContext(threadId))?.messages ?? []).map((m: Message) => m.body);
     await until(async () => (await bodies()).includes("Deploy now? Yes / No"), "question after coordinator note");
     expect(requests[0]).toContain("asks (permission): Deploying is irreversible.");
+    // The coordinator's answer shows in the thread as one line people can open.
+    const answer = (await agent.getThreadContext(threadId))!.messages.find((m: Message) => m.relay?.kind === "reply");
+    expect(answer).toMatchObject({ authorId: "coordinator", body: "The coordinator answered.", relay: { threadId, note: "Ask the person first." } });
+    expect((await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null && m.relay?.kind === "reply")).toEqual([]);
 
     ws.send(JSON.stringify({ type: "message.send", threadId, body: "thanks, all good" }));
     const done = await until(async () => {
@@ -244,6 +299,10 @@ describe("coordinator and thread agent", () => {
       return chat.find((m: Message) => m.body.startsWith("Passed this on.")) ?? null;
     }, "forward line");
     expect(forwarded.body).toBe(`Passed this on. [Calculator](#${thread.id})`);
+    const followUp = { kind: "follow_up", threadId: thread.id, note: "Make it orange." };
+    expect(forwarded.relay).toEqual(followUp);
+    const inThread = (await agent.getThreadContext(thread.id))!.messages.at(-1)!;
+    expect(inThread).toMatchObject({ authorId: "coordinator", body: "The coordinator forwarded a follow-up.", relay: followUp });
     expect(await agent.getThread(thread.id)).toMatchObject({ resolved: false });
     ws.close();
   });
@@ -305,6 +364,11 @@ describe("coordinator and thread agent", () => {
       async () => (await replies(plans.id)).includes("Counting MCP connectors in the plan limits too.") || null,
       "plans thread picks up the relay",
     );
+    const marker = (await agent.getThreadContext(plans.id))!.messages.find((m: Message) => m.relay?.kind === "relay");
+    expect(marker).toMatchObject({
+      body: 'A note came from the "MCP" thread.',
+      relay: { threadId: plans.id, fromThreadId: mcpThread.id, note: "MCP connectors are a new feature; count them in the plan limits." },
+    });
     const look = coordinator.find((p) => p.includes("MCP connector support is ready."))!;
     expect(look).toContain("Nothing new in the project chat.");
     // Thread updates never land in the project chat.

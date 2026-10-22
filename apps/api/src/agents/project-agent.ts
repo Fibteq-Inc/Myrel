@@ -8,11 +8,12 @@ import {
   type CreateRoutineInput,
   createId,
   type Message,
+  type MessageRelay,
   type MessageStats,
   type ArtifactRef,
   nextCronRun,
   normalizeFilePath,
-  planChecklist,
+  isPlanMessage,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -43,6 +44,7 @@ import {
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
 import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
+import { relayLine } from "./relay-line";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
@@ -64,6 +66,8 @@ type MessageRow = {
   artifacts: string | null;
   /** JSON MessageStats, or null. */
   stats: string | null;
+  /** JSON MessageRelay, or null. */
+  relay: string | null;
   created_at: string;
 };
 
@@ -101,6 +105,7 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
   attachments?: Attachment[];
   artifacts?: ArtifactRef[];
   stats?: MessageStats;
+  relay?: MessageRelay;
 };
 
 export type ThreadPatch = Partial<Pick<Thread, "title" | "status" | "statusText" | "resolved" | "label">>;
@@ -171,6 +176,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "artifacts")) this.sql`ALTER TABLE messages ADD COLUMN artifacts TEXT`;
     // Added with per-message stats.
     if (!columns.some((c) => c.name === "stats")) this.sql`ALTER TABLE messages ADD COLUMN stats TEXT`;
+    // Added with relay lines: the coordinator's note to a thread, which people can open.
+    if (!columns.some((c) => c.name === "relay")) this.sql`ALTER TABLE messages ADD COLUMN relay TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -337,9 +344,10 @@ export class ProjectAgent extends Agent<Env> {
     const stored = attachments.length ? JSON.stringify(attachments) : null;
     const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, created_at)
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, created_at)
       VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
-        ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null}, ${createdAt})
+        ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null},
+        ${input.relay ? JSON.stringify(input.relay) : null}, ${createdAt})
       RETURNING seq`;
     const { artifacts: _, ...rest } = input;
     const message: Message = {
@@ -382,6 +390,12 @@ export class ProjectAgent extends Agent<Env> {
     return { messages: rows.slice(0, limit).map((r) => this.toMessage(r)), hasMore: rows.length > limit };
   }
 
+  /** The id of a thread's newest message, or null when it has none. Callable over RPC. */
+  lastThreadMessageId(threadId: string): string | null {
+    const [row] = this.sql<{ id: string }>`SELECT id FROM messages WHERE thread_id = ${threadId} ORDER BY seq DESC LIMIT 1`;
+    return row?.id ?? null;
+  }
+
   getMessage(id: string): Message | null {
     const [row] = this.sql<MessageRow>`SELECT * FROM messages WHERE id = ${id}`;
     return row ? this.toMessage(row) : null;
@@ -422,8 +436,7 @@ export class ProjectAgent extends Agent<Env> {
   // ---- Threads -----------------------------------------------------------
 
   /** Opens a thread under a project-chat message. Callable over RPC. */
-  createThread(rootMessageId: string, title: string, ackMessageId: string | null = null): Thread {
-    const id = createId("thread");
+  createThread(rootMessageId: string, title: string, ackMessageId: string | null = null, id = createId("thread")): Thread {
     const now = new Date().toISOString();
     this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, created_at, updated_at)
       VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
@@ -764,11 +777,11 @@ export class ProjectAgent extends Agent<Env> {
 
   /**
    * Whether the coordinator should see a thread message: what a person writes there and the thread
-   * agent's replies, while another thread is open that it could matter to. Plan cards and
-   * attachment-only messages carry nothing to relay.
+   * agent's replies, while another thread is open that it could matter to. Plan cards, plan update
+   * notes and attachment-only messages carry nothing to relay.
    */
   private observable(m: Message): m is Message & { threadId: string } {
-    if (!m.threadId || !m.body.trim() || planChecklist(m.body) !== null) return false;
+    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body)) return false;
     if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
     return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
   }
@@ -879,14 +892,18 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   private coordinatorHost(meter?: TurnMeter): CoordinatorHost {
-    const post = (body: string) =>
+    const post = (body: string, relay?: MessageRelay) =>
       this.sendMessage({
         threadId: null,
         authorKind: "agent",
         authorId: COORDINATOR_ID,
         body,
+        ...(relay && { relay }),
         ...(meter && { stats: meter.take() ?? undefined }),
       });
+    // The line in the thread where a note arrived, so people can open what the coordinator said.
+    const relayInThread = (relay: MessageRelay, body: string) =>
+      this.sendMessage({ threadId: relay.threadId, authorKind: "agent", authorId: COORDINATOR_ID, body, relay });
     return {
       getMessage: (id) => this.getMessage(id),
       getThread: (id) => this.getThread(id),
@@ -894,18 +911,21 @@ export class ProjectAgent extends Agent<Env> {
       post,
       react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
       startThread: async ({ rootMessageId, title, brief, ack, projectAck }) => {
+        // The id comes first so the "on it" line can carry the brief before the thread exists.
+        const relay: MessageRelay = { kind: "brief", threadId: createId("thread"), note: brief };
         // The project-chat line goes first so the card can sit under it: ask, "on it", card.
-        const ackMessage = projectAck ? post(projectAck) : null;
-        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null);
-        if (ack) this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: ack });
+        const ackMessage = projectAck ? post(projectAck, relay) : null;
+        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null, relay.threadId);
+        relayInThread(relay, ack || relayLine("brief", brief));
         const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
         await agent.start({ projectId: this.name, threadId: thread.id, brief });
         return thread;
       },
-      messageThread: async (threadId, note) => {
+      messageThread: async (threadId, note, kind) => {
         const thread = this.getThread(threadId);
         // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
         if (thread?.resolved) this.updateThread(threadId, { resolved: false, status: "working" });
+        relayInThread({ kind, threadId, note }, relayLine(kind, note));
         await this.wakeThread(threadId, { kind: "coordinator", note });
       },
       relay: async (fromThreadId, toThreadId, note) => {
@@ -924,6 +944,7 @@ export class ProjectAgent extends Agent<Env> {
         }
         this.sql`INSERT INTO coordinator_relays (from_thread_id, to_thread_id, note, created_at)
           VALUES (${from.id}, ${to.id}, ${note}, ${new Date().toISOString()})`;
+        relayInThread({ kind: "relay", threadId: to.id, fromThreadId: from.id, note }, relayLine("relay", note, from.title));
         await this.wakeThread(to.id, { kind: "coordinator", note: `From the "${from.title}" thread: ${note}` });
       },
     };
@@ -1057,6 +1078,7 @@ export class ProjectAgent extends Agent<Env> {
       attachments: r.attachments ? (JSON.parse(r.attachments) as Attachment[]) : [],
       ...(r.artifacts && { artifacts: JSON.parse(r.artifacts) as ArtifactRef[] }),
       ...(r.stats && { stats: JSON.parse(r.stats) as MessageStats }),
+      ...(r.relay && { relay: JSON.parse(r.relay) as MessageRelay }),
       seq: r.seq,
       createdAt: r.created_at,
     };

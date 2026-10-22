@@ -26,6 +26,26 @@ export function DecisionCard({
     : -1;
   const answered = answer !== undefined;
 
+  // Answered: one line with the question and the pick, so the conversation moves on.
+  if (answered) {
+    const picked = chosen >= 0 ? decision.options[chosen]!.label : answer;
+    return (
+      <div
+        role="group"
+        aria-labelledby={titleId}
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-line bg-raised px-3.5 py-2.5 text-sm"
+      >
+        <CircleCheck size={14} className="flex-none text-accent" aria-label={t("decision.answered")} />
+        <span id={titleId} className="min-w-0 text-muted">
+          {decision.question}
+        </span>
+        <span className="ml-auto font-medium text-fg" title={t("decision.chosen")}>
+          {picked.length > 80 ? `${picked.slice(0, 80)}…` : picked}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       role="group"
