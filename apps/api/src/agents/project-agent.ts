@@ -255,6 +255,11 @@ export class ProjectAgent extends Agent<Env> {
     return false;
   }
 
+  /** Clients never write the agent's synced state: everything they send goes through onMessage's checks. */
+  override shouldConnectionBeReadonly(): boolean {
+    return true;
+  }
+
   override onConnect(connection: Connection, { request }: ConnectionContext) {
     const userId = request.headers.get(USER_ID_HEADER);
     const [sessionId, expires] = (request.headers.get(SESSION_HEADER) ?? "").split(":");
@@ -1155,7 +1160,28 @@ export class ProjectAgent extends Agent<Env> {
 
   // ---- Helpers -----------------------------------------------------------
 
+  /** When open connections last had their session and membership checked (see recheckConnections). */
+  private connectionsCheckedAt = Date.now();
+
+  /**
+   * Closes connections whose session was signed out or revoked, or whose person left, since they
+   * connected: a connection that only listens is never checked by onMessage. At most once a minute.
+   */
+  private recheckConnections() {
+    if (Date.now() - this.connectionsCheckedAt < 60_000) return;
+    this.connectionsCheckedAt = Date.now();
+    const open = [...this.getConnections<ConnState>()].filter((c) => c.state);
+    this.ctx.waitUntil(
+      Promise.all(
+        open.map(async (c) => {
+          if (!(await this.stillAllowed(c.state!))) c.close(4401, "unauthorized");
+        }),
+      ).catch((err) => console.warn("checking connections failed", err)),
+    );
+  }
+
   private emit(event: ServerEvent) {
+    this.recheckConnections();
     const now = Date.now();
     const expired: string[] = [];
     for (const c of this.getConnections<ConnState>()) {
