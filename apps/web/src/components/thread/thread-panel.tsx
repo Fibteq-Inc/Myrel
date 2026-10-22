@@ -1,6 +1,6 @@
 import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { planChecklist } from "@myrel/protocol";
+import { decisionPicks, parsePlanUpdate, planChecklist } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import {
   MessageView,
   PlanCard,
   PlanProgress,
+  PlanUpdateNote,
   PullRequestCards,
   ScrollToEnd,
   Thinking,
@@ -339,6 +340,8 @@ function Conversation({
   const messages = threadMessages(state, thread.id);
   const history = useHistoryWindow(messages);
   const answers = decisionAnswers(messages);
+  // A tap on a card is shown on the card itself, not again as a bubble.
+  const picks = decisionPicks(messages);
   const choose = useCallback((label: string) => send(label, threadId), [send, threadId]);
   // Each pull request shows under the message that links it; one no message linked yet shows at the end.
   const pullRequests = threadPullRequests(state, thread.id);
@@ -348,14 +351,20 @@ function Conversation({
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
   const planAnchor = (id: string) => `plan-${id}`;
+  const [planOpen, setPlanOpen] = useState(false);
   return (
     <section aria-label={t("thread.messages")} className={cn("min-w-0 flex-1 flex-col", className)}>
-      {thread.statusText && !thread.resolved && (
+      {/* Stays once the work is done, so the finished plan is still one click away. */}
+      {thread.statusText && (
         <div className="flex-none border-b border-line bg-[#111114] px-5 py-2.5">
           <PlanProgress
+            key={thread.id}
+            planKey={`${thread.id}\n${thread.statusText.split("\n", 1)[0]}`}
             text={thread.statusText}
             live={working}
-            onOpen={
+            open={planOpen}
+            onOpenChange={setPlanOpen}
+            onJump={
               currentPlan
                 ? () => document.getElementById(planAnchor(currentPlan.id))?.scrollIntoView({ behavior: "smooth", block: "start" })
                 : undefined
@@ -368,6 +377,7 @@ function Conversation({
           {root && !history.hidden && <MessageView message={root} me={me} names={names} />}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
+            if (picks.has(m.id)) return null;
             const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
             if (plan !== null) {
               const current = m.id === currentPlan?.id;
@@ -378,6 +388,12 @@ function Conversation({
                   text={current && thread.statusText ? thread.statusText : plan}
                   live={current && working}
                 />
+              );
+            }
+            const update = m.authorKind === "agent" ? parsePlanUpdate(m.body) : null;
+            if (update) {
+              return (
+                <PlanUpdateNote key={m.id} update={update} onOpenPlan={thread.statusText ? () => setPlanOpen(true) : undefined} />
               );
             }
             return (

@@ -1,9 +1,11 @@
 import { createDb, schema } from "@myrel/db";
 import {
-  type AgentConnector,
+  type AgentStart,
   type CliId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerDirListing,
+  type RunnerFeature,
+  type RunnerFile,
   type RunnerFolder,
   RunnerToServer,
   type ServerToRunner,
@@ -22,7 +24,7 @@ export type TaskStart = {
   cli: CliId;
   prompt: string;
   /** The CLI runs as the thread's agent, connected to the thread's MCP endpoint (needs feature "agent"). */
-  agent?: { mcpPath: string; token: string; connectors?: AgentConnector[] };
+  agent?: AgentStart;
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
@@ -124,8 +126,9 @@ export class RunnerAgent extends Agent<Env> {
         // Empty text: only the usage changed.
         if (!frame.text) return;
         const project = await getAgentByName(this.env.PROJECT_AGENT, task.project_id);
-        await project.setActivity(task.thread_id, true, frame.text.slice(0, 200));
-        await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.slice(0, 200) }]);
+        // The activity line takes the step's first line; the terminal keeps all of it (an agent's message, a long command).
+        await project.setActivity(task.thread_id, true, frame.text.trim().split("\n")[0]!.slice(0, 200));
+        await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.trim() }]);
         return;
       }
       case "task.folders": {
@@ -215,6 +218,18 @@ export class RunnerAgent extends Agent<Env> {
     return { ok: true, listing };
   }
 
+  /**
+   * One file in a project's folders (`folders`, each shared on the computer) or in the thread's
+   * worktree of them, e.g. one an agent's message links to. Callable over RPC.
+   */
+  async readFile(input: { path: string; folders: string[]; threadId?: string }): Promise<RunnerResult<{ file: RunnerFile }>> {
+    const answer = await this.ask({ type: "file.read", ...input }, "files");
+    if (answer.ok === false) return answer;
+    if (answer.type !== "file") return { ok: false, reason: "Unexpected answer from the computer." };
+    const { type: _t, requestId: _r, ...file } = answer;
+    return { ok: true, file };
+  }
+
   /** Shares or stops sharing a folder on the computer. Callable over RPC. */
   async setShared(path: string, shared: boolean): Promise<RunnerResult<{ folders: RunnerFolder[] }>> {
     const answer = await this.ask({ type: shared ? "folder.share" : "folder.unshare", path });
@@ -235,6 +250,7 @@ export class RunnerAgent extends Agent<Env> {
   /** Sends a folder request to the computer and waits for its answer. */
   private async ask(
     question: DistributiveOmit<Question, "requestId">,
+    feature: RunnerFeature = "folders",
   ): Promise<{ ok: false; reason: string } | (Answer & { ok?: undefined })> {
     const [connection] = this.getConnections();
     if (!connection) return { ok: false, reason: "The computer is offline. Start myrel-runner on it first." };
@@ -242,8 +258,14 @@ export class RunnerAgent extends Agent<Env> {
       .select({ info: schema.runners.info })
       .from(schema.runners)
       .where(eq(schema.runners.id, this.name));
-    if (!parseInfo(row?.info ?? null)?.features.includes("folders")) {
-      return { ok: false, reason: "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update)." };
+    if (!parseInfo(row?.info ?? null)?.features.includes(feature)) {
+      return {
+        ok: false,
+        reason:
+          feature === "files"
+            ? "Update myrel-runner on this computer to open its files from here (npx myrel-runner@latest update)."
+            : "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update).",
+      };
     }
     const requestId = crypto.randomUUID();
     const answer = await new Promise<Answer | null>((resolve) => {
@@ -270,14 +292,20 @@ export class RunnerAgent extends Agent<Env> {
       .where(eq(schema.runners.id, this.name));
   }
 
+  /**
+   * Hands a task's result to its thread, then records it as finished. If the thread cannot take it
+   * (it is restarting for a new version of Myrel), the task stays running, so the result the runner
+   * sends again after reconnecting is delivered then.
+   */
   private async finish(task: TaskRow, ok: boolean, result: string, cancelled = false) {
-    this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
+    const detail = ok || cancelled ? undefined : result.trim().split("\n")[0]?.slice(0, 300) || undefined;
     const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
     await thread.taskEvents(task.id, [
       { type: "text", text: result },
-      ok ? { type: "phase", phase: "agent", state: "done" } : { type: "phase", phase: "agent", state: "failed" },
+      ok ? { type: "phase", phase: "agent", state: "done" } : { type: "phase", phase: "agent", state: "failed", ...(detail && { detail }) },
       cancelled ? { type: "done", ok: false, error: "Cancelled." } : { type: "done", ok },
     ]);
+    this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
   }
 }
 

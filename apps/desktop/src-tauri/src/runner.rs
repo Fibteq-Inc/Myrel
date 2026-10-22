@@ -103,8 +103,8 @@ pub fn runner_connect<R: Runtime>(app: AppHandle<R>, server: String, runner_id: 
 
 #[tauri::command]
 pub async fn runner_set_access<R: Runtime>(app: AppHandle<R>, access: String) -> Result<(), String> {
-    if !matches!(access.as_str(), "read" | "edit" | "full") {
-        return Err("access must be read, edit or full".into());
+    if !matches!(access.as_str(), "read" | "edit" | "auto" | "full") {
+        return Err("access must be read, edit, auto or full".into());
     }
     // `start --access` saves the level; restart so the running runner picks it up.
     stop(&app);

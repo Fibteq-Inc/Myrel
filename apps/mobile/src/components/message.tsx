@@ -1,16 +1,29 @@
 import { useT } from "@myrel/i18n/react";
-import { type Artifact, type Attachment, type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
+import {
+  type Artifact,
+  type Attachment,
+  DECISION_LANG,
+  type Message,
+  parseConnectorSuggestion,
+  type Reaction,
+} from "@myrel/protocol";
 import { CircleAlert, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { colors, radius } from "../theme";
 import { ArtifactCards } from "./artifact-card";
+import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
+import { RelayNote } from "./relay-note";
 import { MyrelMark, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
+
+/** Line heights of a bubble and of markdown text, to fold after so many lines. */
+const BUBBLE_LINE = 22;
+const MARKDOWN_LINE = 24;
 
 /**
  * One message, Claude style: people's messages as bubbles on the right,
@@ -61,8 +74,13 @@ export function MessageView({
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
           ) : (
-            !!message.body && <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />
+            !!message.body && (
+              <FoldIfLong body={message.body}>
+                <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />
+              </FoldIfLong>
+            )
           )}
+          {message.relay && <RelayNote relay={message.relay} onLink={onLink} />}
           <Attachments attachments={message.attachments} />
           {!!message.artifacts?.length && (
             <ArtifactCards refs={message.artifacts} artifacts={artifacts} onOpen={onOpenArtifact} />
@@ -84,9 +102,11 @@ export function MessageView({
       {!mine && <Text style={styles.author}>{names[message.authorId] ?? t("common.member")}</Text>}
       {!!message.body && (
         <View style={styles.bubble}>
-          <Text selectable style={styles.bubbleText}>
-            {message.body}
-          </Text>
+          <Collapsible height={BUBBLE_LINE * 10}>
+            <Text selectable style={styles.bubbleText}>
+              {message.body}
+            </Text>
+          </Collapsible>
         </View>
       )}
       <Attachments attachments={message.attachments} />
@@ -94,6 +114,15 @@ export function MessageView({
       {children && <View style={{ width: "100%" }}>{children}</View>}
     </View>
   );
+}
+
+/**
+ * Agent replies fold later than people's messages, and never when they carry
+ * a decision card: the card sits at the end and must stay in reach.
+ */
+function FoldIfLong({ body, children }: { body: string; children: ReactNode }) {
+  if (body.includes("```" + DECISION_LANG)) return children;
+  return <Collapsible height={MARKDOWN_LINE * 24}>{children}</Collapsible>;
 }
 
 function Attachments({ attachments }: { attachments?: Attachment[] }) {
@@ -171,7 +200,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  bubbleText: { color: colors.fg, fontSize: 16, lineHeight: 22 },
+  bubbleText: { color: colors.fg, fontSize: 16, lineHeight: BUBBLE_LINE },
   attachments: { flexDirection: "row", flexWrap: "wrap", gap: 6, maxWidth: "85%" },
   attachment: {
     flexDirection: "row",

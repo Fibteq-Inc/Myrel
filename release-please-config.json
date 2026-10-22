@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
+  "tag-separator": "-",
+  "separate-pull-requests": true,
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "component": "desktop",
+      "package-name": "desktop",
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "apps/desktop/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "toml",
+          "path": "apps/desktop/src-tauri/Cargo.toml",
+          "jsonpath": "$.package.version"
+        }
+      ],
+      "changelog-path": "apps/desktop/CHANGELOG.md",
+      "version-file": "apps/desktop/version.txt",
+      "exclude-paths": [
+        "apps/api",
+        "apps/artifacts",
+        "apps/mobile",
+        "docs",
+        "ee",
+        "scripts",
+        ".github"
+      ]
+    },
+    "apps/mobile": {
+      "release-type": "node",
+      "component": "mobile",
+      "package-name": "@myrel/mobile",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "app.config.ts"
+        }
+      ]
+    }
+  }
+}

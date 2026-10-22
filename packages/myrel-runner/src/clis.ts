@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CliId, RunnerCli } from "@myrel/protocol";
+import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
 import type { Access } from "./config";
+import { claudeLimits, readCodexLimits } from "./limits";
 
 /** What a CLI's output told us so far. */
 export type ParseState = {
@@ -14,12 +15,16 @@ export type ParseState = {
   result?: string;
   /** True when the CLI reported a failure in its own output. */
   failed?: boolean;
+  /** The last error the CLI reported, which may have been one it recovered from. */
+  error?: string;
   /** Tokens the CLI reported using so far, summed. */
   usage?: { inputTokens: number; outputTokens: number };
   /** The model the CLI says it uses. */
   model?: string;
   /** Model calls already counted, for CLIs that repeat a call's usage on each of its parts. */
   counted?: Set<string>;
+  /** The subscription limits the CLI reported in its output (Claude Code's rate_limit_event). */
+  limits?: CliLimits;
 };
 
 /**
@@ -45,6 +50,8 @@ export type CliAdapter = {
   line(line: string, state: ParseState): void;
   /** Called with all of stdout when the CLI exits, for CLIs that print one JSON document. */
   end?(stdout: string, state: ParseState): void;
+  /** After a run, the subscription limits the CLI saved somewhere else than its output. */
+  limits?(state: ParseState): Promise<CliLimits | undefined>;
 };
 
 /** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__myrel__<tool> in Claude Code. */
@@ -74,6 +81,8 @@ export const APPROVE_TOOL = "mcp__myrel__approve_access";
 
 /** How long Claude Code waits on one Myrel tool call: the person may take a few minutes to answer. */
 const ASK_TIMEOUT_MS = 15 * 60 * 1000;
+/** How long Claude Code waits for an MCP server to start before going on without it. */
+const MCP_START_TIMEOUT_MS = 10_000;
 
 export type AgentServer =
   | { transport: "http"; name: string; url: string }
@@ -106,7 +115,8 @@ const claude: CliAdapter = {
     "--permission-mode",
     // Bypassing permissions would skip the question about folders outside the project, so full
     // access with Myrel asking pre-allows the rest instead (see agent()).
-    { read: "plan", edit: "acceptEdits", full: asks ? "acceptEdits" : "bypassPermissions" }[access],
+    // Auto mode runs the steps its classifier judges safe; what it would ask about goes to Myrel.
+    { read: "plan", edit: "acceptEdits", auto: "auto", full: asks ? "acceptEdits" : "bypassPermissions" }[access],
     ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...(asks ? ["--permission-prompt-tool", APPROVE_TOOL] : []),
     ...(resume ? ["--resume", resume] : []),
@@ -114,7 +124,9 @@ const claude: CliAdapter = {
   ],
   async agent({ url, token, dir, connectors = [], skills, asks, access }) {
     const headers = { Authorization: `Bearer ${token}` };
-    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers } };
+    // alwaysLoad: Myrel's own tools go in the first model call. Otherwise Claude Code hides them behind
+    // ToolSearch, and every turn spends a whole model call finding reply and update_plan first.
+    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers, alwaysLoad: true } };
     for (const c of connectors) {
       servers[c.name] =
         c.transport === "http" ? { type: "http", url: c.url, headers } : { type: "stdio", command: c.command, args: c.args, env: c.env };
@@ -126,8 +138,25 @@ const claude: CliAdapter = {
     // The skills come as a plugin (myrel:<name>); their folder may be read without asking.
     const skillArgs = skills ? ["--plugin-dir", quotePath(skills.plugin), "--add-dir", quotePath(skills.dir)] : [];
     return {
-      args: ["--mcp-config", config, "--allowedTools", allowed.join(","), ...skillArgs],
-      ...(asks && { env: { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) } }),
+      // Strict: only the servers above. With --mcp-config, `claude -p` waits for every MCP server the
+      // person set up for themselves too before its first model call, up to 30s for one that hangs.
+      // Pull requests go through Myrel's open_pull_request tool (the GitHub App), never the person's gh.
+      args: [
+        "--mcp-config",
+        config,
+        "--strict-mcp-config",
+        "--allowedTools",
+        allowed.join(","),
+        "--disallowedTools",
+        "Bash(gh pr create:*)",
+        ...skillArgs,
+      ],
+      env: {
+        ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+        // A connector that hangs holds up the start for this long, not 30s. The person's own setting wins.
+        ...(!process.env.MCP_TIMEOUT && { MCP_TIMEOUT: String(MCP_START_TIMEOUT_MS) }),
+        ...(asks && { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) }),
+      },
     };
   },
   line(line, state) {
@@ -135,6 +164,7 @@ const claude: CliAdapter = {
     if (!event) return;
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.type === "system" && typeof event.model === "string") state.model = event.model;
+    if (event.type === "rate_limit_event") state.limits = claudeLimits(event.rate_limit_info, state.limits);
     if (event.type === "assistant") {
       const message = (event.message ?? {}) as { id?: unknown; model?: unknown; usage?: unknown; content?: unknown[] };
       if (typeof message.model === "string") state.model = message.model;
@@ -147,7 +177,7 @@ const claude: CliAdapter = {
       for (const part of content as Array<Record<string, unknown>>) {
         if (part.type === "tool_use") state.progress = describeTool(String(part.name), part.input);
         else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-          state.progress = firstLine(part.text);
+          state.progress = clip(part.text);
         }
       }
     }
@@ -167,14 +197,17 @@ const claude: CliAdapter = {
 const codex: CliAdapter = {
   id: "codex",
   bin: "codex",
-  args: ({ access, extra = [], dirs = [] }) => [
+  args: ({ access, resume, extra = [], dirs = [] }) => [
     "exec",
     "--json",
     "--skip-git-repo-check",
     "--sandbox",
-    { read: "read-only", edit: "workspace-write", full: "danger-full-access" }[access],
+    // `codex exec` cannot ask mid-run, so auto stays in the workspace like edit.
+    { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" }[access],
     ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...extra,
+    // exec's own flags go before its resume subcommand, which takes the session and the prompt.
+    ...(resume ? ["resume", resume] : []),
     "-",
   ],
   // Config overrides for one run; the token stays in the environment.
@@ -213,21 +246,27 @@ const codex: CliAdapter = {
     if (!event) return;
     if (event.type === "thread.started" && typeof event.thread_id === "string") state.sessionId = event.thread_id;
     const item = event.item as Record<string, unknown> | undefined;
-    if (item?.type === "command_execution" && typeof item.command === "string") state.progress = `$ ${item.command}`;
+    if (item?.type === "command_execution" && typeof item.command === "string") state.progress = clip(`$ ${unwrapShell(item.command)}`);
     if (event.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string") {
       state.result = item.text;
-      state.progress = firstLine(item.text);
+      state.progress = clip(item.text);
     }
     if (event.type === "turn.completed" && event.usage) {
       const u = event.usage as Record<string, unknown>;
       addUsage(state, { inputTokens: count(u.input_tokens), outputTokens: count(u.output_tokens) });
     }
-    if (event.type === "turn.failed" || event.type === "error") {
+    // Codex also reports errors it recovers from this way ("Reconnecting... 1/5"), so only a failed
+    // turn (or its exit code) fails the run; a turn that completes after an error is fine.
+    const message = (event.error as { message?: string } | undefined)?.message ?? event.message;
+    if (event.type === "error" && typeof message === "string") state.error = message;
+    if (event.type === "turn.failed") {
       state.failed = true;
-      const message = (event.error as { message?: string } | undefined)?.message ?? event.message;
-      if (typeof message === "string") state.result = message;
+      state.result = typeof message === "string" ? message : state.error;
     }
+    if (event.type === "turn.completed") state.failed = false;
   },
+  // `codex exec --json` leaves its rate limits out; the session file it writes has them.
+  limits: (state) => readCodexLimits(state.sessionId),
 };
 
 const gemini: CliAdapter = {
@@ -237,7 +276,7 @@ const gemini: CliAdapter = {
     "--output-format",
     "json",
     "--approval-mode",
-    { read: "default", edit: "auto_edit", full: "yolo" }[access],
+    { read: "default", edit: "auto_edit", auto: "auto_edit", full: "yolo" }[access],
     ...(dirs.length ? ["--include-directories", dirs.map(quotePath).join(",")] : []),
     ...extra,
   ],
@@ -322,7 +361,12 @@ function parseJson(line: string): Record<string, unknown> | null {
 function describeTool(name: string, input: unknown): string {
   const i = (input ?? {}) as Record<string, unknown>;
   const detail = i.command ?? i.file_path ?? i.path ?? i.pattern ?? i.description;
-  return typeof detail === "string" ? `${name}: ${firstLine(detail)}` : name;
+  return typeof detail === "string" ? clip(`${name}: ${detail}`) : name;
+}
+
+/** Progress text as the protocol takes it: whole, up to its limit. */
+function clip(text: string): string {
+  return text.trim().slice(0, 2000);
 }
 
 function firstLine(text: string): string {

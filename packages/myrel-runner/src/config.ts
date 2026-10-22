@@ -1,13 +1,17 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import type { RunnerFolder } from "@myrel/protocol";
+import type { CliId, RunnerFolder } from "@myrel/protocol";
 
 /**
  * How much the CLI may do on its own in a shared folder.
  * read: look only. edit (default): change files, but not run arbitrary commands. full: anything, no prompts.
  */
-export type Access = "read" | "edit" | "full";
+/**
+ * What the CLI may do without asking. auto: Claude Code's auto mode, where it decides itself which
+ * steps are safe and asks (through Myrel) about the rest; other CLIs treat it like edit.
+ */
+export type Access = "read" | "edit" | "auto" | "full";
 
 export type RunnerConfig = {
   /** Origin of the Myrel server, e.g. https://myrel.example.com */
@@ -68,19 +72,27 @@ export function unshareFolder(config: RunnerConfig, folder: string): boolean {
 }
 
 /** Per-thread CLI session ids, so later tasks in a thread continue the same conversation. */
+/** A thread's CLI session, and the task whose turn it last ran. */
+export type StoredSession = { id: string; task?: string };
+
 export class SessionStore {
   constructor(private readonly path = join(runnerHome(), "sessions.json")) {}
 
-  async get(threadId: string): Promise<string | undefined> {
-    return (await readJson<Record<string, string>>(this.path))?.[threadId];
+  async get(threadId: string, cli: CliId = "claude"): Promise<StoredSession | undefined> {
+    const value = (await readJson<Record<string, string | StoredSession>>(this.path))?.[sessionKey(threadId, cli)];
+    // Runners before 0.11.1 kept only the id.
+    return typeof value === "string" ? { id: value } : value;
   }
 
-  async set(threadId: string, sessionId: string): Promise<void> {
-    const all = (await readJson<Record<string, string>>(this.path)) ?? {};
-    all[threadId] = sessionId;
+  async set(threadId: string, cli: CliId, session: StoredSession): Promise<void> {
+    const all = (await readJson<Record<string, string | StoredSession>>(this.path)) ?? {};
+    all[sessionKey(threadId, cli)] = session;
     await writeJson(this.path, all);
   }
 }
+
+/** Claude Code's sessions keep the bare thread id they always had. */
+const sessionKey = (threadId: string, cli: CliId) => (cli === "claude" ? threadId : `${cli}:${threadId}`);
 
 export async function readJson<T>(path: string): Promise<T | undefined> {
   try {
