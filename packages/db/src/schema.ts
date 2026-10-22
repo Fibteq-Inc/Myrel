@@ -152,7 +152,7 @@ export const usageEvents = sqliteTable(
     /** Groups the model calls of one agent turn. */
     turnId: text("turn_id").notNull(),
     provider: text("provider").notNull(),
-    /** The model that was asked for, e.g. "firerouter/opus". */
+    /** The model that was asked for, e.g. "auto". */
     model: text("model").notNull(),
     /** The model the provider says answered, when it differs (routers). */
     servedModel: text("served_model"),

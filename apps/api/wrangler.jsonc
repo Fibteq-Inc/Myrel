@@ -106,7 +106,7 @@
   // anthropic and openai calls then go through it (AI_GATEWAY_TOKEN secret for an authenticated gateway).
   // LLM_BASE_URL: optional full override of the provider's API base URL.
   // LLM_PRICES: optional JSON of model prices in US dollars per million tokens, used for the
-  // usage dashboard's cost estimates, e.g. {"firerouter/opus": {"input": 4, "output": 20, "cachedInput": 0.4}}.
+  // usage dashboard's cost estimates, e.g. {"kimi-k3": {"input": 3, "output": 15, "cachedInput": 0.3}}.
   // Built-in prices cover Claude models; a model with no price is metered with no cost.
   //
   // GitHub (optional, see src/github/README.md) is configured entirely with secrets, so a

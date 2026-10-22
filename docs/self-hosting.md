@@ -120,9 +120,11 @@ Agents call the provider named by `LLM_PROVIDER`, using that provider's key.
 
 | `LLM_PROVIDER` | Secret | Default model |
 |---|---|---|
-| `fireworks` (default) | `FIREWORKS_API_KEY` | `firerouter/opus` |
+| `fireworks` (default) | `FIREWORKS_API_KEY` | `auto` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
 | `openai` | `OPENAI_API_KEY` | `gpt-5.1` |
+
+Fireworks' `auto` ([Nexus Auto](https://docs.fireworks.ai/nexus/auto)) picks a model for each turn. It uses Claude Opus only when your Fireworks account holds an Anthropic Provider Key; without one every turn goes to open models (GLM, Kimi). It sends no cost with a response, so Myrel prices each call from the model the response names (see `LLM_PRICES`).
 
 Set the key:
 

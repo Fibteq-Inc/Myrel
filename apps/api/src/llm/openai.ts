@@ -85,8 +85,8 @@ const USAGE_COST_KEYS = ["cost", "cost_usd", "total_cost", "total_cost_usd"];
 
 /**
  * The call's cost when the response carries one, in the usage object or a header.
- * Fireworks' FireRouter runs on LiteLLM and sends x-litellm-response-cost in US
- * dollars; it picks a model per call, so its own figure beats any price table.
+ * A LiteLLM proxy sends x-litellm-response-cost in US dollars. Fireworks' Nexus Auto
+ * sends neither, so its calls are priced by the model they name (see callCostMicros).
  */
 export function reportedCost(usage: Record<string, unknown> | undefined, headers: Headers = new Headers()): { costUsd?: number } {
   for (const key of USAGE_COST_KEYS) {

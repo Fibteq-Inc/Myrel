@@ -501,7 +501,7 @@ describe("coordinator and thread agent", () => {
     }, "two metered calls");
     await until(async () => (await agent.getMessagesAfter(0)).messages.some((m: Message) => m.body === "Here it is."), "the reply");
 
-    // The fake model reports 1000 input / 100 output tokens per call and firerouter/opus has no built-in price.
+    // The fake model reports 1000 input / 100 output tokens per call and auto has no built-in price.
     expect(summary.totals).toEqual({
       calls: 2,
       inputTokens: 2000,
@@ -522,7 +522,7 @@ describe("coordinator and thread agent", () => {
     expect(summary.daily).toHaveLength(7);
     expect(summary.daily.at(-1)!.calls).toBe(2);
     expect(summary.byProject).toEqual([expect.objectContaining({ projectId: project.id, name: "Myrel", calls: 2 })]);
-    expect(summary.byModel).toEqual([expect.objectContaining({ provider: "fireworks", model: "firerouter/opus" })]);
+    expect(summary.byModel).toEqual([expect.objectContaining({ provider: "fireworks", model: "auto" })]);
     expect(Object.fromEntries(summary.byAgent.map((a) => [a.agent, a.calls]))).toEqual({ coordinator: 2 });
 
     const [row] = (await env.DB.prepare("SELECT user_id FROM usage_events WHERE project_id = ?").bind(project.id).all())

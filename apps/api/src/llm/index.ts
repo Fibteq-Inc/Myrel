@@ -29,8 +29,9 @@ export const PROVIDERS = {
   fireworks: {
     kind: "openai",
     baseUrl: "https://api.fireworks.ai/inference/v1",
-    // FireRouter sends routine turns to open models and harder ones to Claude Opus.
-    defaultModel: "firerouter/opus",
+    // Nexus Auto (formerly FireRouter) picks a model per user turn: open models (GLM, Kimi) on
+    // Fireworks, and Claude Opus only when the Fireworks account holds an Anthropic Provider Key.
+    defaultModel: "auto",
     keyVar: "FIREWORKS_API_KEY",
     gatewaySlug: null,
   },
@@ -149,6 +150,6 @@ export function taskModel(
 export function readsImages(kind: ModelConfig["kind"], modelId: string): boolean {
   if (kind === "anthropic") return true;
   const name = modelId.toLowerCase();
-  if (/router/.test(name)) return false;
+  if (name === "auto" || /router/.test(name)) return false;
   return /claude|gpt-4o|gpt-4\.1|gpt-5|\bo[34]\b|gemini|gemma-?3|kimi-k2[p.][5-9]|qwen[\d.p]*-?vl|-vl\b|vision|llama-?v?4|llama4|pixtral|glm-?4[p.]\dv|minicpm-v|internvl/.test(name);
 }
