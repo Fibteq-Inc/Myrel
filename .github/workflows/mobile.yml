@@ -105,6 +105,21 @@ jobs:
           printf '%s' "$CONTENT" > "$RUNNER_TEMP/google-services.json"
           echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
 
+      # The local build copies the whole workspace and runs Gradle/Xcode in its working directory,
+      # which defaults to /tmp. On the hosted runners /tmp is a separate, size-limited filesystem
+      # (Android's R8 step failed there with "Disk quota exceeded"), so the build and its temporary
+      # files go to the runner's work disk instead.
+      - name: Use the work disk for the build
+        if: steps.wanted.outputs.build == 'true'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/eas-build" "$RUNNER_TEMP/tmp"
+          {
+            echo "EAS_LOCAL_BUILD_WORKINGDIR=$RUNNER_TEMP/eas-build"
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+          } >> "$GITHUB_ENV"
+          df -h / /tmp "$RUNNER_TEMP" || true
+
       - name: Build
         if: steps.wanted.outputs.build == 'true'
         working-directory: apps/mobile
@@ -112,6 +127,10 @@ jobs:
           npx -y "$EAS_CLI" build --local --non-interactive
           --platform ${{ matrix.platform }} --profile production
           --output "$RUNNER_TEMP/${{ matrix.artifact }}"
+
+      - name: Disk left after the build
+        if: always() && steps.wanted.outputs.build == 'true'
+        run: df -h / /tmp "$RUNNER_TEMP" || true
 
       - name: Submit to the store
         if: steps.wanted.outputs.build == 'true'
