@@ -189,6 +189,20 @@ export async function userInstallations(userToken: string): Promise<UserInstalla
   return all;
 }
 
+/** Ids of the repositories of an installation that the user behind `userToken` can reach themselves. */
+export async function userInstallationRepoIds(userToken: string, installationId: number): Promise<number[]> {
+  const ids: number[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const res = await githubFetch<{ total_count: number; repositories: { id: number }[] }>(
+      userToken,
+      `/user/installations/${installationId}/repositories?per_page=100&page=${page}`,
+    );
+    ids.push(...res.repositories.map((r) => r.id));
+    if (ids.length >= res.total_count || res.repositories.length === 0) break;
+  }
+  return ids;
+}
+
 /** Who a user token belongs to on GitHub. */
 export async function githubUser(userToken: string): Promise<{ id: number; login: string }> {
   const me = await githubFetch<{ id: number; login: string }>(userToken, "/user");

@@ -164,6 +164,23 @@ describe("project repositories", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("only connects repositories the person can reach on GitHub, not every one the installation covers", async () => {
+    fakeGithub.userRepos = [8];
+    try {
+      const token = await signUp();
+      await connect(token);
+      const project = await createProject(token);
+      const picker = (await (await api("/api/github/repos", { token })).json()) as { repos: GithubRepo[] };
+      expect(picker.repos.map((r) => r.fullName)).toEqual(["acme/docs"]);
+      const add = (repoId: number) =>
+        api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId }) });
+      expect((await add(7)).status).toBe(404);
+      expect((await add(8)).status).toBe(201);
+    } finally {
+      fakeGithub.userRepos = [7, 8];
+    }
+  });
+
   it("asks for a fresh GitHub sign-in before picking repositories on an old one", async () => {
     const token = await signUp();
     await connect(token);
@@ -178,6 +195,9 @@ describe("project repositories", () => {
 
     await connect(token);
     expect((await add()).status).toBe(201);
+    // A sign-in from before Myrel kept the person's own repositories counts as old too.
+    await testEnv.DB.prepare("DELETE FROM github_user_repos WHERE user_id = ?").bind(me).run();
+    expect((await api("/api/github/repos", { token })).status).toBe(409);
   });
 
   it("does not let users add repos from installations they cannot reach", async () => {
