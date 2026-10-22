@@ -35,8 +35,9 @@ import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest
 import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
-import { listPullRequests, trackPullRequest } from "../github/pulls";
-import { listProjectRepos } from "../github/store";
+import type { PullCredit } from "../github/attribution";
+import { listPullRequests, openPullRequest, trackPullRequest } from "../github/pulls";
+import { githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
@@ -54,7 +55,10 @@ import {
   type AccessRequest,
   accessTargets,
   allowAnswer,
+  commandAnswer,
+  commandMessage,
   denyAnswer,
+  describeCommand,
   describeRequest,
   insideAny,
 } from "./folder-access";
@@ -721,7 +725,18 @@ export class ThreadAgent extends Agent<Env> {
         const started = JSON.parse(this.getMeta("access_folders") ?? "[]") as string[];
         const targets = accessTargets(input, started[0]);
         const outside = targets.filter((t) => !insideAny(t.path, started));
-        if (!outside.length) return denyAnswer(ACCESS_LEVEL_DENIED);
+        // A file inside the folders asks only when the runner is read-only, which stays as it is.
+        if (!outside.length && targets.length) return denyAnswer(ACCESS_LEVEL_DENIED);
+        // A command the runner's access level does not run on its own: the person decides here,
+        // instead of restarting the runner with --access full.
+        if (!outside.length) {
+          if (this.getMeta("access_commands")) return allowAnswer(input);
+          const command = describeCommand(tool_name, input);
+          const answer = await this.askAccess(command, command, "command");
+          if (answer === null) return denyAnswer("The person did not answer in time about running this. Carry on without it, and say in your reply what you could not do.");
+          if (answer === "deny") return denyAnswer("The person did not allow running this. Carry on without it; if the work cannot be done without it, say so in a reply.");
+          return allowAnswer(input);
+        }
         // Folders the person allowed this turn, or added to the project since it started.
         const { projectId } = this.ids();
         const workspace = await getWorkspace(this.env, projectId);
@@ -744,7 +759,7 @@ export class ThreadAgent extends Agent<Env> {
    * Puts one folder to the person as a card (or joins a card already asking about it) and waits for
    * the answer: null when none came in time or the turn ended.
    */
-  private async askAccess(folder: string, what: string): Promise<AccessAnswer | null> {
+  private async askAccess(folder: string, what: string, kind?: "command"): Promise<AccessAnswer | null> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const until = Date.now() + ACCESS_WAIT_MS;
@@ -754,12 +769,13 @@ export class ThreadAgent extends Agent<Env> {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     if (!this.runningTask() || Date.now() >= until) return null;
-    let request = this.accessRequests().find((r) => r.folder === folder && !r.answer);
+    let request = this.accessRequests().find((r) => r.folder === folder && r.kind === kind && !r.answer);
     if (!request) {
-      request = { id: crypto.randomUUID(), folder };
+      request = { id: crypto.randomUUID(), folder, ...(kind && { kind }) };
       this.setMeta("access_requests", JSON.stringify([...this.accessRequests(), request]));
       const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
-      const body = accessMessage(folder, what, turn?.language ?? "en");
+      const language = turn?.language ?? "en";
+      const body = kind === "command" ? commandMessage(folder, language) : accessMessage(folder, what, language);
       const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
       // Not news for the next turn, unless someone wrote in between.
       if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
@@ -780,9 +796,9 @@ export class ThreadAgent extends Agent<Env> {
 
   /** A person answered the running turn's folder cards. Returns false when the message is not such an answer. */
   private async answerAccess(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
-    const answer = accessAnswer(reason.body ?? "");
     // Only one card is open at a time (see askAccess); the answer is for that one alone.
     const open = this.accessRequests().filter((r) => !r.answer).slice(0, 1);
+    const answer = open[0]?.kind === "command" ? commandAnswer(reason.body ?? "") : accessAnswer(reason.body ?? "");
     if (!answer || !open.length || !this.runningTask()) return false;
     const { projectId } = this.ids();
     // The folders are on someone's own computer: only they answer for it. Anyone else's
@@ -792,6 +808,11 @@ export class ThreadAgent extends Agent<Env> {
     const given = answer;
     const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
     for (const r of open) {
+      if (r.kind === "command") {
+        if (given === "always") this.setMeta("access_commands", "1");
+        r.answer = given;
+        continue;
+      }
       let mine = given;
       if (mine === "always" && !(await this.addProjectFolder(projectId, r.folder))) mine = "once";
       if (mine !== "deny") grants.push(r.folder);
@@ -827,6 +848,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("access_folders");
     this.deleteMeta("access_grants");
     this.deleteMeta("access_requests");
+    this.deleteMeta("access_commands");
   }
 
   // ---- Connector suggestions -------------------------------------------------
@@ -900,13 +922,29 @@ export class ThreadAgent extends Agent<Env> {
     await project.editMessage(s.messageId, formatConnectorSuggestion(card));
   }
 
+  /** Who this thread's pull requests credit: the person it works for, and a link back to the thread. */
+  private async pullCredit(): Promise<PullCredit> {
+    const { projectId, threadId } = this.ids();
+    const requester = this.getMeta("requester") || null;
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const [origin, person, login] = await Promise.all([
+      project.publicOrigin(),
+      requester
+        ? createDb(this.env.DB).select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, requester)).then((r) => r[0])
+        : undefined,
+      requester ? githubLogin(this.env.DB, requester) : null,
+    ]);
+    return { name: person?.name ?? null, login, threadUrl: origin ? `${origin}/projects/${projectId}/threads/${threadId}` : null };
+  }
+
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
   private async agentToolset(): Promise<Tool[]> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
     const save = (patch: Partial<AgentTurn>) => this.setMeta("agent_turn", JSON.stringify({ ...turn(), ...patch }));
-    const track = (url: string) => trackPullRequest(this.env, projectId, threadId, url);
+    // A pull request a reply only mentions is followed but not credited: it may not be this thread's.
+    const track = (url: string, credit?: PullCredit) => trackPullRequest(this.env, projectId, threadId, url, credit);
     const local = this.runningTask()?.backend === "local";
     return [
       ...(local ? [this.approveAccessTool()] : []),
@@ -966,9 +1004,13 @@ export class ThreadAgent extends Agent<Env> {
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
         trackPullRequest: async (url) => {
-          const pr = await track(url);
+          const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
           return `Following ${pr.repo}#${pr.number}: its state shows in the thread, and CI failures, reviews and the merge will wake you.`;
+        },
+        openPullRequest: async (input) => {
+          const { pr, created } = await openPullRequest(this.env, projectId, threadId, input, await this.pullCredit());
+          return `${created ? "Opened" : "An open pull request already exists for that branch:"} ${pr.url} (${pr.repo}#${pr.number}). Myrel follows it: CI failures, reviews and the merge will wake you.`;
         },
       }),
       ...suggestionTools({
@@ -1138,7 +1180,7 @@ export class ThreadAgent extends Agent<Env> {
       await this.publishTask(taskId);
       // From now on the webhook keeps the pull request's state current and wakes this thread on CI and reviews.
       if (progress.prUrl) {
-        await trackPullRequest(this.env, projectId, threadId, progress.prUrl).catch((err) =>
+        await trackPullRequest(this.env, projectId, threadId, progress.prUrl, await this.pullCredit()).catch((err) =>
           console.error("tracking pull request failed", progress.prUrl, err),
         );
       }

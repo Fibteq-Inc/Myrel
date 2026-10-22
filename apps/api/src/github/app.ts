@@ -189,6 +189,12 @@ export async function userInstallations(userToken: string): Promise<UserInstalla
   return all;
 }
 
+/** Who a user token belongs to on GitHub. */
+export async function githubUser(userToken: string): Promise<{ id: number; login: string }> {
+  const me = await githubFetch<{ id: number; login: string }>(userToken, "/user");
+  return { id: me.id, login: me.login };
+}
+
 // --- Encoding helpers ---
 
 export function base64url(bytes: Uint8Array): string {

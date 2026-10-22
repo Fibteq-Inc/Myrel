@@ -3,7 +3,7 @@ import type { GithubInstallation, ProjectRepo } from "@myrel/protocol";
 import { and, eq } from "drizzle-orm";
 import { type GithubEnv, installationToken, type RepoPermissions, type UserInstallation } from "./app";
 
-const { githubInstallations, githubInstallationUsers, projectRepos } = schema;
+const { githubAccounts, githubInstallations, githubInstallationUsers, projectRepos } = schema;
 
 /** Installations the user proved access to with their GitHub sign-in. */
 export async function listUserInstallations(db: D1Database, userId: string): Promise<GithubInstallation[]> {
@@ -79,6 +79,21 @@ export async function syncUserInstallations(db: D1Database, userId: string, inst
       d.insert(githubInstallationUsers).values({ installationId: i.id, userId, createdAt: now }).onConflictDoNothing(),
     ]);
   await d.batch([d.delete(githubInstallationUsers).where(eq(githubInstallationUsers.userId, userId)), ...writes]);
+}
+
+/** Remembers which GitHub account the user connected, so pull requests can credit and assign them. */
+export async function saveGithubAccount(db: D1Database, userId: string, account: { id: number; login: string }) {
+  const now = new Date();
+  await createDb(db)
+    .insert(githubAccounts)
+    .values({ userId, githubId: account.id, login: account.login, updatedAt: now })
+    .onConflictDoUpdate({ target: githubAccounts.userId, set: { githubId: account.id, login: account.login, updatedAt: now } });
+}
+
+/** The GitHub login of a Myrel user, when they connected GitHub. */
+export async function githubLogin(db: D1Database, userId: string): Promise<string | null> {
+  const [row] = await createDb(db).select({ login: githubAccounts.login }).from(githubAccounts).where(eq(githubAccounts.userId, userId));
+  return row?.login ?? null;
 }
 
 export async function listProjectRepos(db: D1Database, projectId: string): Promise<ProjectRepo[]> {

@@ -7,12 +7,13 @@ import {
   exchangeCode,
   type GithubApiRepo,
   githubConfigured,
+  githubUser,
   installationRepos,
   userInstallations,
 } from "../github/app";
 import { handlePullEvent } from "../github/pulls";
 import { safeReturnTo, signState, verifyState, verifyWebhook } from "../github/state";
-import { githubGrantStale, listUserInstallations, syncUserInstallations } from "../github/store";
+import { githubGrantStale, listUserInstallations, saveGithubAccount, syncUserInstallations } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 
 const { githubInstallations, projectRepos } = schema;
@@ -79,6 +80,10 @@ export const githubRoutes = new Hono<AppEnv>()
     try {
       const token = await exchangeCode(c.env, code);
       await syncUserInstallations(c.env.DB, c.get("user").id, await userInstallations(token));
+      // Only credits and assigns pull requests, so connecting never fails over it.
+      await githubUser(token)
+        .then((account) => saveGithubAccount(c.env.DB, c.get("user").id, account))
+        .catch((err) => console.warn("reading the GitHub account failed", err));
       return back("connected");
     } catch (err) {
       console.error("github callback failed", err);

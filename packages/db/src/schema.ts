@@ -255,6 +255,16 @@ export const githubInstallationUsers = sqliteTable(
   (t) => [primaryKey({ columns: [t.installationId, t.userId] }), index("github_installation_users_user_id_idx").on(t.userId)],
 );
 
+/** The GitHub account a Myrel user signed in with when connecting GitHub, so pull requests can credit and assign them. */
+export const githubAccounts = sqliteTable("github_accounts", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  githubId: integer("github_id").notNull(),
+  login: text("login").notNull(),
+  updatedAt: timestamps.updatedAt,
+});
+
 /** A repository connected to a project. `repoId` is GitHub's repository id, stable across renames. */
 export const projectRepos = sqliteTable(
   "project_repos",

@@ -29,6 +29,8 @@ export type ThreadHost = {
   resolve(): Promise<void>;
   /** Follows a pull request on a connected repository; says what happened. */
   trackPullRequest(url: string): Promise<string>;
+  /** Opens a pull request on a connected repository through Myrel's GitHub App; says what happened. */
+  openPullRequest(input: { repo: string; head: string; base?: string; title: string; body?: string; draft?: boolean }): Promise<string>;
   /** Directory listing of a connected repository. */
   listRepoFiles(repo: string, path: string, ref?: string): Promise<string>;
   /** Text of one file in a connected repository. */
@@ -196,6 +198,20 @@ export function threadTools(host: ThreadHost): Tool[] {
         ref: z.string().optional().describe("Branch, tag or commit. Defaults to the default branch."),
       }),
       run: ({ repo, path, ref }) => host.readRepoFile(repo, path, ref),
+    }),
+    tool({
+      name: "open_pull_request",
+      description:
+        "Open a pull request on a connected repository through Myrel's GitHub App, after you pushed its branch. It needs no GitHub sign-in or gh on your side, credits the person this thread works for with a link back here, and follows the pull request like track_pull_request. If the branch already has an open pull request, that one is returned.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        head: z.string().min(1).max(255).describe("The pushed branch with the changes."),
+        base: z.string().max(255).optional().describe("The branch to merge into. Defaults to the repository's default branch."),
+        title: z.string().min(1).max(256),
+        body: z.string().max(60000).optional().describe("What changed and why, in Markdown. Myrel adds the credit line on top itself."),
+        draft: z.boolean().optional(),
+      }),
+      run: (input) => host.openPullRequest(input),
     }),
     tool({
       name: "track_pull_request",
