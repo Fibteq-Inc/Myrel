@@ -46,17 +46,18 @@ Regenerate icons from `icon.svg` with `pnpm --filter @myrel/desktop icons`.
 
 ## Release
 
-`.github/workflows/desktop.yml` builds every pull request that touches the app and uploads the
-installers as workflow artifacts. To publish, bump `version` in `src-tauri/Cargo.toml`, then push a tag
-with the same version:
+`.github/workflows/desktop.yml` builds the app only from main: a `desktop-v*` tag on a main commit, or a
+manual run (Actions → Desktop → Run workflow) on main, which uploads the installers as workflow artifacts.
+Pull requests don't build it; CI's typecheck and build cover its TypeScript. To publish, bump `version` in
+`src-tauri/Cargo.toml` on main, then tag that main commit with the same version:
 
 ```sh
 git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
 ```
 
-While the repository is private, tags and manual runs build macOS on the org's self-hosted Mac runner (labels
-`self-hosted`, `macOS`), so that Mac must be on and awake while a release builds. Pull requests, and every run once
-the repository is public, use GitHub's hosted runners.
+While the repository is private, macOS builds on the org's self-hosted Mac runner (labels `self-hosted`,
+`macOS`), so that Mac must be on and awake while a release builds. Once the repository is public, it uses
+GitHub's hosted runners.
 
 The workflow creates a draft GitHub release with the installers and, when the updater key is set,
 `latest.json` for in-app updates. Publishing the draft makes it live.
