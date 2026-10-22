@@ -49,5 +49,6 @@ malicious server operator.
 - Keep `BETTER_AUTH_SECRET` and model keys as Worker secrets, never in
   `wrangler.jsonc` or Git.
 - Leave `SIGNUP_ENABLED` off on public servers unless you mean to allow open
-  registration.
+  registration. If you open it, set up
+  [Turnstile](docs/self-hosting.md#sign-up-protection-turnstile) on sign-up.
 - Only list origins you control in `TRUSTED_ORIGINS`.

@@ -25,6 +25,12 @@ off in the pull request that flips visibility, or keep this file updated.
       repository is public nothing does (`desktop.yml`).
 - [x] Application review on `main` (2026-10-21) after #121, #125 and #132:
       no open finding blocks going public.
+- [x] Second review on `main` (2026-10-22): gitleaks over files and the full
+      history of every branch found nothing to rotate. Fixes merged in #178
+      (plan limits re-checked while a turn runs, Turnstile on sign-up, push
+      subscription checks, runner pairing rate limit, desktop CSP) and #183
+      (forwarded follow-ups, push-capable GitHub repositories only, runner
+      token kept out of child processes, scoped git credential helper).
 - [x] AGPL-3.0 `LICENSE`, `ee/LICENSE` for enterprise code, `CLA.md`.
 - [x] README, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
       issue and pull request templates.
@@ -59,6 +65,12 @@ off in the pull request that flips visibility, or keep this file updated.
 - [ ] Decide what to do with the production D1 `database_id` in
       `apps/api/wrangler.jsonc`. It is not a secret, but forks cannot use it;
       the self-hosting guide tells them to replace it.
+
+- [ ] Create the Turnstile widget for the hosted server and set
+      `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (sign-up has no challenge
+      until then).
+- [ ] Build the desktop app with the new CSP and smoke-test sign-in, the
+      runner and opening links.
 
 - [ ] Org Settings → Actions → Runner groups: the group with the self-hosted
       Mac keeps **Allow public repositories** off. A fork pull request can edit
