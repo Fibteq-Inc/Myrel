@@ -73,6 +73,21 @@ export function applyPullRequests(state: ProjectState, pullRequests: PullRequest
 export const threadPullRequests = (s: ProjectState, threadId: string) =>
   Object.values(s.pullRequests).filter((pr) => pr.threadId === threadId);
 
+/**
+ * Splits a run of pull requests into the cards worth showing and the rest,
+ * so a thread that opened many does not stack a card for each. Open ones
+ * stay out (they still need someone); with none open, the one updated last
+ * does. Two or fewer are all shown. Both lists keep the given order.
+ */
+export function foldPullRequests(prs: PullRequest[]): { shown: PullRequest[]; folded: PullRequest[] } {
+  if (prs.length <= 2) return { shown: prs, folded: [] };
+  const open = prs.filter((pr) => pr.state === "open");
+  const keep = new Set(
+    open.length ? open : [prs.reduce((a, b) => (b.updatedAt.localeCompare(a.updatedAt) >= 0 ? b : a))],
+  );
+  return { shown: prs.filter((pr) => keep.has(pr)), folded: prs.filter((pr) => !keep.has(pr)) };
+}
+
 export const threadTasks = (s: ProjectState, threadId: string) =>
   Object.values(s.tasks)
     .filter((t) => t.threadId === threadId)
