@@ -224,7 +224,16 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     expect(codex.args).toContain('mcp_servers.linear.url="https://myrel.test/api/agent-mcp/thr_1/c/linear"');
     expect(codex.args).toContain('mcp_servers.db.args=["-y","pg-mcp"]');
     expect(codex.args).toContain('mcp_servers.db.env={ DATABASE_URL = "postgres://x" }');
-    expect(codex.args.join(" ")).not.toContain("linear.default_tools_approval_mode");
+    expect(codex.args).toContain('mcp_servers.linear.default_tools_approval_mode="approve"');
+    expect(codex.args).toContain('mcp_servers.db.default_tools_approval_mode="approve"');
+  });
+
+  it("pre-approves Codex's app tools unless the run may only read", async () => {
+    // `codex exec` cannot ask, so a tool that needs approval would fail even after the person approved in the thread.
+    const apps = 'apps._default.default_tools_approval_mode="approve"';
+    expect((await ADAPTERS.codex.agent({ ...mcp(), access: "edit" })).args).toContain(apps);
+    expect((await ADAPTERS.codex.agent({ ...mcp(), access: "full" })).args).toContain(apps);
+    expect((await ADAPTERS.codex.agent({ ...mcp(), access: "read" })).args).not.toContain(apps);
   });
 });
 
