@@ -1,0 +1,39 @@
+---
+title: Fibteq Myrel docs
+description: The user guide for Myrel, a shared project chat where AI agents do the work.
+template: splash
+hero:
+  tagline: A shared project chat where AI agents do the work. Ask in the chat, Myrel opens a thread for each task and keeps you in the loop.
+  actions:
+    - text: Get started
+      link: /getting-started/
+      icon: right-arrow
+    - text: Open Myrel
+      link: https://myrel.fibteq.io
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+## Using Myrel
+
+<CardGrid>
+  <LinkCard title="Getting started" description="Account, first project, inviting people." href="/getting-started/" />
+  <LinkCard title="Projects and threads" description="The chat, threads, plans and decision cards." href="/guides/projects-and-threads/" />
+  <LinkCard title="Using your computer" description="Let agents work in folders on your machine." href="/guides/using-your-computer/" />
+  <LinkCard title="GitHub integration" description="Connect repositories and get pull requests." href="/guides/github-integration/" />
+</CardGrid>
+
+## Running or building Myrel
+
+These docs cover using Myrel. How to run, build or contribute to it lives in the repository, next to the code it describes.
+
+<CardGrid>
+  <Card title="Self-hosting" icon="rocket">
+    Deploy your own Myrel on Cloudflare: the [self-hosting guide](https://github.com/Fibteq-Inc/myrel/blob/main/docs/self-hosting.md).
+  </Card>
+  <Card title="Contributing" icon="github">
+    [Contributing](https://github.com/Fibteq-Inc/myrel/blob/main/CONTRIBUTING.md), the [CLA](https://github.com/Fibteq-Inc/myrel/blob/main/CLA.md) and the [architecture](https://github.com/Fibteq-Inc/myrel/blob/main/docs/architecture.md).
+  </Card>
+</CardGrid>
