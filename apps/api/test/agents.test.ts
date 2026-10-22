@@ -157,6 +157,61 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("opens a new plan card under the new ask when a resolved thread gets more work", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Fix", instructions: "Fix it.", project_ack: "Tamam." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const plan = (...steps: [string, string][]) => ({ title: "Fix", steps: steps.map(([text, state]) => ({ text, state })) });
+    const prompts: string[] = [];
+    const play: Play = async (turn, index) => {
+      prompts.push(turn.prompt);
+      if (index === 0) {
+        await turn.call("update_plan", plan(["Build", "done"]));
+        await turn.call("reply", { text: "Built." });
+        await turn.call("resolve_thread");
+      } else if (index === 1) {
+        // Same title as the finished plan: it still gets a card of its own at the end.
+        await turn.call("update_plan", plan(["Tests", "done"]));
+        await turn.call("reply", { text: "Tested." });
+      } else {
+        // The thread was waiting on the person, not resolved: the same round's card grows.
+        await turn.call("update_plan", plan(["Tests", "done"], ["Docs", "done"]));
+        await turn.call("reply", { text: "Documented." });
+      }
+    };
+
+    const { ws, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "Fix it" }));
+    const thread: Thread = await until(async () => {
+      const t = (await agent.listThreads())[0];
+      return t?.resolved ? t : null;
+    }, "resolved");
+    const agentBodies = async () =>
+      (await agent.getThreadContext(thread.id))!.messages.filter((m: Message) => m.authorId === "thread-agent").map((m: Message) => m.body);
+
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "Add tests too" }));
+    await until(async () => (await agentBodies()).includes("Tested."), "second round");
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "And docs" }));
+    await until(async () => (await agentBodies()).includes("Documented."), "third turn");
+
+    expect(await agentBodies()).toEqual([
+      formatPlan("Fix\n\n✓ Build"),
+      "Built.",
+      formatPlan("Fix\n\n✓ Tests\n✓ Docs"),
+      "Tested.",
+      formatPlanUpdate({ added: ["Docs"], removed: [], failed: [] }),
+      "Documented.",
+    ]);
+    // The reopened turn is told its plan is finished, the next one sees the new round's plan as current.
+    expect(prompts[1]).toContain("## Your plan from the earlier round");
+    expect(prompts[2]).toContain("## Your current plan, as the thread shows it\nFix\n\n✓ Tests");
+    ws.close();
+  });
+
   it("refuses to open a thread on a person's message without an acknowledgement line", async () => {
     setFakeModel((req) => {
       if (!isCoordinator(req)) return { text: "", toolCalls: [] };

@@ -396,8 +396,9 @@ export class ProjectAgent extends Agent<Env> {
   /** A person's message in a thread: a finished thread picks up again, and its agent wakes. */
   private async threadMessageArrived(message: Message, userId: string) {
     const threadId = message.threadId!;
-    if (this.getThread(threadId)?.resolved) this.updateThread(threadId, { resolved: false, status: "working" });
-    await this.wakeThread(threadId, { kind: "message", messageId: message.id, body: message.body, authorId: userId, seq: message.seq });
+    const reopened = !!this.getThread(threadId)?.resolved;
+    if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
+    await this.wakeThread(threadId, { kind: "message", messageId: message.id, body: message.body, authorId: userId, seq: message.seq, reopened });
   }
 
   /** Messages with seq > afterSeq, oldest first. Callable over RPC. */
@@ -747,11 +748,12 @@ export class ProjectAgent extends Agent<Env> {
     if (routine.target.kind === "thread") {
       const thread = this.getThread(routine.target.threadId);
       if (thread) {
-        if (thread.resolved) this.updateThread(thread.id, { resolved: false });
+        const reopened = thread.resolved;
+        if (reopened) this.updateThread(thread.id, { resolved: false });
         // The run works for the routine's author, not for whoever wrote in the thread last: a member's
         // routine must not reach another member's own connectors or computer.
         const actor = routine.createdBy === "agent" ? undefined : routine.createdBy;
-        await this.wakeThread(thread.id, { kind: "routine", name: routine.name, prompt: routine.prompt, actor });
+        await this.wakeThread(thread.id, { kind: "routine", name: routine.name, prompt: routine.prompt, actor, reopened });
         return;
       }
       // The thread is gone: hand the run to the coordinator instead of dropping it.
@@ -1018,9 +1020,10 @@ export class ProjectAgent extends Agent<Env> {
       messageThread: async (threadId, note, kind) => {
         const thread = this.getThread(threadId);
         // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
-        if (thread?.resolved) this.updateThread(threadId, { resolved: false, status: "working" });
+        const reopened = !!thread?.resolved;
+        if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
         relayInThread({ kind, threadId, note }, relayLine(kind, note));
-        await this.wakeThread(threadId, { kind: "coordinator", note });
+        await this.wakeThread(threadId, { kind: "coordinator", note, reopened });
       },
       relay: async (fromThreadId, toThreadId, note) => {
         const from = this.getThread(fromThreadId);
@@ -1230,12 +1233,13 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 }
 
 /** Why a thread agent is woken. */
+/** reopened: the thread was resolved and this wake opens it again, so its work starts a new round with its own plan card. */
 export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
-  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number }
-  | { kind: "coordinator"; note: string }
+  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean }
+  | { kind: "coordinator"; note: string; reopened?: boolean }
   /** actor: the person the routine works for (its author); none for one an agent made for its thread. */
-  | { kind: "routine"; name: string; prompt: string; actor?: string }
+  | { kind: "routine"; name: string; prompt: string; actor?: string; reopened?: boolean }
   /**
    * Something happened on a pull request the thread opened (github/pulls.ts). settled: it was merged
    * or closed, which needs no turn of its own unless the thread's plan still has work.
