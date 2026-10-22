@@ -1,6 +1,24 @@
 # Changelog
 
-Releases after 0.6.0 are listed on [GitHub Releases](https://github.com/Fibteq-Inc/myrel/releases) (`desktop-v*` tags).
+## [0.7.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.6.0...desktop-v0.7.0) (2026-10-22)
+
+
+### Features
+
+* **auth:** reset a forgotten password, and start clean when an address is first verified ([cdd7d2a](https://github.com/Fibteq-Inc/myrel/commit/cdd7d2a508a5a9fc78222120d08675c8f2b850f9))
+* **web:** fold finished pull requests when a thread has several ([ea8168e](https://github.com/Fibteq-Inc/myrel/commit/ea8168eef9d76074faa1142ec2b6360768488c6e))
+* **web:** forgot-password and set-new-password pages ([7d942ad](https://github.com/Fibteq-Inc/myrel/commit/7d942ad59397d41a7b1ca7e284c05d17809d5a9c))
+
+
+### Bug Fixes
+
+* **api:** storing project files needs a verified address and fits the plan's storage ([69d46c0](https://github.com/Fibteq-Inc/myrel/commit/69d46c085c28e2bade71abcb4f3f05333a236de4))
+* close the follow-up security findings (credentials, GitHub write, forwarded asks, metering) ([efadc5a](https://github.com/Fibteq-Inc/myrel/commit/efadc5a93142b8001f71b61cc76287ca0999e156))
+* **desktop:** catch external link clicks before plugin handlers ([e6a7bda](https://github.com/Fibteq-Inc/myrel/commit/e6a7bdaad603da2af836ec96ff4e398dcec329d7))
+* **desktop:** catch external link clicks before plugin handlers ([9d5783c](https://github.com/Fibteq-Inc/myrel/commit/9d5783c1d2f5c2c1854151747439422bf7aaa01c))
+* **web:** follow the chat to the end when a reply and the end of Thinking arrive together ([84eef53](https://github.com/Fibteq-Inc/myrel/commit/84eef538f719185f48121201d842337a0e34b496))
+* **web:** follow the chat to the end when a reply arrives with the end of Thinking ([e482849](https://github.com/Fibteq-Inc/myrel/commit/e48284909a7f87709ea71cc442eb4aa6e067dac6))
+* **web:** forbid framing the app and plugins via response headers ([a7c7439](https://github.com/Fibteq-Inc/myrel/commit/a7c743999530c8fd8d28287158b49defc171d961))
 
 ## [0.6.0](https://github.com/Fibteq-Inc/myrel/compare/desktop-v0.5.0...desktop-v0.6.0) (2026-10-22)
 
