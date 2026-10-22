@@ -79,6 +79,8 @@ export const APPROVE_TOOL = "mcp__myrel__approve_access";
 
 /** How long Claude Code waits on one Myrel tool call: the person may take a few minutes to answer. */
 const ASK_TIMEOUT_MS = 15 * 60 * 1000;
+/** How long Claude Code waits for an MCP server to start before going on without it. */
+const MCP_START_TIMEOUT_MS = 10_000;
 
 export type AgentServer =
   | { transport: "http"; name: string; url: string }
@@ -120,7 +122,9 @@ const claude: CliAdapter = {
   ],
   async agent({ url, token, dir, connectors = [], skills, asks, access }) {
     const headers = { Authorization: `Bearer ${token}` };
-    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers } };
+    // alwaysLoad: Myrel's own tools go in the first model call. Otherwise Claude Code hides them behind
+    // ToolSearch, and every turn spends a whole model call finding reply and update_plan first.
+    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "http", url, headers, alwaysLoad: true } };
     for (const c of connectors) {
       servers[c.name] =
         c.transport === "http" ? { type: "http", url: c.url, headers } : { type: "stdio", command: c.command, args: c.args, env: c.env };
@@ -132,9 +136,25 @@ const claude: CliAdapter = {
     // The skills come as a plugin (myrel:<name>); their folder may be read without asking.
     const skillArgs = skills ? ["--plugin-dir", quotePath(skills.plugin), "--add-dir", quotePath(skills.dir)] : [];
     return {
+      // Strict: only the servers above. With --mcp-config, `claude -p` waits for every MCP server the
+      // person set up for themselves too before its first model call, up to 30s for one that hangs.
       // Pull requests go through Myrel's open_pull_request tool (the GitHub App), never the person's gh.
-      args: ["--mcp-config", config, "--allowedTools", allowed.join(","), "--disallowedTools", "Bash(gh pr create:*)", ...skillArgs],
-      ...(asks && { env: { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) } }),
+      args: [
+        "--mcp-config",
+        config,
+        "--strict-mcp-config",
+        "--allowedTools",
+        allowed.join(","),
+        "--disallowedTools",
+        "Bash(gh pr create:*)",
+        ...skillArgs,
+      ],
+      env: {
+        ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+        // A connector that hangs holds up the start for this long, not 30s. The person's own setting wins.
+        ...(!process.env.MCP_TIMEOUT && { MCP_TIMEOUT: String(MCP_START_TIMEOUT_MS) }),
+        ...(asks && { MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS) }),
+      },
     };
   },
   line(line, state) {

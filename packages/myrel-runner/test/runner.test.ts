@@ -85,6 +85,16 @@ describe("CLI output parsing", () => {
     expect(ADAPTERS.gemini.args({ access: "auto" })).toEqual(expect.arrayContaining(["--approval-mode", "auto_edit"]));
   });
 
+  it("starts Claude Code with only Myrel's MCP servers, its own tools loaded up front", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
+    const agent = await ADAPTERS.claude.agent({ url: "https://myrel.test/mcp", token: "t".repeat(32), dir });
+    // The person's own MCP servers would hold up the first model call (up to 30s for one that hangs).
+    expect(agent.args).toEqual(expect.arrayContaining(["--strict-mcp-config"]));
+    expect(agent.env).toMatchObject({ ENABLE_CLAUDEAI_MCP_SERVERS: "false", MCP_TIMEOUT: "10000" });
+    const config = JSON.parse(await readFile(agent.args[agent.args.indexOf("--mcp-config") + 1]!, "utf8"));
+    expect(config.mcpServers.myrel.alwaysLoad).toBe(true);
+  });
+
   it("passes the project's other folders to each CLI", () => {
     expect(ADAPTERS.claude.args({ access: "full", dirs: ["/a"] })).toEqual(
       expect.arrayContaining(["--permission-mode", "bypassPermissions", "--add-dir", "/a"]),
@@ -273,6 +283,7 @@ echo "args: $*" >&2`,
           type: "http",
           url: "https://myrel.test/api/agent-mcp/thr_01JTEST0000000000000000009",
           headers: { Authorization: `Bearer ${"t".repeat(32)}` },
+          alwaysLoad: true,
         },
       },
     });
