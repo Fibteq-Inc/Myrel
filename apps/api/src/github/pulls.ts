@@ -13,8 +13,12 @@ type PullsEnv = Env;
 
 /** What reading a pull request and its CI needs; the app asks for nothing more. */
 const READ: RepoPermissions = { pull_requests: "read", checks: "read", statuses: "read", metadata: "read" };
-/** Opening a pull request, crediting it and assigning it; issues covers the assignees. */
-const WRITE: RepoPermissions = { pull_requests: "write", issues: "write", metadata: "read" };
+/**
+ * Opening a pull request, crediting it and assigning it; issues covers the assignees. GitHub reads
+ * the head and base branches when it opens one, so without contents it answers "not all refs are
+ * readable".
+ */
+const WRITE: RepoPermissions = { contents: "read", pull_requests: "write", issues: "write", metadata: "read" };
 
 /** Only a pull request opened this recently is credited when first followed, never an older one a reply mentions. */
 const CREDIT_WINDOW_MS = 6 * 60 * 60 * 1000;

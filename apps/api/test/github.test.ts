@@ -383,6 +383,9 @@ describe("pull requests", () => {
     expect(created).toBe(true);
     expect(pr).toMatchObject({ repo: "acme/app", state: "open", threadId: thread.id });
     const sent = fakeGithub.requests.slice(before);
+    // GitHub reads the branches to open a pull request: without contents it refuses ("not all refs are readable").
+    const scoped = sent.filter((r) => r.url.endsWith("/access_tokens")).map((r) => (r.body as { permissions?: Record<string, string> }).permissions);
+    expect(scoped).toContainEqual(expect.objectContaining({ contents: "read", pull_requests: "write" }));
     const create = sent.find((r) => r.method === "POST" && r.url.endsWith("/repos/acme/app/pulls"))!;
     const body = (create.body as { body: string; base: string }).body;
     expect((create.body as { base: string }).base).toBe("main");
