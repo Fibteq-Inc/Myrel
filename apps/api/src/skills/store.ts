@@ -103,8 +103,20 @@ export function checkSkillFiles(files: SkillFiles, fallbackName?: string): { ok:
   return { ok: true, skill: { name, description: description.slice(0, 1024), files: list, size } };
 }
 
-/** One skill as a turn of the thread's agent gets it. */
-export type TurnSkill = { id: string; name: string; description: string };
+/** One skill as a turn of the thread's agent gets it. `project`: the project's, not the person's own. */
+export type TurnSkill = { id: string; name: string; description: string; project: boolean };
+
+/**
+ * A project skill's SKILL.md as it goes to someone's own computer: only its name, description and
+ * instructions. Front matter beyond those (allowed-tools, hooks, …) and `!`command`` lines would let
+ * whoever wrote the skill, any admin of the project, pre-approve tools or run commands on that
+ * computer with no card for its owner; the agent still reads the skill and decides what to run.
+ */
+export function tameSkillMd(text: string): string {
+  const front = parseSkillMd(text);
+  const head = ["---", `name: ${JSON.stringify(front.name ?? "")}`, `description: ${JSON.stringify(front.description ?? "")}`, "---", ""];
+  return head.join("\n") + front.body.replaceAll("!`", "! `");
+}
 
 /**
  * The skills a thread's agent gets this turn: the project's, then those of the person the thread
@@ -133,7 +145,7 @@ export async function turnSkills(env: Env, where: { projectId: string; userId: s
   for (const row of [...project, ...own]) {
     if (seen.has(row.name) || out.length >= MAX_TURN_SKILLS) continue;
     seen.add(row.name);
-    out.push({ id: row.id, name: row.name, description: row.description });
+    out.push({ id: row.id, name: row.name, description: row.description, project: row.projectId !== null });
   }
   return out;
 }
