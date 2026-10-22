@@ -1,0 +1,1 @@
+ALTER TABLE `pull_requests` ADD `conflict` integer DEFAULT false NOT NULL;

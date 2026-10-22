@@ -35,7 +35,7 @@ import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest
 import { readBundle, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { listRepoFiles, readRepoFile } from "../github/files";
-import { listPullRequests, trackPullRequest } from "../github/pulls";
+import { CONFLICT_RETRY_SEC, type ConflictCheck, checkConflict, listPullRequests, trackPullRequest } from "../github/pulls";
 import { listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
@@ -1217,6 +1217,15 @@ export class ThreadAgent extends Agent<Env> {
     // Stops whatever the lost run left in the container.
     await sandbox.cancel(row.id).catch(() => false);
     await this.taskEvents(row.id, [{ type: "done", ok: false, error: SANDBOX_LOST }]);
+  }
+
+  /** GitHub is still working out whether one of the thread's pull requests merges cleanly: asks again shortly. */
+  async scheduleConflictCheck(payload: ConflictCheck): Promise<void> {
+    await this.schedule(CONFLICT_RETRY_SEC, "conflictCheck", payload);
+  }
+
+  async conflictCheck(payload: ConflictCheck): Promise<void> {
+    await checkConflict(this.env, payload.repoId, payload.number, payload.attempt);
   }
 
   async taskWatchdog(payload: { taskId: string }): Promise<void> {

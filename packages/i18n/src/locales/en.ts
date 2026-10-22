@@ -671,6 +671,7 @@ export const en = {
   "pr.checksFailure": "CI failed",
   "pr.approved": "Approved",
   "pr.changesRequested": "Changes requested",
+  "pr.conflict": "Has conflicts",
   "tasks.terminalOutput": "Terminal output",
   "tasks.totalTime": "Total time",
   "tasks.stepTime": "How long this step took",

@@ -22,11 +22,19 @@ type ApiPull = {
   merged_at?: string | null;
   draft?: boolean;
   head: { sha: string; ref: string };
+  base: { ref: string };
+  /** Whether the branch merges cleanly into its base; null while GitHub is still working it out. */
+  mergeable?: boolean | null;
 };
 type ApiCheckRun = { name: string; status: string; conclusion: string | null };
 
 /** Check run conclusions that mean the commit is broken. Neutral and skipped ones do not count. */
 const FAILED = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
+
+/** How long to wait, and how many times, while GitHub works out whether a pull request merges cleanly. */
+export const CONFLICT_RETRY_SEC = 10;
+const CONFLICT_RETRIES = 6;
+export type ConflictCheck = { repoId: number; number: number; attempt: number };
 
 export function toPullRequest(row: Row): PullRequest {
   return {
@@ -39,6 +47,7 @@ export function toPullRequest(row: Row): PullRequest {
     draft: row.draft,
     checks: row.checks,
     review: row.review,
+    conflict: row.conflict,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -85,6 +94,7 @@ export async function trackPullRequest(env: PullsEnv, projectId: string, threadI
     headSha: pull.head.sha,
     headRef: pull.head.ref,
     checks: checks.state,
+    conflict: pull.mergeable === false,
   };
   const [row] = await createDb(env.DB)
     .insert(pullRequests)
@@ -118,6 +128,34 @@ async function checkState(
   return { state: failed.length ? "failure" : pending ? "pending" : any ? "success" : null, failed };
 }
 
+/**
+ * Looks again at whether a pull request merges cleanly into its base. GitHub sends no event
+ * when a pull request starts to conflict (a push to its base branch does that), so pushes and
+ * new commits on the pull request bring us here. Newly conflicting wakes the thread once;
+ * resolving it clears the mark. While GitHub has not worked mergeability out yet, the thread's
+ * agent asks again a little later. base: only look when the pull request targets this branch.
+ */
+export async function checkConflict(env: PullsEnv, repoId: number, number: number, attempt = 0, base?: string): Promise<void> {
+  const d = createDb(env.DB);
+  const [row] = await d.select().from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, number))).limit(1);
+  if (!row || row.state !== "open") return;
+  const { token } = await installationToken(env, row.installationId, { repositoryIds: [row.repoId], permissions: READ });
+  const pull = await githubFetch<ApiPull>(token, `/repos/${row.fullName}/pulls/${row.number}`);
+  // Merging and closing come through the pull_request event.
+  if (pull.state !== "open" || (base !== undefined && pull.base.ref !== base)) return;
+  if (pull.mergeable === null || pull.mergeable === undefined) {
+    if (attempt < CONFLICT_RETRIES) {
+      const agent = await getAgentByName(env.THREAD_AGENT, row.threadId);
+      await agent.scheduleConflictCheck({ repoId, number, attempt: attempt + 1 });
+    }
+    return;
+  }
+  const conflict = !pull.mergeable;
+  if (conflict === row.conflict) return;
+  await save(env, row, { conflict });
+  if (conflict) await wake(env, row, `has merge conflicts with its base branch ${pull.base.ref} and cannot be merged until they are resolved.`);
+}
+
 function pullState(pull: Pick<ApiPull, "state" | "merged" | "merged_at">): Row["state"] {
   return pull.merged || pull.merged_at ? "merged" : pull.state;
 }
@@ -135,13 +173,17 @@ export type PullWebhookPayload = {
   review?: { state: string; body: string | null; user: Sender; html_url: string; author_association?: string };
   comment?: { body: string; user: Sender; html_url: string; path?: string; author_association?: string };
   issue?: { number: number; pull_request?: unknown };
+  /** push: the branch that moved, and whether it was deleted. */
+  ref?: string;
+  deleted?: boolean;
 };
 
 /**
  * Pull request, CI, review and comment events for pull requests a thread
  * opened: updates the stored state, shows it live, and wakes the thread's
  * agent when something needs it (CI failed, changes requested, a person
- * commented, merged or closed). Events about other pull requests are ignored.
+ * commented, it started to conflict with its base, merged or closed). Events
+ * about other pull requests are ignored.
  */
 export async function handlePullEvent(env: PullsEnv, event: string, payload: PullWebhookPayload): Promise<void> {
   const repoId = payload.repository?.id;
@@ -167,6 +209,20 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
     if (next.state !== row.state && next.state !== "open") {
       const merged = next.state === "merged";
       await wake(env, row, merged ? "was merged." : "was closed without merging.", { pr: `${row.fullName}#${row.number}`, merged });
+    } else if (next.state === "open" && (moved || payload.action === "edited")) {
+      // New commits can resolve a conflict or bring one in; a new base branch can too.
+      await checkConflict(env, repoId, pull.number);
+    }
+    return;
+  }
+
+  if (event === "push" && payload.ref?.startsWith("refs/heads/") && !payload.deleted) {
+    // A push to a branch can leave the open pull requests that merge into it conflicting.
+    const branch = payload.ref.slice("refs/heads/".length);
+    const rows = await d.select().from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.state, "open")));
+    for (const row of rows) {
+      if (row.headRef === branch) continue;
+      await checkConflict(env, repoId, row.number, 0, branch).catch((err) => console.error("conflict check failed", row.fullName, row.number, err));
     }
     return;
   }
