@@ -1,6 +1,27 @@
-# Fibteq Myrel
+<p align="center">
+  <img src="apps/web/public/icon.svg" alt="Fibteq Myrel logo" width="96" height="96">
+</p>
 
-**An open-source, self-hostable workspace where AI agents do the work inside your projects.**
+<h1 align="center">Fibteq Myrel</h1>
+
+<p align="center">
+  <strong>An open-source, self-hostable workspace where AI agents do the work inside your projects.</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
+  <a href="https://github.com/Fibteq-Inc/myrel/releases/latest"><img alt="Desktop app for macOS, Windows and Linux" src="https://img.shields.io/badge/desktop-macOS%20%7C%20Windows%20%7C%20Linux-6d63ff"></a>
+  <a href="https://www.npmjs.com/package/myrel-runner"><img alt="myrel-runner on npm" src="https://img.shields.io/npm/v/myrel-runner?label=myrel-runner"></a>
+  <a href="https://github.com/Fibteq-Inc/myrel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Fibteq-Inc/myrel/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+</p>
+
+<p align="center">
+  <a href="https://myrel.fibteq.io">Try it</a> ·
+  <a href="#download">Download</a> ·
+  <a href="docs/self-hosting.md">Self-host</a> ·
+  <a href="docs/architecture.md">Architecture</a> ·
+  <a href="https://github.com/Fibteq-Inc/myrel/discussions">Discussions</a>
+</p>
 
 ![Asking Myrel for a landing page: the coordinator opens a thread, the thread agent plans and builds it in the cloud sandbox, and publishes it as an artifact](docs/images/demo.gif)
 
@@ -54,6 +75,18 @@ and running on your own Cloudflare account.
 - **Usage:** every model call and sandbox minute metered per project and thread,
   with an estimated cost under agent replies (turns on your own computer use
   your CLI's login and show none).
+
+## Download
+
+- **Web:** use the hosted server at [myrel.fibteq.io](https://myrel.fibteq.io)
+  or [run your own](#self-hosting).
+- **Desktop (macOS, Windows, Linux):** installers are attached to the
+  [latest release](https://github.com/Fibteq-Inc/myrel/releases/latest)
+  (`.dmg`, `.exe`/`.msi`, `.AppImage`, `.deb`, `.rpm`). The app updates itself
+  and has the runner built in.
+- **Runner only:** `npx myrel-runner pair <code>` pairs a computer without the
+  desktop app (the code is in Myrel under Devices). See
+  [packages/myrel-runner/README.md](packages/myrel-runner/README.md).
 
 ## Architecture
 
@@ -171,6 +204,9 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first; you
 will be asked to sign the [Contributor License Agreement](CLA.md) on your first
 pull request. Report vulnerabilities privately as described in
 [SECURITY.md](SECURITY.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Questions and ideas go to [Discussions](https://github.com/Fibteq-Inc/myrel/discussions).
+If Myrel is useful to you, a star on GitHub helps others find it.
 
 ## License
 
