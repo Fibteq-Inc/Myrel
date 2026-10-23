@@ -1,12 +1,13 @@
 import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { decisionPicks } from "@myrel/protocol";
+import { type CliId, decisionPicks } from "@myrel/protocol";
 import { LoaderCircle, MessagesSquare } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn } from "../../lib/ui";
 import { ArtifactCards } from "../artifacts";
+import { AskCliPicker, OfferedClis, usePickableClis } from "./cli-picker";
 import { Composer } from "./composer";
 import { EarlierMessages, useHistoryWindow } from "./history";
 import { decisionAnswers, MessageView, Thinking } from "./message";
@@ -26,6 +27,9 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   const picks = decisionPicks(chat);
   const thinking = !!state.active[""];
   const last = chat.at(-1);
+  // The CLIs the next ask's thread may run with; each ask picks its own.
+  const pickable = usePickableClis(project);
+  const [clis, setClis] = useState<CliId[]>([]);
 
   return (
     <div className={cn("@container flex min-h-0 min-w-0 flex-1 flex-col", className)}>
@@ -54,6 +58,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 {m.artifacts?.length ? (
                   <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />
                 ) : null}
+                {m.clis?.length ? <OfferedClis clis={m.clis} /> : null}
                 {thread && (
                   <ThreadCard projectId={project.id} thread={thread} replies={threadReplyCount(state, thread.id)} />
                 )}
@@ -67,8 +72,12 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
       <div className="mx-auto w-full max-w-[808px]">
         <Composer
           placeholder={t("chat.placeholder")}
-          onSend={(body, attachments) => send(body, null, attachments)}
+          onSend={(body, attachments) => {
+            send(body, null, attachments, pickable ? clis : []);
+            setClis([]);
+          }}
           onUpload={(file) => api.upload(project.id, file.name, file)}
+          tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
           autoFocus
         />
       </div>
