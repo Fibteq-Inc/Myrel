@@ -22,6 +22,19 @@ A routine wakes Myrel on a schedule with a prompt: a morning summary, a weekly r
 
 Write it in the chat: "every weekday at 9, summarize open threads" or "next Monday at 10, check whether the deploy finished". Myrel sets up the routine and tells you when it first runs.
 
+## Routines a thread sets for itself
+
+Myrel can also schedule a later check inside a thread, for example "look again in an hour whether the deploy finished" or "check the store review tomorrow at 10". Such a routine continues that thread when it runs, shows up in the list as **in** the thread's name, and Myrel removes it once the check has done its job. You can ask for one in any thread: "remind me here on Friday to send the report".
+
 ## Manage routines
 
-Each routine in the list shows when it runs next and when it last ran. **Run now** runs it right away, **Pause** and **Resume** stop and restart it, and **Delete** removes it.
+Each routine in the list shows when it runs next and when it last ran.
+
+| Action | What it does |
+|---|---|
+| **Edit** | Change its name, prompt, schedule or where it runs; then **Save**. The next run follows the new schedule |
+| **Run now** | Runs it right away, without changing the schedule |
+| **Pause** / **Resume** | Stops and restarts it |
+| **Delete** | Removes it |
+
+You can also change a routine by asking in the chat, for example "move the morning digest to 8:30".
