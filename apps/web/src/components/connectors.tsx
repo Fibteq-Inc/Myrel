@@ -802,6 +802,9 @@ function draftFromConnector(c: Connector): Draft {
   };
 }
 
+/** A name with nothing beside it: the value box is easy to miss, and the server would get it empty. */
+const missingValue = (p: Pair) => !!p.key.trim() && !p.value && !p.stored;
+
 const toMap = (pairs: Pair[]) =>
   Object.fromEntries(pairs.filter((p) => p.key.trim()).map((p) => [p.key.trim(), p.value]));
 
@@ -852,9 +855,10 @@ function ConnectorForm({
     onSuccess: (c) => onDone(c),
   });
 
-  const badName = (d.transport === "http" ? (oauth ? [] : d.headers) : d.env).some((p) => p.key.trim() && !(d.transport === "http" ? HEADER_NAME : ENV_NAME).test(p.key.trim()));
-  const valid =
-    !badName && d.name.trim() && (d.transport === "http" ? /^https:\/\/\S+$/.test(d.url.trim()) : d.command.trim());
+  const pairs = d.transport === "http" ? (oauth ? [] : d.headers) : d.env;
+  const nameRule = d.transport === "http" ? HEADER_NAME : ENV_NAME;
+  const badName = pairs.some((p) => p.key.trim() && !nameRule.test(p.key.trim()));
+  const valid = !badName && d.name.trim() && (d.transport === "http" ? /^https:\/\/\S+$/.test(d.url.trim()) : d.command.trim());
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1081,11 +1085,19 @@ function PairsEditor({
     update(i, { key: line[1]!, value: line[2]! });
   };
   const bad = pairs.filter((p) => p.key.trim() && !nameRule.test(p.key.trim()));
+  const empty = pairs.filter(missingValue);
   return (
     <div className="space-y-1.5" role="group" aria-labelledby={id}>
       <span id={id} className="block text-[13px] font-medium text-muted">
         {label}
       </span>
+      {pairs.length > 0 && (
+        // Column titles, so the value box reads as a field of its own and not as part of the name.
+        <div className="flex gap-2 pr-10 text-xs text-subtle" aria-hidden="true">
+          <span className="w-1/3 shrink-0">{t("connectors.pairName")}</span>
+          <span className="flex-1">{t("connectors.valuePlaceholder")}</span>
+        </div>
+      )}
       {pairs.map((p, i) => (
         <div key={p.id} className="flex items-center gap-2">
           <Input
@@ -1096,7 +1108,7 @@ function PairsEditor({
             placeholder={keyPlaceholder}
             aria-label={t("connectors.pairName")}
             spellCheck={false}
-            className="w-2/5 font-mono text-[13px]"
+            className="w-1/3 shrink-0 font-mono text-[13px]"
           />
           <Input
             type="password"
@@ -1105,8 +1117,9 @@ function PairsEditor({
             onChange={(e) => update(i, { value: e.target.value })}
             placeholder={p.stored ? t("connectors.storedValue") : (p.placeholder ?? valuePlaceholder)}
             aria-label={t("connectors.pairValue", { name: p.key || keyPlaceholder })}
+            aria-invalid={missingValue(p)}
             spellCheck={false}
-            className="flex-1 font-mono text-[13px]"
+            className="min-w-0 flex-1 font-mono text-[13px]"
           />
           <IconButton
             type="button"
@@ -1123,6 +1136,9 @@ function PairsEditor({
         <p className="text-xs text-bad" role="alert">
           {badNameHint}
         </p>
+      )}
+      {empty.length > 0 && (
+        <p className="text-xs text-warn">{t("connectors.missingValue", { name: empty.map((p) => p.key.trim()).join(", ") })}</p>
       )}
       <button
         type="button"
