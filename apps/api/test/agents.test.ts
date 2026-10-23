@@ -596,6 +596,109 @@ describe("coordinator and thread agent", () => {
     ws.close();
    }, 20_000);
 
+  it("tells a thread waiting on another one when that thread finishes without a word", async () => {
+    const coordinator: string[] = [];
+    const thread = (prompt: string, title: string) => new RegExp(`\\[(thr_[0-9A-Z]{26})\\] "${title}"`).exec(prompt)![1]!;
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      coordinator.push(req.prompt);
+      const id = newMessageId(req.prompt);
+      if (id) {
+        const title = req.prompt.includes(' "Routines" ') ? "Guide" : "Routines";
+        return { text: "", toolCalls: [call("start_thread", { message_id: id, title, instructions: title, project_ack: "On it." })] };
+      }
+      const finished = req.prompt.indexOf("## Threads that just finished");
+      if (finished >= 0) {
+        return {
+          text: "",
+          toolCalls: [
+            call("relay_to_thread", {
+              from_thread_id: thread(req.prompt, "Routines"),
+              to_thread_id: thread(req.prompt, "Guide"),
+              note: "Routines is finished; write its section now.",
+            }),
+          ],
+        };
+      }
+      if (req.prompt.slice(req.prompt.indexOf("## Thread updates")).includes("Waiting for the routines thread.")) {
+        const routines = thread(req.prompt, "Routines");
+        return {
+          text: "",
+          toolCalls: [
+            call("relay_to_thread", {
+              from_thread_id: routines,
+              to_thread_id: thread(req.prompt, "Guide"),
+              note: `Write the routines section once [Routines](#${routines}) is finished.`,
+            }),
+          ],
+        };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const play: Play = async (turn) => {
+      if (turn.prompt.includes('Thread: "Routines"')) await turn.call("reply", { text: "Building routine editing." });
+      else if (turn.prompt.includes('From the "Routines" thread: Routines is finished')) await turn.call("reply", { text: "Writing the routines section." });
+      else if (turn.prompt.includes('From the "Routines" thread: Write the routines')) await turn.call("reply", { text: "OK, I will wait." });
+      else await turn.call("reply", { text: "Waiting for the routines thread." });
+    };
+
+    const { ws, agent } = await setup(play);
+    const replies = async (threadId: string) =>
+      ((await agent.getThreadContext(threadId))?.messages ?? []).filter((m: Message) => m.authorId === "thread-agent").map((m: Message) => m.body);
+    const byTitle = async (title: string) => ((await agent.listThreads()) as Thread[]).find((t) => t.title === title) ?? null;
+
+    ws.send(JSON.stringify({ type: "message.send", body: "Let people edit routines" }));
+    const routines = await until(() => byTitle("Routines"), "Routines thread");
+    await until(async () => (await replies(routines.id)).includes("Building routine editing.") || null, "Routines reply");
+    ws.send(JSON.stringify({ type: "message.send", body: "Write the user guide" }));
+    const guide = await until(() => byTitle("Guide"), "Guide thread");
+    await until(async () => (await replies(guide.id)).includes("Waiting for the routines thread.") || null, "Guide reply");
+
+    // The coordinator tells the guide to wait for the routines thread.
+    await agent.coordinatorTurn();
+    await until(async () => (await replies(guide.id)).includes("OK, I will wait.") || null, "guide waits");
+    await agent.coordinatorTurn();
+
+    // The routines thread finishes with nothing posted the coordinator watches, as when its pull request merges.
+    ws.send(JSON.stringify({ type: "thread.resolve", threadId: routines.id, resolved: true }));
+    await until(async () => (await agent.getThread(routines.id))?.resolved || null, "routines resolved");
+    await agent.coordinatorTurn();
+    await until(async () => (await replies(guide.id)).includes("Writing the routines section.") || null, "guide hears it finished");
+
+    const look = coordinator.at(-1)!;
+    expect(look).toContain(`- Thread [${routines.id}] "Routines" finished at`);
+    expect(look).toContain(`- in [${guide.id}] "Guide"`);
+    expect(look).toContain(`Write the routines section once [Routines](#${routines.id}) is finished.`);
+    expect(look).toContain("Nothing new in the project chat.");
+    // Only open threads hear of it, and only through the coordinator's relay: nothing lands in the project chat.
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+    expect(chat).toHaveLength(4);
+    ws.close();
+  }, 20_000);
+
+  it("does not report a finished thread when no other thread is open", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Solo", instructions: "Solo", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup(async (turn) => {
+      await turn.call("reply", { text: "Done." });
+    });
+    ws.send(JSON.stringify({ type: "message.send", body: "Do one thing" }));
+    const solo = await until(async () => (await agent.listThreads())[0] ?? null, "thread");
+    await until(async () => ((await agent.getThread(solo.id))?.status === "review_ready" ? true : null), "turn over");
+    ws.send(JSON.stringify({ type: "thread.resolve", threadId: solo.id, resolved: true }));
+    await until(async () => (await agent.getThread(solo.id))?.resolved || null, "resolved");
+    const inbox = await runInDurableObject(agent as unknown as DurableObjectStub, (_, state) =>
+      state.storage.sql.exec<{ kind: string }>("SELECT kind FROM coordinator_inbox").toArray(),
+    );
+    expect(inbox.filter((r) => r.kind === "finished")).toEqual([]);
+    ws.close();
+  });
+
   it("keeps a person's message for the retry when a coordinator turn dies before answering", async () => {
     const prompts: string[] = [];
     setFakeModel((req) => {

@@ -25,7 +25,23 @@ export type InboxItem =
   /** A routine ran and posted its prompt in the project chat as messageId. */
   | { kind: "routine"; messageId: string; routineId: string; name: string }
   /** Someone wrote in a thread (a person's decision, or the thread agent's reply) while other threads are open. */
-  | { kind: "thread"; threadId: string; messageId: string };
+  | { kind: "thread"; threadId: string; messageId: string }
+  /** A thread was resolved (by its agent, a person, or its pull requests settling) while other threads are open. */
+  | { kind: "finished"; threadId: string };
+
+/** Items the coordinator only looks at for links between threads; a turn with nothing else may only relay. */
+export function onlyObserving(inbox: InboxItem[]): boolean {
+  return inbox.length > 0 && inbox.every((i) => i.kind === "thread" || i.kind === "finished");
+}
+
+/** A thread that just finished, with how it ended and what the coordinator told open threads about it. */
+export type FinishedThread = {
+  thread: Thread;
+  /** Its newest message with words in it: the agent's last reply, or the line saying its pull request merged. */
+  last: Message | null;
+  /** Briefs and notes in open threads that name it, newest last. */
+  mentions: { threadId: string; note: string; createdAt: string }[];
+};
 
 /** A note the coordinator passed from one thread's work to another thread. */
 export type Relay = { fromThreadId: string; toThreadId: string; note: string; createdAt: string };
@@ -93,6 +109,8 @@ When a person answers such a card in a way that sets a rule for the project ("al
 
 Keeping threads in step: threads work in parallel, and what one thread starts, decides or delivers can change another thread's work. Examples: a new feature that another thread has to account for (a thread for a new kind of connector means the thread on plan limits must count it), a rename or a new server address, a renamed shared package, a decision a person made in one thread that another thread is waiting for, two threads about to change the same file. When you see such a link, call relay_to_thread to tell the affected thread in one or two sentences what changed and what it means for its work; when two threads would change the same file, say which thread owns it. Check for links whenever you start a thread (does an open thread need to know about this new work?) and whenever "Thread updates" lists new messages from inside threads. Relay only when it changes the recipient's work: most updates need nothing, and then you call no tools. Never send a note listed under "Notes already relayed" again, and never pass a thread's answer to your note back to the thread it came from. A decision people made in a thread that the whole project should keep (a name, a price, a rule) also goes in memory. Thread updates never get a post in the project chat: people already saw them in the thread.
 
+Threads finishing: a thread cannot see other threads, so when you tell one to wait for another thread ("write the guide once those threads are done"), you are the one who tells it when that happens. "Threads that just finished" lists every thread resolved since your last turn, also those resolved without a message (a merged pull request, a person closing it), with the briefs and notes that mention it in open threads. For each one, check whether an open thread waits on it or needs its result (a note or brief says so, or its plan or last messages do) and tell that thread with relay_to_thread that the work is finished and what it delivered. Never leave a thread waiting on work that is already done. When nothing waits on it, call no tools for it.
+
 ${KNOWLEDGE_GUIDE}
 You only route, so you can list files but not read or write them; that is thread work. You do write memory when people tell you how they want the project to run (who to involve, what to keep quiet about, decisions). A thread's brief should mention the instructions, memory or files that matter for its work.
 
@@ -111,6 +129,8 @@ export function coordinatorPrompt(input: {
   inbox: InboxItem[];
   /** New messages inside threads, for the thread items in the inbox. */
   threadUpdates?: { thread: Thread; message: Message }[];
+  /** Threads resolved since the last turn, for the finished items in the inbox. */
+  finished?: FinishedThread[];
   relays?: Relay[];
   knowledge: KnowledgeSnapshot;
   now: Date;
@@ -146,10 +166,21 @@ export function coordinatorPrompt(input: {
     ({ thread, message }) =>
       `- Thread [${thread.id}] "${thread.title}" · ${authorLabel(message, input.names)} · ${message.createdAt}\n${indent(clip(message.body, UPDATE_MAX))}`,
   );
+  const finished = (input.finished ?? []).map(({ thread, last, mentions }) =>
+    [
+      `- Thread [${thread.id}] "${thread.title}" finished at ${thread.updatedAt}`,
+      last ? `  Last message (${authorLabel(last, input.names)}):\n${indent(clip(last.body, UPDATE_MAX))}` : "",
+      mentions.length
+        ? `  Mentioned in open threads:\n${mentions.map((m) => `    - in [${m.threadId}] "${titles.get(m.threadId) ?? ""}" · ${m.createdAt}: ${clip(m.note.replace(/\s+/g, " "), MENTION_MAX)}`).join("\n")}`
+        : "  No brief or note in an open thread mentions it; still check the open threads' plans.",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
   const relays = (input.relays ?? []).map(
     (r) => `- ${r.createdAt}: "${titles.get(r.fromThreadId) ?? r.fromThreadId}" → "${titles.get(r.toThreadId) ?? r.toThreadId}": ${r.note}`,
   );
-  const onlyThreadUpdates = input.inbox.length > 0 && input.inbox.every((i) => i.kind === "thread");
+  const onlyThreadUpdates = onlyObserving(input.inbox);
   // Named again at the end, so a person's ask is not lost among thread updates in the same turn.
   const newChat = input.chat.filter((m) => newIds.has(m.id)).map((m) => m.id);
   const asked = questionItems.length
@@ -169,9 +200,12 @@ export function coordinatorPrompt(input: {
       : "",
     ran.length ? `## Routines that just ran (start a thread on each post)\n${ran.join("\n")}` : "",
     updates.length ? `## Thread updates (NEW messages inside threads; people saw them there)\n${updates.join("\n\n")}` : "",
+    finished.length
+      ? `## Threads that just finished (tell every open thread that waits on one, with relay_to_thread)\n${finished.join("\n\n")}`
+      : "",
     relays.length ? `## Notes already relayed between threads, newest last\n${relays.join("\n")}` : "",
     onlyThreadUpdates
-      ? "Nothing new in the project chat. Relay only what changes another open thread's work; otherwise call no tools."
+      ? `Nothing new in the project chat. Relay only what changes another open thread's work${finished.length ? ", and tell threads waiting on a finished one that it is done" : ""}; otherwise call no tools.`
       : newChat.length
         ? `Handle everything new now with your tools. Each NEW project chat message needs its own handling, even when thread updates or requests arrived with it: ${newChat.map((id) => `[${id}]`).join(", ")}.${asked}`
         : `Handle everything new now with your tools.${asked}`,
@@ -182,6 +216,8 @@ export function coordinatorPrompt(input: {
 
 /** How much of a thread message the coordinator reads; enough to spot a decision or a result. */
 const UPDATE_MAX = 1200;
+/** How much of a brief or note naming a finished thread the coordinator reads. */
+const MENTION_MAX = 600;
 /** How much of an open thread's plan the coordinator reads. */
 const PLAN_MAX = 300;
 
