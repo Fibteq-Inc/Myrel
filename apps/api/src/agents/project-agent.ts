@@ -161,6 +161,12 @@ export class ProjectAgent extends Agent<Env> {
   private syncedActivity: string | null = null;
   private activityWrite: Promise<void> = Promise.resolve();
 
+  /**
+   * The last coordinator inbox row a running turn has taken. In memory only, so a turn that dies
+   * with the object (a deploy, an eviction) leaves its rows for the queue's retry to take again.
+   */
+  private coordinatorTaken = 0;
+
   /** Project instructions, memory and the file index. */
   readonly knowledge: KnowledgeStore;
 
@@ -909,11 +915,23 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Queue callback: one coordinator turn over everything in the inbox. */
   async coordinatorTurn(): Promise<void> {
-    const rows = this.sql<InboxRow>`SELECT * FROM coordinator_inbox ORDER BY id`;
+    const rows = this.sql<InboxRow>`SELECT * FROM coordinator_inbox WHERE id > ${this.coordinatorTaken} ORDER BY id`;
     if (rows.length === 0) return; // an earlier turn already took these
-    this.sql`DELETE FROM coordinator_inbox WHERE id <= ${rows.at(-1)!.id}`;
-    const inbox = rows.map((r) => JSON.parse(r.payload) as InboxItem);
+    const first = rows[0]!.id;
+    const last = rows.at(-1)!.id;
+    this.coordinatorTaken = last;
+    // The rows stay until the turn is over: deleting them first lost a person's message whenever
+    // the turn threw or the object restarted, since the queue's retry then found an empty inbox.
+    try {
+      await this.runCoordinatorTurn(rows.map((r) => JSON.parse(r.payload) as InboxItem));
+    } catch (err) {
+      if (this.coordinatorTaken === last) this.coordinatorTaken = first - 1;
+      throw err;
+    }
+    this.sql`DELETE FROM coordinator_inbox WHERE id BETWEEN ${first} AND ${last}`;
+  }
 
+  private async runCoordinatorTurn(inbox: InboxItem[]): Promise<void> {
     const allowed = await canUseCoordinator(this.env, this.name);
     if (!allowed.ok) {
       this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: allowed.reason });

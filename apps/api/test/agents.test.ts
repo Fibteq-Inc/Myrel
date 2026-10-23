@@ -2,6 +2,7 @@ import { formatPlan, formatPlanUpdate, isPlanMessage, type Message, type Project
 import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { coordinatorPrompt } from "../src/agents/coordinator";
 import { agentProject, api, type Play, signUp, until } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
@@ -522,6 +523,57 @@ describe("coordinator and thread agent", () => {
     expect(await replies(mcpThread.id)).toEqual(["Working on MCP.", "MCP connector support is ready."]);
     ws.close();
    }, 20_000);
+
+  it("keeps a person's message for the retry when a coordinator turn dies before answering", async () => {
+    const prompts: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      prompts.push(req.prompt);
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Links", instructions: "Fix it.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup();
+    // The first turn dies the way a restart or a failed lookup does: thrown out of the queue callback.
+    let failures = 0;
+    await runInDurableObject(agent as unknown as DurableObjectStub, (instance) => {
+      const self = instance as unknown as { runCoordinatorTurn: (inbox: unknown[]) => Promise<void> };
+      const real = self.runCoordinatorTurn.bind(instance);
+      self.runCoordinatorTurn = async (inbox) => {
+        if (failures++ === 0) throw new Error("object restarted");
+        return real(inbox);
+      };
+    });
+    ws.send(JSON.stringify({ type: "message.send", body: "links do not open on mobile" }));
+
+    await until(async () => (failures > 0 ? true : null), "the failed turn");
+    await agent.coordinatorTurn();
+    const thread = await until(async () => (await agent.listThreads())[0] ?? null, "thread from the retry");
+    expect(thread.title).toBe("Links");
+    expect(prompts[0]).toMatch(/· NEW\n\s+links do not open on mobile/);
+    // Handled once: a later turn finds nothing left.
+    await agent.coordinatorTurn();
+    expect(prompts).toHaveLength(1);
+    ws.close();
+  });
+
+  it("names every new project chat message again after the thread updates", () => {
+    const m = { id: "cmsg_A", threadId: null, authorKind: "user", authorId: "u1", body: "two asks", createdAt: "2026-10-23T09:30:00.000Z", seq: 1 };
+    const prompt = coordinatorPrompt({
+      projectName: "P",
+      names: { u1: "İsmail" },
+      chat: [m as Message],
+      threads: [],
+      routines: [],
+      inbox: [{ kind: "message", messageId: "cmsg_A" }, { kind: "thread", threadId: "thr_B", messageId: "cmsg_C" }],
+      knowledge: { instructions: "", memoryIndex: "", memory: [], files: [], moreFiles: 0 },
+      now: new Date("2026-10-23T09:30:05Z"),
+      defaultTimezone: "UTC",
+    });
+    expect(prompt.trim().split("\n").at(-1)).toContain("Each NEW project chat message needs its own handling");
+    expect(prompt.trim().split("\n").at(-1)).toContain("[cmsg_A]");
+  });
 
   it("reports a failed coordinator turn in the project chat", async () => {
     setFakeModel(() => {

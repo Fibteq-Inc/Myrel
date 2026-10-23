@@ -7,7 +7,7 @@ import { formatCost, formatDuration, formatTokens, modelName } from "../lib/form
 import { makeStyles, mono, radius, useColors } from "../theme";
 
 const HARNESS_NAMES: Record<string, string> = { ...CLI_NAMES, opencode: "OpenCode", "claude-code": "Claude Code", shell: "Shell" };
-const harnessName = (h: string) => HARNESS_NAMES[h] ?? h;
+export const harnessName = (h: string) => HARNESS_NAMES[h] ?? h;
 
 /**
  * The quiet line under an agent's reply: where it ran, the model, how long it

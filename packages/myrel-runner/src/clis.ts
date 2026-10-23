@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
+import type { AcpMcpServer, AcpTurn } from "./acp";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
@@ -29,6 +30,8 @@ export type ParseState = {
   /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI). */
   draft?: string;
   draftStep?: unknown;
+  /** The ACP conversation of this run, for CLIs that speak ACP (see CliAdapter.acp). */
+  acp?: AcpTurn;
 };
 
 /**
@@ -49,7 +52,7 @@ export type CliAdapter = {
    * to people through Myrel's tools without asking for permission. `dir` is a private folder
    * for config files, deleted after the run.
    */
-  agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string> }>;
+  agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string>; mcpServers?: AcpMcpServer[] }>;
   /** What goes on stdin for this prompt, when the CLI does not take it as plain text. */
   input?(prompt: string, access: Access): string;
   /** Feeds one line of stdout; updates `state` in place. */
@@ -58,6 +61,14 @@ export type CliAdapter = {
   end?(stdout: string, state: ParseState): void;
   /** After a run, the subscription limits the CLI saved somewhere else than its output. */
   limits?(state: ParseState): Promise<CliLimits | undefined>;
+  /**
+   * For CLIs that speak the Agent Client Protocol on stdin and stdout instead of taking one prompt:
+   * the session mode for this access, and whether to allow what the agent asks permission for.
+   * The prompt (after `input`) and agent()'s mcpServers go in the session (see acp.ts).
+   */
+  acp?(access: Access): { mode?: string; allow: boolean };
+  /** Whether `<bin> --version` printed this CLI's version, for a binary name another tool also uses. */
+  isMine?(version: string): boolean;
 };
 
 /** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__myrel__<tool> in Claude Code. */
@@ -80,6 +91,8 @@ export type AgentMcp = {
    */
   asks?: boolean;
   access?: Access;
+  /** The project's other folders, for CLIs that take them in their config rather than as flags. */
+  dirs?: string[];
 };
 
 /** Claude Code's permission prompt tool on Myrel's MCP server. */
@@ -352,7 +365,146 @@ const antigravity: CliAdapter = {
   },
 };
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity };
+/**
+ * What opencode may do at each access level. They are its last permission rules, so they win over the
+ * person's own for these tools. Commands are never sandboxed in opencode, so they need full access.
+ */
+const OPENCODE_ACCESS: Record<Access, Record<string, string>> = {
+  read: { edit: "deny", bash: "deny" },
+  edit: { edit: "allow", bash: "deny" },
+  auto: { edit: "allow", bash: "deny" },
+  full: { edit: "allow", bash: "allow" },
+};
+
+const opencode: CliAdapter = {
+  id: "opencode",
+  bin: "opencode",
+  // `opencode run` reads the prompt from stdin when it gets no message.
+  args: ({ access, resume, extra = [] }) => [
+    "run",
+    "--format",
+    "json",
+    // Full access approves whatever would ask (folders outside, the web), except what the person denied.
+    ...(access === "full" ? ["--auto"] : []),
+    ...(resume ? ["--session", resume] : []),
+    ...extra,
+  ],
+  // Servers, permissions and skills for one run, in the environment: nothing goes into the person's config.
+  async agent({ url, token, connectors = [], skills, access = "edit", dirs = [] }) {
+    const auth = { Authorization: `Bearer {env:${TOKEN_VAR}}` };
+    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "remote", url, headers: auth, oauth: false } };
+    for (const c of connectors) {
+      servers[c.name] =
+        c.transport === "http"
+          ? { type: "remote", url: c.url, headers: auth, oauth: false }
+          : { type: "local", command: [c.command, ...c.args], environment: c.env };
+    }
+    // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
+    const permission: Record<string, unknown> = { ...OPENCODE_ACCESS[access] };
+    for (const name of Object.keys(servers)) permission[`${name}_*`] = "allow";
+    const folders = [...dirs, ...(skills ? [skills.dir] : [])];
+    if (folders.length) permission.external_directory = Object.fromEntries(folders.flatMap((d) => [[d, "allow"], [join(d, "*"), "allow"]]));
+    const config = {
+      mcp: servers,
+      permission,
+      ...(skills && { skills: { paths: [skills.dir] } }),
+      // Headless, a step that would ask is declined; by default that also ends the run with no answer.
+      experimental: { continue_loop_on_deny: true },
+    };
+    return {
+      // opencode 2 runs through its background service otherwise, which ignores the run's config.
+      args: opencodeServerArgs(await cliVersion("opencode")),
+      env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config), [TOKEN_VAR]: token },
+    };
+  },
+  line(line, state) {
+    const event = parseJson(line);
+    if (!event) return;
+    if (typeof event.sessionID === "string" && event.sessionID) state.sessionId = event.sessionID;
+    const part = (event.part ?? {}) as Record<string, unknown>;
+    if (event.type === "tool_use" && typeof part.tool === "string") {
+      state.progress = describeTool(part.tool, (part.state as { input?: unknown } | undefined)?.input);
+    }
+    // The answer is the text of its last message, which may come in several parts.
+    if (event.type === "text" && typeof part.text === "string" && part.text.trim()) {
+      state.draft = part.messageID === state.draftStep && state.draft ? `${state.draft}\n\n${part.text}` : part.text;
+      state.draftStep = part.messageID;
+      state.result = state.draft;
+      state.progress = clip(part.text);
+    }
+    // Each model call's tokens; input leaves out cache reads and writes, which Myrel counts as input.
+    if (event.type === "step_finish") {
+      const t = (part.tokens ?? {}) as Record<string, unknown>;
+      const cache = (t.cache ?? {}) as Record<string, unknown>;
+      addUsage(state, { inputTokens: count(t.input) + count(cache.read) + count(cache.write), outputTokens: count(t.output) + count(t.reasoning) });
+    }
+    // opencode 1 puts the message under data, opencode 2 on the error itself.
+    if (event.type === "error") {
+      const error = (event.error ?? {}) as { name?: unknown; message?: unknown; data?: { message?: unknown } };
+      const message = [error.data?.message, error.message, error.name].find((m) => typeof m === "string" && m);
+      state.failed = true;
+      state.result = typeof message === "string" ? message : "opencode reported an error.";
+    }
+  },
+};
+
+/** `opencode --version` prints "1.19.4"; opencode 2 prints "opencode v2.0.28": the first number is the major. */
+export function opencodeServerArgs(version: string | null): string[] {
+  const major = Number(/\d+/.exec(version ?? "")?.[0] ?? 0);
+  return major >= 2 ? ["--standalone"] : [];
+}
+
+/**
+ * What Hermes is told below full access. Its commands cannot be switched off for one run (its toolsets
+ * come from its global config), and it asks only about dangerous commands and sensitive files.
+ */
+const HERMES_LIMITED: Record<Access, string | null> = {
+  read: "(myrel-runner: this run may only read. Do not change files or run commands that change anything: steps that need approval are declined.)",
+  edit: "(myrel-runner: steps that need approval, such as dangerous commands or sensitive files, are declined in this run. Do not run commands that change anything outside this folder.)",
+  auto: "(myrel-runner: steps that need approval, such as dangerous commands or sensitive files, are declined in this run. Do not run commands that change anything outside this folder.)",
+  full: null,
+};
+
+const hermes: CliAdapter = {
+  id: "hermes",
+  bin: "hermes",
+  // Its ACP server takes MCP servers per session; `hermes chat` runs in a shared gateway that only
+  // knows the global config. The ACP server needs `hermes pm install --extra acp`.
+  args: ({ extra = [] }) => ["acp", ...extra],
+  acp: (access) => ({
+    // Edit modes: default asks before edits (declined here), accept_edits allows edits in the workspace.
+    mode: { read: "default", edit: "accept_edits", auto: "accept_edits", full: "dont_ask" }[access],
+    allow: access === "full",
+  }),
+  input: (prompt, access) => (HERMES_LIMITED[access] ? `${prompt}\n\n${HERMES_LIMITED[access]}` : prompt),
+  // The token goes in the session over the pipe: never on disk or in the environment.
+  async agent({ url, token, connectors = [] }) {
+    const headers = [{ name: "Authorization", value: `Bearer ${token}` }];
+    const mcpServers: AcpMcpServer[] = [{ type: "http", name: MYREL_MCP_SERVER, url, headers }];
+    for (const c of connectors) {
+      mcpServers.push(
+        c.transport === "http"
+          ? { type: "http", name: c.name, url: c.url, headers }
+          : { name: c.name, command: c.command, args: c.args, env: Object.entries(c.env).map(([name, value]) => ({ name, value })) },
+      );
+    }
+    return { args: [], mcpServers };
+  },
+  line: (line, state) => state.acp?.receive(line),
+  // Another `hermes` (the React Native JavaScript engine) prints something else.
+  isMine: (version) => version.startsWith("Hermes Agent"),
+};
+
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes };
+
+/** The first line `<bin> --version` prints, or null when it does not run. */
+function cliVersion(bin: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
+      resolve(err ? null : firstLine(stdout) || null);
+    });
+  });
+}
 
 /** Which CLIs are installed, by running `<bin> --version`. */
 export async function detectClis(): Promise<RunnerCli[]> {
@@ -361,7 +513,8 @@ export async function detectClis(): Promise<RunnerCli[]> {
       (a) =>
         new Promise<RunnerCli | null>((resolve) => {
           execFile(a.bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
-            resolve(err ? null : { id: a.id, version: firstLine(stdout) || null });
+            if (err || (a.isMine && !a.isMine(firstLine(stdout)))) return resolve(null);
+            resolve({ id: a.id, version: firstLine(stdout) || null });
           });
         }),
     ),
@@ -399,7 +552,7 @@ function parseJson(line: string): Record<string, unknown> | null {
 
 function describeTool(name: string, input: unknown): string {
   const i = (input ?? {}) as Record<string, unknown>;
-  const detail = i.command ?? i.file_path ?? i.path ?? i.pattern ?? i.description;
+  const detail = i.command ?? i.file_path ?? i.filePath ?? i.path ?? i.pattern ?? i.description;
   return typeof detail === "string" ? clip(`${name}: ${detail}`) : name;
 }
 

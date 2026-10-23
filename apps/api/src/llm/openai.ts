@@ -11,6 +11,7 @@ type OpenAiMessage =
 
 type OpenAiResponse = {
   choices?: {
+    finish_reason?: string | null;
     message?: {
       content?: string | null;
       tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[];
@@ -59,7 +60,8 @@ export function openAiCompatible(opts: OpenAiCompatibleOptions): ModelProvider {
       if (!res.ok) throw new LlmError(`${opts.id} ${res.status}: ${(await res.text()).slice(0, 500)}`, res.status);
 
       const data = (await res.json()) as OpenAiResponse;
-      const message = data.choices?.[0]?.message;
+      const choice = data.choices?.[0];
+      const message = choice?.message;
       const toolCalls: ToolCall[] = (message?.tool_calls ?? []).map((c, i) => ({
         id: c.id || `call_${i}`,
         name: c.function?.name ?? "",
@@ -74,6 +76,7 @@ export function openAiCompatible(opts: OpenAiCompatibleOptions): ModelProvider {
           cachedInputTokens: data.usage.prompt_tokens_details?.cached_tokens ?? 0,
         },
         model: data.model,
+        ...(choice?.finish_reason === "length" && { truncated: true }),
         ...reportedCost(data.usage, res.headers),
       };
     },

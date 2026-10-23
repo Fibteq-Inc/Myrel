@@ -24,6 +24,8 @@ export const darkColors = {
   bad: "#ff7b72",
   // Surfaces and lines between the base steps above.
   sunken: "#0b0b0d",
+  console: "#08080a",
+  merged: "#b49cff",
   option: "#1a1a1e",
   card: "#26262b",
   divider: "#222227",
@@ -62,6 +64,8 @@ export const lightColors: Colors = {
   warnLine: "#eed49b",
   bad: "#bf2e29",
   sunken: "#f6f6f8",
+  console: "#f3f3f6",
+  merged: "#7a3fd1",
   option: "#ffffff",
   card: "#e2e2e8",
   divider: "#e9e9ee",

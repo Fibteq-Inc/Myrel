@@ -3,14 +3,14 @@ title: Using your computer
 description: Pair a computer with myrel-runner so agents work in folders on your machine.
 ---
 
-Agents can work in folders on your own machine instead of the cloud. They run through your own coding CLI (Claude Code, Codex CLI or Antigravity CLI), signed in with your own account, so these turns show no estimated cost and do not count toward plan limits.
+Agents can work in folders on your own machine instead of the cloud. They run through your own coding CLI (Claude Code, Codex CLI, Antigravity CLI, OpenCode or Hermes Agent), signed in with your own account, so these turns show no estimated cost and do not count toward plan limits.
 
 The bridge between Myrel and your computer is **myrel-runner**. This page covers the steps in the app; the [myrel-runner README](https://github.com/Fibteq-Inc/myrel/blob/main/packages/myrel-runner/README.md) covers its commands and options.
 
 ## What you need
 
 - Node.js 22 or newer
-- `claude`, `codex` or `agy` (Antigravity CLI) installed and signed in
+- `claude`, `codex`, `agy` (Antigravity CLI), `opencode` or `hermes` (Hermes Agent, with `hermes pm install --extra acp`) installed and signed in
 
 ## Pair the computer
 
@@ -40,7 +40,7 @@ Project settings → General → **Run tasks**:
 
 ## When an agent needs more
 
-Agents stay inside the project's folders. With Claude Code, the agent can ask in the thread when it needs another folder (**Allow once**, **Add to project**, **Don't allow**) or wants to run a command it is not already allowed to run (**Run it**, **Allow commands this turn**, **Don't run**). Codex and Antigravity cannot ask in the middle of a run, so they stay inside the shared folders.
+Agents stay inside the project's folders. With Claude Code, the agent can ask in the thread when it needs another folder (**Allow once**, **Add to project**, **Don't allow**) or wants to run a command it is not already allowed to run (**Run it**, **Allow commands this turn**, **Don't run**). Codex, Antigravity, OpenCode and Hermes cannot ask in the middle of a run, so they stay inside the shared folders. Hermes always has its terminal: below full access, the steps it would ask about (dangerous commands, sensitive files) are declined.
 
 ## Git repositories
 
