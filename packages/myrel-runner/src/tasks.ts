@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
-import { ADAPTERS, type CliAdapter, type ParseState } from "./clis";
+import { ADAPTERS, type CliAdapter, modelFlags, type ParseState } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { downloadSkills, type RunSkills } from "./skills";
 import { threadWorktree, type Worktree } from "./worktrees";
@@ -157,7 +157,8 @@ export class TaskRunner {
     const config = this.opts.config();
     const log = this.opts.log ?? (() => {});
     const { cwd, adapter, agent, dirs, skills, where, cleanup } = run;
-    const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: run.asks });
+    const extra = [...modelFlags(adapter, task.model), ...agent.args];
+    const args = adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: childEnv(agent.env),

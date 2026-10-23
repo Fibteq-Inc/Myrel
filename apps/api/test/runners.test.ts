@@ -1,4 +1,4 @@
-import type { Project, ProjectWorkspace, Runner, ServerToRunner } from "@myrel/protocol";
+import type { Project, ProjectSettings, ProjectWorkspace, Runner, ServerToRunner } from "@myrel/protocol";
 import { RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
@@ -807,6 +807,82 @@ describe("local workspace", () => {
     );
     expect(notice.body).toContain("Antigravity CLI is not available on Laptop");
     expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(1);
+    chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("runs a thread with its model and effort, else the project's default for its CLI", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const clis = [
+      {
+        id: "codex",
+        version: "0.163.0",
+        models: [
+          { id: "gpt-6-sol", name: "GPT-6-Sol", efforts: ["low", "medium", "high", "ultra"] },
+          { id: "gpt-6-luna", name: "GPT-6-Luna", efforts: ["low", "medium", "high"] },
+          { id: "gpt-mini", name: "GPT Mini", efforts: [] },
+        ],
+      },
+      { id: "claude", version: "2.1.0" },
+    ];
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "agent-clis", "models"], { clis });
+    await until(async () => (await listRunners(user)).find((r) => r.online && r.clis[0]?.models?.length === 3), "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "codex" }),
+    });
+    const settings = (body: unknown) => api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify(body) });
+    const saved = (await (await settings({ cliModels: { codex: { model: "gpt-6-sol", effort: "ultra" } } })).json()) as { settings: ProjectSettings };
+    expect(saved.settings.cliModels).toEqual({ codex: { model: "gpt-6-sol", effort: "ultra" } });
+
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const author = await idOf(user);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Model", null);
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    const turn = async (n: number) => {
+      if (n === 1) await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+      else {
+        const m = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: `again ${n}` });
+        await threadAgent.wake({ kind: "message", messageId: m.id, body: m.body, authorId: author, seq: m.seq });
+      }
+      const starts = await until(() => {
+        const all = runnerSide.frames.filter((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start");
+        return all.length >= n ? all : null;
+      }, `task.start ${n}`);
+      const start = starts[n - 1]!;
+      runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "done" });
+      await until(async () => (await threadAgent.getTasks()).filter((t) => t.status === "done").length >= n, `turn ${n}`);
+      return start.model;
+    };
+
+    // The project's default for the thread's CLI.
+    expect(await turn(1)).toEqual({ model: "gpt-6-sol", effort: "ultra" });
+
+    // The thread picks another model: the project's effort goes only where that model takes it.
+    const chat = await openChat(project.id, user);
+    chat.send(JSON.stringify({ type: "thread.model", threadId: thread.id, cli: "codex", model: "gpt-6-luna", effort: null }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.model?.model === "gpt-6-luna", "the pick");
+    expect((await projectAgent.getThread(thread.id))?.model).toEqual({ cli: "codex", model: "gpt-6-luna", effort: null });
+    expect(await turn(2)).toEqual({ model: "gpt-6-luna" });
+
+    // A model that takes no effort gets none; one the CLI no longer lists is left to the CLI.
+    chat.send(JSON.stringify({ type: "thread.model", threadId: thread.id, cli: "codex", model: "gpt-mini", effort: "high" }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.model?.model === "gpt-mini", "no effort");
+    expect(await turn(3)).toEqual({ model: "gpt-mini" });
+    chat.send(JSON.stringify({ type: "thread.model", threadId: thread.id, cli: "codex", model: "gpt-old", effort: "low" }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.model?.model === "gpt-old", "gone");
+    expect(await turn(4)).toEqual({ effort: "low" });
+
+    // Back to the project's defaults; with those cleared, the CLI's own default runs.
+    chat.send(JSON.stringify({ type: "thread.model", threadId: thread.id, cli: "codex", model: null, effort: null }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.model === null, "cleared");
+    await settings({ cliModels: { codex: { model: null, effort: null } } });
+    expect(((await (await api(`/api/projects/${project.id}/settings`, { token: user })).json()) as { settings: ProjectSettings }).settings.cliModels).toEqual({});
+    expect(await turn(5)).toBeUndefined();
     chat.close();
     runnerSide.ws.close();
   });

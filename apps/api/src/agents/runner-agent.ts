@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import {
   type AgentStart,
+  type TaskModel,
   type CliId,
   RUNNER_PROTOCOL_VERSION,
   type RunnerDirListing,
@@ -30,6 +31,8 @@ export type TaskStart = {
   prompt: string;
   /** The CLI runs as the thread's agent, connected to the thread's MCP endpoint (needs feature "agent"). */
   agent?: AgentStart;
+  /** The model and effort, only ever ones the runner listed (so only runners with feature "models"). */
+  model?: TaskModel;
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
@@ -220,6 +223,7 @@ export class RunnerAgent extends Agent<Env> {
       cli: input.cli,
       prompt: input.prompt,
       ...(input.agent && { agent: input.agent }),
+      ...(input.model && { model: input.model }),
     });
     return { ok: true };
   }

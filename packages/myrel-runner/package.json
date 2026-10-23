@@ -1,6 +1,6 @@
 {
   "name": "@fibteq/myrel-runner",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent or Cursor CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",

@@ -45,6 +45,17 @@ export const ClientEvent = z.discriminatedUnion("type", [
     threadId: ThreadId,
     cli: CliId.nullable(),
   }),
+  /**
+   * Someone who can pick the thread's CLI picks its model and effort for that CLI; null for both:
+   * the project's defaults again.
+   */
+  z.object({
+    type: z.literal("thread.model"),
+    threadId: ThreadId,
+    cli: CliId,
+    model: z.string().trim().min(1).max(200).nullable(),
+    effort: z.string().trim().min(1).max(20).nullable(),
+  }),
   z.object({
     type: z.literal("sync"),
     /** Return messages with seq strictly greater than this. 0 = from the start. */

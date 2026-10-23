@@ -8,7 +8,7 @@ import {
   type RunnerToServer,
   ServerToRunner,
 } from "@myrel/protocol";
-import { detectClis } from "./clis";
+import { ADAPTERS, detectClis } from "./clis";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
@@ -20,7 +20,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.17.0";
+export const RUNNER_VERSION = "0.18.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -189,6 +189,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "project-folders",
         "files",
         "settings",
+        "models",
         ...(updates === "service" ? (["update"] as const) : []),
       ],
       settings: settingsOf(config),
@@ -207,8 +208,20 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   watchFile(configPath(), { interval: 2000 }, onConfigChange);
 
   const ping = setInterval(() => send({ type: "ping" }), 25_000);
+  // Asking each CLI for its models can take a while (some go online), so hello goes first without them.
+  const readModels = () =>
+    void Promise.all(
+      clis.map(async (c) => {
+        const models = await ADAPTERS[c.id].models?.().catch(() => undefined);
+        const changed = JSON.stringify(models) !== JSON.stringify(c.models);
+        if (models) c.models = models;
+        return changed && !!models;
+      }),
+    ).then((changed) => changed.some(Boolean) && hello());
+  readModels();
   readCodex();
   const codexLimits = setInterval(readCodex, 10 * 60 * 1000);
+  const modelLists = setInterval(readModels, 6 * 60 * 60 * 1000);
   codexLimits.unref?.();
   // Removes the worktrees of threads whose work is merged (see pruneWorktrees).
   const prune = () =>
@@ -231,6 +244,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     clearInterval(ping);
     clearInterval(pruning);
     clearInterval(codexLimits);
+    clearInterval(modelLists);
     clearInterval(autoUpdating);
     clearTimeout(firstCheck);
     clearTimeout(confirmTimer);

@@ -6,7 +6,7 @@ import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
-import { ThreadCliNote, ThreadCliPicker, usePickableClis } from "../../../../../components/cli-picker";
+import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, usePickableClis } from "../../../../../components/cli-picker";
 import { Conversation } from "../../../../../components/conversation";
 import { Tabs } from "../../../../../components/project/tabs";
 import { WorkspaceFilesTab } from "../../../../../components/thread/files";
@@ -172,7 +172,12 @@ export default function ThreadScreen() {
           header={header}
           tools={
             pickable &&
-            thread && <ThreadCliPicker pickable={pickable} thread={thread} onChange={(cli) => emit({ type: "thread.cli", threadId, cli })} />
+            thread && (
+              <>
+                <ThreadCliPicker pickable={pickable} thread={thread} onChange={(cli) => emit({ type: "thread.cli", threadId, cli })} />
+                <ThreadModelPicker pickable={pickable} thread={thread} onChange={(pick) => emit({ type: "thread.model", threadId, ...pick })} />
+              </>
+            )
           }
           plan={plan}
           onOpenPlan={thread?.statusText ? () => setPlanOpen(true) : undefined}
