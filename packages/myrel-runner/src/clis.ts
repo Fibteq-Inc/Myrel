@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
+import type { AcpMcpServer, AcpTurn } from "./acp";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
@@ -29,6 +30,8 @@ export type ParseState = {
   /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI). */
   draft?: string;
   draftStep?: unknown;
+  /** The ACP conversation of this run, for CLIs that speak ACP (see CliAdapter.acp). */
+  acp?: AcpTurn;
 };
 
 /**
@@ -49,7 +52,7 @@ export type CliAdapter = {
    * to people through Myrel's tools without asking for permission. `dir` is a private folder
    * for config files, deleted after the run.
    */
-  agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string> }>;
+  agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string>; mcpServers?: AcpMcpServer[] }>;
   /** What goes on stdin for this prompt, when the CLI does not take it as plain text. */
   input?(prompt: string, access: Access): string;
   /** Feeds one line of stdout; updates `state` in place. */
@@ -58,6 +61,14 @@ export type CliAdapter = {
   end?(stdout: string, state: ParseState): void;
   /** After a run, the subscription limits the CLI saved somewhere else than its output. */
   limits?(state: ParseState): Promise<CliLimits | undefined>;
+  /**
+   * For CLIs that speak the Agent Client Protocol on stdin and stdout instead of taking one prompt:
+   * the session mode for this access, and whether to allow what the agent asks permission for.
+   * The prompt (after `input`) and agent()'s mcpServers go in the session (see acp.ts).
+   */
+  acp?(access: Access): { mode?: string; allow: boolean };
+  /** Whether `<bin> --version` printed this CLI's version, for a binary name another tool also uses. */
+  isMine?(version: string): boolean;
 };
 
 /** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__myrel__<tool> in Claude Code. */
@@ -443,7 +454,48 @@ export function opencodeServerArgs(version: string | null): string[] {
   return major >= 2 ? ["--standalone"] : [];
 }
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode };
+/**
+ * What Hermes is told below full access. Its commands cannot be switched off for one run (its toolsets
+ * come from its global config), and it asks only about dangerous commands and sensitive files.
+ */
+const HERMES_LIMITED: Record<Access, string | null> = {
+  read: "(myrel-runner: this run may only read. Do not change files or run commands that change anything: steps that need approval are declined.)",
+  edit: "(myrel-runner: steps that need approval, such as dangerous commands or sensitive files, are declined in this run. Do not run commands that change anything outside this folder.)",
+  auto: "(myrel-runner: steps that need approval, such as dangerous commands or sensitive files, are declined in this run. Do not run commands that change anything outside this folder.)",
+  full: null,
+};
+
+const hermes: CliAdapter = {
+  id: "hermes",
+  bin: "hermes",
+  // Its ACP server takes MCP servers per session; `hermes chat` runs in a shared gateway that only
+  // knows the global config. The ACP server needs `hermes pm install --extra acp`.
+  args: ({ extra = [] }) => ["acp", ...extra],
+  acp: (access) => ({
+    // Edit modes: default asks before edits (declined here), accept_edits allows edits in the workspace.
+    mode: { read: "default", edit: "accept_edits", auto: "accept_edits", full: "dont_ask" }[access],
+    allow: access === "full",
+  }),
+  input: (prompt, access) => (HERMES_LIMITED[access] ? `${prompt}\n\n${HERMES_LIMITED[access]}` : prompt),
+  // The token goes in the session over the pipe: never on disk or in the environment.
+  async agent({ url, token, connectors = [] }) {
+    const headers = [{ name: "Authorization", value: `Bearer ${token}` }];
+    const mcpServers: AcpMcpServer[] = [{ type: "http", name: MYREL_MCP_SERVER, url, headers }];
+    for (const c of connectors) {
+      mcpServers.push(
+        c.transport === "http"
+          ? { type: "http", name: c.name, url: c.url, headers }
+          : { name: c.name, command: c.command, args: c.args, env: Object.entries(c.env).map(([name, value]) => ({ name, value })) },
+      );
+    }
+    return { args: [], mcpServers };
+  },
+  line: (line, state) => state.acp?.receive(line),
+  // Another `hermes` (the React Native JavaScript engine) prints something else.
+  isMine: (version) => version.startsWith("Hermes Agent"),
+};
+
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes };
 
 /** The first line `<bin> --version` prints, or null when it does not run. */
 function cliVersion(bin: string): Promise<string | null> {
@@ -461,7 +513,8 @@ export async function detectClis(): Promise<RunnerCli[]> {
       (a) =>
         new Promise<RunnerCli | null>((resolve) => {
           execFile(a.bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
-            resolve(err ? null : { id: a.id, version: firstLine(stdout) || null });
+            if (err || (a.isMine && !a.isMine(firstLine(stdout)))) return resolve(null);
+            resolve({ id: a.id, version: firstLine(stdout) || null });
           });
         }),
     ),

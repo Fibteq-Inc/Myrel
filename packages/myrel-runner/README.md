@@ -2,7 +2,7 @@
 
 Connects your computer to a Myrel server, so a project can work in one of your
 local folders with the coding CLI you already use: Claude Code, Codex CLI,
-Antigravity CLI or OpenCode.
+Antigravity CLI, OpenCode or Hermes Agent.
 
 - It opens an **outbound** WebSocket to the server. No port is opened, and it works behind NAT.
 - The server sends a task (a folder, a CLI and a prompt). The runner starts the CLI in that folder, streams its
@@ -15,7 +15,7 @@ Antigravity CLI or OpenCode.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI) or `opencode` on your `PATH`, already signed in.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode` or `hermes` (Hermes Agent) on your `PATH`, already signed in.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -117,6 +117,12 @@ permission you set to `ask` yourself) is declined and the run goes on too
 (`experimental.continue_loop_on_deny`). With `full`, `--auto` approves what would ask, but rules you set to `deny`
 still hold.
 
+Hermes Agent runs as an ACP server (`hermes acp`), whose session takes an edit mode: `default` (asks before
+edits) with `read`, `accept_edits` with `edit` and `auto`, `dont_ask` with `full`. What it asks permission for
+(dangerous commands, sensitive files, edits with `read`) is declined below `full` and allowed with `full`. Its
+terminal cannot be switched off for one run (toolsets come from its global config), so below `full` it is told not
+to run commands that change anything; this is an instruction, not a sandbox.
+
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 
@@ -149,11 +155,12 @@ decisions, artifacts, memory, routines) added over MCP:
 | Codex CLI | `-c mcp_servers.myrel.url=…` and `-c mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"` |
 | Antigravity CLI | `myrel-runner mcp-bridge` in `~/.gemini/config/mcp_config.json`, allowed with `mcp(myrel/*)` in `~/.gemini/antigravity-cli/settings.json` |
 | OpenCode | `mcp.myrel` (remote, `Authorization: Bearer {env:MYREL_MCP_TOKEN}`) in `OPENCODE_CONFIG_CONTENT`, allowed with `myrel_*` |
+| Hermes Agent | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
 uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
-for Antigravity CLI, 0.15.0 or later for OpenCode.
+for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent.
 
 Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
 server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
@@ -165,6 +172,14 @@ OpenCode takes a whole config for one run in `OPENCODE_CONFIG_CONTENT`, so nothi
 merged over your own config, and the token stays in `MYREL_MCP_TOKEN`. Your model and provider logins are your own.
 opencode 2 runs `opencode run` through its background service, which would ignore that config, so the runner adds
 `--standalone` when `opencode --version` says 2 or later. Connectors' tools show up as `<connector>_<tool>`.
+
+Hermes Agent's `hermes chat` runs every turn in a shared background gateway that takes MCP servers only from
+`~/.hermes/config.yaml`, so the runner uses its ACP server instead (`hermes acp`, which needs
+`hermes pm install --extra acp` once). Each run is one ACP session: initialize, `session/new` or `session/resume`
+(the thread's previous session) with the run's MCP servers, `session/set_mode`, then `session/prompt`; the runner
+ends the connection when the prompt is answered. The token travels only over that pipe. Hermes shows the run's
+servers to the model behind its `tool_search`, as `mcp__editor_<server>_<id>__<tool>`. Detection checks that
+`hermes --version` says Hermes Agent (another `hermes` is the React Native JavaScript engine).
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 
