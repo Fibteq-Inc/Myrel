@@ -1,6 +1,6 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, CLI_NAMES, CliId, type ProjectWorkspace, type TaskModel, TaskTarget } from "@myrel/protocol";
-import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
+import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskModel, TaskTarget } from "@myrel/protocol";
+import type { ModelConfig, RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { githubConfigured, installationToken } from "../github/app";
@@ -67,6 +67,29 @@ export function localCanceller(env: Env, runnerId: string | undefined): Pick<Run
       if (!result.ok) throw new Error(result.reason);
     },
   };
+}
+
+/** The CLI the project's cloud turns run with (the project setting; OpenCode by default). */
+export async function projectCloudCli(env: Env, projectId: string): Promise<CloudCli> {
+  const [row] = await createDb(env.DB).select({ cloudCli: schema.projects.cloudCli }).from(schema.projects).where(eq(schema.projects.id, projectId));
+  return CloudCli.catch("opencode").parse(row?.cloudCli ?? "opencode");
+}
+
+/**
+ * The harness a cloud turn runs: the CLI asked for when the model suits it, else OpenCode, which
+ * takes any model. Claude Code speaks only Anthropic's API, Codex only OpenAI's Responses API.
+ * `note` says why the asked-for CLI was not used.
+ */
+export function cloudHarness(cli: CloudCli, model: Pick<ModelConfig, "kind">): { id: "opencode" | "claude-code" | "codex"; title: string; note?: string } {
+  if (cli === "claude") {
+    if (model.kind === "anthropic") return { id: "claude-code", title: "Claude Code" };
+    return { id: "opencode", title: "OpenCode", note: "This project runs cloud turns with Claude Code, which needs a Claude model; its model is not one, so this turn runs with OpenCode." };
+  }
+  if (cli === "codex") {
+    if (model.kind === "openai") return { id: "codex", title: "Codex" };
+    return { id: "opencode", title: "OpenCode", note: "This project runs cloud turns with Codex, which needs an OpenAI-compatible model; its model is not one, so this turn runs with OpenCode." };
+  }
+  return { id: "opencode", title: "OpenCode" };
 }
 
 export type TaskPlace =

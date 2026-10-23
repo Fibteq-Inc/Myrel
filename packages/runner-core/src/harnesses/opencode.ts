@@ -151,6 +151,8 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
   const m = spec.model;
   if (!m) return config;
   const apiKey = "{env:MYREL_MODEL_API_KEY}";
+  // Titles and summaries use the task's model too: Myrel's proxy lets only that one through.
+  config.small_model = opencodeModel(spec);
   config.provider =
     m.kind === "anthropic"
       ? { anthropic: { options: { apiKey, ...(m.baseUrl ? { baseURL: `${m.baseUrl.replace(/\/+$/, "")}/v1` } : {}) } } }

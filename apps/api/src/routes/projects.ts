@@ -15,6 +15,7 @@ import {
   MAX_WORKSPACE_FOLDERS,
   SetWorkspaceInput,
   WorkspaceFolderInput,
+  CloudCli,
   TaskTarget,
   UpdateProjectSettingsInput,
 } from "@myrel/protocol";
@@ -101,7 +102,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, model, taskTarget, cliModels } = input.data;
+    const { name, model, taskTarget, cloudCli, cliModels } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -120,6 +121,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(name !== undefined && { name }),
         ...(model !== undefined && { llmModel: model || null }),
         ...(taskTarget !== undefined && { taskTarget }),
+        ...(cloudCli !== undefined && { cloudCli: cloudCli === "opencode" ? null : cloudCli }),
         ...(cliModels !== undefined && { cliModels: mergeCliModels(current.cliModels, cliModels) }),
         llmProvider: provider,
         llmKeyId: keyId,
@@ -606,6 +608,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       model: projects.llmModel,
       keyId: projects.llmKeyId,
       taskTarget: projects.taskTarget,
+      cloudCli: projects.cloudCli,
       cliModels: projects.cliModels,
     })
     .from(projects)
@@ -614,6 +617,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
     ...row!,
     provider: row!.provider as ProjectSettings["provider"],
     taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
+    cloudCli: CloudCli.catch("opencode").parse(row!.cloudCli ?? "opencode"),
     cliModels: parseCliModels(row!.cliModels),
   };
 }

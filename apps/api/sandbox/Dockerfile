@@ -38,8 +38,9 @@ RUN useradd --create-home --shell /bin/bash myrel \
 ENV COREPACK_HOME=/usr/local/share/corepack
 RUN corepack enable && corepack prepare "pnpm@10.28.0" --activate && chmod -R a+rX "$COREPACK_HOME"
 
-# The coding agent of cloud turns.
-RUN npm install -g "opencode-ai@1.19.3" && npm cache clean --force
+# The coding agents of cloud turns: OpenCode by default, Claude Code or Codex when the project picks
+# one (see cloudHarness in src/sandbox/backend.ts). Each reaches its model only through Myrel's proxy.
+RUN npm install -g "opencode-ai@1.19.3" "@anthropic-ai/claude-code@2.1.309" "@openai/codex@0.164.0" && npm cache clean --force
 
 # Work arrives through exec; this only keeps the container up.
 CMD ["sleep", "infinity"]

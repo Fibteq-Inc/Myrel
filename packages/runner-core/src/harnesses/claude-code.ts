@@ -1,30 +1,68 @@
 import { type Harness, jsonLine, log, num, obj, shellQuote, str, todoStatus } from "../harness";
-import type { RunnerEvent } from "../spec";
+import type { RunnerEvent, TaskSpec } from "../spec";
+
+/** Where the task writes Claude Code's MCP config, with the tokens filled in ($HOME is the task's own home). */
+const MCP_FILE = "$HOME/.cache/myrel/claude-mcp.json";
+
+/**
+ * Fills `{env:NAME}` in the config's headers and command variables from the environment, so the
+ * config travels without secrets and only the private file written right before the run holds them.
+ */
+const FILL_ENV = `.mcpServers |= map_values(
+  (if .headers then .headers |= map_values(gsub("[{]env:(?<n>[A-Z_][A-Z0-9_]*)[}]"; $ENV[.n] // "")) else . end)
+  | (if .env then .env |= map_values(gsub("[{]env:(?<n>[A-Z_][A-Z0-9_]*)[}]"; $ENV[.n] // "")) else . end))`;
 
 /**
  * Claude Code (`claude -p --output-format stream-json`). Claude models only.
- * In the cloud it uses ANTHROPIC_API_KEY; the local runner uses the person's
- * own signed-in CLI, so their subscription never leaves their machine.
+ * In the cloud it reaches the model through Myrel (ANTHROPIC_BASE_URL) with the turn's token as its
+ * key, so no real key enters the sandbox; without a model it uses the CLI's own login.
  */
 export const claudeCode: Harness = {
   id: "claude-code",
   label: "Claude Code",
 
   command(spec) {
-    const model = spec.model?.kind === "anthropic" ? `--model ${shellQuote(spec.model.id)}` : "";
-    return [
+    const cloud = spec.model?.kind === "anthropic";
+    const claude = [
+      cloud ? 'ANTHROPIC_API_KEY="$MYREL_MODEL_API_KEY"' : "",
       "claude -p --output-format stream-json --verbose --dangerously-skip-permissions",
-      model,
-      '"$MYREL_PROMPT"',
+      cloud ? `--model ${shellQuote(spec.model!.id)}` : "",
+      // Strict: only Myrel's servers. --mcp-config takes several files, so the prompt goes on stdin.
+      spec.mcp ? `--mcp-config "${MCP_FILE}" --strict-mcp-config` : "",
     ]
       .filter(Boolean)
       .join(" ");
+    const run = `printf '%s' "$MYREL_PROMPT" | ${claude}`;
+    if (!spec.mcp) return run;
+    return [
+      `mkdir -p "$(dirname "${MCP_FILE}")"`,
+      `(umask 077 && printf '%s' "$MYREL_CLAUDE_MCP" | jq -c "$MYREL_CLAUDE_MCP_FILL" > "${MCP_FILE}") || exit 1`,
+      run,
+      // The file holds the tokens: it goes as soon as the run ends.
+      `CODE=$?; rm -f "${MCP_FILE}"; exit $CODE`,
+    ].join("\n");
   },
 
   env(spec) {
+    const env: Record<string, string> = {};
+    if (spec.mcp) Object.assign(env, { MYREL_CLAUDE_MCP: JSON.stringify(claudeMcpConfig(spec)), MYREL_CLAUDE_MCP_FILL: FILL_ENV });
     // Only when the task carries a model: otherwise the local CLI's own login is used.
-    if (spec.model?.kind !== "anthropic") return {};
-    return { ...(spec.model.baseUrl ? { ANTHROPIC_BASE_URL: spec.model.baseUrl } : {}) };
+    if (spec.model?.kind !== "anthropic") return env;
+    const id = spec.model.id;
+    return {
+      ...env,
+      ...(spec.model.baseUrl ? { ANTHROPIC_BASE_URL: spec.model.baseUrl } : {}),
+      // Every call Claude Code makes on its own (titles, subagents) uses the task's model too, the
+      // one the proxy prices and the project pays for.
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: id,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: id,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: id,
+      CLAUDE_CODE_SUBAGENT_MODEL: id,
+      // Nothing leaves the sandbox but the model calls through Myrel: no telemetry, error reports or update checks.
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      DISABLE_AUTOUPDATER: "1",
+      ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+    };
   },
 
   parse(line) {
@@ -73,3 +111,23 @@ export const claudeCode: Harness = {
     return [];
   },
 };
+
+/** Claude Code's MCP config for the task: Myrel's tools and the thread's connectors, secrets as `{env:NAME}`. */
+export function claudeMcpConfig(spec: TaskSpec): Record<string, unknown> {
+  if (!spec.mcp) return { mcpServers: {} };
+  const headers = { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" };
+  // alwaysLoad: Myrel's own tools go in the first model call rather than behind ToolSearch.
+  const servers: Record<string, unknown> = { myrel: { type: "http", url: spec.mcp.url, headers, alwaysLoad: true } };
+  for (const c of spec.mcp.connectors ?? []) {
+    servers[c.name] =
+      c.transport === "http"
+        ? { type: "http", url: c.url, headers }
+        : {
+            type: "stdio",
+            command: c.command,
+            args: c.args,
+            env: Object.fromEntries(Object.entries(c.env).map(([name, secret]) => [name, `{env:${secret}}`])),
+          };
+  }
+  return { mcpServers: servers };
+}

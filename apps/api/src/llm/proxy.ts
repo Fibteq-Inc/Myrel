@@ -10,7 +10,8 @@ const PASSED_HEADERS = ["content-type", "cache-control", "retry-after", "x-reque
  * the turn's business.
  */
 const MODEL_PATHS: Record<"openai" | "anthropic", string[]> = {
-  openai: ["chat/completions"],
+  // responses: the Responses API, the only one Codex CLI speaks.
+  openai: ["chat/completions", "responses"],
   anthropic: ["v1/messages", "v1/messages/count_tokens"],
 };
 
@@ -55,11 +56,16 @@ export async function proxyModel(
   if (target.cacheKey && target.kind === "openai") headers.set("x-session-affinity", target.cacheKey);
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const text = hasBody ? await req.text() : undefined;
-  // An OpenAI-compatible call names its model in the body: only the project's model is paid for here.
-  if (target.model && target.kind === "openai" && bodyModel(text) !== target.model) {
+  // A call names its model in the body: only the project's model is paid for here. The harness's
+  // settings keep it there; this holds for a call made around it with the turn's token too.
+  if (target.model && bodyModel(text) !== target.model) {
     return Response.json({ error: { message: `This turn can only use ${target.model}.` } }, { status: 403 });
   }
-  const sent = text !== undefined && target.kind === "openai" ? withStreamUsage(text) : text;
+  // A Responses API stream ends with its usage anyway, and takes no stream_options.include_usage.
+  const responses = target.kind === "openai" && /\/responses\/?$/.test(new URL(target.url).pathname);
+  const refused = responses ? responsesRefusal(text) : null;
+  if (refused) return Response.json({ error: { message: refused } }, { status: 400 });
+  const sent = text !== undefined && target.kind === "openai" && !responses ? withStreamUsage(text) : text;
   const upstream = await fetch(target.url, { method: req.method, headers, body: sent });
   const out = new Headers();
   for (const name of PASSED_HEADERS) {
@@ -109,7 +115,7 @@ export async function proxyModel(
     return new Response(text, { status: upstream.status, headers: out });
   }
 
-  const scan = streamCostScanner();
+  const scan = responses ? responsesStreamScanner() : streamCostScanner();
   const body = upstream.body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
@@ -123,6 +129,42 @@ export async function proxyModel(
     }),
   );
   return new Response(body, { status: upstream.status, headers: out });
+}
+
+/** Tool types the harness runs itself; the provider only returns the call. */
+const CLIENT_TOOLS = new Set(["function", "custom"]);
+
+/**
+ * Why a Responses API call may not go through, or null. Only a call whose whole cost shows in its
+ * own answer is let through, within the turn:
+ * - background: the provider keeps working after the call (and the turn) ended, unpriced here;
+ * - a tool the provider runs itself (web search, code interpreter, file search, image generation,
+ *   remote MCP): billed apart from the tokens this proxy prices;
+ * - stored state (store, previous_response_id, conversation): objects the shared key holds, not
+ *   tied to this project.
+ * Codex sends none of these (its web search is turned off, see the codex harness).
+ */
+export function responsesRefusal(body: string | undefined): string | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body ?? "") as Record<string, unknown>;
+  } catch {
+    return "The request body is not JSON.";
+  }
+  if (parsed.background === true) return "Background responses are not allowed here.";
+  if (parsed.store === true || parsed.previous_response_id != null || parsed.conversation != null) {
+    return "Stored responses are not allowed here: send the whole input with store set to false.";
+  }
+  const clientOnly = (tools: unknown): boolean =>
+    tools == null ||
+    (Array.isArray(tools) &&
+      tools.every((t) => {
+        const type = (t as { type?: unknown } | null)?.type;
+        // A namespace groups the harness's own tools.
+        return typeof type === "string" && (CLIENT_TOOLS.has(type) || (type === "namespace" && clientOnly((t as { tools?: unknown }).tools)));
+      }));
+  if (!clientOnly(parsed.tools)) return "Only tools the harness runs itself are allowed here, not ones the provider runs (web search, code interpreter and the like).";
+  return null;
 }
 
 function bodyModel(body: string | undefined): unknown {
@@ -144,15 +186,22 @@ function withStreamUsage(body: string): string {
   }
 }
 
-/** An OpenAI-compatible usage object priced at the list price of the model that served the call. */
+/**
+ * An OpenAI-compatible usage object priced at the list price of the model that served the call:
+ * Chat Completions' (prompt_tokens, completion_tokens) or the Responses API's (input_tokens, output_tokens).
+ */
 function estimatedCost(usage: Record<string, unknown> | undefined, model: unknown, prices: Record<string, Price> | undefined): number | undefined {
   if (!usage || typeof model !== "string" || !prices) return undefined;
   const price = priceFor(model, prices);
   if (!price) return undefined;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const details = usage.prompt_tokens_details as { cached_tokens?: unknown } | undefined;
+  const details = (usage.prompt_tokens_details ?? usage.input_tokens_details) as { cached_tokens?: unknown } | undefined;
   const micros = costMicros(
-    { inputTokens: n(usage.prompt_tokens), outputTokens: n(usage.completion_tokens), cachedInputTokens: n(details?.cached_tokens) },
+    {
+      inputTokens: n(usage.prompt_tokens ?? usage.input_tokens),
+      outputTokens: n(usage.completion_tokens ?? usage.output_tokens),
+      cachedInputTokens: n(details?.cached_tokens),
+    },
     price,
   );
   return micros / 1_000_000;
@@ -240,6 +289,45 @@ export function streamCostScanner() {
     /** The last usage object seen; call after cost(). */
     usage: () => lastUsage,
     /** The model the stream named. */
+    model: () => served,
+  };
+}
+
+/**
+ * Follows a Responses API stream: its last event (response.completed, or response.incomplete when
+ * it was cut short) carries the whole response with the model that served it and its usage.
+ * Same shape as `streamCostScanner`.
+ */
+export function responsesStreamScanner() {
+  const decoder = new TextDecoder();
+  let rest = "";
+  let found: number | undefined;
+  let lastUsage: Record<string, unknown> | undefined;
+  let served: string | undefined;
+  const line = (l: string) => {
+    if (!l.startsWith("data:") || !l.includes('"usage"')) return;
+    try {
+      const event = JSON.parse(l.slice(5)) as { response?: { model?: unknown; usage?: Record<string, unknown> | null } };
+      const usage = event.response?.usage;
+      if (!usage) return;
+      lastUsage = usage;
+      if (typeof event.response?.model === "string") served = event.response.model;
+      const cost = reportedCost(usage).costUsd;
+      if (cost !== undefined) found = cost;
+    } catch {}
+  };
+  return {
+    push(chunk: Uint8Array) {
+      const lines = (rest + decoder.decode(chunk, { stream: true })).split("\n");
+      rest = lines.pop() ?? "";
+      for (const l of lines) line(l.trim());
+    },
+    cost() {
+      if (rest) line(rest.trim());
+      rest = "";
+      return found;
+    },
+    usage: () => lastUsage,
     model: () => served,
   };
 }

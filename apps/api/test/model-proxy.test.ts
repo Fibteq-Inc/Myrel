@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { modelCallAllowed, type Price, proxyModel, streamCostScanner } from "../src/llm";
+import { modelCallAllowed, type Price, proxyModel, responsesRefusal, streamCostScanner } from "../src/llm";
 
 afterEach(() => vi.unstubAllGlobals());
 
 const enc = new TextEncoder();
 
-function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "openai", prices?: Record<string, Price>) {
+function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "openai", prices?: Record<string, Price>, url = "https://up.test/v1/chat/completions") {
   const seen: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     seen.push({ url, init });
@@ -18,14 +18,16 @@ function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "o
     headers: { authorization: "Bearer turn-token", "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const res = proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "real-key", kind, prices }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
+  const res = proxyModel(req, { url, apiKey: "real-key", kind, prices }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
   return { res, seen, costs, settle: () => Promise.all(waits) };
 }
 
 describe("modelCallAllowed", () => {
   it("lets through inference calls only", () => {
     expect(modelCallAllowed("openai", "POST", "chat/completions")).toBe(true);
+    expect(modelCallAllowed("openai", "POST", "responses")).toBe(true);
     expect(modelCallAllowed("anthropic", "POST", "v1/messages")).toBe(true);
+    expect(modelCallAllowed("anthropic", "POST", "responses")).toBe(false);
     expect(modelCallAllowed("openai", "GET", "chat/completions")).toBe(false);
     expect(modelCallAllowed("openai", "POST", "files")).toBe(false);
     expect(modelCallAllowed("openai", "DELETE", "files/file-1")).toBe(false);
@@ -35,6 +37,18 @@ describe("modelCallAllowed", () => {
 });
 
 describe("proxyModel", () => {
+  it("refuses an Anthropic call for another model too", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (u: string) => {
+      seen.push(u);
+      return Response.json({});
+    });
+    const req = new Request("https://myrel.test/api/agent-mcp/t/model/v1/messages", { method: "POST", body: JSON.stringify({ model: "claude-opus-x", messages: [] }) });
+    const out = await proxyModel(req, { url: "https://up.test/v1/messages", apiKey: "k", kind: "anthropic", model: "claude-sonnet-x" }, async () => {}, () => {});
+    expect(out.status).toBe(403);
+    expect(seen).toEqual([]);
+  });
+
   it("refuses an OpenAI-compatible call for another model without calling the provider", async () => {
     const seen: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
@@ -169,6 +183,58 @@ describe("proxyModel", () => {
     await Promise.all([settle(), empty.settle()]);
     expect(costs).toEqual([null]);
     expect(empty.costs).toEqual([]);
+  });
+});
+
+describe("proxyModel with the Responses API (Codex)", () => {
+  const url = "https://up.test/v1/responses";
+  const prices = { "gpt-x": { input: 3, output: 15, cachedInput: 0.3 } };
+
+  it("leaves a stream's body alone and prices it from response.completed", async () => {
+    const sse =
+      'event: response.created\ndata: {"type":"response.created","response":{"model":"gpt-x","usage":null}}\n\n' +
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"hi"}\n\n' +
+      'event: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-x","usage":{"input_tokens":2000,"input_tokens_details":{"cached_tokens":1000},"output_tokens":100}}}\n\n';
+    const upstream = new Response(sse, { headers: { "content-type": "text/event-stream" } });
+    const body = { model: "gpt-x", stream: true, input: [] };
+    const { res, seen, costs, settle } = run(upstream, body, "openai", prices, url);
+    expect(await (await res).text()).toBe(sse);
+    await settle();
+    expect(seen[0]!.url).toBe(url);
+    expect(JSON.parse(seen[0]!.init.body as string)).toEqual(body);
+    // 1,000 uncached at $3/M + 1,000 cached at $0.30/M + 100 output at $15/M
+    expect(costs).toEqual([0.0048]);
+  });
+
+  it("refuses, without calling the provider, what it could not hold to the turn or price", async () => {
+    const codexTools = [
+      { type: "function", name: "exec_command" },
+      { type: "custom", name: "apply_patch" },
+      { type: "namespace", name: "multi_agent_v1", tools: [{ type: "function", name: "spawn" }] },
+    ];
+    expect(responsesRefusal(JSON.stringify({ model: "gpt-x", input: [], store: false, tools: codexTools }))).toBeNull();
+    for (const extra of [
+      { background: true },
+      { store: true },
+      { previous_response_id: "resp_1" },
+      { conversation: "conv_1" },
+      { tools: [...codexTools, { type: "web_search" }] },
+      { tools: [{ type: "code_interpreter", container: { type: "auto" } }] },
+      { tools: [{ type: "namespace", tools: [{ type: "file_search" }] }] },
+      { tools: [{ type: "mcp", server_url: "https://x.test" }] },
+    ]) {
+      const { res, seen } = run(Response.json({}), { model: "gpt-x", input: [], ...extra }, "openai", prices, url);
+      expect((await res).status, JSON.stringify(extra)).toBe(400);
+      expect(seen).toEqual([]);
+    }
+  });
+
+  it("prices a JSON response from its usage", async () => {
+    const upstream = Response.json({ model: "gpt-x", usage: { input_tokens: 1000, output_tokens: 200 } });
+    const { res, costs, settle } = run(upstream, { model: "gpt-x", input: [] }, "openai", prices, url);
+    await res;
+    await settle();
+    expect(costs).toEqual([0.006]);
   });
 });
 

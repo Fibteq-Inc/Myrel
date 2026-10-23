@@ -46,7 +46,7 @@ import { connectRepoByName, githubLogin, listProjectRepos } from "../github/stor
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
-import { localBackend, localCanceller, ownsComputer, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
+import { cloudHarness, localBackend, localCanceller, ownsComputer, projectCloudCli, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { projectCliModels, resolveTaskModel } from "../task-model";
@@ -645,7 +645,15 @@ export class ThreadAgent extends Agent<Env> {
         // The model is reached through Myrel (see modelCaller), so no key, the server's or a member's
         // own, ever enters the sandbox, and an OpenAI-compatible call's cost is counted.
         spec.model = { ...model.model, baseUrl: `${origin}${mcpPath}/model` };
-        spec.prompt = agentPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId) }, context, infos, skills);
+        const harness = cloudHarness(await projectCloudCli(this.env, projectId), model.model);
+        spec.harness = harness.id;
+        spec.title = harness.title;
+        spec.prompt = agentPrompt(
+          { kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId), harness: harness.id },
+          context,
+          infos,
+          skills,
+        );
         spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: token, MYREL_MCP_TOKEN: token };
@@ -680,6 +688,7 @@ export class ThreadAgent extends Agent<Env> {
           secrets.MYREL_WORKSPACE_TOKEN = workspace.token;
         }
         await this.launch(stored(spec), backend.id, () => backend.start(spec, secrets), language);
+        if (harness.note) await this.taskEvents(taskId, [{ type: "log", stream: "system", text: harness.note }]);
         if (this.runningTask()?.id === taskId) {
           await markSandboxActive(this.env.DB, { taskId, projectId, startedAt: new Date() }).catch((err) => console.error("sandbox active", err));
         }

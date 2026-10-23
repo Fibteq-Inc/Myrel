@@ -4,8 +4,8 @@ import { ROUTINE_GUIDE } from "./routine-tools";
 
 /**
  * A thread's agent is a coding harness, not a loop of Myrel's: the person's own CLI on their
- * computer when the project has a local folder there, otherwise OpenCode in the thread's cloud
- * sandbox. It works with its own tools and talks to people through Myrel's tools over MCP (see
+ * computer when the project has a local folder there, otherwise OpenCode (or the project's cloud
+ * CLI) in the thread's cloud sandbox. It works with its own tools and talks to people through Myrel's tools over MCP (see
  * ThreadAgent.agentMcp). One turn is one harness run.
  */
 
@@ -18,9 +18,12 @@ export type AgentPlace =
   | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean }
   /**
    * images: its model reads images, so it can look at screenshots itself. saveBranch: where unpushed
-   * work in its cloned repositories is kept on GitHub between turns.
+   * work in its cloned repositories is kept on GitHub between turns. harness: the CLI it runs as
+   * (OpenCode when not given).
    */
-  | { kind: "cloud"; images: boolean; saveBranch: string };
+  | { kind: "cloud"; images: boolean; saveBranch: string; harness?: "opencode" | "claude-code" | "codex" };
+
+const CLOUD_LABELS = { opencode: "OpenCode", "claude-code": "Claude Code", codex: "Codex" } as const;
 
 /** Where a cloud turn finds the files attached in the thread (see MYREL_FILES in runner-core's task script). */
 export const SANDBOX_FILES = "/workspace/files";
@@ -61,7 +64,7 @@ export function agentSystem(place: AgentPlace): string {
   const where =
     place.kind === "local"
       ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${localFolders(place)} A file in these folders you mention in a reply opens in a preview when you link it with its path, relative to the folder or absolute ([sonuc.json](out/sonuc.json)), but only for the person whose computer this is: put anything others in the project need to see in the project files too (never one holding secrets). For a pull request, push the branch with git and open it with open_pull_request; gh is not needed. Name the repository as it is listed as connected (an old name in the folder's git remote still works for pushing, since GitHub redirects renamed repositories).`
-      : `You run as OpenCode in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead, over HTTPS and without old file versions, which makes a large repository clone several times faster (\`git clone --filter=blob:none https://github.com/<owner>/<name>.git\`; git fetches an old version when a command needs it): git and gh already have access to the connected ones, and there is no SSH key. A repository that is not listed as connected cannot be pushed to (and a private one not even cloned): ask for it with request_repo_connection, which puts a one-tap card to the person, and end your turn rather than waiting. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends. As a safety net, when a turn ends Myrel pushes whatever you left uncommitted or unpushed in each repository there to the branch ${place.saveBranch} on GitHub, as one commit on top of where you were. To pick that work up in a later turn, clone again, run \`git fetch origin ${place.saveBranch}\`, then \`git checkout -B <the branch its commit message names> FETCH_HEAD && git reset --soft HEAD~1\`.`;
+      : `You run as ${CLOUD_LABELS[place.harness ?? "opencode"]} in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead, over HTTPS and without old file versions, which makes a large repository clone several times faster (\`git clone --filter=blob:none https://github.com/<owner>/<name>.git\`; git fetches an old version when a command needs it): git and gh already have access to the connected ones, and there is no SSH key. A repository that is not listed as connected cannot be pushed to (and a private one not even cloned): ask for it with request_repo_connection, which puts a one-tap card to the person, and end your turn rather than waiting. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends. As a safety net, when a turn ends Myrel pushes whatever you left uncommitted or unpushed in each repository there to the branch ${place.saveBranch} on GitHub, as one commit on top of where you were. To pick that work up in a later turn, clone again, run \`git fetch origin ${place.saveBranch}\`, then \`git checkout -B <the branch its commit message names> FETCH_HEAD && git reset --soft HEAD~1\`.`;
   return `You are Myrel, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Myrel.
 
 ${where}
@@ -133,7 +136,7 @@ export function skillsGuide(place: AgentPlace, skills: AgentSkillInfo[]): string
   const list = skills.map((s) => `- ${s.name}: ${s.description.replace(/\s+/g, " ")}`).join("\n");
   const where =
     place.kind === "cloud"
-      ? `Each one is a folder at ${SANDBOX_SKILLS}/<name>/ with a SKILL.md (OpenCode also lists them as its own skills).`
+      ? `Each one is a folder at ${SANDBOX_SKILLS}/<name>/ with a SKILL.md${place.harness === "codex" ? "." : ` (${CLOUD_LABELS[place.harness ?? "opencode"]} also lists them as its own skills).`}`
       : `Each one is a folder <skills folder>/<name>/ with a SKILL.md; the skills folder is named in the last line of this message.${place.cli === "claude" ? " Claude Code also lists them as its own skills (myrel:<name>)." : ""}`;
   return `Skills: people added these in Myrel, instructions, scripts and references for particular kinds of work. ${where}
 ${list}

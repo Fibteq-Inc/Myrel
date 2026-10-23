@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   claudeCode,
+  claudeMcpConfig,
+  codex,
+  codexArgs,
   emptyProgress,
   formatMarker,
   LineSplitter,
@@ -88,6 +91,8 @@ describe("opencode", () => {
   it("registers OpenAI-compatible models as a custom provider without the key", () => {
     const s = spec({ model: { kind: "openai", provider: "fireworks", id: "firerouter/opus", baseUrl: "https://api.fireworks.ai/inference/v1" } });
     expect(opencode.command(s)).toBe(`opencode run --format json --model 'myrel/firerouter/opus' "$MYREL_PROMPT"`);
+    // Titles use the task's model too, the only one Myrel's proxy lets through.
+    expect(opencodeConfig(s).small_model).toBe("myrel/firerouter/opus");
     const config = JSON.stringify(opencodeConfig(s));
     expect(config).toContain("{env:MYREL_MODEL_API_KEY}");
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
@@ -149,6 +154,113 @@ describe("claude code", () => {
       { type: "text", text: "Looking" },
       { type: "tool", name: "Bash", title: "ls" },
     ]);
+  });
+});
+
+describe("claude code in the sandbox", () => {
+  const cloud = spec({
+    model: { kind: "anthropic", provider: "anthropic", id: "claude-sonnet-x", baseUrl: "https://myrel.test/api/agent-mcp/thr_1/model" },
+    mcp: {
+      url: "https://myrel.test/api/agent-mcp/thr_1",
+      connectors: [
+        { transport: "http", name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
+        { transport: "stdio", name: "db", command: "npx", args: ["-y", "pg-mcp", "{env:MYREL_MODEL_API_KEY}"], env: { DATABASE_URL: "MYREL_CONNECTOR_1_0" } },
+      ],
+    },
+  });
+
+  it("reaches the model through Myrel with the turn's token and keeps every call on the task's model", () => {
+    const env = claudeCode.env(cloud);
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://myrel.test/api/agent-mcp/thr_1/model");
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("claude-sonnet-x");
+    expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe("1");
+    expect(Object.values(env).join(" ")).not.toContain("tok_");
+    expect(claudeCode.command(cloud)).toContain('ANTHROPIC_API_KEY="$MYREL_MODEL_API_KEY" claude -p');
+  });
+
+  it("writes its MCP config with the secrets filled in only where they belong, and removes it after the run", () => {
+    expect(claudeMcpConfig(cloud)).toMatchObject({ mcpServers: { myrel: { type: "http", headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" } } } });
+    const home = mkdtempSync(join(tmpdir(), "myrel-claude-"));
+    const bin = mkdtempSync(join(tmpdir(), "myrel-bin-"));
+    // A stand-in claude that shows what it was given.
+    writeFileSync(join(bin, "claude"), '#!/bin/bash\nfor a in "$@"; do [ "$prev" = --mcp-config ] && cat "$a"; prev="$a"; done\necho; echo "stdin: $(cat)"\n', { mode: 0o755 });
+    const res = spawnSync("bash", ["-c", claudeCode.command(cloud)], {
+      encoding: "utf8",
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        HOME: home,
+        ...claudeCode.env(cloud),
+        MYREL_PROMPT: "Fix it",
+        MYREL_MCP_TOKEN: "tok_mcp",
+        MYREL_MODEL_API_KEY: "tok_model",
+        MYREL_CONNECTOR_1_0: "postgres://secret",
+      },
+    });
+    expect(res.status).toBe(0);
+    const [config, stdin] = res.stdout.split("\n").filter(Boolean);
+    const servers = JSON.parse(config!).mcpServers;
+    expect(servers.myrel.headers.Authorization).toBe("Bearer tok_mcp");
+    expect(servers.linear.headers.Authorization).toBe("Bearer tok_mcp");
+    expect(servers.db.env).toEqual({ DATABASE_URL: "postgres://secret" });
+    // Only headers and variables are filled: an argument cannot pull another secret in.
+    expect(servers.db.args).toEqual(["-y", "pg-mcp", "{env:MYREL_MODEL_API_KEY}"]);
+    expect(stdin).toBe("stdin: Fix it");
+    expect(existsSync(join(home, ".cache", "myrel", "claude-mcp.json"))).toBe(false);
+  });
+});
+
+describe("codex", () => {
+  const cloud = spec({
+    model: { kind: "openai", provider: "fireworks", id: "accounts/fireworks/models/glm-5", baseUrl: "https://myrel.test/api/agent-mcp/thr_1/model" },
+    mcp: {
+      url: "https://myrel.test/api/agent-mcp/thr_1",
+      connectors: [
+        { transport: "http", name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
+        { transport: "stdio", name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "MYREL_CONNECTOR_1_0" } },
+      ],
+    },
+  });
+
+  it("registers the model as a Responses API provider with the key from the environment", () => {
+    const args = codexArgs(cloud);
+    expect(args).toContain(
+      'model_providers.myrel={ name = "Myrel (fireworks)", base_url = "https://myrel.test/api/agent-mcp/thr_1/model", env_key = "MYREL_MODEL_API_KEY", wire_api = "responses" }',
+    );
+    expect(args).toContain('model_provider="myrel"');
+    // Web search runs at the provider, which Myrel's proxy refuses.
+    expect(args).toContain('web_search="disabled"');
+    expect(args[args.indexOf("-m") + 1]).toBe("accounts/fireworks/models/glm-5");
+    expect(codex.command(cloud)).toMatch(/^printf '%s' "\$MYREL_PROMPT" \| codex exec --json .* -$/);
+  });
+
+  it("pre-approves Myrel's tools and connectors and keeps a command's secrets off its command line", () => {
+    const args = codexArgs(cloud);
+    expect(args).toContain('mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"');
+    expect(args).toContain('mcp_servers.myrel.default_tools_approval_mode="approve"');
+    expect(args).toContain('mcp_servers.linear.url="https://myrel.test/api/agent-mcp/thr_1/c/linear"');
+    expect(args).toContain('mcp_servers.db.command="sh"');
+    expect(args).toContain('mcp_servers.db.env_vars=["MYREL_CONNECTOR_1_0"]');
+    const shArgs = JSON.parse(args.find((a) => a.startsWith("mcp_servers.db.args="))!.slice("mcp_servers.db.args=".length));
+    expect(shArgs).toEqual(["-c", 'export DATABASE_URL="$MYREL_CONNECTOR_1_0"; exec "$0" "$@"', "npx", "-y", "pg-mcp"]);
+    // The wrapper hands the command its variable under its own name.
+    const res = spawnSync("sh", [...shArgs.slice(0, 2), "sh", "-c", 'echo "$DATABASE_URL"'], { encoding: "utf8", env: { MYREL_CONNECTOR_1_0: "postgres://x" } });
+    expect(res.stdout.trim()).toBe("postgres://x");
+  });
+
+  it("maps its JSON events", () => {
+    const parse = (ev: object) => codex.parse(JSON.stringify(ev));
+    expect(parse({ type: "item.started", item: { type: "command_execution", command: "bash -lc 'ls -la'" } })).toEqual([{ type: "tool", name: "bash", title: "ls -la" }]);
+    expect(parse({ type: "item.completed", item: { type: "command_execution", command: "ls", aggregated_output: "a\nb\n" } })).toEqual([
+      { type: "log", stream: "stdout", text: "a\nb" },
+    ]);
+    expect(parse({ type: "item.completed", item: { type: "agent_message", text: "Done." } })).toEqual([{ type: "text", text: "Done." }]);
+    expect(parse({ type: "item.started", item: { type: "mcp_tool_call", server: "myrel", tool: "reply" } })).toEqual([{ type: "tool", name: "mcp", title: "myrel.reply" }]);
+    expect(parse({ type: "item.completed", item: { type: "file_change", changes: [{ path: "a.ts", kind: "update" }] } })).toEqual([{ type: "tool", name: "edit", title: "a.ts" }]);
+    expect(parse({ type: "item.updated", item: { type: "todo_list", items: [{ text: "Read", completed: true }, { text: "Fix", completed: false }] } })).toEqual([
+      { type: "todos", items: [{ text: "Read", status: "done" }, { text: "Fix", status: "pending" }] },
+    ]);
+    expect(parse({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 5, output_tokens: 2 } })).toEqual([{ type: "usage", inputTokens: 10, outputTokens: 2 }]);
+    expect(parse({ type: "turn.failed", error: { message: "boom" } })).toEqual([{ type: "log", stream: "stderr", text: "boom" }]);
   });
 });
 

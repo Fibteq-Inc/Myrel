@@ -44,6 +44,13 @@ export type CreateApiKeyInput = z.input<typeof CreateApiKeyInput>;
 export const TaskTarget = z.enum(["auto", "local", "cloud"]);
 export type TaskTarget = z.infer<typeof TaskTarget>;
 
+/**
+ * The CLI cloud turns run with in the thread's sandbox. Claude Code needs an Anthropic model and
+ * Codex an OpenAI-compatible one; with another model the turn runs with OpenCode and says so.
+ */
+export const CloudCli = z.enum(["opencode", "claude", "codex"]);
+export type CloudCli = z.infer<typeof CloudCli>;
+
 /** A project's default model and effort for one CLI; null: the CLI's own default. */
 export const CliModelDefault = z.object({
   model: z.string().trim().min(1).max(200).nullable(),
@@ -62,6 +69,8 @@ export const ProjectSettings = z.object({
   keyId: z.string().nullable(),
   taskTarget: TaskTarget,
   /** Older servers never send it. */
+  cloudCli: CloudCli.default("opencode"),
+  /** Older servers never send it. */
   cliModels: CliModelDefaults.default({}),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
@@ -72,6 +81,7 @@ export const UpdateProjectSettingsInput = z.object({
   model: z.string().trim().max(200).nullable().optional(),
   keyId: z.string().nullable().optional(),
   taskTarget: TaskTarget.optional(),
+  cloudCli: CloudCli.optional(),
   /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
   cliModels: CliModelDefaults.optional(),
 });
