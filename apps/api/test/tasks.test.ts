@@ -125,9 +125,9 @@ describe("the cloud agent", () => {
     await until(async () => ((await threadAgent.getTasks())[0]?.status === "failed" ? true : null), "the first turn");
 
     // Runs the sandbox does not know, like ones a deploy cut off mid-way.
-    const lost = (id: string) =>
+    const lost = (id: string, agent = false) =>
       runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
-        const spec = { taskId: id, title: "OpenCode", prompt: "x", harness: "opencode", openPr: false, timeoutSec: 60 };
+        const spec = { taskId: id, title: "OpenCode", prompt: "x", harness: "opencode", openPr: false, timeoutSec: 60, ...(agent && { agent }) };
         const progress = { phases: { prepare: "started", clone: "pending", agent: "pending", save: "skipped", publish: "pending" }, phaseDetail: {}, todos: [], lastText: null, lastTool: null, prUrl: null, usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, finished: null };
         state.storage.sql.exec(
           "INSERT INTO tasks (id, spec, backend, status, progress, language, created_at) VALUES (?, ?, 'sandbox', 'running', ?, 'en', ?)",
@@ -145,7 +145,16 @@ describe("the cloud agent", () => {
     const task = (await threadAgent.getTasks()).find((t) => t.id === "task_check")!;
     expect(task.status).toBe("failed");
     expect(task.summary).toContain("new version of Myrel was deployed");
-  });
+
+    // An agent turn the sandbox lost continues on its own, like one a runner restart cut off.
+    await lost("task_turn", true);
+    await threadAgent.sandboxCheck({ taskId: "task_turn" });
+    expect(await status("task_turn")).toBe("failed");
+    const resumes = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (agent: ThreadAgent) =>
+      agent.getSchedules().filter((x) => x.callback === "resumeInterrupted"),
+    );
+    expect(resumes.map((x) => x.payload)).toEqual([{ taskId: "task_turn" }]);
+  }, 20_000);
 
   it("opens the model proxy to a cloud turn's token only, never a local turn's", async () => {
     const { project, thread, threadAgent } = await threadSetup();

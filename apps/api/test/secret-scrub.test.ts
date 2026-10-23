@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { secretScrubber } from "../src/sandbox/sandbox";
+import { scrubbedNames, secretScrubber } from "../src/sandbox/sandbox";
 
 describe("sandbox output", () => {
   it("hides the run's secret values", () => {
@@ -12,5 +12,7 @@ describe("sandbox output", () => {
     const line = JSON.stringify({ type: "text", text: "FIRST=placeholder-one-xxxx SECOND=placeholder-two-xxxx yes" });
     expect(JSON.parse(scrub(line))).toEqual({ type: "text", text: "FIRST=[hidden] SECOND=[hidden] yes" });
     expect(secretScrubber({})("plain")).toBe("plain");
+    // The container's own filter hides the same ones, by name.
+    expect(scrubbedNames({ FIRST: "placeholder-one-xxxx", SHORT: "yes", MYREL_FILES: "[".padEnd(40, "x") })).toEqual(["FIRST"]);
   });
 });

@@ -1,5 +1,6 @@
 import {
   HARNESSES,
+  type HarnessId,
   LineSplitter,
   parseLine,
   type RunnerEvent,
@@ -10,6 +11,7 @@ import {
 } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { DurableObject } from "cloudflare:workers";
+import { FOLLOW_SCRIPT, KILL_SCRIPT, MIN_SCRUBBED, PROBE_SCRIPT, SCRUB_JS, START_SCRIPT } from "./run-scripts";
 import { SANDBOX_HOME, SANDBOX_USER } from "./setup";
 
 /** principal: the person the task works for ("" for nobody in particular), see `execute`. */
@@ -28,9 +30,23 @@ const MAX_BATCH = 200;
 const PRINCIPAL_KEY = "principal";
 
 /**
+ * A task running in the container, kept in storage so the sandbox finds it again after a restart.
+ * lines: how many lines of its output already reached the thread.
+ */
+type StoredRun = { taskId: string; threadId: string; harness: HarnessId; timeoutSec: number; deadline: number; lines: number };
+const RUN_KEY = "run";
+
+/** How many times a follow that broke off without the run ending is started again. */
+const MAX_FOLLOWS = 3;
+
+/**
  * One per thread (named by thread id): the thread's Linux container. It runs
  * one task at a time with the shared task script from @myrel/runner-core and
  * streams the events back to the ThreadAgent through `taskEvents`.
+ *
+ * The task runs on its own in the container (START_SCRIPT) and this object follows its output.
+ * A deploy restarts this object but not the container: the thread's next check (`running`) finds
+ * the run in storage and follows it again from the line it got to, so the turn goes on.
  *
  * Containers start from the image built from apps/api/sandbox/Dockerfile and
  * pinned by digest in wrangler.jsonc, with every tool already installed.
@@ -64,22 +80,48 @@ export class Sandbox extends DurableObject<Env> {
   }
 
   /**
-   * Stops a task. False when this sandbox is not running it: a deploy restarts the sandbox and
-   * ends its tasks without a word, and the thread then settles the task itself. A container left
-   * over from such a task is stopped too.
+   * Stops a task. False when this sandbox is not following it: the thread then settles the task
+   * itself. A run this sandbox lost track of is stopped, and so is a container left over from one.
    */
   async cancel(taskId: string): Promise<boolean> {
     if (this.current?.taskId === taskId) {
       this.current.abort.abort(new Error("Cancelled"));
       return true;
     }
-    if (!this.current && this.ctx.container?.running) await this.ctx.container.destroy().catch(() => {});
+    const container = this.ctx.container;
+    if (!this.current && container?.running) {
+      const run = await this.ctx.storage.get<StoredRun>(RUN_KEY);
+      if (run?.taskId === taskId) await this.kill(container).catch(() => {});
+      else await container.destroy().catch(() => {});
+    }
+    if ((await this.ctx.storage.get<StoredRun>(RUN_KEY))?.taskId === taskId) await this.ctx.storage.delete(RUN_KEY);
     return this.ended === taskId;
   }
 
-  /** Whether the task is still running here (or just ended and is reporting so). */
+  /**
+   * Whether the task is still running here (or just ended and is reporting so). A run this object
+   * lost track of, because a deploy restarted it, is followed again from where it got to.
+   */
   async running(taskId: string): Promise<boolean> {
-    return this.current?.taskId === taskId || this.ended === taskId;
+    if (this.current?.taskId === taskId || this.ended === taskId) return true;
+    if (this.current) return false;
+    const run = await this.ctx.storage.get<StoredRun>(RUN_KEY);
+    const container = this.ctx.container;
+    if (run?.taskId !== taskId || !container?.running) return false;
+    // Taken before anything else is awaited, so a second check at the same time does not follow it twice.
+    const abort = new AbortController();
+    this.current = { taskId, abort };
+    const alive = await container
+      .exec(["bash", "-c", PROBE_SCRIPT], { user: SANDBOX_USER })
+      .then(async (p) => (await p.exitCode) === 0)
+      .catch(() => false);
+    if (!alive) {
+      this.current = null;
+      await this.ctx.storage.delete(RUN_KEY);
+      return false;
+    }
+    this.ctx.waitUntil(this.reattach(run, abort.signal));
+    return true;
   }
 
   /**
@@ -101,26 +143,12 @@ export class Sandbox extends DurableObject<Env> {
   }
 
   private async execute(threadId: string, spec: TaskSpec, secrets: Record<string, string>, signal: AbortSignal, principal: string) {
-    const thread = await getAgentByName(this.env.THREAD_AGENT, threadId);
     const harness = HARNESSES[spec.harness];
-    let pending: RunnerEvent[] = [];
-    let flushing: Promise<void> = Promise.resolve();
-    const flush = () => {
-      const batch = pending;
-      pending = [];
-      if (batch.length) flushing = flushing.then(() => thread.taskEvents(spec.taskId, batch));
-      return flushing;
-    };
-    const timer = setInterval(flush, FLUSH_MS);
-    const push = (...events: RunnerEvent[]) => {
-      pending.push(...events);
-      if (pending.length >= MAX_BATCH) void flush();
-    };
-
+    const out = await this.outbox(threadId, spec.taskId);
     let done: RunnerEvent;
     try {
       const opening = Date.now();
-      push(
+      out.push(
         { type: "phase", phase: "prepare", state: "started" },
         { type: "log", stream: "system", text: `Starting ${harness.label} in the sandbox…` },
       );
@@ -133,77 +161,198 @@ export class Sandbox extends DurableObject<Env> {
       const last = await this.ctx.storage.get<string>(PRINCIPAL_KEY);
       if (!this.starting && this.ctx.container?.running && last !== undefined && last !== principal) {
         await this.ctx.container.destroy();
-        push({ type: "log", stream: "system", text: "Starting a fresh sandbox: this turn works for someone else than the last one." });
+        out.push({ type: "log", stream: "system", text: "Starting a fresh sandbox: this turn works for someone else than the last one." });
       }
       const state = this.starting ? "warming up" : this.ctx.container?.running ? "already running" : "new";
       const container = await this.container(signal);
       await this.ctx.storage.put(PRINCIPAL_KEY, principal);
       const start = state !== "already running" && this.lastStart ? `, first command after ${clock(this.lastStart.ms)} and ${this.lastStart.tries} tries` : "";
-      push({ type: "log", stream: "system", text: `Sandbox ready (${state}${start})`, ms: Date.now() - opening });
-      const timeout = AbortSignal.timeout(spec.timeoutSec * 1000);
-      const proc = await execWhenReady(container, ["bash", "-c", taskScript()], {
-        env: { HOME: SANDBOX_HOME, CI: "1", GIT_TERMINAL_PROMPT: "0", ...taskEnv(spec, harness), ...secrets },
+      out.push({ type: "log", stream: "system", text: `Sandbox ready (${state}${start})`, ms: Date.now() - opening });
+      const run: StoredRun = { taskId: spec.taskId, threadId, harness: spec.harness, timeoutSec: spec.timeoutSec, deadline: Date.now() + spec.timeoutSec * 1000, lines: 0 };
+      const started = await execWhenReady(container, ["bash", "-c", START_SCRIPT], {
+        env: {
+          HOME: SANDBOX_HOME,
+          CI: "1",
+          GIT_TERMINAL_PROMPT: "0",
+          ...taskEnv(spec, harness),
+          ...secrets,
+          MYREL_TASK_SCRIPT: taskScript(),
+          MYREL_SCRUB_JS: SCRUB_JS,
+          MYREL_SCRUB_NAMES: scrubbedNames(secrets).join(","),
+        },
         user: SANDBOX_USER,
-        stdout: "pipe",
-        stderr: "combined",
-        signal: AbortSignal.any([signal, timeout]),
+        signal,
       });
-      // How long the harness takes to start: from its phase starting to the first thing it says.
-      // A harness that reports usage per model step (OpenCode) also shows how long each step took,
-      // so a slow model is told apart from a stuck sandbox.
-      let agentStarted = Date.now();
-      let stepStarted = agentStarted;
-      let steps = 0;
-      let answered = false;
-      const take = (line: string) => {
-        for (const e of parseLine(harness, line)) {
-          if (e.type === "phase" && e.phase === "agent" && e.state === "started") agentStarted = stepStarted = Date.now();
-          if (!answered && (e.type === "text" || e.type === "tool" || e.type === "todos" || e.type === "usage")) {
-            answered = true;
-            push({ type: "log", stream: "system", text: `${harness.label} started`, ms: Date.now() - agentStarted });
-          }
-          // Every model call of a cloud turn goes through Myrel's proxy, which prices it (proxyModel);
-          // the harness's own cost figure would count it twice, and misses calls made around it.
-          push(e.type === "usage" ? { ...e, costUsd: undefined } : e);
-          if (e.type === "usage") {
-            const now = Date.now();
-            const tokens = e.inputTokens + e.outputTokens;
-            push({ type: "log", stream: "system", text: `Model step ${++steps} (${tokens.toLocaleString("en")} tokens)`, ms: now - stepStarted });
-            stepStarted = now;
-          }
-        }
-      };
+      if ((await started.exitCode) !== 0) throw new Error("The task could not start in the sandbox.");
+      await this.ctx.storage.put(RUN_KEY, run);
       // What the run prints is kept and shown in the thread; a token it echoes (`env`, a failed git
       // command) is not. This does not stop an agent that means to show one, only accidents.
-      const scrub = secretScrubber(secrets);
-      const lines = new LineSplitter();
-      const reader = proc.stdout!.getReader();
-      for (;;) {
-        const { value, done: ended } = await reader.read();
-        if (ended) break;
-        for (const line of lines.push(value as Uint8Array)) take(scrub(line));
-      }
-      for (const line of lines.end()) take(scrub(line));
-      const exitCode = await proc.exitCode;
-      done = signal.aborted
-        ? { type: "done", ok: false, exitCode, error: "Cancelled." }
-        : timeout.aborted
-          ? { type: "done", ok: false, exitCode, error: `Timed out after ${spec.timeoutSec} seconds.` }
-          : { type: "done", ok: exitCode === 0, exitCode, ...(exitCode === 0 ? {} : { error: `Exited with code ${exitCode}.` }) };
+      done = await this.follow(container, run, out, signal, secretScrubber(secrets));
     } catch (err) {
       const message = signal.aborted ? "Cancelled." : err instanceof Error ? err.message : String(err);
       done = { type: "done", ok: false, error: message.slice(0, 4000) };
-    } finally {
-      clearInterval(timer);
-      this.ended = spec.taskId;
-      this.current = null;
     }
-    push(done);
+    await this.settle(spec.taskId, out, done);
+  }
+
+  /** Follows a run again after this object restarted, from the line it got to. */
+  private async reattach(run: StoredRun, signal: AbortSignal) {
+    const out = await this.outbox(run.threadId, run.taskId, run.lines);
+    let done: RunnerEvent;
     try {
-      await flush();
+      const container = this.ctx.container;
+      if (!container?.running) throw new Error("The sandbox stopped while working.");
+      out.push({ type: "log", stream: "system", text: "Myrel was updated while this ran; picking the run up where it was." });
+      done = await this.follow(container, run, out, signal, (line) => line);
+    } catch (err) {
+      const message = signal.aborted ? "Cancelled." : err instanceof Error ? err.message : String(err);
+      done = { type: "done", ok: false, error: message.slice(0, 4000) };
+    }
+    await this.settle(run.taskId, out, done);
+  }
+
+  /** Reports how the run ended and forgets it. */
+  private async settle(taskId: string, out: Outbox, done: RunnerEvent) {
+    this.ended = taskId;
+    this.current = null;
+    if ((await this.ctx.storage.get<StoredRun>(RUN_KEY))?.taskId === taskId) await this.ctx.storage.delete(RUN_KEY);
+    out.push(done);
+    try {
+      await out.close();
     } catch (err) {
       console.error("could not deliver task events", err);
     }
+  }
+
+  /**
+   * Streams a run's output to the thread until it ends, and returns its `done`. Stops the run when
+   * the task is cancelled or its time is up.
+   */
+  private async follow(container: Container, run: StoredRun, out: Outbox, signal: AbortSignal, scrub: (line: string) => string): Promise<RunnerEvent> {
+    const harness = HARNESSES[run.harness];
+    const timeout = AbortSignal.timeout(Math.max(0, run.deadline - Date.now()));
+    const stop = AbortSignal.any([signal, timeout]);
+    const killed = new Promise<void>((resolve) => {
+      const onStop = () => void this.kill(container).catch(() => {}).finally(resolve);
+      if (stop.aborted) onStop();
+      else stop.addEventListener("abort", onStop, { once: true });
+    });
+    // How long the harness takes to start: from its phase starting to the first thing it says.
+    // A harness that reports usage per model step (OpenCode) also shows how long each step took,
+    // so a slow model is told apart from a stuck sandbox.
+    let agentStarted = Date.now();
+    let stepStarted = agentStarted;
+    let steps = 0;
+    let answered = run.lines > 0;
+    const take = (line: string) => {
+      for (const e of parseLine(harness, line)) {
+        if (e.type === "phase" && e.phase === "agent" && e.state === "started") agentStarted = stepStarted = Date.now();
+        if (!answered && (e.type === "text" || e.type === "tool" || e.type === "todos" || e.type === "usage")) {
+          answered = true;
+          out.push({ type: "log", stream: "system", text: `${harness.label} started`, ms: Date.now() - agentStarted });
+        }
+        // Every model call of a cloud turn goes through Myrel's proxy, which prices it (proxyModel);
+        // the harness's own cost figure would count it twice, and misses calls made around it.
+        out.push(e.type === "usage" ? { ...e, costUsd: undefined } : e);
+        if (e.type === "usage") {
+          const now = Date.now();
+          const tokens = e.inputTokens + e.outputTokens;
+          out.push({ type: "log", stream: "system", text: `Model step ${++steps} (${tokens.toLocaleString("en")} tokens)`, ms: now - stepStarted });
+          stepStarted = now;
+        }
+      }
+    };
+
+    // Only this follow's own last line, never one the run printed, ends it.
+    const marker = `::myrel-exit-${run.taskId}::`;
+    let exitCode: number | null | undefined;
+    for (let attempt = 1; exitCode === undefined && attempt <= MAX_FOLLOWS && !stop.aborted; attempt++) {
+      const proc = await container.exec(["bash", "-c", FOLLOW_SCRIPT], {
+        env: { MYREL_FROM: String(out.lines), MYREL_EXIT_MARKER: marker },
+        user: SANDBOX_USER,
+        stdout: "pipe",
+        stderr: "pipe",
+        signal: stop,
+      });
+      const lines = new LineSplitter();
+      const handle = (line: string) => {
+        if (line.startsWith(marker)) {
+          const code = line.slice(marker.length).trim();
+          exitCode = /^\d+$/.test(code) ? Number(code) : null;
+          return;
+        }
+        if (exitCode !== undefined) return;
+        out.counted();
+        take(scrub(line));
+      };
+      try {
+        const reader = proc.stdout!.getReader();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          for (const line of lines.push(value as Uint8Array)) handle(line);
+        }
+        for (const line of lines.end()) handle(line);
+      } catch (err) {
+        if (!stop.aborted) console.warn("sandbox: following the run broke off", err);
+      }
+    }
+    if (stop.aborted) {
+      await killed;
+      return signal.aborted
+        ? { type: "done", ok: false, error: "Cancelled." }
+        : { type: "done", ok: false, error: `Timed out after ${run.timeoutSec} seconds.` };
+    }
+    if (exitCode === undefined || exitCode === null) {
+      // Its output could not be followed to the end: nothing would report the rest, so it stops here.
+      if (exitCode === undefined) await this.kill(container).catch(() => {});
+      return { type: "done", ok: false, error: "The task stopped without finishing." };
+    }
+    return { type: "done", ok: exitCode === 0, exitCode, ...(exitCode === 0 ? {} : { error: `Exited with code ${exitCode}.` }) };
+  }
+
+  /** Stops the running task in the container. */
+  private async kill(container: Container) {
+    const proc = await container.exec(["bash", "-c", KILL_SCRIPT], { user: SANDBOX_USER });
+    await proc.exitCode;
+  }
+
+  /**
+   * Sends a task's events to the thread in batches. Once a batch arrived, the number of output
+   * lines it covered is saved with the run, so a restart follows on from there.
+   */
+  private async outbox(threadId: string, taskId: string, lines = 0): Promise<Outbox> {
+    const thread = await getAgentByName(this.env.THREAD_AGENT, threadId);
+    let pending: RunnerEvent[] = [];
+    let sending: Promise<void> = Promise.resolve();
+    const box: Outbox = {
+      lines,
+      seen: lines,
+      counted: () => void box.seen++,
+      push: (...events) => {
+        pending.push(...events);
+        if (pending.length >= MAX_BATCH) void flush();
+      },
+      close: async () => {
+        clearInterval(timer);
+        await flush();
+      },
+    };
+    const flush = () => {
+      const batch = pending;
+      const upTo = box.seen;
+      pending = [];
+      sending = sending.then(async () => {
+        if (batch.length) await thread.taskEvents(taskId, batch);
+        if (upTo === box.lines) return;
+        box.lines = upTo;
+        const run = await this.ctx.storage.get<StoredRun>(RUN_KEY);
+        if (run?.taskId === taskId) await this.ctx.storage.put(RUN_KEY, { ...run, lines: upTo });
+      });
+      return sending;
+    };
+    const timer = setInterval(() => void flush().catch((err) => console.error("could not deliver task events", err)), FLUSH_MS);
+    return box;
   }
 
   /** The running container, started from the image on first use. */
@@ -248,8 +397,24 @@ export class Sandbox extends DurableObject<Env> {
   }
 }
 
-/** Values shorter than this are left alone: they would match ordinary output. */
-const MIN_SCRUBBED = 12;
+/** A task's events on their way to the thread (see `Sandbox.outbox`). */
+type Outbox = {
+  /** Output lines the thread has (from the last batch that arrived). */
+  lines: number;
+  /** Output lines read so far. */
+  seen: number;
+  counted: () => void;
+  push: (...events: RunnerEvent[]) => void;
+  close: () => Promise<void>;
+};
+
+
+/** The secrets the container's own filter hides (SCRUB_JS), by name. */
+export function scrubbedNames(secrets: Record<string, string>): string[] {
+  return Object.entries(secrets)
+    .filter(([name, value]) => name !== "MYREL_FILES" && value.length >= MIN_SCRUBBED)
+    .map(([name]) => name);
+}
 
 /** Replaces the run's secret values in a line of its output. MYREL_FILES is a list of links, not one secret. */
 export function secretScrubber(secrets: Record<string, string>): (line: string) => string {
