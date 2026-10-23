@@ -1,6 +1,6 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type CliModelDefaults, EFFORT_LEVELS, effortsFor, type Project, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type Project, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Brain, Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
@@ -13,20 +13,27 @@ export function cliName(id: string): string {
 }
 
 /**
- * The CLIs the signed-in person can pick for this project's threads: those on the project folder's
+ * The CLIs the signed-in person can pick for this project's threads. On the project folder's
  * computer, when that computer is theirs (a turn only runs there for its owner) and the project does
- * not always work in the cloud. Null when there is nothing to pick.
+ * not always work in the cloud: the CLIs installed there. Otherwise their threads run in the cloud,
+ * where any member picks among the cloud CLIs, the project's "CLI in the cloud" being the default
+ * (`cloud`). Null when there is nothing to pick.
  */
-export type PickableClis = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults };
+export type PickableClis = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults; cloud?: boolean };
+
+const CLOUD_CLIS: RunnerCli[] = CloudCli.options.map((id) => ({ id, version: null }));
 
 export function usePickableClis(project: Project): PickableClis | null {
-  const { data: workspace } = useQuery(workspaceQuery(project.id));
+  const { data: workspace, isPending } = useQuery(workspaceQuery(project.id));
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
-  const { data: settings } = useQuery({ ...projectSettingsQuery(project.id), enabled: !!workspace });
+  const { data: settings } = useQuery(projectSettingsQuery(project.id));
+  if (isPending || !settings) return null;
   // Only your own computers are listed, so finding it means it is yours.
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
-  if (!workspace || !runner || runner.clis.length === 0 || settings?.taskTarget === "cloud") return null;
-  return { clis: runner.clis, folderCli: workspace.cli, defaults: settings?.cliModels ?? {} };
+  const cloud = settings.taskTarget === "cloud" || !workspace || (settings.taskTarget === "auto" && runners !== undefined && !runner);
+  if (cloud) return { clis: CLOUD_CLIS, folderCli: settings.cloudCli, defaults: {}, cloud: true };
+  if (!runner || runner.clis.length === 0) return null;
+  return { clis: runner.clis, folderCli: workspace.cli, defaults: settings.cliModels };
 }
 
 /**
@@ -79,6 +86,7 @@ export function AskCliPicker({
             />
           ))}
           {pickable.clis.length > 1 && <p className="px-2.5 pb-1.5 pt-2 text-xs leading-relaxed text-subtle">{t("cliPicker.askHint")}</p>}
+          {pickable.cloud && <p className="px-2.5 pb-1.5 text-xs leading-relaxed text-subtle">{t("cliPicker.cloudHint")}</p>}
         </>
       )}
     </Menu>
@@ -131,7 +139,10 @@ export function ThreadCliPicker({
               note={limitNote(c, t)}
             />
           ))}
-          <p className="px-2.5 pb-1.5 pt-2 text-xs leading-relaxed text-subtle">{t("cliPicker.threadHint")}</p>
+          <p className="px-2.5 pb-1.5 pt-2 text-xs leading-relaxed text-subtle">
+            {t("cliPicker.threadHint")}
+            {pickable.cloud && ` ${t("cliPicker.cloudHint")}`}
+          </p>
         </>
       )}
     </Menu>
@@ -158,7 +169,8 @@ export function ThreadModelPicker({
 }) {
   const t = useT();
   const cli = (thread.cli?.id as CliId | undefined) ?? pickable.folderCli;
-  const models = pickable.clis.find((c) => c.id === cli)?.models;
+  // In the cloud the project's model runs whichever CLI it is.
+  const models = pickable.cloud ? undefined : pickable.clis.find((c) => c.id === cli)?.models;
   if (!models?.length) return null;
   const own = thread.model?.cli === cli ? thread.model : null;
   const project = pickable.defaults[cli];

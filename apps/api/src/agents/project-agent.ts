@@ -5,6 +5,8 @@ import {
   type ArtifactVersion,
   type AuthorKind,
   type CliId,
+  CloudCli,
+  TaskTarget,
   ClientEvent,
   type CreateRoutineInput,
   createId,
@@ -401,7 +403,7 @@ export class ProjectAgent extends Agent<Env> {
           return send(connection, {
             type: "error",
             code: "no_cli",
-            message: "Only the person whose computer runs this project can pick its CLI, and only one installed there.",
+            message: "This thread cannot run with that CLI: in the cloud it takes OpenCode, Claude Code or Codex; on the project's computer only its owner picks, among the CLIs installed there.",
           });
         }
         this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null } });
@@ -415,7 +417,7 @@ export class ProjectAgent extends Agent<Env> {
           return;
         }
         // The same people as for the CLI: the model runs on that computer, with its owner's login.
-        const [cli] = await this.offeredClis(userId, [event.cli]);
+        const [cli] = await this.offeredClis(userId, [event.cli], true);
         if (!cli) {
           return send(connection, {
             type: "error",
@@ -581,8 +583,22 @@ export class ProjectAgent extends Agent<Env> {
    * Of the CLIs a person offered, in their order and once each, those installed on the project
    * folder's computer, and none unless that computer is theirs: a turn only runs there for its owner.
    */
-  private async offeredClis(userId: string, wanted: CliId[]): Promise<CliId[]> {
+  /**
+   * The CLIs `userId` may pick for a thread out of `wanted`. A thread they start runs in the cloud
+   * when the project always works there, has no local folder, or works on someone else's computer:
+   * then any member picks among the cloud CLIs (CloudCli), which run in the thread's sandbox with
+   * the project's model. Otherwise only the computer's owner picks, among the CLIs installed there.
+   * `localOnly`: a pick that only means something on the computer (its model and effort).
+   */
+  private async offeredClis(userId: string, wanted: CliId[], localOnly = false): Promise<CliId[]> {
     const computer = await workspaceClis(this.env, this.name);
+    if (!localOnly) {
+      const [row] = await createDb(this.env.DB).select({ taskTarget: schema.projects.taskTarget }).from(schema.projects).where(eq(schema.projects.id, this.name));
+      const target = TaskTarget.catch("auto").parse(row?.taskTarget);
+      if (target === "cloud" || !computer || (target === "auto" && computer.ownerId !== userId)) {
+        return [...new Set(wanted)].filter((c) => CloudCli.safeParse(c).success);
+      }
+    }
     if (!computer || computer.ownerId !== userId) return [];
     const installed = new Set(computer.clis.map((c) => c.id));
     return [...new Set(wanted)].filter((c) => installed.has(c));
