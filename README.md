@@ -11,6 +11,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
   <a href="https://github.com/Fibteq-Inc/myrel/releases/latest"><img alt="Desktop app for macOS, Windows and Linux" src="https://img.shields.io/badge/desktop-macOS%20%7C%20Windows%20%7C%20Linux-6d63ff"></a>
+  <a href="https://play.google.com/store/apps/details?id=io.fibteq.myrel"><img alt="Get it on Google Play" src="https://img.shields.io/badge/Google%20Play-Android-34A853?logo=googleplay&logoColor=white"></a>
   <a href="https://www.npmjs.com/package/myrel-runner"><img alt="myrel-runner on npm" src="https://img.shields.io/npm/v/myrel-runner?label=myrel-runner"></a>
   <a href="https://github.com/Fibteq-Inc/myrel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Fibteq-Inc/myrel/actions/workflows/ci.yml/badge.svg?branch=main"></a>
 </p>
@@ -85,6 +86,7 @@ and running on your own Cloudflare account.
   [latest release](https://github.com/Fibteq-Inc/myrel/releases/latest)
   (`.dmg`, `.exe`/`.msi`, `.AppImage`, `.deb`, `.rpm`). The app updates itself
   and has the runner built in.
+- **Android:** [Google Play](https://play.google.com/store/apps/details?id=io.fibteq.myrel).
 - **Runner only:** `npx myrel-runner pair <code>` pairs a computer without the
   desktop app (the code is in Myrel under Devices). See
   [packages/myrel-runner/README.md](packages/myrel-runner/README.md).
