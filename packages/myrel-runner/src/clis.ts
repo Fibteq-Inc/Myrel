@@ -51,7 +51,7 @@ export type CliAdapter = {
    */
   agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string> }>;
   /** What goes on stdin for this prompt, when the CLI does not take it as plain text. */
-  input?(prompt: string): string;
+  input?(prompt: string, access: Access): string;
   /** Feeds one line of stdout; updates `state` in place. */
   line(line: string, state: ParseState): void;
   /** Called with all of stdout when the CLI exits, for CLIs that print one JSON document. */
@@ -275,6 +275,10 @@ const codex: CliAdapter = {
   limits: (state) => readCodexLimits(state.sessionId),
 };
 
+/** What Antigravity CLI is told below full access, where a step that needs approval ends the run. */
+const AGY_LIMITED =
+  "(myrel-runner: in this run you cannot run shell commands, open web pages or use any tool that needs approval: asking for one ends your run at once, with no answer. Read and edit the files here and use Myrel's tools. If a command is essential, say so in a reply: it needs full access on this computer, which the person sets in Myrel > Devices.)";
+
 const antigravity: CliAdapter = {
   id: "antigravity",
   bin: "agy",
@@ -291,7 +295,12 @@ const antigravity: CliAdapter = {
     ...(resume ? ["--conversation", resume] : []),
     ...extra,
   ],
-  input: (prompt) => `${JSON.stringify({ event: "user", message: { content: prompt } })}\n`,
+  // Below full access, a step that needs approval (a command, a web page) is declined and ends the
+  // whole run with no answer, so the agent is told up front to keep to files and Myrel's tools.
+  input: (prompt, access) => {
+    const content = access === "full" ? prompt : `${prompt}\n\n${AGY_LIMITED}`;
+    return `${JSON.stringify({ event: "user", message: { content } })}\n`;
+  },
   // Its MCP servers come only from its global config, which holds Myrel's bridge (see bridge.ts):
   // the run's servers and token go to the bridge in a private file, never into that config.
   async agent({ url, token, dir, connectors = [], skills }) {
@@ -332,6 +341,13 @@ const antigravity: CliAdapter = {
       if (input || output) state.usage = { inputTokens: input, outputTokens: output };
       state.failed = result.status !== "SUCCESS";
       state.result = state.failed && typeof result.error === "string" && result.error ? result.error : typeof result.response === "string" ? result.response : "";
+      // A step it had no permission for ends the run as a success with no answer; say what stopped it.
+      const denied = Array.isArray(result.denied_actions) ? (result.denied_actions as Array<{ action?: unknown }>) : [];
+      if (denied.length && !state.result.trim()) {
+        const actions = [...new Set(denied.map((d) => String(d.action ?? "a tool")))].join(", ");
+        state.failed = true;
+        state.result = `Antigravity CLI stopped: a step needed the "${actions}" permission, which it cannot ask for when Myrel runs it. Set this computer's access to full in Myrel > Devices, or allow it under permissions.allow in ~/.gemini/antigravity-cli/settings.json (for example command(git)).`;
+      }
     }
   },
 };

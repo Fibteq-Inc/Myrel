@@ -104,6 +104,13 @@ the ones it would ask about come to you as a card in the thread. Your Claude acc
 Antigravity CLI cannot ask mid-run, so for them `auto` is the same as `edit` (Antigravity's own auto mode needs its
 terminal sandbox and is missing on business accounts).
 
+Antigravity CLI is stricter than Codex below `full`: there is no sandbox where its commands run on their own. A
+command, a web page or a file outside the folders needs approval, which it cannot ask for when Myrel runs it, and
+being declined ends the whole run with no answer. So with `read`, `edit` and `auto` it is told to keep to the files
+and Myrel's tools, and a run that still stops says which permission stopped it. Give it `full` to let it run
+commands, or allow single ones under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (e.g.
+`command(git)`).
+
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 

@@ -131,7 +131,9 @@ describe("CLI output parsing", () => {
   });
 
   it("gives Antigravity the prompt on stdin and reads its errors", () => {
-    expect(JSON.parse(ADAPTERS.antigravity.input!("a\nb"))).toEqual({ event: "user", message: { content: "a\nb" } });
+    expect(JSON.parse(ADAPTERS.antigravity.input!("a\nb", "full"))).toEqual({ event: "user", message: { content: "a\nb" } });
+    // Below full access it is told that a step needing approval would end the run.
+    expect(JSON.parse(ADAPTERS.antigravity.input!("a", "edit")).message.content).toMatch(/^a\n\n\(myrel-runner: .*cannot run shell commands/);
     expect(ADAPTERS.antigravity.args({ access: "full", resume: "c-1" })).toEqual(
       expect.arrayContaining(["--dangerously-skip-permissions", "--conversation", "c-1"]),
     );
@@ -142,6 +144,19 @@ describe("CLI output parsing", () => {
       agy,
     );
     expect(agy).toMatchObject({ failed: true, result: "authentication failed or timed out" });
+  });
+
+  it("says what stopped Antigravity when a step it may not take ended the run", () => {
+    // As agy 1.4.6 prints it after declining `ls -la` with --mode accept-edits: a success with no answer.
+    const agy: ParseState = {};
+    const denied = [{ action: "command", display_name: "RunCommand" }];
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "result", result: { conversation_id: "c", status: "SUCCESS", response: "", num_turns: 1, denied_actions: denied } }), agy);
+    expect(agy.failed).toBe(true);
+    expect(agy.result).toContain('the "command" permission');
+    // An answer it still gave stands.
+    const answered: ParseState = {};
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "Bitti.", denied_actions: denied } }), answered);
+    expect(answered).toMatchObject({ failed: false, result: "Bitti." });
   });
 
   it("shows Codex's commands without their shell wrapper and its messages whole", () => {
