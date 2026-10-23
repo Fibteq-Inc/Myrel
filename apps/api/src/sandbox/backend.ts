@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
+import { type AgentStart, CliId, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
 import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -96,6 +96,13 @@ export async function taskPlace(env: Env, projectId: string, requester: string |
     return {
       kind: "error",
       message: `This project runs tasks on ${workspace.runnerName}, and only the person whose computer that is can start work there. Ask them, or switch the project to the cloud.`,
+    };
+  }
+  // A folder still set to a CLI Myrel dropped (Gemini CLI) waits for its owner to pick another one.
+  if (workspace && !CliId.safeParse(workspace.cli).success) {
+    return {
+      kind: "error",
+      message: `Myrel no longer supports the CLI this project's local folder uses. Pick another CLI for the folder on ${workspace.runnerName} from the project header, then write here again.`,
     };
   }
   if (workspace?.online) return { kind: "local", workspace };

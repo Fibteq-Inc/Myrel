@@ -26,7 +26,7 @@ default to `https://myrel.fibteq.io` (repository variable `MYREL_DESKTOP_API_URL
 Devices page, **Connect this computer** pairs it in one click: the app asks the server for a pairing code,
 trades it for a runner login and keeps that login in the OS keychain. The runner gets it through
 `MYREL_SERVER` / `MYREL_RUNNER_TOKEN` and never writes it to disk. It runs while the app is open, starts
-again at the next launch, and gets the login shell's `PATH` so it finds `claude`, `codex` and `gemini`.
+again at the next launch, and gets the login shell's `PATH` so it finds `claude`, `codex` and `agy`.
 Folders are shared from the Devices page like for any other computer; they live in the app data folder
 (`runner/config.json`), separate from a terminal `npx myrel-runner` install.
 

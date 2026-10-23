@@ -528,6 +528,33 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("drops Gemini CLI from older runners and asks for another CLI where a folder still uses it", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const clis = [{ id: "claude", version: "2.1.0" }, { id: "gemini", version: "0.40.0" }];
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "agent-clis"], { clis });
+    const online = await until(async () => (await listRunners(user)).find((r) => r.online && r.folders.length), "hello");
+    expect(online.clis).toEqual([{ id: "claude", version: "2.1.0" }]);
+    const project = await createProject(user);
+    const body = JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "gemini" });
+    expect((await api(`/api/projects/${project.id}/workspace`, { method: "PUT", token: user, body })).status).toBe(400);
+    // A folder saved before Gemini CLI was dropped.
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    await env.DB.prepare("UPDATE project_workspaces SET cli = 'gemini' WHERE project_id = ?").bind(project.id).run();
+    const { projectAgent, thread } = await startThread(project.id, user);
+    const notice = await until(
+      async () => (await projectAgent.getThreadContext(thread.id))?.messages.find((m) => m.authorKind === "system"),
+      "the notice",
+    );
+    expect(notice.body).toContain("no longer supports the CLI");
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    runnerSide.ws.close();
+  });
+
   it("runs another member's thread in the cloud, never on the folder owner's computer", { timeout: 20_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
