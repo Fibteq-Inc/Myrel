@@ -2,7 +2,7 @@
 
 Connects your computer to a Myrel server, so a project can work in one of your
 local folders with the coding CLI you already use: Claude Code, Codex CLI,
-Antigravity CLI, OpenCode, Hermes Agent or Cursor CLI.
+Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI or Muse Code.
 
 - It opens an **outbound** WebSocket to the server. No port is opened, and it works behind NAT.
 - The server sends a task (a folder, a CLI and a prompt). The runner starts the CLI in that folder, streams its
@@ -15,7 +15,7 @@ Antigravity CLI, OpenCode, Hermes Agent or Cursor CLI.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent) or `cursor-agent` (Cursor CLI) on your `PATH`, already signed in.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI) or `muse` (Muse Code) on your `PATH`, already signed in.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -92,12 +92,12 @@ Read-only tasks (`--access read`) always run in the folder itself.
 `myrel-runner start --access <level>`, or for the background runner `myrel-runner service install --access <level>` or
 `myrel-runner update --access <level>` (both restart it). The level is saved for next time:
 
-| level | Claude Code | Codex | Antigravity CLI | OpenCode | Cursor CLI |
-|---|---|---|---|---|---|
-| `read` | `--permission-mode plan` | `--sandbox read-only` | `--mode plan` | edit and bash denied | `--mode ask` |
-| `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` |
-| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` |
-| `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` |
+| level | Claude Code | Codex | Antigravity CLI | OpenCode | Cursor CLI | Muse Code |
+|---|---|---|---|---|---|---|
+| `read` | `--permission-mode plan` | `--sandbox read-only` | `--mode plan` | edit and bash denied | `--mode ask` | `--approval-mode never --disable-write --disable-shell` |
+| `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` | `--approval-mode never --trust-workspace` |
+| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` | `--approval-mode never --trust-workspace` |
+| `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` | `--yolo` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
 the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode; Codex and
@@ -128,6 +128,13 @@ the workspace and gives commands no network; what would need approval (a file ou
 is declined and the run goes on. `--force` would also take commands out of the sandbox, so only `full` uses it. With
 `read` it runs in ask mode, which reads and answers but changes nothing (plan mode would leave out Myrel's tools).
 
+Muse Code (`muse exec --json`) is close to Codex too. With approval mode `never` nothing waits for an answer: with
+`edit` and `auto` its sandbox keeps writes in the workspace (and `/tmp`), a write outside fails and the run goes on,
+and commands reach the network through its proxy. `--trust-workspace` loads the folder's own rules and skills for
+that run only. With `read` its write and shell tools are taken away (its `:read-only` profile would wait forever on
+a command's approval). `full` is `--yolo`: no approval, no sandbox. Muse Code has no `--add-dir`, so below `full` it
+writes only in the project's main folder.
+
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 
@@ -143,7 +150,7 @@ level does not allow on its own (with `edit`: `git commit`, `git push`, tests) i
 Allow commands this turn, Don't run), so there is no need to restart the runner with `--access full` for one task. A
 file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
-are asked about. Codex, Antigravity CLI, OpenCode, Hermes Agent and Cursor CLI cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
+are asked about. Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI and Muse Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
 `external_directory` allow rules).
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
@@ -162,11 +169,12 @@ decisions, artifacts, memory, routines) added over MCP:
 | OpenCode | `mcp.myrel` (remote, `Authorization: Bearer {env:MYREL_MCP_TOKEN}`) in `OPENCODE_CONFIG_CONTENT`, allowed with `myrel_*` |
 | Hermes Agent | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header |
 | Cursor CLI | `mcp.json` of a plugin folder of the run (`--plugin-dir`, `--approve-mcps`), allowed with `Mcp(plugin-myrel-myrel:*)` in a `cli-config.json` of the run (`CURSOR_CONFIG_DIR`) |
+| Muse Code | `-c 'mcpServers.myrel={"url":…,"headers":{"Authorization":"${MYREL_MCP_AUTH}"}}'`, run with `--approval-mode never` |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
 uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
-for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI.
+for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.19.0 or later for Muse Code.
 
 Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
 server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
@@ -196,6 +204,16 @@ is written to your `~/.cursor`; both folders and the token in them are deleted a
 gets a `.cursor-plugin` manifest and goes in as a second plugin. The runner looks for `cursor-agent` rather than
 `agent`, the other name Cursor's installer links. Sign in once with `cursor-agent login`. Your own servers in
 `~/.cursor/mcp.json` load too, approved like the run's (`--approve-mcps` cannot pick).
+
+Muse Code takes one `-c mcpServers.<name>=<json>` per server for a run (it refuses the whole map at once, and an HTTP
+server with a `type`), so nothing is written to your `~/.config/muse/settings.json`. A secret goes in `-c` only as a
+whole `${VAR}`, so the token's `Authorization` header and connectors' environment values stay in the run's
+environment. `muse exec` does not read stdin: the prompt goes in a file only you can read (`--prompt-file`), deleted
+after the run. The thread's next turn continues the session with `--session-id`. Muse Code has no command that lists
+its models, so the runner reads the catalog it keeps in `~/.local/share/muse/model-catalog` (visible models and their
+effort tiers); a picked model and effort go in as `--model` and `--effort`, otherwise your settings decide. Your own
+MCP servers come from your settings too. Skills: the prompt names the run's skills folder, where Muse Code reads them.
+Detection checks that `muse --version` says Muse Code. Sign in once with `muse login`.
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 

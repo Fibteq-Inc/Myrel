@@ -56,7 +56,7 @@ main pieces:
 - **Local runner (shipped).** `myrel-runner` pairs with an account through a
   one-time code from the Devices page, then keeps an outbound WebSocket to a
   `RunnerAgent`. A project picks one of the folders shared on that computer and a
-  CLI (Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent or Cursor CLI), which then works that project's
+  CLI (Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI or Muse Code), which then works that project's
   threads with the user's own login. Subscription credentials never leave the computer;
   the server stores only a hash of the runner's own token. A turn cut off by a
   runner restart (for example `myrel-runner update`) is continued automatically
