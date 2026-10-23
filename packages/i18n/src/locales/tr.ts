@@ -1000,6 +1000,8 @@ export const tr: Catalog = {
   "mobile.signOutConfirm": "{email} hesabından çıkılsın mı?",
   "mobile.openInBrowser": "Tarayıcıda aç",
   "mobile.badLink": "Bu bağlantı açılamıyor.",
+  "mobile.attachPhotos": "Fotoğraflar",
+  "mobile.attachFiles": "Dosyalar",
   "mobile.noPreviewOpen": "Burada önizleme yok. Görmek, paylaşmak ya da kaydetmek için telefonundaki bir uygulamayla aç.",
   "mobile.openAttachment": "Dosyayı açar",
   "mobile.openFile": "Başka uygulamayla aç",

@@ -44,7 +44,8 @@ export function Conversation({
   /** Null when idle; otherwise what to show while the agent works. */
   working: string | null;
   placeholder: string;
-  onSend: (body: string) => void;
+  /** `attachments` are paths of files the composer uploaded. */
+  onSend: (body: string, attachments?: string[]) => void;
   /** Pinned above the list (e.g. a thread's checklist). */
   header?: ReactNode;
   /** The plan card the agent is moving along, drawn from the thread's fresh checklist. */

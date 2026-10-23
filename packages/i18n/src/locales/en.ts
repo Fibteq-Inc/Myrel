@@ -1005,6 +1005,8 @@ export const en = {
   "mobile.signOutConfirm": "Sign out of {email}?",
   "mobile.openInBrowser": "Open in browser",
   "mobile.badLink": "This link can't be opened.",
+  "mobile.attachPhotos": "Photos",
+  "mobile.attachFiles": "Files",
   "mobile.noPreviewOpen": "No preview here. Open it with an app on your phone to view, share or save it.",
   "mobile.openAttachment": "Opens the file",
   "mobile.openFile": "Open with…",
