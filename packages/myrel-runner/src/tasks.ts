@@ -12,7 +12,7 @@ type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
 
 /** The CLIs whose sessions a thread's next turn continues. */
-const RESUMES = new Set<CliId>(["claude", "codex", "antigravity"]);
+const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode"]);
 /** Results are cut to fit the protocol's limit. */
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
@@ -114,6 +114,7 @@ export class TaskRunner {
         connectors,
         asks,
         access: config.access,
+        dirs,
         ...(skills && { skills: { plugin: skills.plugin, dir: skills.skills } }),
       });
     }
