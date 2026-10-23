@@ -1,4 +1,15 @@
-import { type Message, type MessageRelay, type Routine, type Thread, ThreadCloseReason, threadLink } from "@myrel/protocol";
+import {
+  CLI_NAMES,
+  type CliId,
+  type Message,
+  type MessageRelay,
+  type Routine,
+  type RunnerCli,
+  type Thread,
+  type ThreadCli,
+  ThreadCloseReason,
+  threadLink,
+} from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
@@ -31,6 +42,8 @@ export type CoordinatorHost = {
     brief: string;
     ack?: string;
     projectAck?: string;
+    /** The CLI it runs with on the person's computer; absent: the project folder's. */
+    cli?: ThreadCli;
   }): Promise<Thread>;
   /** A recent thread the same person opened with the same ask, if this message repeats one. */
   findDuplicate(messageId: string): Thread | null;
@@ -58,6 +71,8 @@ For each new message in the project chat:
 - A greeting or FYI with nothing to do: one short post_message, or a react.
 - Thanks or a sign-off: react with an emoji and nothing else.
 - People talking among themselves: do nothing.
+
+Picking a CLI: a person can offer CLIs from their computer with their ask, shown under the message. When it offers several, start_thread needs cli (one of them) and cli_reason: one short sentence in the person's language saying why, which people see in the thread. Pick the one that suits the work and can work right now: skip a CLI whose limits are used up or nearly so (see "The computer's CLIs"), and otherwise prefer the first one offered. With one CLI offered, or none, leave cli out.
 
 Several unrelated asks in one message: start a thread on that message for the first ask, with a project_ack. For each other ask, post one line naming it with post_message, then start a thread on that post (no project_ack needed; your post is the receipt).
 
@@ -89,14 +104,22 @@ export function coordinatorPrompt(input: {
   knowledge: KnowledgeSnapshot;
   now: Date;
   defaultTimezone: string;
+  /** The CLIs on the computer of the project's local folder, for picking among offered ones. */
+  computerClis?: RunnerCli[];
 }): string {
   const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "message" || i.kind === "routine" ? [i.messageId] : [])));
   const threadByRoot = new Map(input.threads.map((t) => [t.rootMessageId, t]));
   const chat = input.chat.map((m) => {
     const line = renderMessage(m, input.names, { isNew: newIds.has(m.id) });
     const thread = threadByRoot.get(m.id);
-    return thread ? `${line}\n    ↳ thread [${thread.id}] "${thread.title}"` : line;
+    if (thread) return `${line}\n    ↳ thread [${thread.id}] "${thread.title}"`;
+    const offered = m.clis ?? [];
+    if (!newIds.has(m.id) || offered.length === 0) return line;
+    return offered.length === 1
+      ? `${line}\n    ↳ runs with ${cliName(offered[0]!)} (picked by the person)`
+      : `${line}\n    ↳ CLIs offered: ${offered.map((c) => `${cliName(c)} [${c}]`).join(", ")}; pick one with start_thread's cli and cli_reason`;
   });
+  const choosing = input.chat.some((m) => newIds.has(m.id) && (m.clis?.length ?? 0) > 1);
   const requests = input.inbox.flatMap((i) =>
     i.kind === "request" ? [`- Thread [${i.threadId}] asks (${i.request}): ${i.reason}`] : [],
   );
@@ -120,6 +143,7 @@ export function coordinatorPrompt(input: {
     renderKnowledge(input.knowledge),
     `## Threads (open ones with their current plan)\n${input.threads.map(renderThreadWithPlan).join("\n") || "(none yet)"}`,
     `## Routines\n${input.routines.map(renderRoutine).join("\n") || "(none)"}`,
+    choosing ? `## The computer's CLIs\n${(input.computerClis ?? []).map(renderCli).join("\n") || "(not reported)"}` : "",
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
     requests.length ? `## Requests from thread agents\n${requests.join("\n")}` : "",
     ran.length ? `## Routines that just ran (start a thread on each post)\n${ran.join("\n")}` : "",
@@ -143,6 +167,20 @@ const PLAN_MAX = 300;
 function renderThreadWithPlan(t: Thread): string {
   const line = renderThread(t);
   return !t.resolved && t.statusText ? `${line}\n${indent(clip(t.statusText, PLAN_MAX))}` : line;
+}
+
+function cliName(id: string): string {
+  return CLI_NAMES[id as CliId] ?? id;
+}
+
+/** A CLI on the computer with its version and how much of its limits is used, as it last reported. */
+export function renderCli(c: RunnerCli): string {
+  const windows = (c.limits?.windows ?? [])
+    .filter((w) => w.usedPercent !== null)
+    .map((w) => `${w.kind} ${Math.round(w.usedPercent!)}% used${w.resetsAt ? ` (resets ${w.resetsAt})` : ""}`);
+  const status = c.limits?.status === "limited" ? "LIMITED, refuses work until a reset" : c.limits?.status === "warning" ? "near its limit" : null;
+  const limits = [status, ...windows].filter(Boolean).join("; ");
+  return `- ${cliName(c.id)} [${c.id}]${c.version ? ` ${c.version}` : ""}: ${limits || "no limits reported"}`;
 }
 
 function clip(text: string, max: number): string {
@@ -219,8 +257,14 @@ export function coordinatorTools(
           .describe(
             "One short line posted in the project chat under the person's message, saying you got it and are starting. Required when the message is a person's.",
           ),
+        cli: z.string().max(40).optional().describe("Only when the message offers several CLIs: the id of the one the thread runs with."),
+        cli_reason: z
+          .string()
+          .max(300)
+          .optional()
+          .describe("With cli: one short sentence in the person's language on why this CLI, shown in the thread."),
       }),
-      run: async ({ message_id, title, instructions, ack, project_ack, allow_duplicate }) => {
+      run: async ({ message_id, title, instructions, ack, project_ack, allow_duplicate, cli, cli_reason }) => {
         const root = host.getMessage(message_id);
         if (!root || root.threadId) throw new Error(`${message_id} is not a project-chat message.`);
         const existing = host.threadForRoot(message_id);
@@ -236,7 +280,15 @@ export function coordinatorTools(
         if (root.authorKind === "user" && !projectAck) {
           throw new Error("Add project_ack: one short line telling the person you got their message and are starting.");
         }
-        const thread = await host.startThread({ rootMessageId: message_id, title, brief: instructions, ack, projectAck });
+        const threadCli = pickCli(root.clis ?? [], cli, cli_reason);
+        const thread = await host.startThread({
+          rootMessageId: message_id,
+          title,
+          brief: instructions,
+          ack,
+          projectAck,
+          ...(threadCli && { cli: threadCli }),
+        });
         return `Started thread ${thread.id}.`;
       },
     }),
@@ -308,4 +360,19 @@ export function coordinatorTools(
       },
     }),
   ];
+}
+
+/**
+ * The CLI a new thread runs with, from the ones its ask offered: the only one, or the coordinator's
+ * pick among several (which needs a reason people can read). None offered: the project folder's.
+ */
+export function pickCli(offered: string[], cli: string | undefined, reason: string | undefined): ThreadCli | null {
+  if (offered.length === 0) return null;
+  if (offered.length === 1) return { id: offered[0]!, options: offered, by: "person", reason: null };
+  if (!cli || !offered.includes(cli)) {
+    throw new Error(`This ask offers several CLIs (${offered.join(", ")}). Pass cli with one of them, and cli_reason.`);
+  }
+  const why = reason?.trim();
+  if (!why) throw new Error("Add cli_reason: one short sentence, in the person's language, on why this CLI.");
+  return { id: cli, options: offered, by: "coordinator", reason: why };
 }

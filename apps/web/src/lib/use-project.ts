@@ -8,7 +8,7 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import type { ClientEventInput, Message } from "@myrel/protocol";
+import type { CliId, ClientEventInput, Message } from "@myrel/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api, queryClient, runnersQuery, workspaceQuery } from "./api";
 
@@ -104,8 +104,8 @@ export function useProject(projectId: string) {
   }, [projectId, ready, state]);
 
   const send = useCallback(
-    (body: string, threadId: string | null = null, attachments: string[] = []) =>
-      socketRef.current?.sendMessage(body, { threadId, attachments }),
+    (body: string, threadId: string | null = null, attachments: string[] = [], clis: CliId[] = []) =>
+      socketRef.current?.sendMessage(body, { threadId, attachments, clis }),
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);

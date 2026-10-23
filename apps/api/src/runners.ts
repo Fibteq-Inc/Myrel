@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { type CliId, MAX_WORKSPACE_FOLDERS, type ProjectWorkspace, type Runner, type RunnerFeature, RunnerInfo } from "@myrel/protocol";
+import { type CliId, MAX_WORKSPACE_FOLDERS, type ProjectWorkspace, type Runner, type RunnerCli, type RunnerFeature, RunnerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 
@@ -114,6 +114,20 @@ export async function getWorkspace(env: Env, projectId: string): Promise<Project
     cli: row.cli as CliId,
     online: await isRunnerOnline(env, row.runnerId),
   };
+}
+
+/**
+ * The CLIs installed on the computer of the project's local folder, as it last reported them (with
+ * their limits), and whose computer it is. Null without a local folder.
+ */
+export async function workspaceClis(env: Env, projectId: string): Promise<{ ownerId: string; clis: RunnerCli[] } | null> {
+  const [row] = await createDb(env.DB)
+    .select({ ownerId: runners.userId, info: runners.info })
+    .from(projectWorkspaces)
+    .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
+    .where(eq(projectWorkspaces.projectId, projectId))
+    .limit(1);
+  return row ? { ownerId: row.ownerId, clis: parseInfo(row.info)?.clis ?? [] } : null;
 }
 
 /** A workspace's other folders, from their JSON column. */

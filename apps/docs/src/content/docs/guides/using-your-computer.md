@@ -38,6 +38,16 @@ Project settings → General → **Run tasks**:
 - **Always on the computer**
 - **Always in the cloud**
 
+## Pick a CLI per thread
+
+The project's folder has a default CLI. To run one ask with another, use the CLI button next to the paperclip in the project chat before you send it:
+
+- **Project default**: the folder's CLI, as before
+- **One CLI**: the thread runs with it
+- **Several CLIs**: Myrel picks the one that fits, for example skipping one that is at its limit, and says which and why at the top of the thread
+
+Inside a thread, the same button switches its CLI from the next turn. Only the person whose computer it is sees the button, with the CLIs installed there.
+
 ## When an agent needs more
 
 Agents stay inside the project's folders. With Claude Code, the agent can ask in the thread when it needs another folder (**Allow once**, **Add to project**, **Don't allow**) or wants to run a command it is not already allowed to run (**Run it**, **Allow commands this turn**, **Don't run**). Codex, Antigravity, OpenCode and Hermes cannot ask in the middle of a run, so they stay inside the shared folders. Hermes always has its terminal: below full access, the steps it would ask about (dangerous commands, sensitive files) are declined.

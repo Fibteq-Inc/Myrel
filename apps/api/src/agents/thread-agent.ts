@@ -372,7 +372,7 @@ export class ThreadAgent extends Agent<Env> {
         : // Someone who has left the project since writing here gets no more turns.
           await member(lastWriter);
     this.setMeta("requester", requester ?? "");
-    const place = await taskPlace(this.env, projectId, requester);
+    const place = await taskPlace(this.env, projectId, requester, ctx.thread.cli?.id);
     if (place.kind === "error") return this.cannotWork(place.message);
     // The container takes the longest to be ready, so it starts while the turn is put together.
     if (place.kind === "cloud" && this.env.SANDBOX && (await canUseSandbox(this.env, projectId)).ok) {

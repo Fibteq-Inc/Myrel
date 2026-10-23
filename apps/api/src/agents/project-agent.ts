@@ -4,6 +4,7 @@ import {
   type Artifact,
   type ArtifactVersion,
   type AuthorKind,
+  type CliId,
   ClientEvent,
   type CreateRoutineInput,
   createId,
@@ -23,6 +24,7 @@ import {
   type ServerEvent,
   SYNC_PAGE_SIZE,
   type Thread,
+  type ThreadCli,
   type ThreadCloseReason,
   type ThreadStatus,
   type UpdateRoutineInput,
@@ -47,6 +49,7 @@ import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore
 import { meteredForTurn, TurnMeter } from "../usage";
 import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
 import { relayLine } from "./relay-line";
+import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
@@ -70,6 +73,8 @@ type MessageRow = {
   stats: string | null;
   /** JSON MessageRelay, or null. */
   relay: string | null;
+  /** JSON array of CliId, or null. */
+  clis: string | null;
   created_at: string;
 };
 
@@ -84,6 +89,8 @@ type ThreadRow = {
   close_reason: ThreadCloseReason | null;
   duplicate_of: string | null;
   label: string | null;
+  /** JSON ThreadCli, or null. */
+  cli: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -110,10 +117,11 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
   artifacts?: ArtifactRef[];
   stats?: MessageStats;
   relay?: MessageRelay;
+  clis?: string[];
 };
 
 export type ThreadPatch = Partial<
-  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label">
+  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli">
 >;
 
 /** What a thread agent reads at the start of each turn. */
@@ -192,6 +200,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "stats")) this.sql`ALTER TABLE messages ADD COLUMN stats TEXT`;
     // Added with relay lines: the coordinator's note to a thread, which people can open.
     if (!columns.some((c) => c.name === "relay")) this.sql`ALTER TABLE messages ADD COLUMN relay TEXT`;
+    // Added with picking CLIs per ask.
+    if (!columns.some((c) => c.name === "clis")) this.sql`ALTER TABLE messages ADD COLUMN clis TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -211,6 +221,8 @@ export class ProjectAgent extends Agent<Env> {
       this.sql`ALTER TABLE threads ADD COLUMN close_reason TEXT`;
       this.sql`ALTER TABLE threads ADD COLUMN duplicate_of TEXT`;
     }
+    // Added with picking a thread's CLI.
+    if (!threadColumns.some((c) => c.name === "cli")) this.sql`ALTER TABLE threads ADD COLUMN cli TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -307,12 +319,15 @@ export class ProjectAgent extends Agent<Env> {
         } catch (err) {
           return send(connection, { type: "error", code: "no_file", message: (err as Error).message });
         }
+        // Only a new ask carries CLIs, and only ones installed on the sender's own computer.
+        const clis = !event.threadId && event.clis?.length ? await this.offeredClis(userId, event.clis) : [];
         const message = this.sendMessage({
           threadId: event.threadId,
           authorKind: "user",
           authorId: userId,
           body: event.body,
           attachments,
+          ...(clis.length && { clis }),
         });
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
@@ -333,6 +348,24 @@ export class ProjectAgent extends Agent<Env> {
           resolved: event.resolved,
           status: event.resolved ? "done" : "review_ready",
         });
+        return;
+      }
+      case "thread.cli": {
+        const thread = this.getThread(event.threadId);
+        if (!thread) return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
+        if (event.cli === null) {
+          this.updateThread(thread.id, { cli: null });
+          return;
+        }
+        const [cli] = await this.offeredClis(userId, [event.cli]);
+        if (!cli) {
+          return send(connection, {
+            type: "error",
+            code: "no_cli",
+            message: "Only the person whose computer runs this project can pick its CLI, and only one installed there.",
+          });
+        }
+        this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null } });
         return;
       }
       case "sync": {
@@ -372,10 +405,10 @@ export class ProjectAgent extends Agent<Env> {
     const stored = attachments.length ? JSON.stringify(attachments) : null;
     const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, created_at)
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, clis, created_at)
       VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
         ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null},
-        ${input.relay ? JSON.stringify(input.relay) : null}, ${createdAt})
+        ${input.relay ? JSON.stringify(input.relay) : null}, ${input.clis?.length ? JSON.stringify(input.clis) : null}, ${createdAt})
       RETURNING seq`;
     const { artifacts: _, ...rest } = input;
     const message: Message = {
@@ -462,13 +495,30 @@ export class ProjectAgent extends Agent<Env> {
       .map((r) => ({ messageId: r.message_id, emoji: r.emoji, authorKind: r.author_kind, authorId: r.author_id }));
   }
 
+  /**
+   * Of the CLIs a person offered, in their order and once each, those installed on the project
+   * folder's computer, and none unless that computer is theirs: a turn only runs there for its owner.
+   */
+  private async offeredClis(userId: string, wanted: CliId[]): Promise<CliId[]> {
+    const computer = await workspaceClis(this.env, this.name);
+    if (!computer || computer.ownerId !== userId) return [];
+    const installed = new Set(computer.clis.map((c) => c.id));
+    return [...new Set(wanted)].filter((c) => installed.has(c));
+  }
+
   // ---- Threads -----------------------------------------------------------
 
   /** Opens a thread under a project-chat message. Callable over RPC. */
-  createThread(rootMessageId: string, title: string, ackMessageId: string | null = null, id = createId("thread")): Thread {
+  createThread(
+    rootMessageId: string,
+    title: string,
+    ackMessageId: string | null = null,
+    id = createId("thread"),
+    cli: ThreadCli | null = null,
+  ): Thread {
     const now = new Date().toISOString();
-    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, created_at, updated_at)
-      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${now}, ${now})`;
+    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, created_at, updated_at)
+      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
     this.syncActivity();
@@ -495,7 +545,7 @@ export class ProjectAgent extends Agent<Env> {
     }
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
       resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
-      label = ${next.label}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
+      label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
     this.syncActivity();
     return next;
@@ -957,6 +1007,10 @@ export class ProjectAgent extends Agent<Env> {
         return thread && message ? [{ thread, message }] : [];
       });
       const onlyThreadUpdates = inbox.every((i) => i.kind === "thread");
+      // Picking among the CLIs an ask offers goes by how much of their limits the computer reports used.
+      const fresh = new Set(inbox.flatMap((i) => (i.kind === "message" ? [i.messageId] : [])));
+      const choosing = chat.some((m) => fresh.has(m.id) && (m.clis?.length ?? 0) > 1);
+      const computerClis = choosing ? ((await workspaceClis(this.env, this.name))?.clis ?? []) : undefined;
       await runLoop({
         provider: meteredForTurn(
           llm.provider,
@@ -977,6 +1031,7 @@ export class ProjectAgent extends Agent<Env> {
           knowledge: this.knowledge.snapshot(),
           now: new Date(),
           defaultTimezone: this.defaultTimezone(),
+          computerClis,
         }),
         tools: [
           ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
@@ -1048,12 +1103,12 @@ export class ProjectAgent extends Agent<Env> {
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
       post,
       react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
-      startThread: async ({ rootMessageId, title, brief, ack, projectAck }) => {
+      startThread: async ({ rootMessageId, title, brief, ack, projectAck, cli }) => {
         // The id comes first so the "on it" line can carry the brief before the thread exists.
         const relay: MessageRelay = { kind: "brief", threadId: createId("thread"), note: brief };
         // The project-chat line goes first so the card can sit under it: ask, "on it", card.
         const ackMessage = projectAck ? post(projectAck, relay) : null;
-        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null, relay.threadId);
+        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null, relay.threadId, cli ?? null);
         relayInThread(relay, ack || relayLine("brief", brief));
         const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
         await agent.start({ projectId: this.name, threadId: thread.id, brief });
@@ -1247,6 +1302,7 @@ export class ProjectAgent extends Agent<Env> {
       ...(r.artifacts && { artifacts: JSON.parse(r.artifacts) as ArtifactRef[] }),
       ...(r.stats && { stats: JSON.parse(r.stats) as MessageStats }),
       ...(r.relay && { relay: JSON.parse(r.relay) as MessageRelay }),
+      ...(r.clis && { clis: JSON.parse(r.clis) as string[] }),
       seq: r.seq,
       createdAt: r.created_at,
     };
@@ -1265,6 +1321,7 @@ export class ProjectAgent extends Agent<Env> {
       closeReason: r.close_reason ?? null,
       duplicateOf: r.duplicate_of ?? null,
       label: r.label,
+      cli: r.cli ? (JSON.parse(r.cli) as ThreadCli) : null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

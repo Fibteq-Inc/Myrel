@@ -22,6 +22,7 @@ import {
   Thinking,
   useHistoryWindow,
 } from "../chat";
+import { ThreadCliNote, ThreadCliPicker, usePickableClis } from "../chat/cli-picker";
 import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
@@ -334,8 +335,9 @@ function Conversation({
   className?: string;
 }) {
   const t = useT();
-  const { project, names, state, send } = useProjectContext();
+  const { project, names, state, send, emit } = useProjectContext();
   const thread = state.threads[threadId]!;
+  const pickable = usePickableClis(project);
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
   const history = useHistoryWindow(messages);
@@ -381,6 +383,7 @@ function Conversation({
       >
         <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
           {root && !history.hidden && <MessageView message={root} me={me} names={names} />}
+          {!history.hidden && <ThreadCliNote thread={thread} />}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
             if (picks.has(m.id)) return null;
@@ -434,6 +437,15 @@ function Conversation({
           placeholder={t("thread.placeholder")}
           onSend={(body, attachments) => send(body, thread.id, attachments)}
           onUpload={(file) => api.upload(project.id, file.name, file)}
+          tools={
+            pickable && (
+              <ThreadCliPicker
+                pickable={pickable}
+                thread={thread}
+                onChange={(cli) => emit({ type: "thread.cli", threadId: thread.id, cli })}
+              />
+            )
+          }
         />
       </div>
     </section>

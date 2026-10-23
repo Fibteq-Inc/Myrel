@@ -94,6 +94,9 @@ export const MessageRelay = z.object({
 });
 export type MessageRelay = z.infer<typeof MessageRelay>;
 
+/** How many CLIs a person can offer for one ask. */
+export const MAX_THREAD_CLIS = 8;
+
 export const Message = z.object({
   id: MessageId,
   projectId: ProjectId,
@@ -110,6 +113,12 @@ export const Message = z.object({
   stats: MessageStats.optional(),
   /** Coordinator messages only: the note it sent a thread, which people can open under the line. */
   relay: MessageRelay.optional(),
+  /**
+   * A person's project-chat ask only: the CLIs on their computer the thread for it may run with
+   * (CliId values). One: the thread runs with it. Several: the coordinator picks one. Absent: the
+   * project folder's CLI.
+   */
+  clis: z.array(z.string().max(40)).max(MAX_THREAD_CLIS).optional(),
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,
@@ -128,6 +137,20 @@ export type ThreadStatus = z.infer<typeof ThreadStatus>;
  * it was opened for something another thread covers, or the ask was dropped. Null when it was
  * resolved the usual way, and again once it is reopened.
  */
+/**
+ * The CLI a thread runs with on the person's computer, instead of the project folder's. `id` is a
+ * CliId, kept a plain string here so a CLI Myrel drops later does not break the thread (the server
+ * then asks for another one). by: "person" (they picked it, from the composer or the thread) or
+ * "coordinator" (it picked among `options`, the CLIs the person offered, for `reason`).
+ */
+export const ThreadCli = z.object({
+  id: z.string().max(40),
+  options: z.array(z.string().max(40)).max(MAX_THREAD_CLIS),
+  by: z.enum(["person", "coordinator"]),
+  reason: z.string().max(300).nullable(),
+});
+export type ThreadCli = z.infer<typeof ThreadCli>;
+
 export const ThreadCloseReason = z.enum(["duplicate", "misrouted", "cancelled"]);
 export type ThreadCloseReason = z.infer<typeof ThreadCloseReason>;
 
@@ -150,6 +173,8 @@ export const Thread = z.object({
   /** For a duplicate: the thread that carries the work. */
   duplicateOf: ThreadId.nullable().default(null),
   label: z.string().nullable(),
+  /** The CLI it runs with on the person's computer; null: the project folder's (and from older servers). */
+  cli: ThreadCli.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

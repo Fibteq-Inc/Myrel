@@ -3,7 +3,8 @@ import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
-import { MAX_MESSAGE_LENGTH, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
+import { CliId } from "./runner";
+import { MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
@@ -16,6 +17,11 @@ export const ClientEvent = z.discriminatedUnion("type", [
     body: z.string().trim().max(MAX_MESSAGE_LENGTH),
     /** Paths of files already uploaded to the project files (see POST /uploads). */
     attachments: z.array(FilePath).max(MAX_ATTACHMENTS).default([]),
+    /**
+     * A new ask in the project chat: the CLIs on the sender's computer its thread may run with (see
+     * Message.clis). Ignored in a thread and for anyone but the computer's owner.
+     */
+    clis: z.array(CliId).max(MAX_THREAD_CLIS).optional(),
   }).refine((e) => e.body.length > 0 || e.attachments.length > 0, "Write something or attach a file"),
   /** A person marks a thread resolved (optionally closing it with a reason), or reopens it. */
   z.object({
@@ -23,6 +29,12 @@ export const ClientEvent = z.discriminatedUnion("type", [
     threadId: ThreadId,
     resolved: z.boolean(),
     reason: ThreadCloseReason.optional(),
+  }),
+  /** The computer's owner picks the CLI a thread runs with from now on; null: the project folder's again. */
+  z.object({
+    type: z.literal("thread.cli"),
+    threadId: ThreadId,
+    cli: CliId.nullable(),
   }),
   z.object({
     type: z.literal("sync"),

@@ -32,6 +32,7 @@ export function Conversation({
   onOpenPlan,
   footerFor,
   empty,
+  tools,
 }: {
   messages: Message[];
   me: string;
@@ -55,6 +56,8 @@ export function Conversation({
   /** Rendered under a message, e.g. the card of the thread it opened. */
   footerFor?: (message: Message) => ReactNode;
   empty?: ReactNode;
+  /** Controls in the composer, e.g. the CLI picker. */
+  tools?: ReactNode;
 }) {
   const t = useT();
   const insets = useSafeAreaInsets();
@@ -150,7 +153,7 @@ export function Conversation({
           )}
         </View>
         <View style={{ paddingBottom: keyboardOpen ? 8 : Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
-          <Composer placeholder={placeholder} onSend={onSend} />
+          <Composer placeholder={placeholder} onSend={onSend} tools={tools} />
         </View>
       </KeyboardAvoidingView>
     </View>

@@ -8,11 +8,11 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import type { ClientEventInput } from "@myrel/protocol";
+import type { CliId, ClientEventInput } from "@myrel/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppState } from "react-native";
-import { filesQueryKey } from "./queries";
+import { filesQueryKey, runnersQueryKey, workspaceQueryKey } from "./queries";
 import { useSession } from "./session";
 
 type Action =
@@ -36,7 +36,7 @@ type ProjectValue = {
   projectId: string;
   state: ProjectState;
   status: SocketStatus;
-  send(body: string, threadId?: string | null, attachments?: string[]): void;
+  send(body: string, threadId?: string | null, attachments?: string[], clis?: CliId[]): void;
   emit(event: ClientEventInput): void;
   /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
   loadTasks(threadId: string): Promise<void>;
@@ -72,6 +72,11 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         if (event.type === "knowledge.changed" && event.kind === "files") {
           void queryClient.invalidateQueries({ queryKey: filesQueryKey(server, projectId) });
         }
+        // The folder, its computer or that computer's CLIs changed: the CLI picker follows.
+        if (event.type === "workspace.changed") {
+          void queryClient.invalidateQueries({ queryKey: workspaceQueryKey(server, projectId) });
+          void queryClient.invalidateQueries({ queryKey: runnersQueryKey(server) });
+        }
         dispatch(event);
       },
       onStatus: (s) => {
@@ -99,8 +104,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
   }, [api, server, projectId, queryClient]);
 
   const send = useCallback(
-    (body: string, threadId: string | null = null, attachments?: string[]) =>
-      socketRef.current?.sendMessage(body, { threadId, attachments }),
+    (body: string, threadId: string | null = null, attachments?: string[], clis?: CliId[]) =>
+      socketRef.current?.sendMessage(body, { threadId, attachments, clis }),
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);

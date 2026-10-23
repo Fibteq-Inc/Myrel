@@ -2,8 +2,10 @@ import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
+import type { CliId } from "@myrel/protocol";
 import { useCallback, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { AskCliPicker, OfferedClis, usePickableClis } from "../../../../components/cli-picker";
 import { Conversation } from "../../../../components/conversation";
 import { ArtifactsTab } from "../../../../components/project/artifacts-tab";
 import { FilesTab } from "../../../../components/project/files-tab";
@@ -78,7 +80,16 @@ function ChatTab() {
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
   const threads = useMemo(() => threadByCard(state), [state]);
-  const onSend = useCallback((body: string, attachments?: string[]) => send(body, null, attachments), [send]);
+  // The CLIs the next ask's thread may run with; each ask picks its own.
+  const pickable = usePickableClis(projectId);
+  const [clis, setClis] = useState<CliId[]>([]);
+  const onSend = useCallback(
+    (body: string, attachments?: string[]) => {
+      send(body, null, attachments, pickable ? clis : []);
+      setClis([]);
+    },
+    [send, pickable, clis],
+  );
 
   return (
     <Conversation
@@ -91,10 +102,17 @@ function ChatTab() {
       working={state.active[""] ? (state.progress[""] ?? t("message.thinking")) : null}
       placeholder={t("chat.placeholder")}
       onSend={onSend}
+      tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
       footerFor={(m) => {
         const thread = threads.get(m.id);
-        if (!thread) return null;
-        return <ThreadCard projectId={projectId} thread={thread} replies={threadReplyCount(state, thread.id)} />;
+        const offered = m.clis?.length ? <OfferedClis clis={m.clis} /> : null;
+        if (!thread) return offered;
+        return (
+          <>
+            {offered}
+            <ThreadCard projectId={projectId} thread={thread} replies={threadReplyCount(state, thread.id)} />
+          </>
+        );
       }}
       empty={
         status === "open" ? (

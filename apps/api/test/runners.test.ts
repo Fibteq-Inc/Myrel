@@ -737,6 +737,105 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("runs a thread with the CLI picked for it, not the folder's", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const clis = [{ id: "claude", version: "2.1.0" }, { id: "codex", version: "0.50.0" }];
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "agent-clis"], { clis });
+    await until(async () => (await listRunners(user)).find((r) => r.online && r.clis.length === 2), "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const chat = await openChat(project.id, user);
+    const errors: string[] = [];
+    chat.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data as string) as { type: string; code?: string };
+      if (event.type === "error") errors.push(event.code!);
+    });
+
+    // An ask keeps the CLIs it offered that the computer has, once each and in order.
+    chat.send(JSON.stringify({ type: "message.send", body: "Fix the tests", clis: ["codex", "antigravity", "codex", "claude"] }));
+    const ask = await until(async () => (await projectAgent.getMessagesAfter(0)).messages.find((m) => m.body === "Fix the tests"), "the ask");
+    expect(ask.clis).toEqual(["codex", "claude"]);
+
+    // The thread runs with its own CLI.
+    const author = await idOf(user);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Testler", null, undefined, {
+      id: "codex",
+      options: ["claude", "codex"],
+      by: "coordinator",
+      reason: "Claude Code is at its limit.",
+    });
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+    const start = await until(
+      () => runnerSide.frames.find((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start"),
+      "task.start",
+    );
+    expect(start.cli).toBe("codex");
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "done" });
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "done", "the turn");
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ harness: "codex", title: "Codex CLI" });
+
+    // The computer's owner switches it, but only to a CLI the computer has.
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "antigravity" }));
+    await until(() => errors.includes("no_cli"), "the refusal");
+    expect((await projectAgent.getThread(thread.id))?.cli?.id).toBe("codex");
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "claude" }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.cli?.id === "claude", "the switch");
+    expect((await projectAgent.getThread(thread.id))?.cli).toEqual({ id: "claude", options: ["claude"], by: "person", reason: null });
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: null }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.cli === null, "back to the folder's");
+
+    // A thread set to a CLI the computer no longer has says so instead of running.
+    const other = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "y" });
+    const gone = await projectAgent.createThread(other.id, "Gone", null, undefined, { id: "antigravity", options: ["antigravity"], by: "person", reason: null });
+    await (await getAgentByName(env.THREAD_AGENT, gone.id)).start({ projectId: project.id, threadId: gone.id, brief: "y" });
+    const notice = await until(
+      async () => (await projectAgent.getThreadContext(gone.id))?.messages.find((m) => m.authorKind === "system"),
+      "the notice",
+    );
+    expect(notice.body).toContain("Antigravity CLI is not available on Laptop");
+    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(1);
+    chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("ignores CLIs offered by someone whose computer it is not", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.online, "online");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const email = `m${crypto.randomUUID()}@example.com`;
+    const member = (
+      await api("/api/auth/sign-up/email", {
+        method: "POST",
+        body: JSON.stringify({ email, password: "correct-horse-battery", name: "Ada" }),
+      })
+    ).headers.get("set-auth-token")!;
+    const invited = await api(`/api/projects/${project.id}/invites`, { method: "POST", token: user, body: JSON.stringify({ email }) });
+    const { invite } = (await invited.json()) as { invite: { id: string } };
+    expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: member })).status).toBe(200);
+    const chat = await openChat(project.id, member);
+    chat.send(JSON.stringify({ type: "message.send", body: "Mine", clis: ["claude"] }));
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const ask = await until(async () => (await projectAgent.getMessagesAfter(0)).messages.find((m) => m.body === "Mine"), "the ask");
+    expect(ask.clis).toBeUndefined();
+    chat.close();
+    runnerSide.ws.close();
+  });
+
   it("asks older runners to update before stopping their tasks", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

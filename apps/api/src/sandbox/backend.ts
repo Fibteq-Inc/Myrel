@@ -1,11 +1,11 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, CliId, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
+import { type AgentStart, CLI_NAMES, CliId, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
 import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { githubConfigured, installationToken } from "../github/app";
 import { listProjectRepos, repoWritable } from "../github/store";
-import { getWorkspace } from "../runners";
+import { getWorkspace, workspaceClis } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts), for a task that works for `principal`. */
 export function sandboxBackend(env: Env, threadId: string, principal = ""): RunnerBackend {
@@ -81,8 +81,12 @@ export type TaskPlace =
  * Only for the computer's owner (`requester`, the person the thread works for): a turn runs
  * there as its owner, with their CLI, login and files, so another member of the project, or a
  * thread nobody asked for, works in the cloud instead.
+ *
+ * `cli`: the CLI the thread was set to run with instead of the folder's. Picked on purpose, so the
+ * turn waits for the computer rather than quietly moving to the cloud, and says so when that CLI
+ * is gone from it.
  */
-export async function taskPlace(env: Env, projectId: string, requester: string | null): Promise<TaskPlace> {
+export async function taskPlace(env: Env, projectId: string, requester: string | null, cli?: string | null): Promise<TaskPlace> {
   const [row] = await createDb(env.DB)
     .select({ taskTarget: schema.projects.taskTarget })
     .from(schema.projects)
@@ -97,6 +101,24 @@ export async function taskPlace(env: Env, projectId: string, requester: string |
       kind: "error",
       message: `This project runs tasks on ${workspace.runnerName}, and only the person whose computer that is can start work there. Ask them, or switch the project to the cloud.`,
     };
+  }
+  if (workspace && cli) {
+    const id = CliId.safeParse(cli);
+    const installed = id.success && (await workspaceClis(env, projectId))?.clis.some((c) => c.id === id.data);
+    if (!installed) {
+      const name = id.success ? CLI_NAMES[id.data] : cli;
+      return {
+        kind: "error",
+        message: `${name} is not available on ${workspace.runnerName} anymore. Pick another CLI for this thread from its message box, then write here again.`,
+      };
+    }
+    if (!workspace.online) {
+      return {
+        kind: "error",
+        message: `This thread runs with ${CLI_NAMES[id.data!]} on ${workspace.runnerName}, which is offline. Start myrel-runner on it, or pick the project's default for this thread from its message box.`,
+      };
+    }
+    return { kind: "local", workspace: { ...workspace, cli: id.data! } };
   }
   // A folder still set to a CLI Myrel dropped (Gemini CLI) waits for its owner to pick another one.
   if (workspace && !CliId.safeParse(workspace.cli).success) {
