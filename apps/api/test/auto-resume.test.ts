@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideResume, MAX_AUTO_RESUMES } from "../src/agents/auto-resume";
+import { decideResume, MAX_AUTO_RESUMES, resumeNote, resumingMessage } from "../src/agents/auto-resume";
 
 describe("decideResume", () => {
   it("continues with growing waits until the budget is used", () => {
@@ -22,5 +22,13 @@ describe("decideResume", () => {
     expect(decideResume({ state: once.state, progressed: false, flapping: false, agent: true })).toMatchObject({ resume: false, reason: "limit" });
     expect(decideResume({ state: null, progressed: true, flapping: true, agent: true })).toEqual({ resume: false, reason: "flapping" });
     expect(decideResume({ state: null, progressed: true, flapping: false, agent: false })).toEqual({ resume: false, reason: "not-agent" });
+  });
+
+  it("says where the run was cut off", () => {
+    expect(resumingMessage(false, 1, 30)).toContain("the runner went away");
+    expect(resumingMessage(false, 1, 30, "sandbox")).toContain("its cloud sandbox stopped");
+    expect(resumingMessage(true, 2, 120, "sandbox")).toBe("Bulut sandbox'ı durduğu için görev kesildi; 2 dk içinde kaldığı yerden devam ediyor (2/3).");
+    expect(resumeNote({ resumes: 1, lastStep: null })).toContain("The runner on the person's computer went away");
+    expect(resumeNote({ resumes: 1, lastStep: "pnpm test", where: "sandbox" })).toContain("Your cloud sandbox stopped");
   });
 });

@@ -1,7 +1,11 @@
 /**
  * When a turn on the person's computer stops because the runner went away (it restarted for an
- * update, the computer disconnected), the thread continues it on its own, a bounded number of times.
+ * update, the computer disconnected), or a cloud turn because its sandbox was lost, the thread
+ * continues it on its own, a bounded number of times.
  */
+
+/** Where the cut-off turn ran: on the person's computer, or in the cloud sandbox. */
+export type ResumeWhere = "runner" | "sandbox";
 
 /** At most this many continues in a row; a run that made no progress counts twice. */
 export const MAX_AUTO_RESUMES = 3;
@@ -35,8 +39,13 @@ export function interruptedReason(restarted: boolean): string {
 }
 
 /** The line in the thread while it waits to continue. */
-export function resumingMessage(tr: boolean, resumes: number, delaySec: number): string {
+export function resumingMessage(tr: boolean, resumes: number, delaySec: number, where: ResumeWhere = "runner"): string {
   const wait = delaySec >= 60 ? (tr ? `${Math.round(delaySec / 60)} dk` : `${Math.round(delaySec / 60)} min`) : tr ? `${delaySec} sn` : `${delaySec}s`;
+  if (where === "sandbox") {
+    return tr
+      ? `Bulut sandbox'ı durduğu için görev kesildi; ${wait} içinde kaldığı yerden devam ediyor (${resumes}/${MAX_AUTO_RESUMES}).`
+      : `The task was interrupted when its cloud sandbox stopped; it continues where it left off in ${wait} (${resumes}/${MAX_AUTO_RESUMES}).`;
+  }
   return tr
     ? `Runner yeniden başladığı için görev kesildi; ${wait} içinde kaldığı yerden devam ediyor (${resumes}/${MAX_AUTO_RESUMES}).`
     : `The task was interrupted when the runner went away; it continues where it left off in ${wait} (${resumes}/${MAX_AUTO_RESUMES}).`;
@@ -55,10 +64,14 @@ export function gaveUpMessage(tr: boolean, reason: "limit" | "flapping"): string
 }
 
 /** What the continuing turn's agent is told, so it checks what the cut-off run left before going on. */
-export function resumeNote(input: { resumes: number; lastStep: string | null }): string {
+export function resumeNote(input: { resumes: number; lastStep: string | null; where?: ResumeWhere }): string {
+  const why =
+    input.where === "sandbox"
+      ? "Your cloud sandbox stopped mid-run (Myrel was updated, or the container was replaced), which stopped your harness. Files you had not saved or pushed may be gone."
+      : "The runner on the person's computer went away mid-run (it restarted for an update, or the computer disconnected), which stopped your CLI.";
   return [
     `## Your last run was interrupted (automatic continue ${input.resumes} of ${MAX_AUTO_RESUMES})`,
-    "The runner on the person's computer went away mid-run (it restarted for an update, or the computer disconnected), which stopped your CLI. Nobody wrote anything new for this: pick the work up where it stopped.",
+    `${why} Nobody wrote anything new for this: pick the work up where it stopped.`,
     input.lastStep ? `Your last step before it stopped: ${input.lastStep}` : "",
     "A command that was running may not have finished: check the state (git status, the files you were changing, your plan) before going on, and do not redo what is already done or send a reply you already sent.",
   ]

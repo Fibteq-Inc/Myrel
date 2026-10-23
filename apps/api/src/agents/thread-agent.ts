@@ -72,7 +72,7 @@ import {
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
-import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, resumeNote, resumingMessage } from "./auto-resume";
+import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, type ResumeWhere, resumeNote, resumingMessage } from "./auto-resume";
 import { SEEN_EMOJI, THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
@@ -502,7 +502,7 @@ export class ThreadAgent extends Agent<Env> {
     };
     const lastHuman = [...ctx.messages].reverse().find((m) => m.authorKind === "user") ?? ctx.root;
     // This turn continues one a runner restart cut off, whether its wait ran out or a message came first.
-    const pending = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; lastStep: string | null } | null;
+    const pending = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; lastStep: string | null; where?: ResumeWhere } | null;
     this.deleteMeta("resume_pending");
     const note = { ...(pending ? { resumeNote: resumeNote(pending) } : {}), planFinished: this.getMeta("plan_finished") === "1" };
     await this.startAgentTurn({
@@ -731,7 +731,7 @@ export class ThreadAgent extends Agent<Env> {
     if (this.getMeta("closed") === "1") return void (await project.setActivity(threadId, false));
     let pending = turn?.pending ?? [];
     const replied = turn?.replied ?? false;
-    const resuming = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; delaySec: number } | null;
+    const resuming = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; delaySec: number; where?: ResumeWhere } | null;
     // A turn that ended on its own ends the chain of automatic continues.
     if (!resuming) this.deleteMeta("auto_resume");
     let lastText: string | null = null;
@@ -751,7 +751,7 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
         authorKind: "system",
         authorId: SYSTEM_ID,
-        body: resumingMessage(tr, resuming.resumes, resuming.delaySec),
+        body: resumingMessage(tr, resuming.resumes, resuming.delaySec, resuming.where),
         artifacts: pending,
         stats: tail,
       });
@@ -1597,9 +1597,10 @@ export class ThreadAgent extends Agent<Env> {
       await this.schedule(SANDBOX_CHECK_SEC, "sandboxCheck", payload);
       return;
     }
-    // Stops whatever the lost run left in the container.
+    // The run is gone (the container stopped too): stops whatever it left there, and continues the
+    // turn on its own like one a runner restart cut off.
     await sandbox.cancel(row.id).catch(() => false);
-    await this.taskEvents(row.id, [{ type: "done", ok: false, error: SANDBOX_LOST }]);
+    await this.interrupted(row, { where: "sandbox", reason: SANDBOX_LOST, flapping: false });
   }
 
   /** GitHub is still working out whether one of the thread's pull requests merges cleanly: asks again shortly. */
@@ -1619,6 +1620,14 @@ export class ThreadAgent extends Agent<Env> {
   async taskInterrupted(taskId: string, input: { restarted: boolean; flapping: boolean }): Promise<void> {
     const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
     if (!row || row.status !== "running") return;
+    await this.interrupted(row, { where: "runner", reason: interruptedReason(input.restarted), flapping: input.flapping });
+  }
+
+  /**
+   * Ends a run its runner or sandbox lost, and continues an agent turn on its own (auto-resume.ts).
+   */
+  private async interrupted(row: TaskRow, input: { where: ResumeWhere; reason: string; flapping: boolean }): Promise<void> {
+    const taskId = row.id;
     const spec = JSON.parse(row.spec) as StoredSpec;
     const [last] = this.sql<{ text: string }>`SELECT text FROM task_log WHERE task_id = ${taskId} AND tool = 1 ORDER BY id DESC LIMIT 1`;
     const decision = decideResume({
@@ -1632,12 +1641,12 @@ export class ThreadAgent extends Agent<Env> {
     if (decision.resume) {
       this.setMeta("auto_resume", JSON.stringify(decision.state));
       const lastStep = last ? last.text.replace(/^→ /, "").split("\n")[0]!.slice(0, 300) : null;
-      this.setMeta("resume_pending", JSON.stringify({ resumes: decision.state.resumes, delaySec: decision.delaySec, lastStep }));
+      this.setMeta("resume_pending", JSON.stringify({ resumes: decision.state.resumes, delaySec: decision.delaySec, lastStep, where: input.where }));
       await this.schedule(decision.delaySec, "resumeInterrupted", { taskId });
     } else {
       this.deleteMeta("auto_resume");
     }
-    const reason = interruptedReason(input.restarted);
+    const reason = input.reason;
     await this.taskEvents(taskId, [
       { type: "phase", phase: "agent", state: "failed", detail: reason },
       { type: "done", ok: false, error: reason },
