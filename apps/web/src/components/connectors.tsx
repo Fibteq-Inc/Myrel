@@ -257,9 +257,9 @@ function Catalog({
   const recommended = !category ? CONNECTOR_PRESETS.filter((p) => p.featured && matches(p)) : [];
   const extras = CONNECTOR_PRESETS.filter((p) => !p.featured && (!category || p.category === category) && matches(p));
   const offers: Offer[] = [
-    ...entries.filter((e) => e.popular).map((entry): Offer => ({ kind: "registry", entry })),
+    ...entries.filter((e) => e.official).map((entry): Offer => ({ kind: "registry", entry })),
     ...extras.map((preset): Offer => ({ kind: "preset", preset })),
-    ...entries.filter((e) => !e.popular).map((entry): Offer => ({ kind: "registry", entry })),
+    ...entries.filter((e) => !e.official).map((entry): Offer => ({ kind: "registry", entry })),
   ];
 
   const connect = useMutation({
@@ -290,7 +290,7 @@ function Catalog({
         )}
       >
         <div className="flex items-start gap-3">
-          <OfferIcon name={name} featured={p?.featured} terminal={p?.transport === "stdio"} iconUrl={e?.popular ? e.iconUrl : null} />
+          <OfferIcon name={name} featured={p?.featured} terminal={p?.transport === "stdio"} iconUrl={e?.official ? e.iconUrl : null} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate font-medium" title={e?.id}>
@@ -302,11 +302,7 @@ function Catalog({
                   {t("connectors.featured")}
                 </span>
               )}
-              {e?.popular && (
-                <span className="flex-none rounded-md bg-hover px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                  {t("connectors.catalogPopular")}
-                </span>
-              )}
+              {e?.official && <OfficialBadge name={name} />}
             </div>
             <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-subtle">{description}</p>
           </div>
@@ -422,7 +418,7 @@ function CategoryChip({ active, onClick, label, count }: { active: boolean; onCl
 }
 
 /**
- * Only Myrel's presets and the well-known services show an icon of their own: the rest come from
+ * Only Myrel's presets and the official servers show an icon of their own: the rest come from
  * anyone who publishes to the registry, and loading their images would tell those hosts who opened
  * the settings.
  */
@@ -443,6 +439,22 @@ export function OfferIcon({ name, featured, terminal, iconUrl }: { name: string;
       ) : (
         name.slice(0, 1).toUpperCase()
       )}
+    </span>
+  );
+}
+
+/**
+ * Marks one of the official servers (OFFICIAL_CATALOG). The mark comes from Myrel's own list, never
+ * from what a server says of itself, and says so on hover.
+ */
+export function OfficialBadge({ name }: { name: string }) {
+  const t = useT();
+  const hint = t("connectors.officialHint", { name });
+  return (
+    <span title={hint} className="inline-flex flex-none items-center gap-1 rounded-md bg-ok-soft px-1.5 py-0.5 text-[11px] font-medium text-ok">
+      <ShieldCheck size={11} aria-hidden="true" />
+      {t("connectors.official")}
+      <span className="sr-only">{hint}</span>
     </span>
   );
 }
@@ -487,15 +499,17 @@ function ConnectorItem({ connector: c, projectId, highlight }: { connector: Conn
   return (
     <li className={cn("bg-panel", highlight && "bg-accent-soft/30")}>
       <div className="flex items-center gap-3 px-3.5 py-3">
-        <span
-          aria-hidden="true"
-          className="flex size-9 flex-none items-center justify-center rounded-lg bg-hover text-muted"
-        >
-          {c.transport === "http" ? <Globe size={17} /> : <SquareTerminal size={17} />}
-        </span>
+        {c.official?.iconUrl ? (
+          <OfferIcon name={c.name} iconUrl={c.official.iconUrl} />
+        ) : (
+          <span aria-hidden="true" className="flex size-9 flex-none items-center justify-center rounded-lg bg-hover text-muted">
+            {c.transport === "http" ? <Globe size={17} /> : <SquareTerminal size={17} />}
+          </span>
+        )}
         <div className={cn("min-w-0 flex-1", !c.enabled && "opacity-60")}>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="truncate font-medium">{c.name}</span>
+            {c.official && <OfficialBadge name={c.official.title} />}
             <code className="rounded bg-hover px-1 py-px font-mono text-[11px] text-subtle">{c.slug}</code>
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-subtle">

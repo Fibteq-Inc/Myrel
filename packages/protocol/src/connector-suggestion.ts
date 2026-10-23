@@ -15,8 +15,10 @@ export const ConnectorOffer = z.object({
   /** "headers": the server needs a key, which the card asks for; "oauth": it signs in, or needs nothing. */
   auth: z.enum(["oauth", "headers"]),
   headerHint: z.object({ name: z.string(), placeholder: z.string() }).nullable().default(null),
-  /** Only for Myrel's presets and the well-known services (see POPULAR_CATALOG). */
+  /** Only for Myrel's presets and the official servers (see OFFICIAL_CATALOG). */
   iconUrl: z.string().nullable().default(null),
+  /** One of the official servers (OFFICIAL_CATALOG). */
+  official: z.boolean().default(false),
   /** One of Fibteq's own presets. */
   featured: z.boolean().default(false),
 });

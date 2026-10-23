@@ -4,8 +4,8 @@ import {
   type CatalogConnector,
   type CatalogPage,
   guessCatalogCategory,
-  POPULAR_CATALOG,
-  POPULAR_CATALOG_IDS,
+  OFFICIAL_CATALOG,
+  OFFICIAL_CATALOG_IDS,
 } from "@myrel/protocol";
 import { and, asc, count, desc, eq, getTableColumns, inArray, type SQLWrapper, sql } from "drizzle-orm";
 import { blockedUrl } from "./client";
@@ -68,7 +68,7 @@ export function catalogRow(entry: RegistryEntry, now: Date): CatalogRow | null {
     headerName: header?.name ?? null,
     headerPlaceholder: header ? clip(header.placeholder || header.description || "", 200) : null,
     // The namespace (often io.github.<someone>) says who published it, not what it does.
-    category: POPULAR_CATALOG.find((p) => p.id === s.name)?.category ?? guessCatalogCategory(`${title} ${s.name.split("/")[1] ?? ""} ${description}`),
+    category: OFFICIAL_CATALOG.find((p) => p.id === s.name)?.category ?? guessCatalogCategory(`${title} ${s.name.split("/")[1] ?? ""} ${description}`),
     version: s.version,
     registryUpdatedAt: meta?.updatedAt ?? now.toISOString(),
     syncedAt: now,
@@ -174,7 +174,7 @@ async function saveState(db: ReturnType<typeof createDb>, state: { since: string
 }
 
 /**
- * Searches the catalog. Without a query the well-known services come first, in their order, then
+ * Searches the catalog. Without a query the official servers come first, in their order, then
  * servers with an icon and a website (usually real products) before the rest.
  */
 export async function searchCatalog(
@@ -187,10 +187,10 @@ export async function searchCatalog(
   const q = opts.q?.trim().slice(0, 100);
   const pattern = q ? `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%` : null;
   const like = (column: SQLWrapper) => sql`${column} like ${pattern} escape '\\'`;
-  const popularRank = sql`case ${connectorCatalog.id} ${sql.join(
-    POPULAR_CATALOG_IDS.map((id, i) => sql`when ${id} then ${i}`),
+  const officialRank = sql`case ${connectorCatalog.id} ${sql.join(
+    OFFICIAL_CATALOG_IDS.map((id, i) => sql`when ${id} then ${i}`),
     sql` `,
-  )} else ${POPULAR_CATALOG_IDS.length} end`;
+  )} else ${OFFICIAL_CATALOG_IDS.length} end`;
   // A name match ranks above a match in the description.
   const titleMatch = pattern ? [sql`case when ${like(connectorCatalog.title)} then 0 else 1 end`] : [];
   const rows = await db
@@ -203,7 +203,7 @@ export async function searchCatalog(
       ),
     )
     .orderBy(
-      popularRank,
+      officialRank,
       ...titleMatch,
       desc(sql`${connectorCatalog.iconUrl} is not null and ${connectorCatalog.websiteUrl} is not null`),
       // Names that start with a letter before "00Widget", ".prompts" and emoji.
@@ -218,7 +218,7 @@ export async function searchCatalog(
     .select({ id: connectorCatalog.category, count: count() })
     .from(connectorCatalog)
     .groupBy(connectorCatalog.category);
-  const popular = new Set(POPULAR_CATALOG_IDS);
+  const official = new Set(OFFICIAL_CATALOG_IDS);
   return {
     connectors: rows.slice(0, limit).map(
       (r): CatalogConnector => ({
@@ -231,7 +231,7 @@ export async function searchCatalog(
         auth: r.auth,
         headerHint: r.headerName ? { name: r.headerName, placeholder: r.headerPlaceholder ?? "" } : null,
         category: r.category as CatalogCategory,
-        popular: popular.has(r.id),
+        official: official.has(r.id),
       }),
     ),
     nextOffset: rows.length > limit ? offset + limit : null,
@@ -245,4 +245,29 @@ export async function searchCatalog(
 export async function catalogSize(env: Env) {
   const [row] = await createDb(env.DB).select({ n: count() }).from(connectorCatalog);
   return row?.n ?? 0;
+}
+
+/** An official server's catalog entry, as an added connector shows it. */
+export type OfficialMark = { id: string; title: string; iconUrl: string | null };
+
+/** "https://mcp.notion.com/mcp/" and "https://MCP.notion.com/mcp" are the same address. */
+export function sameAddress(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname.replace(/\/+$/, "")}${u.search}`;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The official servers' entries by address. A connector counts as official only when its address
+ * is one of these: its name, description or what the server says of itself never make it so.
+ */
+export async function officialMarks(env: Env): Promise<Map<string, OfficialMark>> {
+  const rows = await createDb(env.DB)
+    .select({ id: connectorCatalog.id, title: connectorCatalog.title, iconUrl: connectorCatalog.iconUrl, url: connectorCatalog.url })
+    .from(connectorCatalog)
+    .where(inArray(connectorCatalog.id, OFFICIAL_CATALOG_IDS));
+  return new Map(rows.map((r) => [sameAddress(r.url), { id: r.id, title: r.title, iconUrl: r.iconUrl }]));
 }

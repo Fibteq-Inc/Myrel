@@ -2,7 +2,7 @@ import { createDb, schema } from "@myrel/db";
 import { SetPersonalInProjectInput } from "@myrel/protocol";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { toConnector } from "../connectors/store";
+import { presentConnectors } from "../connectors/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { toSkill } from "../skills/store";
 import { findMembership } from "./projects";
@@ -29,9 +29,10 @@ export const personalInProjectRoutes = new Hono<AppEnv>()
     ]);
     const onSkills = new Set(skillLinks.map((r) => r.id));
     const onConnectors = new Set(connectorLinks.map((r) => r.id));
+    const shown = await presentConnectors(c.env, myConnectors, true);
     return c.json({
       skills: mySkills.map((r) => ({ ...toSkill(r, true), inProject: onSkills.has(r.id) })),
-      connectors: myConnectors.map((r) => ({ ...toConnector(r, true), inProject: onConnectors.has(r.id) })),
+      connectors: shown.map((r) => ({ ...r, inProject: onConnectors.has(r.id) })),
     });
   })
   /** Turns one of the caller's own skills or connectors on or off in this project. */

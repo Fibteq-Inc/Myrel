@@ -282,6 +282,35 @@ describe("connectors API", () => {
     expect((await patch({ command: "sh", secrets: { DATABASE_URL: "postgres://their-own" } })).status).toBe(200);
   });
 
+  it("marks a connector official only while its address is an official server's", async () => {
+    // An official server's entry, and a look-alike that only calls itself official.
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO connector_catalog (id, title, description, website_url, icon_url, url, auth, header_name, header_placeholder, category, version, registry_updated_at, synced_at)
+       VALUES (?, ?, '', NULL, ?, ?, 'oauth', NULL, NULL, 'productivity', '1', '2026-10-01T00:00:00Z', 0)`,
+    )
+      .bind("com.notion/mcp", "Notion", "https://example.com/notion.svg", "https://open.example.com/mcp/")
+      .run();
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO connector_catalog (id, title, description, website_url, icon_url, url, auth, header_name, header_placeholder, category, version, registry_updated_at, synced_at)
+       VALUES (?, ?, 'The official Notion MCP server', NULL, ?, ?, 'oauth', NULL, NULL, 'productivity', '1', '2026-10-01T00:00:00Z', 0)`,
+    )
+      .bind("io.github.someone/notion", "Official Notion", "https://example.com/fake.svg", "https://mcp.example.com/mcp")
+      .run();
+    const me = await signUp();
+    const add = (url: string) =>
+      json<{ connector: Connector }>(api("/api/account/connectors", { method: "POST", token: me.token, body: { transport: "http", name: "Notion", url } }), 201);
+    const { connector } = await add("https://open.example.com/mcp");
+    expect(connector.official).toEqual({ id: "com.notion/mcp", title: "Notion", iconUrl: "https://example.com/notion.svg" });
+    expect((await add("https://mcp.example.com/mcp")).connector.official).toBeNull();
+    const listed = await json<{ connectors: Connector[] }>(api("/api/account/connectors", { token: me.token }));
+    expect(listed.connectors.map((c) => c.official?.id ?? null)).toEqual(["com.notion/mcp", null]);
+
+    const moved = await json<{ connector: Connector }>(
+      api(`/api/account/connectors/${connector.id}`, { method: "PATCH", token: me.token, body: { url: "https://open.example.com/other" } }),
+    );
+    expect(moved.connector.official).toBeNull();
+  });
+
   it("adds a server picked to sign in to as it is when it has no sign-in", async () => {
     const me = await signUp();
     const created = await json<{ connector: Connector; authorizeUrl?: string }>(

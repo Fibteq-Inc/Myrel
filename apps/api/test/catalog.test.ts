@@ -110,7 +110,7 @@ describe("connector catalog", () => {
     expect(all.syncedAt).not.toBeNull();
     // The well-known services first, in their order.
     expect(all.connectors.map((c) => c.id)).toEqual(["com.notion/mcp", "app.linear/linear", "io.github.someone/notes"]);
-    expect(all.connectors[0]).toMatchObject({ title: "Notion", popular: true, auth: "oauth" });
+    expect(all.connectors[0]).toMatchObject({ title: "Notion", official: true, auth: "oauth" });
 
     // The next run asks only for changes; a removed server leaves the catalog.
     registry.calls.length = 0;
