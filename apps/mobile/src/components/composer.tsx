@@ -155,7 +155,7 @@ export function Composer({
           ))}
         </ScrollView>
       )}
-      {tools}
+      {tools && <View style={styles.tools}>{tools}</View>}
       <View style={styles.row}>
         <Pressable
           accessibilityRole="button"
@@ -206,6 +206,8 @@ const useStyles = makeStyles((colors) =>
       paddingVertical: 8,
     },
     row: { flexDirection: "row", alignItems: "flex-end", gap: 4 },
+    // Pickers sit side by side and wrap only when the screen is too narrow for them.
+    tools: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" },
     pending: { gap: 6, paddingHorizontal: 6 },
     chip: {
       flexDirection: "row",
