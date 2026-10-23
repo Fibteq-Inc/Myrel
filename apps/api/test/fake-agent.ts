@@ -86,7 +86,11 @@ export async function agentProject(token: string, play: Play, opts: { features?:
   const ws = res.webSocket!;
   openRunners.add(ws);
   const frames: ServerToRunner[] = [];
-  const send = (frame: unknown) => ws.send(JSON.stringify(frame));
+  // A turn can finish after its test returned and closeRunners hung up; its task.done then has
+  // nowhere to go, and sending on the closed socket would fail the run as an unhandled rejection.
+  const send = (frame: unknown) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+  };
   const turns: Turn[] = [];
   ws.addEventListener("message", (e) => {
     const frame = JSON.parse(e.data as string) as ServerToRunner;
