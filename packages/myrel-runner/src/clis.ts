@@ -109,15 +109,25 @@ function output(bin: string, args: string[], timeout = 20_000): Promise<string |
  */
 export function parseClaudeHelp(help: string): CliModel[] | undefined {
   const text = help.replace(/\s+/g, " ");
-  const aliases = /--model <model>[^-]*?\(e\.g\. ([^)]*)\)/.exec(text)?.[1]?.match(/'([a-z0-9-]+)'/g)?.map((a) => a.slice(1, -1));
+  const aliases = helpParens(text, "--model <model>", "(e.g. ")?.match(/'[a-z0-9-]+'/g)?.map((a) => a.slice(1, -1));
   if (!aliases?.length) return undefined;
-  const efforts = /--effort <level>[^(]*\(([^)]*)\)/.exec(text)?.[1]?.split(",").map((e) => e.trim()).filter(safeModelArg) ?? [];
+  const efforts = helpParens(text, "--effort <level>", "(")?.split(",").map((e) => e.trim()).filter(safeModelArg) ?? [];
   // Haiku takes no effort.
   return [...aliases, ...(aliases.includes("haiku") ? [] : ["haiku"])].map((id) => ({
     id,
     name: id[0]!.toUpperCase() + id.slice(1),
     efforts: id === "haiku" ? [] : efforts,
   }));
+}
+
+/** What is inside the parentheses opened by `open` in the description of `flag`, found without regexes over the help. */
+function helpParens(text: string, flag: string, open: string): string | undefined {
+  const at = text.indexOf(flag);
+  if (at < 0) return undefined;
+  const description = text.slice(at + flag.length, at + flag.length + 400);
+  const start = description.indexOf(open);
+  const end = start < 0 ? -1 : description.indexOf(")", start + open.length);
+  return end < 0 ? undefined : description.slice(start + open.length, end);
 }
 
 /** `codex debug models`: the catalog the person's Codex uses, with each model's reasoning levels. */
@@ -143,9 +153,13 @@ export function parseCodexModels(json: string): CliModel[] | undefined {
  */
 export function parseModelLines(text: string): CliModel[] | undefined {
   const list = text.split(/\r?\n/).flatMap((line) => {
-    const [id = "", ...rest] = line.trim().split(/\t+| +- +/);
+    const trimmed = line.trim();
+    const tab = trimmed.indexOf("\t");
+    const cut = tab >= 0 ? tab : trimmed.indexOf(" - ");
+    const id = cut >= 0 ? trimmed.slice(0, cut).trim() : trimmed;
+    const name = cut >= 0 ? trimmed.slice(cut + (tab >= 0 ? 1 : 3)).trim() : "";
     if (!safeModelArg(id) || /^(available|fetching|loading)$/i.test(id) || id.endsWith(":")) return [];
-    return [{ id, name: rest.join(" ").trim() || id, efforts: [] }];
+    return [{ id, name: name || id, efforts: [] }];
   });
   return list.length ? list.slice(0, 100) : undefined;
 }
