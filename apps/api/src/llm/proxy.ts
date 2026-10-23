@@ -140,8 +140,8 @@ const CLIENT_TOOLS = new Set(["function", "custom"]);
  * - background: the provider keeps working after the call (and the turn) ended, unpriced here;
  * - a tool the provider runs itself (web search, code interpreter, file search, image generation,
  *   remote MCP): billed apart from the tokens this proxy prices;
- * - stored state (store, previous_response_id, conversation): objects the shared key holds, not
- *   tied to this project.
+ * - stored state (store not false, which providers default to true; previous_response_id,
+ *   conversation): objects the shared key holds, not tied to this project.
  * Codex sends none of these (its web search is turned off, see the codex harness).
  */
 export function responsesRefusal(body: string | undefined): string | null {
@@ -152,7 +152,7 @@ export function responsesRefusal(body: string | undefined): string | null {
     return "The request body is not JSON.";
   }
   if (parsed.background === true) return "Background responses are not allowed here.";
-  if (parsed.store === true || parsed.previous_response_id != null || parsed.conversation != null) {
+  if (parsed.store !== false || parsed.previous_response_id != null || parsed.conversation != null) {
     return "Stored responses are not allowed here: send the whole input with store set to false.";
   }
   const clientOnly = (tools: unknown): boolean =>
