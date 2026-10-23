@@ -62,7 +62,7 @@ type LimitKind = (typeof LIMIT_KINDS)[number];
 const isKnown = (w: CliLimitWindow): w is CliLimitWindow & { kind: LimitKind } =>
   (LIMIT_KINDS as readonly string[]).includes(w.kind);
 
-/** CLIs that report subscription limits (Gemini CLI does not). */
+/** CLIs that report subscription limits (Antigravity CLI does not). */
 const LIMITED_CLIS = new Set<RunnerCli["id"]>(["claude", "codex"]);
 
 /**

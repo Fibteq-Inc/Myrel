@@ -5,7 +5,7 @@ import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
 /**
  * myrel-runner: a small daemon on the user's own computer. It opens an
  * outbound WebSocket to the server and runs tasks with the user's own CLI
- * (Claude Code, Codex, Gemini CLI) in folders the user shared on that
+ * (Claude Code, Codex, Antigravity CLI) in folders the user shared on that
  * computer. The CLI keeps its own login; no subscription token ever reaches
  * the server.
  */
@@ -15,13 +15,13 @@ export const RUNNER_PROTOCOL_VERSION = 2;
 
 export const RunnerId = z.string().regex(idPattern("runner"));
 
-export const CliId = z.enum(["claude", "codex", "gemini"]);
+export const CliId = z.enum(["claude", "codex", "antigravity"]);
 export type CliId = z.infer<typeof CliId>;
 
 export const CLI_NAMES: Record<CliId, string> = {
   claude: "Claude Code",
   codex: "Codex CLI",
-  gemini: "Gemini CLI",
+  antigravity: "Antigravity CLI",
 };
 
 /** A folder the user shared from their computer with `myrel-runner share`. */
@@ -66,7 +66,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
  * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
- * "agent-clis": the same for Codex CLI and Gemini CLI.
+ * "agent-clis": the same for Codex CLI and Antigravity CLI.
  * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
  * "skills": the runner downloads the turn's skills (task.start's `agent.skills`) into a folder of the run.
  * "files": reads a file in the project's folders for the web app to show ("file.read").
@@ -100,7 +100,16 @@ export const RunnerInfo = z.object({
   hostname: z.string().max(255),
   platform: z.string().max(50),
   folders: z.array(RunnerFolder).max(200),
-  clis: z.array(RunnerCli).max(10),
+  /** CLIs Myrel no longer supports (Gemini CLI, from older runners) are dropped, not refused. */
+  clis: z
+    .array(z.unknown())
+    .max(10)
+    .transform((all) =>
+      all.flatMap((c) => {
+        const cli = RunnerCli.safeParse(c);
+        return cli.success ? [cli.data] : [];
+      }),
+    ),
   /** Unknown features from newer runners are dropped, not refused. */
   features: z
     .array(z.string().max(50))

@@ -146,7 +146,7 @@ async function describe(manager: ServiceManager): Promise<Omit<ServiceInfo, "run
 /**
  * The environment the service runs with. Login services start with a bare
  * PATH, so the current one is kept: that is where `claude`, `codex` and
- * `gemini` were found. npx's temporary folders are dropped.
+ * `agy` were found. npx's temporary folders are dropped.
  */
 function serviceEnv(): Record<string, string> {
   const path = (process.env.PATH ?? "")
