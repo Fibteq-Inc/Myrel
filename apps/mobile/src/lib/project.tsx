@@ -1,6 +1,8 @@
 import {
   applyEvent,
   applyMessages,
+  applyPullRequests,
+  applyTasks,
   emptyProjectState,
   ProjectSocket,
   type ProjectState,
@@ -17,12 +19,16 @@ type Action =
   | Parameters<typeof applyEvent>[1]
   | { type: "reset" }
   | { type: "idle" }
-  | { type: "messages"; messages: Parameters<typeof applyMessages>[1] };
+  | { type: "messages"; messages: Parameters<typeof applyMessages>[1] }
+  | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] }
+  | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "reset") return emptyProjectState;
   if (action.type === "idle") return { ...state, active: {} };
   if (action.type === "messages") return applyMessages(state, action.messages);
+  if (action.type === "tasks") return applyTasks(state, action.tasks);
+  if (action.type === "pullRequests") return applyPullRequests(state, action.pullRequests);
   return applyEvent(state, action);
 }
 
@@ -32,6 +38,8 @@ type ProjectValue = {
   status: SocketStatus;
   send(body: string, threadId?: string | null): void;
   emit(event: ClientEventInput): void;
+  /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
+  loadTasks(threadId: string): Promise<void>;
 };
 
 const ProjectContext = createContext<ProjectValue | null>(null);
@@ -95,9 +103,17 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);
+  const loadTasks = useCallback(
+    async (threadId: string) => {
+      const [tasks, pullRequests] = await Promise.all([api.listTasks(projectId, threadId), api.listPullRequests(projectId, threadId)]);
+      dispatch({ type: "tasks", tasks });
+      dispatch({ type: "pullRequests", pullRequests });
+    },
+    [api, projectId],
+  );
   const value = useMemo<ProjectValue>(
-    () => ({ projectId, state, status, send, emit }),
-    [projectId, state, status, send, emit],
+    () => ({ projectId, state, status, send, emit, loadTasks }),
+    [projectId, state, status, send, emit, loadTasks],
   );
   return <ProjectContext value={value}>{children}</ProjectContext>;
 }
