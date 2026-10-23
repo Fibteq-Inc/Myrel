@@ -160,7 +160,7 @@ describe("Muse Code task", () => {
     // Prints what it got: the prompt file's text and mode, then an answer.
     await fakeMuse(`#!/bin/sh
 while [ $# -gt 0 ]; do [ "$1" = "--prompt-file" ] && f="$2"; shift; done
-mode=$(stat -f %Lp "$f" 2>/dev/null || stat -c %a "$f")
+mode=$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f")
 text=$(cat "$f")
 echo '{"stream":{"kind":"session","id":"s-1"},"payload_type":"run.model.configured","payload":{"model_id":"muse-spark-1.3"}}'
 echo "{\\"stream\\":{\\"kind\\":\\"session\\",\\"id\\":\\"s-1\\"},\\"payload_type\\":\\"run.terminal.completed\\",\\"payload\\":{\\"terminal\\":\\"completed\\",\\"text\\":\\"$mode $text $f\\"}}"
