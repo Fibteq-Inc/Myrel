@@ -14,9 +14,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { MessageMarkdown } from "../../../../components/markdown";
 import { Empty } from "../../../../components/project/empty";
 import { Button, errorMessage, Spinner } from "../../../../components/ui";
-import { displayName, fileKind } from "../../../../lib/files";
+import { displayName, type FileKind, fileKind } from "../../../../lib/files";
+import { useOpenLink } from "../../../../lib/links";
 import { openWithSystem } from "../../../../lib/open-file";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
@@ -26,7 +28,7 @@ import { makeStyles, mono, useColors } from "../../../../theme";
 const MAX_TEXT = 200_000;
 
 /** The file as a data URL (what the phone's viewer gets), and its text when it is text. */
-type Preview = { kind: "text" | "image" | "other"; type: string; dataUrl: string; text?: string };
+type Preview = { kind: FileKind; type: string; dataUrl: string; text?: string };
 
 function readBlob(blob: Blob, as: "text" | "dataURL") {
   return new Promise<string>((resolve, reject) => {
@@ -40,7 +42,8 @@ function readBlob(blob: Blob, as: "text" | "dataURL") {
 
 /**
  * A preview of one project file, or with `local`, one in the project's folder on this person's
- * computer (an agent's message pointed to it; `thread` is where its worktree is): text, and images
+ * computer (an agent's message pointed to it; `thread` is where its worktree is): text, Markdown
+ * drawn like agent messages (links and file paths open as they do there), and images
  * that pinch to zoom on iOS. The header button hands any file to the phone (Quick Look on iOS,
  * a viewer app on Android) to zoom, share or save it; files with no preview offer that in place.
  */
@@ -57,11 +60,12 @@ export default function FileScreen() {
       const blob = local ? await api.getLocalFile(projectId, path, thread) : await api.getFile(projectId, path);
       const kind = fileKind(blob.type, path);
       const dataUrl = await readBlob(blob, "dataURL");
-      const text = kind === "text" ? (await readBlob(blob, "text")).slice(0, MAX_TEXT) : undefined;
+      const text = kind === "text" || kind === "markdown" ? (await readBlob(blob, "text")).slice(0, MAX_TEXT) : undefined;
       return { kind, type: blob.type, dataUrl, text };
     },
     retry: local ? false : undefined,
   });
+  const openLink = useOpenLink(projectId, thread);
   const name = displayName(path);
   const [opening, setOpening] = useState(false);
 
@@ -96,6 +100,10 @@ export default function FileScreen() {
         </View>
       ) : preview.error ? (
         <Empty title={t("files.loadFailed")} body={errorMessage(preview.error, t("common.error"))} />
+      ) : preview.data.kind === "markdown" ? (
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <MessageMarkdown body={preview.data.text ?? ""} onLink={openLink} />
+        </ScrollView>
       ) : preview.data.kind === "text" ? (
         <ScrollView contentContainerStyle={{ padding: 16 }}>
           <Text selectable style={styles.code}>

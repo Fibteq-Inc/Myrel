@@ -96,7 +96,11 @@ describe("files", () => {
   it("goes by content type, falling back to the extension", () => {
     expect(fileKind("image/png", "uploads/x-photo.png")).toBe("image");
     expect(fileKind("", "uploads/x-photo.JPEG")).toBe("image");
-    expect(fileKind("application/octet-stream", "notes.md")).toBe("text");
+    expect(fileKind("application/octet-stream", "notes.md")).toBe("markdown");
+    expect(fileKind("text/plain", "docs/README.MARKDOWN")).toBe("markdown");
+    expect(fileKind("text/markdown", "notes")).toBe("markdown");
+    expect(fileKind("text/plain", "notes.txt")).toBe("text");
+    expect(fileKind("", "src/app.tsx")).toBe("text");
     expect(fileKind("application/json", "data")).toBe("text");
     expect(fileKind("application/pdf", "report.pdf")).toBe("other");
   });
