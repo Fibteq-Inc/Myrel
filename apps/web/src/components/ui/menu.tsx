@@ -89,7 +89,7 @@ export function Menu({
             aria-label={label}
             style={style}
             className={cn(
-              "fixed z-[100] min-w-56 rounded-xl border border-edge bg-[#17171b] p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.5)]",
+              "fixed z-[100] min-w-56 rounded-xl border border-edge bg-menu p-1.5 shadow-[0_12px_40px_var(--color-shadow)]",
               panelClassName,
             )}
           >

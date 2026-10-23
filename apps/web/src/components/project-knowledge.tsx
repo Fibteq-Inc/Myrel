@@ -63,7 +63,7 @@ export function ProjectKnowledge({
             <FilesTab projectId={projectId} selected={file} onOpen={(path) => onNavigate({ tab: "files", file: path })} />
           </div>
           {file ? (
-            <div className="flex min-w-0 flex-1 flex-col bg-[#0b0b0d]">
+            <div className="flex min-w-0 flex-1 flex-col bg-sunken">
               <FilePreview projectId={projectId} path={file} onClose={() => onNavigate({ tab: "files" })} />
             </div>
           ) : (
@@ -243,7 +243,7 @@ function MemoryCard({ entry, onEdit }: { entry: MemoryEntry; onEdit: () => void 
     <button
       type="button"
       onClick={onEdit}
-      className="flex flex-col gap-1 rounded-xl border border-edge bg-raised px-3.5 py-3 text-left hover:border-[#3a3a44]"
+      className="flex flex-col gap-1 rounded-xl border border-edge bg-raised px-3.5 py-3 text-left hover:border-edge-strong"
     >
       <span className="flex items-center gap-2">
         <span className="font-mono text-[13px] font-medium">{entry.name}</span>

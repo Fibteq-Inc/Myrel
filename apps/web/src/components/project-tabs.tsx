@@ -42,7 +42,7 @@ function ArtifactsTab() {
   const { search, go } = useProjectView();
   if (search.item) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-[#0b0b0d]">
+      <div className="flex min-h-0 flex-1 flex-col bg-sunken">
         <ArtifactViewer
           key={search.item}
           projectId={project.id}

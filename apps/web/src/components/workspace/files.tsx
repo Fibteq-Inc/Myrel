@@ -56,7 +56,7 @@ export function FilesTab({ projectId, threadId, tasks }: { projectId: string; th
           <p className="text-subtle">{t("files.workspaceBinary", { size: String(data.file.size) })}</p>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <pre className="max-h-[60vh] overflow-auto rounded-lg border border-line bg-[#08080a] px-3 py-2 font-mono text-[12px] leading-[1.55] text-body">
+            <pre className="max-h-[60vh] overflow-auto rounded-lg border border-line bg-console px-3 py-2 font-mono text-[12px] leading-[1.55] text-body">
               {data.file.text}
             </pre>
             {data.file.truncated && <p className="text-xs text-subtle">{t("files.workspaceTruncated")}</p>}

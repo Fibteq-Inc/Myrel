@@ -2,18 +2,18 @@ import { parseChecklist } from "@myrel/client";
 import type { MessageKey } from "@myrel/i18n";
 import type { Thread, ThreadCloseReason } from "@myrel/protocol";
 import { CircleAlert, CircleCheck, CircleDot, CircleMinus, CirclePause } from "lucide-react-native";
-import { colors } from "../theme";
+import { type Colors, useColors } from "../theme";
 import { Spinner } from "./ui";
 
 type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed" | "closed";
 
-const STATUS: Record<StatusKey, { label: MessageKey; color: string }> = {
-  working: { label: "status.working", color: colors.subtle },
-  blocked: { label: "status.blocked", color: colors.subtle },
-  review_ready: { label: "status.reviewReady", color: colors.warn },
-  done: { label: "status.done", color: colors.subtle },
-  failed: { label: "status.failed", color: colors.bad },
-  closed: { label: "status.closedCancelled", color: colors.subtle },
+const STATUS: Record<StatusKey, { label: MessageKey; color: keyof Colors }> = {
+  working: { label: "status.working", color: "subtle" },
+  blocked: { label: "status.blocked", color: "subtle" },
+  review_ready: { label: "status.reviewReady", color: "warn" },
+  done: { label: "status.done", color: "subtle" },
+  failed: { label: "status.failed", color: "bad" },
+  closed: { label: "status.closedCancelled", color: "subtle" },
 };
 
 /** A thread closed as opened by mistake says why. */
@@ -30,21 +30,22 @@ function statusKey(thread: Thread): StatusKey {
 type Translate = (key: MessageKey) => string;
 
 /** The thread's state in a few words, plus the color it reads in. */
-export function threadStatus(thread: Thread, t: Translate) {
+export function threadStatus(thread: Thread, t: Translate, colors: Colors) {
   const s = STATUS[statusKey(thread)];
-  return { label: t(thread.closeReason ? CLOSED[thread.closeReason] : s.label), color: s.color };
+  return { label: t(thread.closeReason ? CLOSED[thread.closeReason] : s.label), color: colors[s.color] };
 }
 
 /** What the thread is doing right now: its active checklist step, else its status. */
-export function threadActivity(thread: Thread, t: Translate) {
+export function threadActivity(thread: Thread, t: Translate, colors: Colors) {
   if (thread.status === "working" && !thread.resolved && thread.statusText) {
     const step = parseChecklist(thread.statusText).items.find((i) => i.state === "active")?.text;
     if (step) return { label: step, color: colors.muted };
   }
-  return threadStatus(thread, t);
+  return threadStatus(thread, t, colors);
 }
 
 export function ThreadStatusIcon({ thread, size = 16 }: { thread: Thread; size?: number }) {
+  const colors = useColors();
   switch (statusKey(thread)) {
     case "working":
       return <Spinner size={size} />;

@@ -11,7 +11,7 @@ export function Button({ className = "", ...props }: ButtonHTMLAttributes<HTMLBu
   return (
     <button
       className={cn(
-        "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-ground hover:bg-[#a3b0ff] disabled:opacity-50",
+        "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-ground hover:bg-accent-hover disabled:opacity-50",
         className,
       )}
       {...props}
@@ -58,7 +58,7 @@ export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInpu
 /** A keyboard shortcut hint, e.g. ⌘K. */
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded border border-[#2e2e34] px-1.5 font-mono text-[11px] leading-4 text-subtle">{children}</kbd>
+    <kbd className="rounded border border-frame px-1.5 font-mono text-[11px] leading-4 text-subtle">{children}</kbd>
   );
 }
 

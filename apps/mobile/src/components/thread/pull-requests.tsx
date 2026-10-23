@@ -14,14 +14,14 @@ import {
 } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { colors, radius } from "../../theme";
+import { makeStyles, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
 import { Spinner } from "../ui";
 
-const MERGED = "#b49cff";
-
 /** The pull requests a thread opened, each with its live state: open, merged or closed, CI and review. */
 export function PullRequestsTab({ pullRequests }: { pullRequests: PullRequest[] }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   if (pullRequests.length === 0) {
     return (
@@ -42,10 +42,12 @@ export function PullRequestsTab({ pullRequests }: { pullRequests: PullRequest[] 
 }
 
 function PullRequestCard({ pr }: { pr: PullRequest }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const state =
     pr.state === "merged"
-      ? { Icon: GitMerge, label: t("pr.merged"), color: MERGED }
+      ? { Icon: GitMerge, label: t("pr.merged"), color: colors.merged }
       : pr.state === "closed"
         ? { Icon: GitPullRequestClosed, label: t("pr.closed"), color: colors.bad }
         : pr.draft
@@ -101,6 +103,7 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
 }
 
 function Badge({ icon, color, label }: { icon: ReactNode; color: string; label: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.badge}>
       {icon}
@@ -109,31 +112,33 @@ function Badge({ icon, color, label }: { icon: ReactNode; color: string; label: 
   );
 }
 
-const styles = StyleSheet.create({
-  page: { padding: 16, gap: 8 },
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: "#26262b",
-    backgroundColor: colors.raised,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: colors.panel,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: { color: colors.fg, fontSize: 14, fontWeight: "600" },
-  meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 2 },
-  metaText: { color: colors.subtle, fontSize: 12 },
-  badge: { flexDirection: "row", alignItems: "center", gap: 4 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    page: { padding: 16, gap: 8 },
+    card: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.card,
+      backgroundColor: colors.raised,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    icon: {
+      width: 36,
+      height: 36,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.panel,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    title: { color: colors.fg, fontSize: 14, fontWeight: "600" },
+    meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 2 },
+    metaText: { color: colors.subtle, fontSize: 12 },
+    badge: { flexDirection: "row", alignItems: "center", gap: 4 },
+  }),
+);

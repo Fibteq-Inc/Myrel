@@ -15,7 +15,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { colors, radius } from "../theme";
+import { makeStyles, radius, useColors, useTheme } from "../theme";
 
 export function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -36,6 +36,8 @@ export function Button({
   variant?: "primary" | "ghost";
   style?: StyleProp<ViewStyle>;
 }) {
+  const colors = useColors();
+  const styles = useStyles();
   const primary = variant === "primary";
   return (
     <Pressable
@@ -51,20 +53,24 @@ export function Button({
       ]}
     >
       {pending ? (
-        <ActivityIndicator color={primary ? "#0e0e10" : colors.fg} />
+        <ActivityIndicator color={primary ? colors.onAccent : colors.fg} />
       ) : (
-        <Text style={[styles.buttonText, { color: primary ? "#0e0e10" : colors.fg }]}>{children}</Text>
+        <Text style={[styles.buttonText, { color: primary ? colors.onAccent : colors.fg }]}>{children}</Text>
       )}
     </Pressable>
   );
 }
 
 export function Input(props: TextInputProps) {
+  const theme = useTheme();
+  const colors = useColors();
+  const styles = useStyles();
   return (
     <TextInput
       placeholderTextColor={colors.subtle}
       autoCapitalize="none"
       autoCorrect={false}
+      keyboardAppearance={theme}
       {...props}
       style={[styles.input, props.style]}
     />
@@ -72,7 +78,8 @@ export function Input(props: TextInputProps) {
 }
 
 /** A turning LoaderCircle, like `animate-spin` on web. */
-export function Spinner({ size = 16, color = colors.accent }: { size?: number; color?: string }) {
+export function Spinner({ size = 16, color }: { size?: number; color?: string }) {
+  const colors = useColors();
   const turn = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -84,7 +91,7 @@ export function Spinner({ size = 16, color = colors.accent }: { size?: number; c
   const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
     <Animated.View style={{ transform: [{ rotate }] }} accessibilityElementsHidden importantForAccessibility="no">
-      <LoaderCircle size={size} color={color} />
+      <LoaderCircle size={size} color={color ?? colors.accent} />
     </Animated.View>
   );
 }
@@ -132,25 +139,27 @@ export function useRelativeTime() {
   );
 }
 
-const styles = StyleSheet.create({
-  button: {
-    minHeight: 46,
-    borderRadius: radius.md,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primary: { backgroundColor: colors.accent },
-  ghost: { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.edge },
-  buttonText: { fontSize: 15, fontWeight: "600" },
-  input: {
-    minHeight: 46,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: colors.raised,
-    color: colors.fg,
-    paddingHorizontal: 14,
-    fontSize: 15,
-  },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    button: {
+      minHeight: 46,
+      borderRadius: radius.md,
+      paddingHorizontal: 16,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    primary: { backgroundColor: colors.accent },
+    ghost: { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.edge },
+    buttonText: { fontSize: 15, fontWeight: "600" },
+    input: {
+      minHeight: 46,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.raised,
+      color: colors.fg,
+      paddingHorizontal: 14,
+      fontSize: 15,
+    },
+  }),
+);

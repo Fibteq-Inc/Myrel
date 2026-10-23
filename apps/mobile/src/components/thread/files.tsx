@@ -5,7 +5,7 @@ import { ChevronRight, File, Folder, FolderTree, GitCommitHorizontal } from "luc
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSession } from "../../lib/session";
-import { colors, mono, radius } from "../../theme";
+import { makeStyles, mono, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
 import { Spinner } from "../ui";
 
@@ -14,6 +14,8 @@ import { Spinner } from "../ui";
  * file, and see the saves. Refreshes when a task finishes.
  */
 export function WorkspaceFilesTab({ projectId, threadId, tasks }: { projectId: string; threadId: string; tasks: Task[] }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const { api, server } = useSession();
   const [path, setPath] = useState("");
@@ -110,6 +112,7 @@ export function WorkspaceFilesTab({ projectId, threadId, tasks }: { projectId: s
 }
 
 function Crumb({ label, mono: isMono = false, onPress }: { label: string; mono?: boolean; onPress: () => void }) {
+  const styles = useStyles();
   return (
     <Pressable accessibilityRole="button" onPress={onPress} hitSlop={6}>
       <Text style={[styles.crumb, isMono && { fontFamily: mono, fontSize: 12.5 }]}>{label}</Text>
@@ -117,17 +120,19 @@ function Crumb({ label, mono: isMono = false, onPress }: { label: string; mono?:
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  page: { padding: 16, gap: 16 },
-  crumbs: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 },
-  crumb: { color: colors.muted, fontSize: 13 },
-  hint: { color: colors.subtle, fontSize: 12 },
-  code: { maxHeight: 480, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line, backgroundColor: "#08080a" },
-  codeText: { fontFamily: mono, fontSize: 11.5, lineHeight: 17, color: colors.body },
-  entry: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 9, borderRadius: radius.sm },
-  entryText: { flex: 1, color: colors.fg, fontFamily: mono, fontSize: 12.5 },
-  section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
-  commit: { flexDirection: "row", alignItems: "center", gap: 8 },
-  commitText: { flex: 1, color: colors.muted, fontSize: 13 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    center: { flex: 1, alignItems: "center", justifyContent: "center" },
+    page: { padding: 16, gap: 16 },
+    crumbs: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 },
+    crumb: { color: colors.muted, fontSize: 13 },
+    hint: { color: colors.subtle, fontSize: 12 },
+    code: { maxHeight: 480, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.console },
+    codeText: { fontFamily: mono, fontSize: 11.5, lineHeight: 17, color: colors.body },
+    entry: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 9, borderRadius: radius.sm },
+    entryText: { flex: 1, color: colors.fg, fontFamily: mono, fontSize: 12.5 },
+    section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
+    commit: { flexDirection: "row", alignItems: "center", gap: 8 },
+    commitText: { flex: 1, color: colors.muted, fontSize: 13 },
+  }),
+);

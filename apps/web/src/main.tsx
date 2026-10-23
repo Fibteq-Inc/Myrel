@@ -5,6 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "./lib/api";
 import { initialLocale, saveLocale } from "./lib/i18n";
+import { initTheme } from "./lib/theme";
 import { ConfirmProvider } from "./components/ui/confirm";
 import { routeTree } from "./routeTree.gen";
 import "./styles.css";
@@ -17,6 +18,8 @@ window.addEventListener("vite:preloadError", () => {
   sessionStorage.setItem(key, String(Date.now()));
   window.location.reload();
 });
+
+initTheme();
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });
 

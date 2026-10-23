@@ -4,7 +4,7 @@ import { useT } from "@myrel/i18n/react";
 import { ChevronDown, CircleCheck, CircleDashed, CircleMinus, CircleX, ListChecks } from "lucide-react-native";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { colors, mono } from "../theme";
+import { makeStyles, mono, useColors } from "../theme";
 import { Spinner } from "./ui";
 
 /**
@@ -14,6 +14,8 @@ import { Spinner } from "./ui";
  */
 export function Checklist({ text, live = true, fresh }: { text: string; live?: boolean; fresh?: ReadonlySet<string> }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const { title, items } = parseChecklist(text);
   if (items.length === 0) return <Text style={styles.plain}>{text}</Text>;
   const { done, total } = checklistProgress(items);
@@ -70,47 +72,50 @@ export function Checklist({ text, live = true, fresh }: { text: string; live?: b
   );
 }
 
-const styles = StyleSheet.create({
-  plain: { color: colors.muted, fontSize: 14 },
-  head: { flexDirection: "row", alignItems: "center", gap: 8 },
-  title: { flex: 1, color: colors.subtle, fontSize: 13 },
-  count: { color: colors.subtle, fontSize: 13, fontFamily: mono },
-  track: { height: 4, borderRadius: 2, backgroundColor: "#222227", overflow: "hidden" },
-  bar: { height: "100%", borderRadius: 2, backgroundColor: colors.accent },
-  item: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  itemText: { flex: 1, fontSize: 15, lineHeight: 21 },
-  step: { flex: 1, color: colors.muted, fontSize: 13 },
-  newTag: { color: colors.accent, fontSize: 12, fontWeight: "600" },
-  badge: {
-    color: colors.ground,
-    backgroundColor: colors.accent,
-    fontSize: 11,
-    fontWeight: "700",
-    borderRadius: 8,
-    overflow: "hidden",
-    paddingHorizontal: 6,
-    lineHeight: 16,
-  },
-  link: { color: colors.accent, fontSize: 13 },
-  note: { flex: 1, minWidth: 0, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: colors.edge },
-  noteHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
-  noteText: { flex: 1, color: colors.muted, fontSize: 13 },
-  noteBody: { gap: 6, paddingHorizontal: 12, paddingBottom: 10 },
-  noteMark: { width: 14, textAlign: "center", color: colors.subtle, fontSize: 14 },
-  cardRow: { flexDirection: "row", gap: 12 },
-  card: {
-    flex: 1,
-    minWidth: 0,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-  },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    plain: { color: colors.muted, fontSize: 14 },
+    head: { flexDirection: "row", alignItems: "center", gap: 8 },
+    title: { flex: 1, color: colors.subtle, fontSize: 13 },
+    count: { color: colors.subtle, fontSize: 13, fontFamily: mono },
+    track: { height: 4, borderRadius: 2, backgroundColor: colors.divider, overflow: "hidden" },
+    bar: { height: "100%", borderRadius: 2, backgroundColor: colors.accent },
+    item: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+    itemText: { flex: 1, fontSize: 15, lineHeight: 21 },
+    step: { flex: 1, color: colors.muted, fontSize: 13 },
+    newTag: { color: colors.accent, fontSize: 12, fontWeight: "600" },
+    badge: {
+      color: colors.onAccent,
+      backgroundColor: colors.accent,
+      fontSize: 11,
+      fontWeight: "700",
+      borderRadius: 8,
+      overflow: "hidden",
+      paddingHorizontal: 6,
+      lineHeight: 16,
+    },
+    link: { color: colors.accent, fontSize: 13 },
+    note: { flex: 1, minWidth: 0, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: colors.edge },
+    noteHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
+    noteText: { flex: 1, color: colors.muted, fontSize: 13 },
+    noteBody: { gap: 6, paddingHorizontal: 12, paddingBottom: 10 },
+    noteMark: { width: 14, textAlign: "center", color: colors.subtle, fontSize: 14 },
+    cardRow: { flexDirection: "row", gap: 12 },
+    card: {
+      flex: 1,
+      minWidth: 0,
+      padding: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.panel,
+    },
+  }),
+);
 
 /** An agent's plan as a card in the conversation, where the work started. It stays once the work is done. */
 export function PlanCard({ text, live }: { text: string; live: boolean }) {
+  const styles = useStyles();
   return (
     <View style={styles.cardRow}>
       {/* Lines up with the agent's messages, under its mark. */}
@@ -162,6 +167,8 @@ export function PlanProgress({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const { height } = useWindowDimensions();
   const { title, items } = parseChecklist(text);
   const { fresh, markSeen } = useFreshSteps(planKey, items);
@@ -228,6 +235,8 @@ export function PlanProgress({
  */
 export function PlanUpdateNote({ update, onOpenPlan }: { update: PlanUpdate; onOpenPlan?: () => void }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const [open, setOpen] = useState(false);
   const parts = [
     update.added.length > 0 && <Text style={{ color: colors.accent }}>{t("planUpdate.added", { count: update.added.length })}</Text>,

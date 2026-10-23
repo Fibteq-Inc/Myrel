@@ -16,12 +16,14 @@ import { type ComponentRef, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { formatDuration } from "../../lib/format";
 import { useSession } from "../../lib/session";
-import { colors, mono, radius } from "../../theme";
+import { makeStyles, mono, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
 import { errorMessage, Spinner } from "../ui";
 
 /** Every task the thread's agent ran, newest last. The running one opens by itself; finished ones stay folded. */
 export function TerminalTab({ projectId, tasks, output }: { projectId: string; tasks: Task[]; output: Record<string, TerminalLine[]> }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const list = useRef<ComponentRef<typeof ScrollView>>(null);
   // Follows new output while the reader is at the bottom; scrolling up stops that.
@@ -55,6 +57,8 @@ export function TerminalTab({ projectId, tasks, output }: { projectId: string; t
 
 /** What each finished run changed: its summary and the pull request it opened. */
 export function ChangesTab({ tasks }: { tasks: Task[] }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   if (tasks.length === 0) {
     return (
@@ -98,6 +102,8 @@ export function ChangesTab({ tasks }: { tasks: Task[] }) {
 }
 
 function PullRequestLink({ url }: { url: string }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   return (
     <Pressable
@@ -113,6 +119,8 @@ function PullRequestLink({ url }: { url: string }) {
 }
 
 function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; lines: TerminalLine[] }) {
+  const colors = useColors();
+  const styles = useStyles();
   const { t, locale } = useI18n();
   const { api } = useSession();
   const running = task.status === "running";
@@ -211,6 +219,8 @@ function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
 }
 
 function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
+  const colors = useColors();
+  const styles = useStyles();
   const { t, locale } = useI18n();
   const times = stepTimes(lines, end);
   return (
@@ -237,6 +247,8 @@ const FOLD_LINES = 3;
  * an agent's step or message reads as prose; output stays monospace under its command.
  */
 function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const [open, setOpen] = useState(false);
   const step = line.tool ? line.text.replace(/^→ /, "") : null;
@@ -268,42 +280,45 @@ function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean
 }
 
 function StatusIcon({ status }: { status: Task["status"] }) {
+  const colors = useColors();
   if (status === "running") return <Spinner size={14} color={colors.accent} />;
   if (status === "done") return <CircleCheck size={14} color={colors.ok} />;
   if (status === "cancelled") return <CircleSlash size={14} color={colors.subtle} />;
   return <CircleAlert size={14} color={colors.bad} />;
 }
 
-const styles = StyleSheet.create({
-  page: { padding: 16, gap: 14 },
-  card: {
-    gap: 8,
-    padding: 14,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  head: { flexDirection: "row", alignItems: "center", gap: 8 },
-  toggle: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
-  title: { flexShrink: 1, color: colors.fg, fontSize: 14, fontWeight: "600" },
-  meta: { color: colors.subtle, fontSize: 12, fontVariant: ["tabular-nums"] },
-  summary: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  action: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 },
-  link: { color: colors.accent, fontSize: 12, fontWeight: "500" },
-  stop: { color: colors.muted, fontSize: 12 },
-  note: { color: colors.muted, fontSize: 12, paddingLeft: 22 },
-  terminal: {
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: "#08080a",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  line: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
-  prompt: { width: 8 },
-  out: { fontFamily: mono, fontSize: 11.5, lineHeight: 18, color: colors.muted },
-  prose: { fontSize: 13, lineHeight: 19 },
-  more: { color: colors.accent, fontSize: 12, marginTop: 2 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    page: { padding: 16, gap: 14 },
+    card: {
+      gap: 8,
+      padding: 14,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    head: { flexDirection: "row", alignItems: "center", gap: 8 },
+    toggle: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+    title: { flexShrink: 1, color: colors.fg, fontSize: 14, fontWeight: "600" },
+    meta: { color: colors.subtle, fontSize: 12, fontVariant: ["tabular-nums"] },
+    summary: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+    action: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 },
+    link: { color: colors.accent, fontSize: 12, fontWeight: "500" },
+    stop: { color: colors.muted, fontSize: 12 },
+    note: { color: colors.muted, fontSize: 12, paddingLeft: 22 },
+    terminal: {
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.console,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    line: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
+    prompt: { width: 8 },
+    out: { fontFamily: mono, fontSize: 11.5, lineHeight: 18, color: colors.muted },
+    prose: { fontSize: 13, lineHeight: 19 },
+    more: { color: colors.accent, fontSize: 12, marginTop: 2 },
+  }),
+);

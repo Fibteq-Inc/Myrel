@@ -66,7 +66,7 @@ export function WorkspaceButton({ project }: { project: Project }) {
         <div
           role="dialog"
           aria-label={t("localFolder.title")}
-          className="absolute right-0 top-10 z-20 w-[min(360px,calc(100vw-2rem))] rounded-xl border border-edge bg-raised p-4 shadow-2xl shadow-black/50"
+          className="absolute right-0 top-10 z-20 w-[min(360px,calc(100vw-2rem))] rounded-xl border border-edge bg-raised p-4 shadow-2xl shadow-shadow"
         >
           {canEdit ? (
             <WorkspaceForm project={project} workspace={workspace ?? null} onDone={() => setOpen(false)} />

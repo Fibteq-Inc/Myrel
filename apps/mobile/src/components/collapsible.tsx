@@ -1,7 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import { type ReactNode, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors } from "../theme";
+import { makeStyles } from "../theme";
 
 /**
  * Folds long content to `height` points behind a "Show more" button, so one
@@ -22,6 +22,7 @@ export function Collapsible({
   children: ReactNode;
 }) {
   const t = useT();
+  const styles = useStyles();
   const [measuredLong, setMeasuredLong] = useState(false);
   const [open, setOpen] = useState(false);
   const long = knownLong || measuredLong;
@@ -50,7 +51,9 @@ export function Collapsible({
   );
 }
 
-const styles = StyleSheet.create({
-  toggle: { alignSelf: "flex-start", marginTop: 6 },
-  toggleText: { color: colors.accent, fontSize: 14, fontWeight: "600" },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    toggle: { alignSelf: "flex-start", marginTop: 6 },
+    toggleText: { color: colors.accent, fontSize: 14, fontWeight: "600" },
+  }),
+);

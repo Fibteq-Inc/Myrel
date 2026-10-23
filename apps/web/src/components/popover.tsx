@@ -60,7 +60,7 @@ export function Popover({
     <div
       ref={ref}
       style={style}
-      className={`fixed z-50 rounded-xl border border-edge bg-panel shadow-2xl shadow-black/50 ${className}`}
+      className={`fixed z-50 rounded-xl border border-edge bg-panel shadow-2xl shadow-shadow ${className}`}
     >
       {children}
     </div>,

@@ -5,7 +5,7 @@ import { ChartColumn } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { formatCost, formatDuration, formatTokens, modelName } from "../../lib/format";
-import { colors, mono, radius } from "../../theme";
+import { makeStyles, mono, radius, useColors } from "../../theme";
 import { harnessName } from "../message-stats";
 import { Empty } from "../project/empty";
 import { useRelativeTime } from "../ui";
@@ -25,6 +25,8 @@ const ZERO: Usage = { inputTokens: 0, outputTokens: 0, durationMs: 0, costMicros
  * harness and model, and each reply's share.
  */
 export function ThreadUsageTab({ messages }: { messages: Message[] }) {
+  const colors = useColors();
+  const styles = useStyles();
   const { t, locale } = useI18n();
   const relativeTime = useRelativeTime();
   const replies = messages.filter((m): m is Message & { stats: NonNullable<Message["stats"]> } => !!m.stats);
@@ -135,6 +137,7 @@ function summary(body: string): string {
 }
 
 function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.stat}>
       <Text style={styles.hint}>{label}</Text>
@@ -145,6 +148,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint: stri
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
+  const styles = useStyles();
   return (
     <View style={{ gap: 8 }}>
       <Text style={styles.section}>{title}</Text>
@@ -153,40 +157,42 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-const styles = StyleSheet.create({
-  page: { padding: 16, gap: 20 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  stat: {
-    flexGrow: 1,
-    flexBasis: "45%",
-    gap: 4,
-    padding: 14,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  statValue: { color: colors.fg, fontSize: 20, fontWeight: "600" },
-  hint: { color: colors.subtle, fontSize: 12 },
-  section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
-  card: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-    paddingHorizontal: 14,
-  },
-  line: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  lineName: { color: colors.fg, fontSize: 14 },
-  bar: { marginTop: 4, height: 4, borderRadius: 2, overflow: "hidden", backgroundColor: colors.hover },
-  fill: { height: "100%", borderRadius: 2, backgroundColor: colors.accent },
-  number: { width: 52, textAlign: "right", color: colors.muted, fontSize: 13, fontVariant: ["tabular-nums"] },
-  value: { width: 56, textAlign: "right", color: colors.body, fontSize: 13, fontVariant: ["tabular-nums"] },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    page: { padding: 16, gap: 20 },
+    grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    stat: {
+      flexGrow: 1,
+      flexBasis: "45%",
+      gap: 4,
+      padding: 14,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    statValue: { color: colors.fg, fontSize: 20, fontWeight: "600" },
+    hint: { color: colors.subtle, fontSize: 12 },
+    section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
+    card: {
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+      paddingHorizontal: 14,
+    },
+    line: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.line,
+    },
+    lineName: { color: colors.fg, fontSize: 14 },
+    bar: { marginTop: 4, height: 4, borderRadius: 2, overflow: "hidden", backgroundColor: colors.hover },
+    fill: { height: "100%", borderRadius: 2, backgroundColor: colors.accent },
+    number: { width: 52, textAlign: "right", color: colors.muted, fontSize: 13, fontVariant: ["tabular-nums"] },
+    value: { width: 56, textAlign: "right", color: colors.body, fontSize: 13, fontVariant: ["tabular-nums"] },
+  }),
+);

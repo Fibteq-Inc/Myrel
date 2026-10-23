@@ -49,7 +49,8 @@ export function Turnstile({ siteKey, onToken, resetKey }: { siteKey: string; onT
         if (cancelled || !ref.current) return;
         widget.current = turnstile.render(ref.current, {
           sitekey: siteKey,
-          theme: "auto",
+          // Matches the app, which may differ from the device when picked by hand in Settings.
+          theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
           callback: (token: string) => callback.current(token),
           "expired-callback": () => callback.current(null),
           "error-callback": () => callback.current(null),

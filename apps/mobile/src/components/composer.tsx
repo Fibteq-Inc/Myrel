@@ -9,7 +9,7 @@ import { platform } from "../lib/platform";
 import { useProject } from "../lib/project";
 import { filesQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
-import { colors, radius } from "../theme";
+import { makeStyles, radius, useColors, useTheme } from "../theme";
 import { errorMessage, Spinner } from "./ui";
 
 type Pending = { id: number; name: string; file?: ProjectFile; error?: string };
@@ -33,6 +33,9 @@ export function Composer({
   disabled?: boolean;
 }) {
   const t = useT();
+  const theme = useTheme();
+  const colors = useColors();
+  const styles = useStyles();
   const { api, server } = useSession();
   const { projectId } = useProject();
   const queryClient = useQueryClient();
@@ -121,6 +124,7 @@ export function Composer({
           onChangeText={setBody}
           placeholder={placeholder}
           placeholderTextColor={colors.subtle}
+          keyboardAppearance={theme}
           multiline
           style={styles.input}
           accessibilityLabel={placeholder}
@@ -132,49 +136,51 @@ export function Composer({
           onPress={send}
           style={[styles.send, !canSend && { opacity: 0.4 }]}
         >
-          <ArrowUp size={20} color={colors.fg} />
+          <ArrowUp size={20} color="#ffffff" />
         </Pressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  box: {
-    gap: 6,
-    marginHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: colors.raised,
-    paddingLeft: 6,
-    paddingRight: 8,
-    paddingVertical: 8,
-  },
-  row: { flexDirection: "row", alignItems: "flex-end", gap: 4 },
-  pending: { gap: 6, paddingHorizontal: 6 },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    maxWidth: 220,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: colors.ground,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  chipName: { color: colors.body, fontSize: 13, flexShrink: 1 },
-  attach: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  input: { flex: 1, maxHeight: 140, minHeight: 36, color: colors.fg, fontSize: 16, paddingTop: 8, paddingBottom: 8 },
-  send: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: "#3a4180",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    box: {
+      gap: 6,
+      marginHorizontal: 12,
+      marginBottom: 8,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.raised,
+      paddingLeft: 6,
+      paddingRight: 8,
+      paddingVertical: 8,
+    },
+    row: { flexDirection: "row", alignItems: "flex-end", gap: 4 },
+    pending: { gap: 6, paddingHorizontal: 6 },
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      maxWidth: 220,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.ground,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    chipName: { color: colors.body, fontSize: 13, flexShrink: 1 },
+    attach: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+    input: { flex: 1, maxHeight: 140, minHeight: 36, color: colors.fg, fontSize: 16, paddingTop: 8, paddingBottom: 8 },
+    send: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      backgroundColor: colors.send,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+  }),
+);

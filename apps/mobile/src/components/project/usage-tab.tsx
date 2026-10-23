@@ -6,7 +6,7 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native
 import { formatCost, formatTokens, modelName } from "../../lib/format";
 import { useProject } from "../../lib/project";
 import { useSession } from "../../lib/session";
-import { colors, radius } from "../../theme";
+import { makeStyles, radius, useColors } from "../../theme";
 import { errorMessage, Spinner } from "../ui";
 import { Empty } from "./empty";
 import { Tabs } from "./tabs";
@@ -16,6 +16,8 @@ type Range = (typeof USAGE_RANGES)[number];
 /** What this project's agents spent: totals, by model, and the costliest threads. */
 export function UsageTab() {
   const { t, locale } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
   const { api, server } = useSession();
   const { projectId } = useProject();
   const [days, setDays] = useState<Range>(30);
@@ -97,6 +99,7 @@ export function UsageTab() {
 }
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.stat}>
       <Text style={styles.statLabel}>{label}</Text>
@@ -107,6 +110,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
+  const styles = useStyles();
   return (
     <View style={{ gap: 8 }}>
       <Text style={styles.section}>{title}</Text>
@@ -116,6 +120,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function Line({ name, value, hint }: { name: string; value: string; hint: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.line}>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -129,39 +134,41 @@ function Line({ name, value, hint }: { name: string; value: string; hint: string
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  page: { padding: 16, gap: 20 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  stat: {
-    flexGrow: 1,
-    flexBasis: "45%",
-    gap: 4,
-    padding: 14,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  statLabel: { color: colors.subtle, fontSize: 12 },
-  statValue: { color: colors.fg, fontSize: 20, fontWeight: "600" },
-  hint: { color: colors.subtle, fontSize: 12 },
-  section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
-  card: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-    paddingHorizontal: 14,
-  },
-  line: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  lineName: { color: colors.fg, fontSize: 14 },
-  lineValue: { color: colors.body, fontSize: 14, fontVariant: ["tabular-nums"] },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    center: { flex: 1, alignItems: "center", justifyContent: "center" },
+    page: { padding: 16, gap: 20 },
+    grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    stat: {
+      flexGrow: 1,
+      flexBasis: "45%",
+      gap: 4,
+      padding: 14,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    statLabel: { color: colors.subtle, fontSize: 12 },
+    statValue: { color: colors.fg, fontSize: 20, fontWeight: "600" },
+    hint: { color: colors.subtle, fontSize: 12 },
+    section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
+    card: {
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+      paddingHorizontal: 14,
+    },
+    line: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.line,
+    },
+    lineName: { color: colors.fg, fontSize: 14 },
+    lineValue: { color: colors.body, fontSize: 14, fontVariant: ["tabular-nums"] },
+  }),
+);

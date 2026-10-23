@@ -32,7 +32,7 @@ export function RelayNote({ relay }: { relay: MessageRelay }) {
         <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} aria-hidden="true" />
       </button>
       {open && (
-        <div id={id} className="w-full rounded-xl border border-[#2b3060] bg-accent-soft/40 px-3.5 py-2.5 text-[13px]">
+        <div id={id} className="w-full rounded-xl border border-accent-line bg-accent-soft/40 px-3.5 py-2.5 text-[13px]">
           <div className="mb-1 flex items-center justify-between gap-2 text-xs text-subtle">
             <span>{t(`relay.kind.${relay.kind}`)}</span>
             <CopyButton text={relay.note} label={t("relay.copy")} />

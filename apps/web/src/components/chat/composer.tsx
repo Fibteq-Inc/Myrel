@@ -108,7 +108,7 @@ export function Composer({
       }}
     >
       <div
-        className="flex cursor-text flex-col gap-1 rounded-2xl border border-edge bg-raised px-3.5 pb-2 pt-3 shadow-[0_8px_24px_rgba(0,0,0,0.25)] transition-colors focus-within:border-[#3a3a44]"
+        className="flex cursor-text flex-col gap-1 rounded-2xl border border-edge bg-raised px-3.5 pb-2 pt-3 shadow-[0_8px_24px_rgba(0,0,0,0.25)] light:shadow-[0_8px_24px_rgba(20,20,30,0.08)] transition-colors focus-within:border-edge-strong"
         onClick={() => ref.current?.focus()}
       >
         <PendingAttachments

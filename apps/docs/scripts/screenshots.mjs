@@ -17,7 +17,9 @@ import { chromium } from "playwright";
 
 const WEB = process.env.MYREL_WEB ?? "http://localhost:5173";
 const FAKE_MODEL_PORT = Number(process.env.FAKE_MODEL_PORT ?? 9911);
-const OUT = fileURLToPath(new URL("../src/assets/screenshots/", import.meta.url));
+const OUT = process.env.SCREENSHOTS_OUT ?? fileURLToPath(new URL("../src/assets/screenshots/", import.meta.url));
+// The guide's pictures are dark; MYREL_THEME=light shoots the same screens in the light theme.
+const THEME = process.env.MYREL_THEME === "light" ? "light" : "dark";
 // The runner protocol version, read from its source so the fake computer stays in step.
 const protocolSource = await readFile(new URL("../../../packages/protocol/src/runner.ts", import.meta.url), "utf8");
 const PROTOCOL = Number(/RUNNER_PROTOCOL_VERSION = (\d+)/.exec(protocolSource)[1]);
@@ -113,7 +115,7 @@ const until = async (fn, what, tries = 200) => {
 
 // Playwright's own Chromium when installed (`npx playwright install chromium`), else the installed Chrome.
 const browser = await chromium.launch().catch(() => chromium.launch({ channel: "chrome" }));
-const context = await browser.newContext({ viewport: { width: 1200, height: 760 }, deviceScaleFactor: 2, colorScheme: "light" });
+const context = await browser.newContext({ viewport: { width: 1200, height: 760 }, deviceScaleFactor: 2, colorScheme: THEME });
 const page = await context.newPage();
 const api = async (path, init = {}) => {
   const res = await context.request.fetch(`${WEB}${path}`, {

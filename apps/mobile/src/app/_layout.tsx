@@ -1,25 +1,22 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DarkTheme, SplashScreen, Stack, ThemeProvider } from "expo-router";
+import { DarkTheme, DefaultTheme, SplashScreen, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { type ReactNode, useEffect, useMemo } from "react";
 import { AppI18n } from "../lib/i18n";
 import { unregisterPush } from "../lib/push";
 import { SessionProvider, useSession } from "../lib/session";
-import { colors } from "../theme";
+import { AppTheme } from "../lib/theme";
+import { useColors, useTheme } from "../theme";
 
 void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
 
-const theme = {
-  ...DarkTheme,
-  colors: { ...DarkTheme.colors, background: colors.ground, card: colors.ground, border: colors.line, primary: colors.accent, text: colors.fg },
-};
-
 export default function RootLayout() {
   return (
-    <ThemeProvider value={theme}>
-      <AppI18n>
+    <AppTheme>
+      <NavigationTheme>
+        <AppI18n>
         <QueryClientProvider client={queryClient}>
           <SessionProvider
             onSignOut={async (api) => {
@@ -31,16 +28,36 @@ export default function RootLayout() {
               }
             }}
           >
-            <StatusBar style="light" />
             <Routes />
           </SessionProvider>
         </QueryClientProvider>
-      </AppI18n>
+        </AppI18n>
+      </NavigationTheme>
+    </AppTheme>
+  );
+}
+
+/** The navigator's own colors (headers, cards, transitions) and the status bar, from the app theme. */
+function NavigationTheme({ children }: { children: ReactNode }) {
+  const theme = useTheme();
+  const colors = useColors();
+  const value = useMemo(() => {
+    const base = theme === "light" ? DefaultTheme : DarkTheme;
+    return {
+      ...base,
+      colors: { ...base.colors, background: colors.ground, card: colors.ground, border: colors.line, primary: colors.accent, text: colors.fg },
+    };
+  }, [theme, colors]);
+  return (
+    <ThemeProvider value={value}>
+      <StatusBar style={theme === "light" ? "dark" : "light"} />
+      {children}
     </ThemeProvider>
   );
 }
 
 function Routes() {
+  const colors = useColors();
   const { ready, user } = useSession();
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();

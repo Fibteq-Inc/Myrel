@@ -78,7 +78,7 @@ export function ProjectHeader() {
         role="tablist"
         aria-label={t("tabs.label")}
         onKeyDown={onTabKey}
-        className="flex flex-none items-center gap-0.5 rounded-[10px] border border-[#26262b] bg-[#131316] p-[3px]"
+        className="flex flex-none items-center gap-0.5 rounded-[10px] border border-card bg-well p-[3px]"
       >
         {TABS.map((tab) => {
           const selected = tab.id === view;
@@ -102,11 +102,11 @@ export function ProjectHeader() {
                       // The conversation is where work starts: it leads and stands apart.
                       "mr-1.5 font-semibold",
                       selected
-                        ? "bg-[#2b3366] text-[#dfe3ff] shadow-[inset_0_0_0_1px_#4a55a8]"
-                        : "text-[#b4beff] hover:bg-accent-soft",
+                        ? "bg-tab text-tab-fg shadow-[inset_0_0_0_1px_var(--color-tab-ring)]"
+                        : "text-link hover:bg-accent-soft",
                     )
                   : selected
-                    ? "bg-[#24242a] font-medium text-fg"
+                    ? "bg-selected font-medium text-fg"
                     : "text-muted hover:bg-hover hover:text-fg",
               )}
             >
@@ -242,7 +242,7 @@ function WorkingBadge({ count }: { count: number }) {
   const t = useT();
   if (count <= 0) return null;
   return (
-    <span className="flex flex-none items-center gap-1 whitespace-nowrap rounded-full bg-accent-soft px-1.5 py-px text-[11px] tabular-nums text-[#b4beff]">
+    <span className="flex flex-none items-center gap-1 whitespace-nowrap rounded-full bg-accent-soft px-1.5 py-px text-[11px] tabular-nums text-link">
       <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent" aria-hidden="true" />
       {t("sidebar.working", { count })}
     </span>
@@ -255,7 +255,7 @@ export function ProjectBadge({ name, size = 28 }: { name: string; size?: number 
     <span
       aria-hidden="true"
       style={{ width: size, height: size, fontSize: Math.round(size * 0.46) }}
-      className="flex flex-none items-center justify-center rounded-lg bg-accent-soft font-semibold text-[#b4beff]"
+      className="flex flex-none items-center justify-center rounded-lg bg-accent-soft font-semibold text-link"
     >
       {name.trim()[0]?.toLocaleUpperCase() ?? "?"}
     </span>
@@ -289,7 +289,7 @@ function ConnectionBadge({ status }: { status: SocketStatus }) {
     <span
       role="status"
       title={c.detail}
-      className="flex h-7 flex-none items-center gap-1.5 rounded-full border border-[#26262b] bg-[#16161a] px-2.5 text-xs text-muted"
+      className="flex h-7 flex-none items-center gap-1.5 rounded-full border border-card bg-well px-2.5 text-xs text-muted"
     >
       {status === "closed" ? (
         <WifiOff size={13} className="text-bad" aria-hidden="true" />

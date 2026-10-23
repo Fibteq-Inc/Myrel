@@ -1,3 +1,4 @@
+import { THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
 import type { BillingSummary } from "@myrel/protocol";
 import { useI18n } from "@myrel/i18n/react";
@@ -12,14 +13,20 @@ import type { PurchasesPackage } from "react-native-purchases";
 import { Button, errorMessage } from "../../components/ui";
 import * as purchases from "../../lib/purchases";
 import { useSession } from "../../lib/session";
-import { colors, radius } from "../../theme";
+import { useThemePreference } from "../../lib/theme";
+import { makeStyles, radius, useColors } from "../../theme";
 
 // The app's own policies, published by Fibteq; a self-hosted server's operator sets that server's terms.
 const LEGAL_SITE = "https://myrel.fibteq.io";
 
-/** Account, language and server, like the web settings' Account page. */
+const THEME_LABELS = { system: "settings.themeSystem", light: "settings.themeLight", dark: "settings.themeDark" } as const;
+
+/** Account, language, appearance and server, like the web settings' Account page. */
 export default function SettingsScreen() {
   const { t, locale, setLocale } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
+  const { preference, setPreference } = useThemePreference();
   const { user, server, info, signOut, deleteAccount } = useSession();
 
   function confirmSignOut() {
@@ -66,6 +73,21 @@ export default function SettingsScreen() {
         ))}
       </Section>
 
+      <Section title={t("settings.theme")} hint={t("settings.themeHint")}>
+        {THEME_PREFERENCES.map((p) => (
+          <Pressable
+            key={p}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: p === preference }}
+            onPress={() => setPreference(p)}
+            style={styles.option}
+          >
+            <Text style={styles.value}>{t(THEME_LABELS[p])}</Text>
+            {p === preference && <Check size={18} color={colors.accent} />}
+          </Pressable>
+        ))}
+      </Section>
+
       <Section title={t("settings.server")}>
         <Text style={styles.value}>{info?.name ?? ""}</Text>
         <Text style={styles.hint}>{t("server.current", { host: server.replace(/^https?:\/\//, "") })}</Text>
@@ -97,6 +119,8 @@ export default function SettingsScreen() {
  */
 function PlanSection() {
   const { t } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
   const { api, user, server } = useSession();
   const [busy, setBusy] = useState(false);
   const billing = useQuery({ queryKey: ["billing", server, user?.id], queryFn: () => api.getBilling(), enabled: Boolean(user) });
@@ -196,6 +220,8 @@ function PlanSection() {
 /** Which code is running (the build's own, or an EAS Update) and a way to fetch a newer update now. */
 function AppVersion() {
   const { t } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
   const [checking, setChecking] = useState(false);
   const version = Constants.expoConfig?.version ?? "";
   const running =
@@ -247,6 +273,8 @@ function AppVersion() {
 }
 
 function LegalLink({ label, url }: { label: string; url: string }) {
+  const colors = useColors();
+  const styles = useStyles();
   return (
     <Pressable onPress={() => void WebBrowser.openBrowserAsync(url)} accessibilityRole="link" style={styles.option}>
       <Text style={styles.value}>{label}</Text>
@@ -256,6 +284,7 @@ function LegalLink({ label, url }: { label: string; url: string }) {
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  const styles = useStyles();
   return (
     <View style={{ gap: 8 }}>
       <Text style={styles.section}>{title}</Text>
@@ -265,18 +294,20 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
-const styles = StyleSheet.create({
-  page: { padding: 16, gap: 24 },
-  section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
-  card: {
-    gap: 4,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-    padding: 14,
-  },
-  option: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 },
-  value: { color: colors.fg, fontSize: 15 },
-  hint: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    page: { padding: 16, gap: 24 },
+    section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
+    card: {
+      gap: 4,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+      padding: 14,
+    },
+    option: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 },
+    value: { color: colors.fg, fontSize: 15 },
+    hint: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
+  }),
+);

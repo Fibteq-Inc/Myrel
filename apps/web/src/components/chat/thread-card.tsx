@@ -17,7 +17,7 @@ export function ThreadCard({ projectId, thread, replies }: { projectId: string; 
     <Link
       to="/projects/$projectId/threads/$threadId"
       params={{ projectId, threadId: thread.id }}
-      className="group flex flex-col overflow-hidden rounded-xl border border-[#26262b] bg-raised text-fg transition-colors hover:border-edge"
+      className="group flex flex-col overflow-hidden rounded-xl border border-card bg-raised text-fg transition-colors hover:border-edge"
       activeProps={{ className: "border-accent/60" }}
     >
       <span className="flex items-center gap-2.5 px-3.5 py-3">
@@ -34,7 +34,7 @@ export function ThreadCard({ projectId, thread, replies }: { projectId: string; 
       </span>
       <span
         className={cn(
-          "flex items-center gap-2 border-t border-[#222227] bg-panel px-3.5 py-2 text-xs",
+          "flex items-center gap-2 border-t border-divider bg-panel px-3.5 py-2 text-xs",
           live ? "font-mono text-muted" : activity.tone,
         )}
       >

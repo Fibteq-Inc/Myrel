@@ -7,9 +7,11 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MyrelMark, Button, errorMessage, Input } from "../components/ui";
 import { useSession } from "../lib/session";
-import { colors } from "../theme";
+import { makeStyles, useColors } from "../theme";
 
 export default function LoginScreen() {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const session = useSession();
   const [editingServer, setEditingServer] = useState(session.server === "");
@@ -46,6 +48,8 @@ export default function LoginScreen() {
 
 /** Language choice before signing in, as on the web sign-in page. */
 export function LanguageSwitch() {
+  const colors = useColors();
+  const styles = useStyles();
   const { locale, setLocale } = useI18n();
   return (
     <View style={styles.languages} accessibilityRole="radiogroup">
@@ -70,6 +74,7 @@ function hostOf(origin: string) {
 
 /** Lets the user point the app at any Myrel server, e.g. a self-hosted one. */
 function ServerForm({ onDone }: { onDone: () => void }) {
+  const styles = useStyles();
   const t = useT();
   const session = useSession();
   const [value, setValue] = useState(session.server ? hostOf(session.server) : "");
@@ -117,6 +122,8 @@ function ServerForm({ onDone }: { onDone: () => void }) {
 }
 
 function SignInForm() {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const session = useSession();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -178,7 +185,7 @@ function SignInForm() {
                 hitSlop={10}
                 style={[styles.box, accepted && styles.boxOn]}
               >
-                {accepted && <Check size={14} color={colors.ground} strokeWidth={3} />}
+                {accepted && <Check size={14} color={colors.onAccent} strokeWidth={3} />}
               </Pressable>
               <Text style={[styles.hint, { flex: 1 }]}>
                 {t("login.accept.before")}
@@ -226,6 +233,7 @@ function SignInForm() {
 }
 
 function Offline() {
+  const styles = useStyles();
   const t = useT();
   const session = useSession();
   return (
@@ -237,30 +245,32 @@ function Offline() {
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flexGrow: 1, justifyContent: "center", padding: 24, gap: 28 },
-  brand: { alignItems: "center", gap: 12 },
-  brandName: { color: colors.fg, fontSize: 22, fontWeight: "600" },
-  form: { gap: 12 },
-  title: { color: colors.fg, fontSize: 22, fontWeight: "600" },
-  hint: { color: colors.subtle, fontSize: 14, lineHeight: 20 },
-  error: { color: colors.bad, fontSize: 14 },
-  accept: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  box: {
-    width: 20,
-    height: 20,
-    marginTop: 1,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  boxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  termsLink: { color: colors.link, textDecorationLine: "underline" },
-  serverRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  serverText: { flex: 1, color: colors.subtle, fontSize: 13 },
-  link: { color: colors.link, fontSize: 13 },
-  languages: { flexDirection: "row", justifyContent: "center", gap: 20 },
-  language: { color: colors.subtle, fontSize: 13 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    page: { flexGrow: 1, justifyContent: "center", padding: 24, gap: 28 },
+    brand: { alignItems: "center", gap: 12 },
+    brandName: { color: colors.fg, fontSize: 22, fontWeight: "600" },
+    form: { gap: 12 },
+    title: { color: colors.fg, fontSize: 22, fontWeight: "600" },
+    hint: { color: colors.subtle, fontSize: 14, lineHeight: 20 },
+    error: { color: colors.bad, fontSize: 14 },
+    accept: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+    box: {
+      width: 20,
+      height: 20,
+      marginTop: 1,
+      borderRadius: 5,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    boxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+    termsLink: { color: colors.link, textDecorationLine: "underline" },
+    serverRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+    serverText: { flex: 1, color: colors.subtle, fontSize: 13 },
+    link: { color: colors.link, fontSize: 13 },
+    languages: { flexDirection: "row", justifyContent: "center", gap: 20 },
+    language: { color: colors.subtle, fontSize: 13 },
+  }),
+);

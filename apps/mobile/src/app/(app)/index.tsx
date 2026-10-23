@@ -8,9 +8,11 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { Button, errorMessage, Input, Spinner, useRelativeTime } from "../../components/ui";
 import { formatCost } from "../../lib/format";
 import { useSession } from "../../lib/session";
-import { colors, radius } from "../../theme";
+import { makeStyles, radius, useColors } from "../../theme";
 
 export default function ProjectsScreen() {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const relativeTime = useRelativeTime();
   const { api, server } = useSession();
@@ -127,6 +129,8 @@ export default function ProjectsScreen() {
 
 /** What is going on in the project right now; nothing when it is idle. */
 function ProjectActivity({ project }: { project: Project }) {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const working = project.activity?.working ?? 0;
   const waiting = project.activity?.waiting ?? 0;
@@ -155,6 +159,7 @@ function ProjectActivity({ project }: { project: Project }) {
 
 /** This month's model cost, quiet beside the chevron; nothing until a call is priced. */
 function ProjectCost({ project }: { project: Project }) {
+  const styles = useStyles();
   const t = useT();
   const { locale } = useI18n();
   if (!project.cost?.totalMicros) return null;
@@ -169,36 +174,38 @@ function ProjectCost({ project }: { project: Project }) {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { padding: 16, gap: 8, flexGrow: 1 },
-  create: { gap: 10, marginBottom: 12 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.accentSoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  name: { color: colors.fg, fontSize: 16, fontWeight: "600" },
-  meta: { color: colors.subtle, fontSize: 13 },
-  activity: { flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 2, marginTop: 2 },
-  activityItem: { flexDirection: "row", alignItems: "center", gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  activityText: { fontSize: 13, fontWeight: "500" },
-  cost: { color: colors.subtle, fontSize: 13, fontVariant: ["tabular-nums"] },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
-  emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600" },
-  emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center", paddingHorizontal: 24 },
-  error: { color: colors.bad, fontSize: 14 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    list: { padding: 16, gap: 8, flexGrow: 1 },
+    create: { gap: 10, marginBottom: 12 },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 14,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    icon: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: colors.accentSoft,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    name: { color: colors.fg, fontSize: 16, fontWeight: "600" },
+    meta: { color: colors.subtle, fontSize: 13 },
+    activity: { flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 2, marginTop: 2 },
+    activityItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+    dot: { width: 6, height: 6, borderRadius: 3 },
+    activityText: { fontSize: 13, fontWeight: "500" },
+    cost: { color: colors.subtle, fontSize: 13, fontVariant: ["tabular-nums"] },
+    empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
+    emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600" },
+    emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center", paddingHorizontal: 24 },
+    error: { color: colors.bad, fontSize: 14 },
+  }),
+);

@@ -46,7 +46,7 @@ export function PullRequestCards({ pullRequests, fold = true }: { pullRequests: 
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="flex max-w-md items-center gap-1.5 rounded-xl border border-dashed border-[#26262b] px-3 py-2 text-left text-xs text-subtle transition-colors hover:border-edge hover:text-fg"
+          className="flex max-w-md items-center gap-1.5 rounded-xl border border-dashed border-card px-3 py-2 text-left text-xs text-subtle transition-colors hover:border-edge hover:text-fg"
         >
           {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
           {open ? (
@@ -54,7 +54,7 @@ export function PullRequestCards({ pullRequests, fold = true }: { pullRequests: 
           ) : (
             <>
               <span className="font-medium text-muted">{t("pr.more", { count: folded.length })}</span>
-              {merged > 0 && <span className="text-[#b49cff]">· {t("pr.mergedCount", { count: merged })}</span>}
+              {merged > 0 && <span className="text-merged">· {t("pr.mergedCount", { count: merged })}</span>}
               {closed > 0 && <span className="text-bad">· {t("pr.closedCount", { count: closed })}</span>}
             </>
           )}
@@ -68,7 +68,7 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
   const t = useT();
   const state =
     pr.state === "merged"
-      ? { icon: GitMerge, label: t("pr.merged"), className: "text-[#b49cff]" }
+      ? { icon: GitMerge, label: t("pr.merged"), className: "text-merged" }
       : pr.state === "closed"
         ? { icon: GitPullRequestClosed, label: t("pr.closed"), className: "text-bad" }
         : pr.draft
@@ -80,7 +80,7 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
       href={pr.url}
       target="_blank"
       rel="noreferrer"
-      className="group flex max-w-md items-center gap-3 rounded-xl border border-[#26262b] bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover"
+      className="group flex max-w-md items-center gap-3 rounded-xl border border-card bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover"
     >
       <span className={cn("flex size-9 flex-none items-center justify-center rounded-lg border border-edge bg-panel", state.className)}>
         <StateIcon size={17} aria-hidden="true" />

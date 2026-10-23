@@ -86,7 +86,7 @@ export function RunnerUpdate({ runner, latest }: { runner: Runner; latest: strin
     <div
       className={cn(
         "flex flex-col gap-2 rounded-lg border px-3 py-2.5",
-        tone === "bad" ? "border-[#4a2422] bg-[#1f1212]" : "border-edge bg-panel",
+        tone === "bad" ? "border-bad-line bg-bad-soft" : "border-edge bg-panel",
       )}
       role="status"
     >
@@ -220,12 +220,12 @@ export function RunnerSettingsPanel({ runner }: { runner: Runner }) {
             })}
           </div>
           {askFull && (
-            <div className="flex flex-col gap-2.5 rounded-lg border border-[#4a2422] bg-[#1f1212] px-3.5 py-3">
+            <div className="flex flex-col gap-2.5 rounded-lg border border-bad-line bg-bad-soft px-3.5 py-3">
               <p className="text-[13px] text-fg">{t("runnerSettings.fullConfirm", { name: runner.name })}</p>
               <div className="flex gap-2">
                 <GhostButton
                   type="button"
-                  className="border-[#4a2422] text-bad hover:bg-[#2a1616]"
+                  className="border-bad-line text-bad hover:bg-bad-hover"
                   onClick={() => {
                     setAskFull(false);
                     save.mutate({ settings: { access: "full" } });

@@ -222,7 +222,7 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
         const el = e.currentTarget;
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
-      className="flex max-h-[28rem] flex-col overflow-auto rounded-lg border border-line bg-[#08080a] px-3 py-2 font-mono text-[12px] leading-[1.6] text-body"
+      className="flex max-h-[28rem] flex-col overflow-auto rounded-lg border border-line bg-console px-3 py-2 font-mono text-[12px] leading-[1.6] text-body"
     >
       {lines.length === 0 && <span className="text-subtle">{t("tasks.waiting")}</span>}
       {lines.map((l, i) => (
