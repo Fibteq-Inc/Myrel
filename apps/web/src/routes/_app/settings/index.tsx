@@ -1,3 +1,4 @@
+import { isThemePreference, THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -8,6 +9,7 @@ import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { api, meQuery, platform, sessionQuery } from "../../../lib/api";
 import { currentPushSubscription } from "../../../lib/push";
+import { setThemePreference, useThemePreference } from "../../../lib/theme";
 import { Button, errorMessage, Input } from "../../../lib/ui";
 
 type SettingsSearch = { section?: string; connector?: string; result?: string; project?: string };
@@ -124,10 +126,37 @@ function AccountSettings() {
         </div>
       </Section>
 
+      <ThemeSection />
+
       {platform.updater && <AppUpdateSection updater={platform.updater} />}
 
       <DeleteAccount email={me.email} />
     </>
+  );
+}
+
+const THEME_LABELS = { system: "settings.themeSystem", light: "settings.themeLight", dark: "settings.themeDark" } as const;
+
+/** Light, dark or the device's theme; kept on this device like the language. */
+function ThemeSection() {
+  const t = useT();
+  const preference = useThemePreference();
+  return (
+    <Section title={t("settings.theme")} description={t("settings.themeHint")}>
+      <div className="max-w-60">
+        <Select
+          aria-label={t("settings.theme")}
+          value={preference}
+          onChange={(e) => isThemePreference(e.target.value) && setThemePreference(e.target.value)}
+        >
+          {THEME_PREFERENCES.map((p) => (
+            <option key={p} value={p}>
+              {t(THEME_LABELS[p])}
+            </option>
+          ))}
+        </Select>
+      </div>
+    </Section>
   );
 }
 

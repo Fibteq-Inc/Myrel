@@ -20,7 +20,7 @@ import { displayName, fileKind } from "../../../../lib/files";
 import { openWithSystem } from "../../../../lib/open-file";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
-import { colors, mono } from "../../../../theme";
+import { makeStyles, mono, useColors } from "../../../../theme";
 
 /** Largest text file shown in full; longer ones are cut. */
 const MAX_TEXT = 200_000;
@@ -46,6 +46,8 @@ function readBlob(blob: Blob, as: "text" | "dataURL") {
  */
 export default function FileScreen() {
   const { t } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
   const { path, local, thread } = useLocalSearchParams<{ path: string; local?: string; thread?: string }>();
   const { api, server } = useSession();
   const { projectId } = useProject();
@@ -148,7 +150,9 @@ function ZoomableImage({ uri, label, onOpen }: { uri: string; label: string; onO
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  code: { color: colors.body, fontFamily: mono, fontSize: 13, lineHeight: 19 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    center: { flex: 1, alignItems: "center", justifyContent: "center" },
+    code: { color: colors.body, fontFamily: mono, fontSize: 13, lineHeight: 19 },
+  }),
+);

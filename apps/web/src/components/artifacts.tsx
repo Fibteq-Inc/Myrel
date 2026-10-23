@@ -74,7 +74,7 @@ export function ArtifactCards({
         const version = a.version < latest ? a.version : undefined;
         const className = cn(
           "group flex max-w-md items-center gap-3 rounded-xl border bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover",
-          openId === a.artifactId ? "border-accent/60" : "border-[#26262b]",
+          openId === a.artifactId ? "border-accent/60" : "border-card",
         );
         const body = (
           <>

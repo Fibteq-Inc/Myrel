@@ -171,7 +171,7 @@ export function ThreadPanel({
       aria-label={thread ? t("threadPanel.label", { title: thread.title }) : t("threadPanel.labelEmpty")}
       style={panel.maximized ? undefined : { width: panel.width, maxWidth: `calc(100% - ${CHAT_MIN}px)` }}
       className={cn(
-        "relative flex min-w-0 flex-col border-line bg-[#0c0c0e]",
+        "relative flex min-w-0 flex-col border-line bg-sunken",
         "max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:!w-auto max-lg:!max-w-none",
         panel.maximized ? "flex-1" : "flex-none lg:border-l",
       )}
@@ -209,7 +209,7 @@ export function ThreadPanel({
                 <span className={cn("truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
                 {usage && usage.tokens > 0 && (
                   <>
-                    <span aria-hidden="true" className="text-[#3a3a42]">
+                    <span aria-hidden="true" className="text-edge-strong">
                       ·
                     </span>
                     <ThreadUsageLabel usage={usage} />
@@ -312,7 +312,7 @@ export function ThreadPanel({
               openArtifact={artifact}
               className={current ? "hidden" : "flex"}
             />
-            {current && <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[#0b0b0d]">{current.content}</div>}
+            {current && <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-sunken">{current.content}</div>}
           </div>
         </>
       )}
@@ -357,7 +357,7 @@ function Conversation({
     <section aria-label={t("thread.messages")} className={cn("min-w-0 flex-1 flex-col", className)}>
       {/* Stays once the work is done, so the finished plan is still one click away. */}
       {thread.statusText && (
-        <div className="flex-none border-b border-line bg-[#111114] px-5 py-2.5">
+        <div className="flex-none border-b border-line bg-panel px-5 py-2.5">
           <PlanProgress
             key={thread.id}
             planKey={`${thread.id}\n${thread.statusText.split("\n", 1)[0]}`}
@@ -449,7 +449,7 @@ function PanelMissing({ loading, onClose }: { loading: boolean; onClose: () => v
       ) : (
         <>
           <p>{t("thread.missing")}</p>
-          <button type="button" onClick={onClose} className="text-[#b4beff] hover:underline">
+          <button type="button" onClick={onClose} className="text-link hover:underline">
             {t("thread.backToChat")}
           </button>
         </>

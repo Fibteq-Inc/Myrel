@@ -73,7 +73,7 @@ export function ConfirmDialog({
           <button
             type="submit"
             disabled={!ready || busy}
-            className="inline-flex h-9 items-center justify-center rounded-lg bg-bad px-3 text-sm font-medium text-ground hover:bg-[#ff958e] disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-bad px-3 text-sm font-medium text-ground hover:bg-bad-bright disabled:opacity-50"
           >
             {busy ? (busyLabel ?? confirmLabel) : confirmLabel}
           </button>

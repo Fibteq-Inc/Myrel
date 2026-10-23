@@ -1,8 +1,13 @@
 /* Scan apps/web for classes even when another app (apps/desktop) builds this stylesheet. */
 @import "tailwindcss" source("..");
 
-/* Myrel is dark-first (see the design canvas); `dark:` variants always apply. */
-@custom-variant dark (&:where(.dark, .dark *));
+/*
+ * Two palettes behind the same tokens. The dark one lives in @theme; the light
+ * one swaps the values when lib/theme.ts sets data-theme="light" on <html>
+ * (the person's pick in Settings, else the device's). Components use only
+ * these tokens, never raw hex, so both themes stay readable.
+ */
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
 
 @theme {
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -25,6 +30,98 @@
   --color-ok: #4fcb8d;
   --color-warn: #f5b94a;
   --color-bad: #ff7b72;
+
+  /* Surfaces and lines between the base steps above. */
+  --color-sunken: #0b0b0d;
+  --color-console: #08080a;
+  --color-field: #19191d;
+  --color-well: #141417;
+  --color-menu: #17171b;
+  --color-option: #1a1a1e;
+  --color-selected: #24242a;
+  --color-card: #26262b;
+  --color-divider: #222227;
+  --color-frame: #2e2e34;
+  --color-edge-strong: #3a3a44;
+  --color-control: #34343b;
+  --color-check: #4a4a52;
+  --color-offline: #55555e;
+  /* Text and fills on top of the accent and status colors. */
+  --color-link: #b4beff;
+  --color-accent-hover: #a3b0ff;
+  --color-accent-line: #2b3060;
+  --color-tab: #2b3366;
+  --color-tab-fg: #dfe3ff;
+  --color-tab-ring: #4a55a8;
+  --color-merged: #b49cff;
+  --color-ok-soft: #0f1713;
+  --color-ok-line: #1e3b2c;
+  --color-warn-soft: #17150f;
+  --color-warn-line: #3b3218;
+  --color-warn-strong: #221e12;
+  --color-warn-hover: #2a2516;
+  --color-bad-soft: #1f1212;
+  --color-bad-line: #4a2422;
+  --color-bad-hover: #2a1616;
+  --color-bad-bright: #ff958e;
+  --color-danger: #e5484d;
+  --color-danger-hover: #d93f44;
+  --color-shadow: rgb(0 0 0 / 0.5);
+}
+
+:root[data-theme="light"] {
+  --color-ground: #fbfbfc;
+  --color-rail: #f1f1f4;
+  --color-panel: #f5f5f7;
+  --color-raised: #ffffff;
+  --color-bubble: #eeeef2;
+  --color-hover: #ececf0;
+  --color-line: #e4e4e9;
+  --color-edge: #d4d4db;
+  --color-fg: #111114;
+  --color-body: #2b2b31;
+  --color-muted: #55555e;
+  --color-subtle: #686872;
+  --color-accent: #4a55d6;
+  --color-accent-soft: #eceeff;
+  --color-ok: #15713f;
+  --color-warn: #935600;
+  --color-bad: #bf2e29;
+
+  --color-sunken: #f6f6f8;
+  --color-console: #f3f3f6;
+  --color-field: #ffffff;
+  --color-well: #efeff3;
+  --color-menu: #ffffff;
+  --color-option: #ffffff;
+  --color-selected: #e9e9ef;
+  --color-card: #e2e2e8;
+  --color-divider: #e9e9ee;
+  --color-frame: #d7d7de;
+  --color-edge-strong: #b9b9c3;
+  --color-control: #c9c9d1;
+  --color-check: #a1a1ab;
+  --color-offline: #a1a1aa;
+  --color-link: #3a45c4;
+  --color-accent-hover: #3d47c2;
+  --color-accent-line: #c8cdf8;
+  --color-tab: #e2e5ff;
+  --color-tab-fg: #2a339e;
+  --color-tab-ring: #b3baf3;
+  --color-merged: #7a3fd1;
+  --color-ok-soft: #edf8f2;
+  --color-ok-line: #b9e1ca;
+  --color-warn-soft: #fff8e8;
+  --color-warn-line: #eed49b;
+  --color-warn-strong: #fdefc8;
+  --color-warn-hover: #fbe7b5;
+  --color-bad-soft: #fff1f0;
+  --color-bad-line: #f1c2be;
+  --color-bad-hover: #fde3e1;
+  --color-bad-bright: #a82722;
+  --color-danger: #d1343a;
+  --color-danger-hover: #b92c32;
+  --color-shadow: rgb(20 20 30 / 0.14);
 }
 
 html,
@@ -64,7 +161,7 @@ body {
     @apply mt-1;
   }
   & a {
-    @apply text-[#b4beff] underline-offset-2 hover:underline;
+    @apply text-link underline-offset-2 hover:underline;
   }
   & strong {
     @apply font-semibold text-fg;
@@ -87,10 +184,13 @@ body {
   }
 }
 
-/* Dark browser UI: scrollbars, autofill and any control still drawn by the browser. */
+/* Browser-drawn UI (scrollbars, autofill) follows the theme; lib/theme.ts sets it per pick. */
 html {
   color-scheme: dark;
   accent-color: var(--color-accent);
+  &[data-theme="light"] {
+    color-scheme: light;
+  }
 }
 
 /*
@@ -145,9 +245,9 @@ html {
       padding: 6px;
       border: 1px solid var(--color-edge);
       border-radius: 12px;
-      background: #17171b;
+      background: var(--color-menu);
       color: var(--color-fg);
-      box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+      box-shadow: 0 12px 40px var(--color-shadow);
     }
     & option {
       display: flex;
@@ -165,7 +265,7 @@ html {
         outline: none;
       }
       &:checked {
-        background: #24242a;
+        background: var(--color-selected);
       }
       &::checkmark {
         order: 1;
@@ -184,7 +284,7 @@ html {
   width: 18px;
   height: 18px;
   margin: 0;
-  border: 1px solid #4a4a52;
+  border: 1px solid var(--color-check);
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
@@ -215,7 +315,7 @@ html {
   height: 20px;
   margin: 0;
   border-radius: 999px;
-  background: #34343b;
+  background: var(--color-control);
   cursor: pointer;
   transition: background-color 0.15s;
   &::before {

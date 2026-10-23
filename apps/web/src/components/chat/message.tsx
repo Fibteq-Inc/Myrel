@@ -38,7 +38,7 @@ export function MessageView({
     const [title, ...rest] = message.body.replace(/^⏰\s*/, "").split("\n");
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex items-start gap-2.5 rounded-xl border border-[#2b3060] bg-accent-soft/60 px-3.5 py-2.5 text-[13px] text-body">
+        <div className="flex items-start gap-2.5 rounded-xl border border-accent-line bg-accent-soft/60 px-3.5 py-2.5 text-[13px] text-body">
           <AlarmClock size={16} className="mt-0.5 flex-none text-accent" aria-hidden="true" />
           <span className="min-w-0">
             <span className="block text-xs text-subtle">{t("routines.notice", { name: title ?? "" })}</span>
@@ -52,7 +52,7 @@ export function MessageView({
 
   if (message.authorKind === "system") {
     return (
-      <div className="flex items-start gap-2.5 rounded-xl border border-[#3b3218] bg-[#17150f] px-3.5 py-2.5 text-[13px] text-body">
+      <div className="flex items-start gap-2.5 rounded-xl border border-warn-line bg-warn-soft px-3.5 py-2.5 text-[13px] text-body">
         <CircleAlert size={16} className="mt-0.5 flex-none text-warn" aria-hidden="true" />
         <span className="whitespace-pre-wrap">{message.body}</span>
       </div>

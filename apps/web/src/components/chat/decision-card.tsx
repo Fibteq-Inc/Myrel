@@ -52,7 +52,7 @@ export function DecisionCard({
       aria-labelledby={titleId}
       className={cn(
         "flex flex-col gap-2.5 rounded-xl border p-3.5",
-        answered ? "border-line bg-raised" : "border-[#3b3218] bg-[#17150f]",
+        answered ? "border-line bg-raised" : "border-warn-line bg-warn-soft",
       )}
     >
       <div className={cn("flex items-center gap-2 text-xs", answered ? "text-subtle" : "text-warn")}>
@@ -80,8 +80,8 @@ export function DecisionCard({
                     ? "border-accent/60 bg-accent-soft"
                     : "border-line bg-transparent opacity-60"
                   : recommended
-                    ? "border-warn bg-[#221e12] hover:bg-[#2a2516]"
-                    : "border-[#2e2e34] bg-[#1a1a1e] hover:bg-hover",
+                    ? "border-warn bg-warn-strong hover:bg-warn-hover"
+                    : "border-frame bg-option hover:bg-hover",
                 !answered && onChoose ? "cursor-pointer" : "cursor-default",
               )}
             >

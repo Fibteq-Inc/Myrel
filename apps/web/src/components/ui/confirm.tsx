@@ -68,7 +68,7 @@ function ConfirmDialog({ title, body, action, danger, onDone }: ConfirmOptions &
       aria-describedby={body ? "confirm-body" : undefined}
       onClose={() => finish(false)}
       onClick={(e) => e.target === e.currentTarget && finish(false)}
-      className="m-auto w-[min(420px,calc(100vw-32px))] rounded-2xl border border-edge bg-[#17171b] p-0 text-fg shadow-[0_16px_48px_rgba(0,0,0,0.55)] backdrop:bg-black/60"
+      className="m-auto w-[min(420px,calc(100vw-32px))] rounded-2xl border border-edge bg-menu p-0 text-fg shadow-[0_16px_48px_var(--color-shadow)] backdrop:bg-black/60"
     >
       <form
         method="dialog"
@@ -93,7 +93,7 @@ function ConfirmDialog({ title, body, action, danger, onDone }: ConfirmOptions &
           {danger ? (
             <button
               type="submit"
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-[#e5484d] px-3 text-sm font-medium text-white hover:bg-[#d93f44]"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-danger px-3 text-sm font-medium text-white hover:bg-danger-hover"
             >
               {action}
             </button>

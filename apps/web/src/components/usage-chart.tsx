@@ -128,7 +128,7 @@ function Tooltip(props: {
     <div
       role="status"
       style={{ left, width: w }}
-      className="pointer-events-none absolute top-0 rounded-lg border border-edge bg-bubble px-3 py-2 text-xs shadow-xl shadow-black/40"
+      className="pointer-events-none absolute top-0 rounded-lg border border-edge bg-bubble px-3 py-2 text-xs shadow-xl shadow-shadow"
     >
       <div className="mb-1.5 font-medium text-fg">{props.title}</div>
       {props.rows.map((r) => (

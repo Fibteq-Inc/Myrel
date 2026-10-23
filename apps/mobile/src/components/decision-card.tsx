@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { CircleCheck, CircleHelp } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { chosenOption, type Decision } from "../lib/decision";
-import { colors, radius } from "../theme";
+import { makeStyles, radius, useColors } from "../theme";
 
 /**
  * A question with 2 to 4 options, one recommended. One tap sends the option's
@@ -21,6 +21,8 @@ export function DecisionCard({
   onChoose?: (label: string) => void;
 }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const answered = answer !== undefined;
   const chosen = chosenOption(decision, answer);
 
@@ -92,32 +94,34 @@ export function DecisionCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: { gap: 12, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
-  cardOpen: { borderColor: colors.warnLine, backgroundColor: colors.warnSoft },
-  cardAnswered: { borderColor: colors.line, backgroundColor: colors.raised },
-  compact: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    columnGap: 8,
-    rowGap: 4,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  compactQuestion: { flexShrink: 1, color: colors.muted, fontSize: 14, lineHeight: 20 },
-  compactPick: { marginLeft: "auto", color: colors.fg, fontSize: 14, fontWeight: "600" },
-  kicker: { flexDirection: "row", alignItems: "center", gap: 8 },
-  question: { color: colors.fg, fontSize: 16, fontWeight: "600", lineHeight: 22 },
-  option: { gap: 3, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },
-  optionPlain: { borderColor: "#2e2e34", backgroundColor: "#1a1a1e" },
-  optionRecommended: { borderColor: colors.warn, backgroundColor: "#221e12" },
-  optionPicked: { borderColor: "rgba(139,155,255,0.6)", backgroundColor: colors.accentSoft },
-  optionFaded: { borderColor: colors.line, opacity: 0.6 },
-  optionHead: { flexDirection: "row", alignItems: "center", gap: 8 },
-  optionLabel: { color: colors.fg, fontSize: 15, fontWeight: "600" },
-  recommended: { color: colors.warn, fontSize: 13 },
-  consequence: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    card: { gap: 12, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
+    cardOpen: { borderColor: colors.warnLine, backgroundColor: colors.warnSoft },
+    cardAnswered: { borderColor: colors.line, backgroundColor: colors.raised },
+    compact: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      columnGap: 8,
+      rowGap: 4,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    compactQuestion: { flexShrink: 1, color: colors.muted, fontSize: 14, lineHeight: 20 },
+    compactPick: { marginLeft: "auto", color: colors.fg, fontSize: 14, fontWeight: "600" },
+    kicker: { flexDirection: "row", alignItems: "center", gap: 8 },
+    question: { color: colors.fg, fontSize: 16, fontWeight: "600", lineHeight: 22 },
+    option: { gap: 3, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },
+    optionPlain: { borderColor: colors.frame, backgroundColor: colors.option },
+    optionRecommended: { borderColor: colors.warn, backgroundColor: colors.warnStrong },
+    optionPicked: { borderColor: colors.accentBorder, backgroundColor: colors.accentSoft },
+    optionFaded: { borderColor: colors.line, opacity: 0.6 },
+    optionHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+    optionLabel: { color: colors.fg, fontSize: 15, fontWeight: "600" },
+    recommended: { color: colors.warn, fontSize: 13 },
+    consequence: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  }),
+);

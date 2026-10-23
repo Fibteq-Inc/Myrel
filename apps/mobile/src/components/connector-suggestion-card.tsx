@@ -9,7 +9,7 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { platform } from "../lib/platform";
 import { useApi } from "../lib/session";
-import { colors, radius } from "../theme";
+import { makeStyles, radius, useColors } from "../theme";
 import { Button, errorMessage, Input } from "./ui";
 
 /**
@@ -28,6 +28,8 @@ export function ConnectorSuggestionCard({
 }) {
   const t = useT();
   const api = useApi();
+  const colors = useColors();
+  const styles = useStyles();
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const connect = useMutation({
@@ -144,21 +146,23 @@ export function ConnectorSuggestionCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: { gap: 12, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
-  cardOpen: { borderColor: "rgba(139,155,255,0.4)", backgroundColor: "rgba(30,33,66,0.35)" },
-  cardDone: { borderColor: colors.line, backgroundColor: colors.raised },
-  kicker: { flexDirection: "row", alignItems: "center", gap: 8 },
-  reason: { color: colors.body, fontSize: 15, lineHeight: 21 },
-  offer: { gap: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.panel, padding: 12 },
-  offerPicked: { borderColor: "rgba(139,155,255,0.6)", backgroundColor: colors.accentSoft },
-  offerHead: { flexDirection: "row", alignItems: "center", gap: 10 },
-  icon: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.hover, alignItems: "center", justifyContent: "center" },
-  iconText: { color: colors.muted, fontSize: 15, fontWeight: "600" },
-  name: { color: colors.fg, fontSize: 15, fontWeight: "600" },
-  description: { color: colors.muted, fontSize: 13, lineHeight: 18 },
-  note: { color: colors.subtle, fontSize: 12, lineHeight: 17 },
-  warn: { color: colors.warn, fontSize: 14 },
-  link: { color: colors.link, fontWeight: "600" },
-  bad: { color: colors.bad, fontSize: 14 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    card: { gap: 12, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
+    cardOpen: { borderColor: colors.accentBorderSoft, backgroundColor: colors.accentWash },
+    cardDone: { borderColor: colors.line, backgroundColor: colors.raised },
+    kicker: { flexDirection: "row", alignItems: "center", gap: 8 },
+    reason: { color: colors.body, fontSize: 15, lineHeight: 21 },
+    offer: { gap: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.panel, padding: 12 },
+    offerPicked: { borderColor: colors.accentBorder, backgroundColor: colors.accentSoft },
+    offerHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+    icon: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.hover, alignItems: "center", justifyContent: "center" },
+    iconText: { color: colors.muted, fontSize: 15, fontWeight: "600" },
+    name: { color: colors.fg, fontSize: 15, fontWeight: "600" },
+    description: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+    note: { color: colors.subtle, fontSize: 12, lineHeight: 17 },
+    warn: { color: colors.warn, fontSize: 14 },
+    link: { color: colors.link, fontWeight: "600" },
+    bad: { color: colors.bad, fontSize: 14 },
+  }),
+);

@@ -72,7 +72,7 @@ function DevicesPage() {
                 </IconButton>
               </div>
               {newRunner ? (
-                <div className="flex items-center gap-3 rounded-lg border border-[#1f3b2d] bg-[#0f1a14] px-3.5 py-3">
+                <div className="flex items-center gap-3 rounded-lg border border-ok-line bg-ok-soft px-3.5 py-3">
                   <OnlineDot online={newRunner.online} />
                   <span className="min-w-0 flex-1">
                     {newRunner.online
@@ -150,7 +150,7 @@ function RunnerRow({ runner, latest, onRemoved }: { runner: Runner; latest: stri
             </GhostButton>
             <GhostButton
               type="button"
-              className="border-[#4a2422] text-bad hover:bg-[#1f1212]"
+              className="border-bad-line text-bad hover:bg-bad-soft"
               disabled={remove.isPending}
               onClick={() => remove.mutate()}
             >

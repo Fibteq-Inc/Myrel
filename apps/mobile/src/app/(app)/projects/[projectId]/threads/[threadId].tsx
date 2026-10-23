@@ -11,10 +11,12 @@ import { ThreadStatusIcon } from "../../../../../components/thread-status";
 import { formatCost, formatTokens } from "../../../../../lib/format";
 import { useProject } from "../../../../../lib/project";
 import { useSession } from "../../../../../lib/session";
-import { colors } from "../../../../../theme";
+import { makeStyles, useColors } from "../../../../../theme";
 import { useNames } from "../../../../../lib/use-names";
 
 export default function ThreadScreen() {
+  const colors = useColors();
+  const styles = useStyles();
   const t = useT();
   const { threadId } = useLocalSearchParams<{ threadId: string }>();
   const { user } = useSession();
@@ -118,25 +120,27 @@ export default function ThreadScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  title: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 },
-  titleLines: { flexShrink: 1 },
-  titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", flexShrink: 1 },
-  usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"] },
-  resolve: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  panel: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-    backgroundColor: colors.panel,
-  },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    title: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 },
+    titleLines: { flexShrink: 1 },
+    titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", flexShrink: 1 },
+    usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"] },
+    resolve: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    panel: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.line,
+      backgroundColor: colors.panel,
+    },
+  }),
+);

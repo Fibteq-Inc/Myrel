@@ -5,14 +5,17 @@ import { AppWindow, Blocks, ChevronRight } from "lucide-react-native";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useOpenArtifact } from "../../lib/links";
 import { useProject } from "../../lib/project";
-import { colors, radius } from "../../theme";
-import { artifactCardStyles } from "../artifact-card";
+import { makeStyles, radius, useColors } from "../../theme";
+import { useArtifactCardStyles } from "../artifact-card";
 import { useRelativeTime } from "../ui";
 import { Empty } from "./empty";
 
 /** The project's Library: every artifact its threads published. */
 export function ArtifactsTab() {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
+  const artifactCardStyles = useArtifactCardStyles();
   const relativeTime = useRelativeTime();
   const { projectId, state } = useProject();
   const open = useOpenArtifact(projectId);
@@ -68,19 +71,21 @@ export function ArtifactsTab() {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { padding: 16, gap: 8 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 12,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  title: { color: colors.fg, fontSize: 15, fontWeight: "600" },
-  description: { color: colors.muted, fontSize: 13, lineHeight: 18 },
-  meta: { color: colors.subtle, fontSize: 12 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    list: { padding: 16, gap: 8 },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 12,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    title: { color: colors.fg, fontSize: 15, fontWeight: "600" },
+    description: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+    meta: { color: colors.subtle, fontSize: 12 },
+  }),
+);

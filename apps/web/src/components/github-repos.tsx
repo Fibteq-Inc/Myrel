@@ -100,7 +100,7 @@ function ConnectCard({ returnTo }: { returnTo: string }) {
       <div className="flex flex-wrap items-center gap-2">
         <a
           href={api.githubConnectUrl("install", returnTo)}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-fg px-3 text-sm font-medium text-ground hover:bg-white"
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-fg px-3 text-sm font-medium text-ground hover:bg-fg/85"
         >
           <GithubMark />
           {t("github.connect")}
@@ -274,7 +274,7 @@ function Notice({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
     <div
       className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-[13px] text-body ${
-        ok ? "border-[#1e3b2c] bg-[#0f1713]" : "border-[#3b3218] bg-[#17150f]"
+        ok ? "border-ok-line bg-ok-soft" : "border-warn-line bg-warn-soft"
       }`}
     >
       {ok ? (

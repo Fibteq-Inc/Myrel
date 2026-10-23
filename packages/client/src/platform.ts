@@ -77,6 +77,8 @@ export interface Platform {
   computer?: LocalComputer;
   /** Desktop only: the app's version and in-app updates. */
   updater?: AppUpdater;
+  /** Desktop only: draws the window frame light or dark; null follows the OS. */
+  setWindowTheme?(theme: "light" | "dark" | null): void | Promise<void>;
 }
 
 /** Key/value store over Web Storage; falls back to memory when storage is blocked. */

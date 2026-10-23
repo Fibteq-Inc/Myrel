@@ -8,7 +8,7 @@ import { WebView } from "react-native-webview";
 import { errorMessage, Spinner } from "../../components/ui";
 import { platform } from "../../lib/platform";
 import { useSession } from "../../lib/session";
-import { colors } from "../../theme";
+import { useColors } from "../../theme";
 
 type Params = { url?: string; projectId?: string; artifactId?: string; version?: string };
 
@@ -19,6 +19,7 @@ type Params = { url?: string; projectId?: string; artifactId?: string; version?:
  * the system browser.
  */
 export default function ArtifactScreen() {
+  const colors = useColors();
   const t = useT();
   const { api, server } = useSession();
   const params = useLocalSearchParams<Params>();
@@ -101,6 +102,7 @@ function Centered({ children }: { children: ReactNode }) {
 }
 
 function Message({ title, body }: { title: string; body?: string }) {
+  const colors = useColors();
   return (
     <View style={{ padding: 24, gap: 6 }}>
       <Text style={{ color: colors.fg, fontSize: 16, fontWeight: "600" }}>{title}</Text>

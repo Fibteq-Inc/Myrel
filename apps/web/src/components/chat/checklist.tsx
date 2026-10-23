@@ -29,7 +29,7 @@ export function Checklist({ text, live = true, fresh }: { text: string; live?: b
         aria-valuemin={0}
         aria-valuemax={total}
         aria-valuenow={done}
-        className="h-1 overflow-hidden rounded bg-[#222227]"
+        className="h-1 overflow-hidden rounded bg-divider"
       >
         <div className="h-full rounded bg-accent transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
       </div>
@@ -188,7 +188,7 @@ export function PlanProgress({
           aria-valuemin={0}
           aria-valuemax={total}
           aria-valuenow={done}
-          className="block h-1 w-full overflow-hidden rounded bg-[#222227]"
+          className="block h-1 w-full overflow-hidden rounded bg-divider"
         >
           <span className="block h-full rounded bg-accent transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
         </span>

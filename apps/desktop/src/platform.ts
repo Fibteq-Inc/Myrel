@@ -1,5 +1,6 @@
 import type { KeyValueStore, PickedFile, Platform } from "@myrel/client";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -121,5 +122,6 @@ export function desktopPlatform(): Platform {
     pickFiles,
     computer: desktopComputer(),
     updater: desktopUpdater(),
+    setWindowTheme: (theme) => getCurrentWindow().setTheme(theme),
   };
 }

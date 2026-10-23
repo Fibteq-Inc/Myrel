@@ -4,7 +4,7 @@ import { Cloud, Laptop } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatCost, formatDuration, formatTokens, modelName } from "../lib/format";
-import { colors, mono, radius } from "../theme";
+import { makeStyles, mono, radius, useColors } from "../theme";
 
 const HARNESS_NAMES: Record<string, string> = { ...CLI_NAMES, opencode: "OpenCode", "claude-code": "Claude Code", shell: "Shell" };
 const harnessName = (h: string) => HARNESS_NAMES[h] ?? h;
@@ -15,6 +15,8 @@ const harnessName = (h: string) => HARNESS_NAMES[h] ?? h;
  */
 export function MessageStatsLine({ stats }: { stats: MessageStats }) {
   const { t, locale } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
   const [open, setOpen] = useState(false);
   const { task } = stats;
   const durationMs = stats.durationMs + (task?.durationMs ?? 0);
@@ -67,6 +69,7 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
 }
 
 function Row({ label, value, mono: isMono = false }: { label: string; value: string; mono?: boolean }) {
+  const styles = useStyles();
   return (
     <View style={styles.row}>
       <Text style={styles.label}>{label}</Text>
@@ -77,20 +80,22 @@ function Row({ label, value, mono: isMono = false }: { label: string; value: str
   );
 }
 
-const styles = StyleSheet.create({
-  line: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", maxWidth: "100%" },
-  text: { color: colors.subtle, fontSize: 12, flexShrink: 1 },
-  box: {
-    marginTop: 6,
-    gap: 4,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  row: { flexDirection: "row", gap: 12 },
-  label: { color: colors.subtle, fontSize: 12, width: 96 },
-  value: { color: colors.body, fontSize: 12, flex: 1 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    line: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", maxWidth: "100%" },
+    text: { color: colors.subtle, fontSize: 12, flexShrink: 1 },
+    box: {
+      marginTop: 6,
+      gap: 4,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.panel,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    row: { flexDirection: "row", gap: 12 },
+    label: { color: colors.subtle, fontSize: 12, width: 96 },
+    value: { color: colors.body, fontSize: 12, flex: 1 },
+  }),
+);

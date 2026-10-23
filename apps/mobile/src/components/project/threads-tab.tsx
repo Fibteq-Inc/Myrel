@@ -6,7 +6,7 @@ import { ListTree } from "lucide-react-native";
 import { useMemo } from "react";
 import { Pressable, SectionList, StyleSheet, Text, View } from "react-native";
 import { useProject } from "../../lib/project";
-import { colors, radius } from "../../theme";
+import { makeStyles, radius, useColors } from "../../theme";
 import { threadActivity, ThreadStatusIcon } from "../thread-status";
 import { useRelativeTime } from "../ui";
 import { Empty } from "./empty";
@@ -14,6 +14,8 @@ import { Empty } from "./empty";
 /** Every thread in the project: open ones first, most recently active on top. */
 export function ThreadsTab() {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const router = useRouter();
   const relativeTime = useRelativeTime();
   const { projectId, state } = useProject();
@@ -37,7 +39,7 @@ export function ThreadsTab() {
       stickySectionHeadersEnabled={false}
       renderSectionHeader={({ section }) => <Text style={styles.section}>{section.title}</Text>}
       renderItem={({ item }) => {
-        const activity = threadActivity(item, t);
+        const activity = threadActivity(item, t, colors);
         return (
           <Pressable
             accessibilityRole="button"
@@ -66,19 +68,21 @@ export function ThreadsTab() {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { padding: 16, gap: 8 },
-  section: { color: colors.subtle, fontSize: 13, fontWeight: "600", marginTop: 8, marginBottom: 2 },
-  row: {
-    flexDirection: "row",
-    gap: 12,
-    padding: 14,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  title: { color: colors.fg, fontSize: 15, fontWeight: "600" },
-  activity: { fontSize: 13 },
-  meta: { color: colors.subtle, fontSize: 12 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    list: { padding: 16, gap: 8 },
+    section: { color: colors.subtle, fontSize: 13, fontWeight: "600", marginTop: 8, marginBottom: 2 },
+    row: {
+      flexDirection: "row",
+      gap: 12,
+      padding: 14,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    title: { color: colors.fg, fontSize: 15, fontWeight: "600" },
+    activity: { fontSize: 13 },
+    meta: { color: colors.subtle, fontSize: 12 },
+  }),
+);

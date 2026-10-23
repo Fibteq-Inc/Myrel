@@ -20,7 +20,7 @@ const config: ExpoConfig = {
   orientation: "portrait",
   // Four-petal mark, rendered from assets/icon.svg; re-export the PNGs when it changes.
   icon: "./assets/icon.png",
-  userInterfaceStyle: "dark",
+  userInterfaceStyle: "automatic",
   backgroundColor: "#0e0e10",
   ios: {
     bundleIdentifier: "io.fibteq.myrel",

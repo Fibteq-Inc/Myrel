@@ -7,7 +7,7 @@ import { Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type Vie
 import { type MarkedStyles, Renderer, useMarkdown } from "react-native-marked";
 import { DECISION_LANG, parseDecision } from "../lib/decision";
 import { useFileRefContext } from "../lib/file-refs";
-import { colors, mono, radius } from "../theme";
+import { makeStyles, mono, radius, useColors, useTheme } from "../theme";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
@@ -45,6 +45,7 @@ class MyrelRenderer extends Renderer {
 
 /** Inline code naming a file: tappable when the file can be opened (see useOpenLink), otherwise just code. */
 function FileCodespan({ text, style, onLink }: { text: string; style?: TextStyle; onLink: (href: string) => void }) {
+  const styles = useStyles();
   const file = resolveFileCode(text, useFileRefContext());
   if (!file) {
     return (
@@ -72,6 +73,8 @@ function CodeBlock({
   textStyle?: TextStyle;
 }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   return (
     <View style={[containerStyle, styles.code]}>
       <View style={styles.codeHead}>
@@ -94,7 +97,7 @@ function CodeBlock({
   );
 }
 
-const markedStyles: MarkedStyles = {
+const useMarkedStyles = makeStyles((colors): MarkedStyles => ({
   text: { color: colors.body, fontSize: 16, lineHeight: 24 },
   paragraph: { paddingVertical: 0, marginBottom: 10 },
   strong: { color: colors.fg, fontWeight: "600" },
@@ -111,7 +114,7 @@ const markedStyles: MarkedStyles = {
   hr: { backgroundColor: colors.line, marginVertical: 12 },
   table: { borderColor: colors.line },
   tableCell: { borderColor: colors.line, padding: 6 },
-};
+}));
 
 /** Agent message markdown. */
 export function MessageMarkdown({
@@ -123,6 +126,8 @@ export function MessageMarkdown({
   decision?: DecisionHandlers;
   onLink: (href: string) => void;
 }) {
+  const theme = useTheme();
+  const markedStyles = useMarkedStyles();
   const hasDecision = decision !== undefined;
   const answer = decision?.answer;
   const onChoose = decision?.onChoose;
@@ -131,29 +136,31 @@ export function MessageMarkdown({
     () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink),
     [hasDecision, answer, onChoose, onLink],
   );
-  const elements = useMarkdown(body, { colorScheme: "dark", renderer, styles: markedStyles });
+  const elements = useMarkdown(body, { colorScheme: theme, renderer, styles: markedStyles });
   return <View>{elements}</View>;
 }
 
-const styles = StyleSheet.create({
-  code: {
-    padding: 0,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: "#0b0b0d",
-    overflow: "hidden",
-  },
-  codeHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-  },
-  codeLang: { color: colors.subtle, fontFamily: mono, fontSize: 13 },
-  codeText: { fontFamily: mono, fontSize: 13, lineHeight: 19, color: colors.body },
-  fileCode: { color: colors.link, textDecorationLine: "underline" },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    code: {
+      padding: 0,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.sunken,
+      overflow: "hidden",
+    },
+    codeHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.line,
+    },
+    codeLang: { color: colors.subtle, fontFamily: mono, fontSize: 13 },
+    codeText: { fontFamily: mono, fontSize: 13, lineHeight: 19, color: colors.body },
+    fileCode: { color: colors.link, textDecorationLine: "underline" },
+  }),
+);

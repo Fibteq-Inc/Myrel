@@ -6,7 +6,7 @@ import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleShe
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
-import { colors } from "../theme";
+import { makeStyles, useColors } from "../theme";
 import { PlanCard, PlanUpdateNote } from "./checklist";
 import { Composer } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
@@ -56,6 +56,8 @@ export function Conversation({
   empty?: ReactNode;
 }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const openLink = useOpenLink(projectId, threadId);
   const openArtifact = useOpenArtifact(projectId);
@@ -159,21 +161,23 @@ export function Conversation({
 /** How far from the newest message (in px) the reader has to be before the "jump to latest" button shows. */
 const AWAY = 400;
 
-const styles = StyleSheet.create({
-  list: { paddingHorizontal: 16, paddingVertical: 16, gap: 22, flexGrow: 1 },
-  // Inverted lists flip their children; flip the empty state back.
-  toEnd: {
-    position: "absolute",
-    bottom: 12,
-    alignSelf: "center",
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: colors.raised,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", transform: [{ scaleY: -1 }] },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    list: { paddingHorizontal: 16, paddingVertical: 16, gap: 22, flexGrow: 1 },
+    // Inverted lists flip their children; flip the empty state back.
+    toEnd: {
+      position: "absolute",
+      bottom: 12,
+      alignSelf: "center",
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.raised,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    empty: { flex: 1, alignItems: "center", justifyContent: "center", transform: [{ scaleY: -1 }] },
+  }),
+);

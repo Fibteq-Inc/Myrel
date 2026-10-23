@@ -28,7 +28,7 @@ export function ProjectThreads() {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-3 py-6 sm:px-5">
         <div className="flex gap-2">
-          <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[#26262b] bg-[#19191d] px-3 text-subtle focus-within:border-edge">
+          <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-card bg-field px-3 text-subtle focus-within:border-edge">
             <Search size={15} aria-hidden="true" />
             <input
               type="search"
@@ -46,7 +46,7 @@ export function ProjectThreads() {
           <button
             type="button"
             onClick={() => go("chat")}
-            className="flex h-10 flex-none items-center gap-2 rounded-lg border border-[#26262b] bg-[#19191d] px-3 text-[13px] text-fg hover:bg-hover"
+            className="flex h-10 flex-none items-center gap-2 rounded-lg border border-card bg-field px-3 text-[13px] text-fg hover:bg-hover"
           >
             <SquarePen size={15} aria-hidden="true" />
             <span className="max-sm:sr-only">{t("sidebar.newRequest")}</span>

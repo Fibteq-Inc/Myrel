@@ -148,7 +148,7 @@ function Row({ label, value, mono = false }: { label: string; value: string; mon
 
 function Dot() {
   return (
-    <span aria-hidden="true" className="text-[#3a3a42]">
+    <span aria-hidden="true" className="text-edge-strong">
       ·
     </span>
   );

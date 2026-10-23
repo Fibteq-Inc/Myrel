@@ -8,13 +8,15 @@ import { formatBytes } from "../../lib/format";
 import { useProject } from "../../lib/project";
 import { filesQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
-import { colors, radius } from "../../theme";
+import { makeStyles, radius, useColors } from "../../theme";
 import { errorMessage, Spinner, useRelativeTime } from "../ui";
 import { Empty } from "./empty";
 
 /** The project's shared files; tapping one previews it. */
 export function FilesTab() {
   const { t, locale } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
   const router = useRouter();
   const relativeTime = useRelativeTime();
   const { api, server } = useSession();
@@ -65,20 +67,22 @@ export function FilesTab() {
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  list: { padding: 16, gap: 8, flexGrow: 1 },
-  intro: { color: colors.subtle, fontSize: 13, marginBottom: 4 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 12,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.raised,
-  },
-  name: { color: colors.fg, fontSize: 14, fontWeight: "500" },
-  meta: { color: colors.subtle, fontSize: 12 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    center: { flex: 1, alignItems: "center", justifyContent: "center" },
+    list: { padding: 16, gap: 8, flexGrow: 1 },
+    intro: { color: colors.subtle, fontSize: 13, marginBottom: 4 },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 12,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    name: { color: colors.fg, fontSize: 14, fontWeight: "500" },
+    meta: { color: colors.subtle, fontSize: 12 },
+  }),
+);

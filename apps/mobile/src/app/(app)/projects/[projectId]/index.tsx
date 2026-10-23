@@ -14,13 +14,14 @@ import { ThreadCard } from "../../../../components/thread-card";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
 import { useNames } from "../../../../lib/use-names";
-import { colors } from "../../../../theme";
+import { makeStyles } from "../../../../theme";
 
 type Tab = "chat" | "threads" | "artifacts" | "files" | "usage";
 
 /** A project: its conversation and the Threads, Artifacts, Files and Usage tabs, as on the web. */
 export default function ProjectScreen() {
   const t = useT();
+  const styles = useStyles();
   const { api, server } = useSession();
   const { projectId, status } = useProject();
   const project = useQuery({ queryKey: ["projects", server, projectId], queryFn: () => api.getProject(projectId) });
@@ -73,6 +74,7 @@ export default function ProjectScreen() {
 
 function ChatTab() {
   const t = useT();
+  const styles = useStyles();
   const { user } = useSession();
   const { projectId, state, status, send } = useProject();
   const names = useNames(projectId);
@@ -108,10 +110,12 @@ function ChatTab() {
   );
 }
 
-const styles = StyleSheet.create({
-  title: { alignItems: "center" },
-  titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", maxWidth: 240 },
-  status: { color: colors.subtle, fontSize: 12 },
-  emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600", textAlign: "center" },
-  emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center" },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    title: { alignItems: "center" },
+    titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", maxWidth: 240 },
+    status: { color: colors.subtle, fontSize: 12 },
+    emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600", textAlign: "center" },
+    emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center" },
+  }),
+);

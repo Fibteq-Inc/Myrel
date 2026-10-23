@@ -10,7 +10,7 @@ export function OnlineDot({ online, className = "" }: { online: boolean; classNa
   return (
     <span
       aria-hidden="true"
-      className={`inline-block size-2 flex-none rounded-full ${online ? "bg-ok shadow-[0_0_0_3px_rgba(79,203,141,0.15)]" : "bg-[#55555e]"} ${className}`}
+      className={`inline-block size-2 flex-none rounded-full ${online ? "bg-ok shadow-[0_0_0_3px_rgba(79,203,141,0.15)]" : "bg-offline"} ${className}`}
     />
   );
 }

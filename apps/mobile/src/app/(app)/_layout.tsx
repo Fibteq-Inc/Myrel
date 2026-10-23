@@ -3,10 +3,11 @@ import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { registerForPush, useNotificationRouting } from "../../lib/push";
 import { useApi } from "../../lib/session";
-import { colors } from "../../theme";
+import { useColors } from "../../theme";
 
 export default function AppLayout() {
   const t = useT();
+  const colors = useColors();
   const api = useApi();
   useNotificationRouting();
   useEffect(() => {
