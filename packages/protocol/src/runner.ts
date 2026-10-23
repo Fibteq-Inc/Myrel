@@ -5,7 +5,7 @@ import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
 /**
  * myrel-runner: a small daemon on the user's own computer. It opens an
  * outbound WebSocket to the server and runs tasks with the user's own CLI
- * (Claude Code, Codex, Antigravity CLI, OpenCode, Hermes) in folders the user shared on that
+ * (Claude Code, Codex, Antigravity CLI, OpenCode, Hermes, Cursor CLI) in folders the user shared on that
  * computer. The CLI keeps its own login; no subscription token ever reaches
  * the server.
  */
@@ -15,7 +15,7 @@ export const RUNNER_PROTOCOL_VERSION = 2;
 
 export const RunnerId = z.string().regex(idPattern("runner"));
 
-export const CliId = z.enum(["claude", "codex", "antigravity", "opencode", "hermes"]);
+export const CliId = z.enum(["claude", "codex", "antigravity", "opencode", "hermes", "cursor"]);
 export type CliId = z.infer<typeof CliId>;
 
 export const CLI_NAMES: Record<CliId, string> = {
@@ -24,6 +24,7 @@ export const CLI_NAMES: Record<CliId, string> = {
   antigravity: "Antigravity CLI",
   opencode: "OpenCode",
   hermes: "Hermes Agent",
+  cursor: "Cursor CLI",
 };
 
 /** A folder the user shared from their computer with `myrel-runner share`. */
@@ -68,7 +69,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * Optional abilities a runner announces in hello, so the server only asks
  * what that version can do. "folders": browse and share folders from the web app.
  * "agent": run Claude Code as the thread's agent, with Myrel's tools over MCP (task.start's `agent`).
- * "agent-clis": the same for Codex CLI, Antigravity CLI, OpenCode and Hermes Agent.
+ * "agent-clis": the same for Codex CLI, Antigravity CLI, OpenCode, Hermes Agent and Cursor CLI.
  * "connectors": the agent also gets the thread's connectors (task.start's `agent.connectors`).
  * "skills": the runner downloads the turn's skills (task.start's `agent.skills`) into a folder of the run.
  * "files": reads a file in the project's folders for the web app to show ("file.read").

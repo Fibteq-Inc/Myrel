@@ -122,6 +122,8 @@ export const Message = z.object({
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,
+  /** When its author last changed the text (`message.edit`). Absent: never edited. */
+  editedAt: Timestamp.optional(),
 });
 export type Message = z.infer<typeof Message>;
 

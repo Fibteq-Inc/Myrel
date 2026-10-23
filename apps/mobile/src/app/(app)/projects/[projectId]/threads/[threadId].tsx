@@ -168,6 +168,7 @@ export default function ThreadScreen() {
           working={state.active[threadId] ? (state.progress[threadId] ?? t("message.working")) : null}
           placeholder={t("thread.placeholder")}
           onSend={onSend}
+          onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
           header={header}
           tools={
             pickable &&

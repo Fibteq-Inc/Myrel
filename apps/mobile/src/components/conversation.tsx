@@ -27,6 +27,7 @@ export function Conversation({
   working,
   placeholder,
   onSend,
+  onEdit,
   header,
   plan,
   onOpenPlan,
@@ -48,6 +49,8 @@ export function Conversation({
   placeholder: string;
   /** `attachments` are paths of files the composer uploaded. */
   onSend: (body: string, attachments?: string[]) => void;
+  /** Changes the text of a message the person sent. */
+  onEdit?: (messageId: string, body: string) => void;
   /** Pinned above the list (e.g. a thread's checklist). */
   header?: ReactNode;
   /** The plan card the agent is moving along, drawn from the thread's fresh checklist. */
@@ -137,6 +140,7 @@ export function Conversation({
                   artifacts={artifacts}
                   onLink={openLink}
                   onOpenArtifact={openArtifact}
+                  onEdit={onEdit && ((body) => onEdit(item.id, body))}
                   decision={
                     item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
                   }
