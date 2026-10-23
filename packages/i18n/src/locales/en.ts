@@ -871,6 +871,8 @@ export const en = {
   "routines.where": "Where it runs",
   "routines.targetChat": "Post in the project chat (Myrel opens a thread each time)",
   "routines.targetThread": "Continue in “{title}”",
+  "routines.searchThreads": "Search threads",
+  "routines.noThreadMatch": "No thread matches.",
   "routines.firstRun": "First run {date} · {zone}",
   "routines.never": "That schedule never runs.",
   "routines.pickTime": "Pick a valid time.",

@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { useFormat } from "../lib/format";
 import { Button, errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
 import { useConfirm } from "./ui/confirm";
+import { ThreadPicker } from "./thread-picker";
 import { Select } from "./ui/controls";
 
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -247,8 +248,6 @@ function RoutineForm({
 
   const schedule = scheduleTouched ? buildSchedule({ repeat, time, weekday, cron, at, timezone: initial.timezone }) : null;
   const preview = scheduleTouched ? previewNext(schedule) : routine!.nextRunAt;
-  // The routine targets a thread that is gone: keep it selectable instead of silently switching.
-  const missingThread = target && !threads.some((th) => th.id === target);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -353,19 +352,7 @@ function RoutineForm({
           />
         )}
       </div>
-      <Select
-        aria-label={t("routines.where")}
-        value={target}
-        onChange={(e) => setTarget(e.target.value)}
-      >
-        <option value="">{t("routines.targetChat")}</option>
-        {missingThread && <option value={target}>{t("routines.targetThread", { title: t("routines.aThread") })}</option>}
-        {threads.map((thread) => (
-          <option key={thread.id} value={thread.id}>
-            {t("routines.targetThread", { title: thread.title })}
-          </option>
-        ))}
-      </Select>
+      <ThreadPicker threads={threads} value={target} onChange={setTarget} label={t("routines.where")} />
       <p className="text-[11px] text-subtle">
         {routine && !scheduleTouched
           ? routine.paused
