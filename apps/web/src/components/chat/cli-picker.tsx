@@ -141,7 +141,7 @@ export function ThreadCliNote({ thread }: { thread: Thread }) {
   const cli = thread.cli;
   if (!cli || cli.by !== "coordinator") return null;
   return (
-    <div className="flex gap-2.5 rounded-xl border border-line bg-[#111114] px-3.5 py-2.5 text-[13px]">
+    <div className="flex gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[13px]">
       <Sparkles size={15} className="mt-0.5 flex-none text-accent" aria-hidden="true" />
       <p className="min-w-0 text-body">
         {t("cliPicker.picked", { cli: cliName(cli.id), options: cli.options.map(cliName).join(", ") })}
