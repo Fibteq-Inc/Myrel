@@ -859,6 +859,8 @@ export const tr: Catalog = {
   "routines.where": "Nerede çalışır",
   "routines.targetChat": "Proje sohbetine yaz (Myrel her seferinde bir thread açar)",
   "routines.targetThread": "“{title}” içinde devam et",
+  "routines.searchThreads": "Thread ara",
+  "routines.noThreadMatch": "Eşleşen thread yok.",
   "routines.firstRun": "İlk çalışma {date} · {zone}",
   "routines.never": "Bu zamanlama hiç çalışmıyor.",
   "routines.pickTime": "Geçerli bir zaman seç.",
