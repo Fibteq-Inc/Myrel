@@ -42,7 +42,9 @@ import {
   coordinatorPrompt,
   coordinatorTools,
   COORDINATOR_SYSTEM,
+  type FinishedThread,
   type InboxItem,
+  onlyObserving,
   type Relay,
 } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
@@ -150,6 +152,10 @@ const OBSERVE_DELAY_SEC = 60;
 const RELAY_HISTORY = 20;
 /** A relay between the same two threads (either way) within this window is refused, so notes cannot bounce. */
 const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+/** How many recent coordinator notes in threads are searched for mentions of a thread that finished. */
+const MENTION_SCAN = 200;
+/** How many of those mentions the coordinator sees per finished thread. */
+const MENTION_LIMIT = 5;
 /** A person's ask that repeats one of theirs from this recently is taken for a duplicate, not a new thread. */
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 
@@ -551,6 +557,9 @@ export class ProjectAgent extends Agent<Env> {
       label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
     this.syncActivity();
+    // Every way a thread finishes passes here (its agent, a person, its pull requests merging), and
+    // some post nothing the coordinator watches; threads waiting on it only hear of it from the coordinator.
+    if (!current.resolved && next.resolved && !next.closeReason) this.ctx.waitUntil(this.observeFinished(id));
     return next;
   }
 
@@ -967,6 +976,44 @@ export class ProjectAgent extends Agent<Env> {
     await this.schedule(OBSERVE_DELAY_SEC, "coordinatorTurn", "observe", { idempotent: true });
   }
 
+  private async observeFinished(threadId: string) {
+    if (!this.listThreads().some((t) => !t.resolved && t.id !== threadId)) return;
+    const item: InboxItem = { kind: "finished", threadId };
+    this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${item.kind}, ${JSON.stringify(item)})`;
+    // With the observe delay, its last reply (sent just before it resolved) comes in the same look.
+    await this.schedule(OBSERVE_DELAY_SEC, "coordinatorTurn", "observe", { idempotent: true });
+  }
+
+  /**
+   * The threads the inbox says finished, if still resolved, with their last word and the briefs and
+   * notes in open threads that name them (by link or title), so a thread told to wait is not forgotten.
+   */
+  private finishedThreads(inbox: InboxItem[]): FinishedThread[] {
+    const ids = [...new Set(inbox.flatMap((i) => (i.kind === "finished" ? [i.threadId] : [])))];
+    const done = ids.map((id) => this.getThread(id)).filter((t): t is Thread => !!t?.resolved && !t.closeReason);
+    if (done.length === 0) return [];
+    const open = new Set(this.listThreads().filter((t) => !t.resolved).map((t) => t.id));
+    const notes = this.sql<MessageRow>`
+      SELECT * FROM (SELECT * FROM messages WHERE relay IS NOT NULL AND thread_id IS NOT NULL ORDER BY seq DESC LIMIT ${MENTION_SCAN})
+      ORDER BY seq`
+      .map((r) => this.toMessage(r))
+      .filter((m) => m.relay && open.has(m.threadId!));
+    return done.map((thread) => {
+      const [last] = this.sql<MessageRow>`
+        SELECT * FROM messages WHERE thread_id = ${thread.id} AND author_kind != 'user' AND body != ''
+        ORDER BY seq DESC LIMIT 10`
+        .map((r) => this.toMessage(r))
+        .filter((m) => !isPlanMessage(m.body) && !m.relay);
+      const named = (m: Message) =>
+        m.relay!.fromThreadId === thread.id || m.relay!.note.includes(`#${thread.id})`) || m.relay!.note.includes(thread.title);
+      const mentions = notes
+        .filter((m) => m.threadId !== thread.id && named(m))
+        .slice(-MENTION_LIMIT)
+        .map((m) => ({ threadId: m.threadId!, note: m.relay!.note, createdAt: m.createdAt }));
+      return { thread, last: last ?? null, mentions };
+    });
+  }
+
   private recentRelays(): Relay[] {
     return this.sql<{ from_thread_id: string; to_thread_id: string; note: string; created_at: string }>`
       SELECT * FROM (SELECT * FROM coordinator_relays ORDER BY id DESC LIMIT ${RELAY_HISTORY}) ORDER BY id`.map((r) => ({
@@ -1037,7 +1084,7 @@ export class ProjectAgent extends Agent<Env> {
         const message = this.getMessage(item.messageId);
         return thread && message ? [{ thread, message }] : [];
       });
-      const onlyThreadUpdates = inbox.every((i) => i.kind === "thread");
+      const onlyThreadUpdates = onlyObserving(inbox);
       // Picking among the CLIs an ask offers goes by how much of their limits the computer reports used.
       const fresh = new Set(inbox.flatMap((i) => (i.kind === "message" ? [i.messageId] : [])));
       const choosing = chat.some((m) => fresh.has(m.id) && (m.clis?.length ?? 0) > 1);
@@ -1058,6 +1105,7 @@ export class ProjectAgent extends Agent<Env> {
           routines: this.listRoutines(),
           inbox,
           threadUpdates,
+          finished: this.finishedThreads(inbox),
           relays: this.recentRelays(),
           knowledge: this.knowledge.snapshot(),
           now: new Date(),
@@ -1194,7 +1242,11 @@ export class ProjectAgent extends Agent<Env> {
         const since = new Date(Date.now() - RELAY_COOLDOWN_MS).toISOString();
         const [recent] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM coordinator_relays WHERE created_at > ${since}
           AND ((from_thread_id = ${from.id} AND to_thread_id = ${to.id}) OR (from_thread_id = ${to.id} AND to_thread_id = ${from.id}))`;
-        if (recent!.n > 0) {
+        // Telling a thread that the work it waits on is finished is new, even right after the last note.
+        const [lastNote] = this.sql<{ at: string }>`SELECT MAX(created_at) AS at FROM coordinator_relays
+          WHERE (from_thread_id = ${from.id} AND to_thread_id = ${to.id}) OR (from_thread_id = ${to.id} AND to_thread_id = ${from.id})`;
+        const finishedSince = from.resolved && !!lastNote?.at && from.updatedAt > lastNote.at;
+        if (recent!.n > 0 && !finishedSince) {
           throw new Error(`You already relayed between "${from.title}" and "${to.title}" in the last few minutes; do not relay again.`);
         }
         this.sql`INSERT INTO coordinator_relays (from_thread_id, to_thread_id, note, created_at)
