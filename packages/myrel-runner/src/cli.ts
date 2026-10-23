@@ -4,7 +4,8 @@ import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@myrel/protocol";
 import { detectClis } from "./clis";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
-import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
+import { checkPairing, pair, RESTART_EXIT_CODE, RUNNER_VERSION, startRunner } from "./runner";
+import { settingsOf } from "./self-update";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
 import { readRunning } from "./restart";
 import { isNewer, latestVersion, runVersion } from "./update";
@@ -30,7 +31,11 @@ Usage:
   myrel-runner worktrees [on|off|prune|remove <path> [--force]]
                                  List, turn on or off, or clean up the threads' git worktrees
   myrel-runner update [--now]   Update to the newest version and restart the background runner,
-                                 after its running tasks finish (at most 10 minutes; --now: right away)
+                                 after its running tasks finish (at most 10 minutes; --now: right away).
+                                 Once on 0.13 or later, Myrel > Devices can do it with a button
+  myrel-runner settings [access <level> | auto-update on|off | remote on|off]
+                                 Show or change the settings (Myrel > Devices can change them too,
+                                 unless remote is off)
   myrel-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
@@ -102,7 +107,7 @@ async function main(argv: string[]) {
       const pairingText = { ok: "", invalid: " (not paired any more: run myrel-runner pair)", unknown: " (could not reach it)" };
       console.log(`Server:  ${config.server ? `${config.server}${pairingText[pairing]}` : "(not paired)"}`);
       console.log(`Config:  ${configPath()}`);
-      console.log(`Access:  ${config.access}`);
+      console.log(`Access:  ${config.access}${config.autoUpdate ? " · auto-update on" : ""}`);
       console.log(`Folders: ${config.folders.map((f) => `\n  ${f.path}`).join("") || "none"}`);
       console.log(`CLIs:    ${clis.map((c) => `\n  ${CLI_NAMES[c.id]} ${c.version ?? ""}`).join("") || "none found"}`);
       return;
@@ -115,9 +120,8 @@ async function main(argv: string[]) {
           : {},
       );
       for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => runner.stop());
-      await runner.done;
-      // A clean exit: the background service restarts the runner only after a crash.
-      process.exit(0);
+      // A clean exit: the background service restarts the runner only after a crash, or to update it.
+      process.exit((await runner.done) === "restart" ? RESTART_EXIT_CODE : 0);
     }
     case "service": {
       if (arg === "install") {
@@ -196,6 +200,25 @@ async function main(argv: string[]) {
         console.log(`\n${w.branch}${flags ? ` (${flags})` : ""}\n  ${w.path}\n  from ${w.repo}, last used ${new Date(w.lastUsed).toLocaleString()}`);
       }
       if (!all.length) console.log("No worktrees yet.");
+      return;
+    }
+    case "settings": {
+      const config = await loadConfig();
+      const value = positionals[2];
+      if (arg === "access" && value) {
+        await saveAccess(value);
+      } else if ((arg === "auto-update" || arg === "remote") && (value === "on" || value === "off")) {
+        config[arg === "remote" ? "remoteSettings" : "autoUpdate"] = value === "on";
+        await saveConfig(config);
+      } else if (arg) {
+        throw new Error("Usage: myrel-runner settings [access read|edit|auto|full | auto-update on|off | remote on|off]");
+      }
+      const settings = settingsOf(await loadConfig());
+      if (values.json) return console.log(JSON.stringify(settings));
+      console.log(`Access:      ${settings.access}`);
+      console.log(`Worktrees:   ${settings.worktrees ? "on" : "off"}`);
+      console.log(`Auto-update: ${settings.autoUpdate ? "on (background runner only)" : "off"}`);
+      console.log(`From Myrel:  ${settings.remote ? "can be changed in Myrel > Devices" : "off: only here"}`);
       return;
     }
     case "logout": {

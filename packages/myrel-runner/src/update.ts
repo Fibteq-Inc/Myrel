@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isNewerRunner } from "@myrel/protocol";
 
 export const PACKAGE_NAME = "@fibteq/myrel-runner";
 
@@ -20,14 +21,7 @@ export async function latestVersion(registry = "https://registry.npmjs.org"): Pr
 }
 
 /** Whether version `a` is newer than `b` (major.minor.patch; pre-release tags are ignored). */
-export function isNewer(a: string, b: string): boolean {
-  const parse = (v: string) => v.split("-")[0]!.split(".").map((n) => Number.parseInt(n, 10) || 0);
-  const [x, y] = [parse(a), parse(b)];
-  for (let i = 0; i < 3; i++) {
-    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
-  }
-  return false;
-}
+export const isNewer = isNewerRunner;
 
 /**
  * Runs `myrel-runner <args>` from the given npm version, so the newest code

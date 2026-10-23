@@ -73,8 +73,21 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "project-folders": the CLI also gets the project's other folders (task.start's `folders`), reports
  * the folders it works in ("task.folders"), and Claude Code asks people through Myrel before touching
  * anything outside them (the thread's approve_access tool).
+ * "settings": reports its settings in hello and changes them when asked ("settings.set").
+ * "update": updates itself to a newer version when asked ("runner.update"), if it can (`updates`).
  */
-export const RunnerFeature = z.enum(["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders", "files"]);
+export const RunnerFeature = z.enum([
+  "folders",
+  "cancel",
+  "agent",
+  "agent-clis",
+  "connectors",
+  "skills",
+  "project-folders",
+  "files",
+  "settings",
+  "update",
+]);
 
 /**
  * A connector (MCP server) for the CLI running as the thread's agent. A remote one is on this
@@ -94,6 +107,54 @@ export const AgentConnector = z.discriminatedUnion("transport", [
 export type AgentConnector = z.infer<typeof AgentConnector>;
 export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
+/**
+ * What the CLI may do without asking. read: look only. edit: change files in the folders. auto: Claude
+ * Code's auto mode (it runs the steps it judges safe and asks about the rest; edit for other CLIs).
+ * full: also run any command.
+ */
+export const RunnerAccess = z.enum(["read", "edit", "auto", "full"]);
+export type RunnerAccess = z.infer<typeof RunnerAccess>;
+
+/** The runner's settings, as saved in its config.json on the computer (feature "settings"). */
+export const RunnerSettings = z.object({
+  access: RunnerAccess,
+  /** Each thread works in its own git worktree and branch. */
+  worktrees: z.boolean(),
+  /** Installs a newer version by itself when no task is running. */
+  autoUpdate: z.boolean(),
+  /**
+   * false when the person turned off changing these from Myrel on the computer itself
+   * (`myrel-runner settings remote off`). Only the computer can turn it back on.
+   */
+  remote: z.boolean(),
+});
+export type RunnerSettings = z.infer<typeof RunnerSettings>;
+
+/** What the web app may change; `remote` is only changed on the computer. */
+export const RunnerSettingsInput = RunnerSettings.omit({ remote: true }).partial();
+export type RunnerSettingsInput = z.infer<typeof RunnerSettingsInput>;
+
+/**
+ * How the runner can be updated. service: the background runner updates itself ("runner.update").
+ * app: it came with the desktop app, which updates it. manual: it runs in a terminal, so the person
+ * starts the new version there.
+ */
+export const RunnerUpdates = z.enum(["service", "app", "manual"]);
+export type RunnerUpdates = z.infer<typeof RunnerUpdates>;
+
+/** Where an update the runner was asked for (or started itself) is. */
+export const RunnerUpdateState = z.object({
+  state: z.enum(["waiting", "downloading", "restarting", "failed", "rolled-back"]),
+  /** The version being installed. */
+  version: z.string().max(50),
+  /** Tasks it waits for (state "waiting"). */
+  running: z.number().int().nonnegative().optional(),
+  /** What went wrong (states "failed" and "rolled-back"). */
+  message: z.string().max(500).optional(),
+  at: Timestamp,
+});
+export type RunnerUpdateState = z.infer<typeof RunnerUpdateState>;
+
 /** What the runner last told the server about the computer. */
 export const RunnerInfo = z.object({
   version: z.string().max(50),
@@ -107,6 +168,11 @@ export const RunnerInfo = z.object({
     .max(20)
     .default([])
     .transform((all) => all.filter((f): f is RunnerFeature => RunnerFeature.safeParse(f).success)),
+  // Older runners never send these; a malformed one is dropped, not the whole hello.
+  settings: RunnerSettings.optional().catch(undefined),
+  updates: RunnerUpdates.optional().catch(undefined),
+  /** An update in progress, or one that did not work out lately. */
+  update: RunnerUpdateState.optional().catch(undefined),
 });
 export type RunnerInfo = z.infer<typeof RunnerInfo>;
 
@@ -186,6 +252,12 @@ export const RunnerToServer = z.discriminatedUnion("type", [
   z.object({ type: z.literal("folders"), requestId: RunnerRequestId, folders: z.array(RunnerFolder).max(200) }),
   z.object({ type: z.literal("request.failed"), requestId: RunnerRequestId, message: z.string().max(500) }),
   RunnerFile.extend({ type: z.literal("file"), requestId: RunnerRequestId }),
+  /** Answers "settings.set" with the settings now saved (feature "settings"). */
+  z.object({ type: z.literal("settings"), requestId: RunnerRequestId, settings: RunnerSettings }),
+  /** Answers "runner.update": the update has started (feature "update"). */
+  z.object({ type: z.literal("update.accepted"), requestId: RunnerRequestId, update: RunnerUpdateState }),
+  /** How an update goes on; null once there is nothing to show any more. */
+  z.object({ type: z.literal("update.status"), update: RunnerUpdateState.nullable() }),
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServer>;
 
@@ -248,6 +320,18 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     folders: z.array(z.string().min(1).max(1024)).min(1).max(51),
     threadId: ThreadId.optional(),
   }),
+  /** Change some of the runner's settings (feature "settings"). Answered with "settings". */
+  z.object({ type: z.literal("settings.set"), requestId: RunnerRequestId, settings: RunnerSettingsInput }),
+  /**
+   * Update to `version` (feature "update", `updates` "service"): after the running tasks finish, or
+   * right away when `now` (Myrel continues the tasks it stops). Answered with "update.accepted".
+   */
+  z.object({
+    type: z.literal("runner.update"),
+    requestId: RunnerRequestId,
+    version: z.string().regex(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/).max(50),
+    now: z.boolean().default(false),
+  }),
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunner>;
 /** What a task.start gives a CLI that runs as the thread's agent. */
@@ -266,6 +350,25 @@ export const Runner = RunnerInfo.extend({
   createdAt: Timestamp,
 });
 export type Runner = z.infer<typeof Runner>;
+
+/** Rename a computer, or change its runner's settings (sent to the computer). */
+export const UpdateRunnerInput = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  settings: RunnerSettingsInput.optional(),
+});
+export type UpdateRunnerInput = z.infer<typeof UpdateRunnerInput>;
+
+/** Ask a computer to update myrel-runner to the newest version. */
+export const UpdateRunnerRequest = z.object({ now: z.boolean().default(false) });
+export type UpdateRunnerRequest = z.infer<typeof UpdateRunnerRequest>;
+
+/** GET /api/runners. */
+export const RunnerList = z.object({
+  runners: z.array(Runner),
+  /** The newest myrel-runner on npm; null when it could not be looked up. */
+  latestVersion: z.string().nullable(),
+});
+export type RunnerList = z.infer<typeof RunnerList>;
 
 /** Shown in the web app; typed into `myrel-runner pair` within a few minutes. */
 export const RunnerPairingCode = z.object({ code: z.string(), expiresAt: Timestamp });
@@ -317,3 +420,13 @@ export type WorkspaceFolderInput = z.infer<typeof WorkspaceFolderInput>;
 
 /** How many other folders a project can have besides its main one. */
 export const MAX_WORKSPACE_FOLDERS = 20;
+
+/** Whether myrel-runner version `a` is newer than `b` (major.minor.patch; pre-release tags are ignored). */
+export function isNewerRunner(a: string, b: string): boolean {
+  const parse = (v: string) => v.split("-")[0]!.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const [x, y] = [parse(a), parse(b)];
+  for (let i = 0; i < 3; i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  }
+  return false;
+}

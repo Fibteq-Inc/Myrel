@@ -1,16 +1,21 @@
 import { createDb, schema } from "@myrel/db";
 import {
   createId,
+  isNewerRunner,
   PairRunnerInput,
   type PairRunnerResult,
   RunnerFolderInput,
+  type RunnerList,
   type RunnerPairingCode,
+  UpdateRunnerInput,
+  UpdateRunnerRequest,
 } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Hono } from "hono";
 import { type AppEnv, requireUser } from "../middleware";
 import {
+  latestRunnerVersion,
   newPairingCode,
   newRunnerToken,
   normalizeCode,
@@ -94,7 +99,43 @@ export const runnerRoutes = new Hono<AppEnv>()
       .from(runners)
       .where(eq(runners.userId, c.get("user").id))
       .orderBy(desc(runners.createdAt));
-    return c.json({ runners: await Promise.all(rows.map((r) => toRunner(c.env, r))) });
+    const [list, latestVersion] = await Promise.all([Promise.all(rows.map((r) => toRunner(c.env, r))), latestRunnerVersion()]);
+    return c.json({ runners: list, latestVersion } satisfies RunnerList);
+  })
+  // Renames a computer and changes its runner's settings (the computer must be online for those).
+  .patch("/:id", async (c) => {
+    const id = c.req.param("id");
+    const input = UpdateRunnerInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    if (!(await ownsRunner(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const { name, settings } = input.data;
+    if (settings && Object.keys(settings).length) {
+      const agent = await getAgentByName(c.env.RUNNER_AGENT, id);
+      const result = await agent.setSettings(settings);
+      if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
+    }
+    const db = createDb(c.env.DB);
+    if (name) await db.update(runners).set({ name }).where(eq(runners.id, id));
+    const [row] = await db.select().from(runners).where(eq(runners.id, id));
+    return c.json({ runner: await toRunner(c.env, row!) });
+  })
+  // Updates myrel-runner on the computer to the newest version, after its running tasks (or now).
+  .post("/:id/update", async (c) => {
+    const id = c.req.param("id");
+    const input = UpdateRunnerRequest.safeParse(await c.req.json().catch(() => ({})));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    if (!(await ownsRunner(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const version = await latestRunnerVersion();
+    if (!version) return c.json({ error: "runner_failed", message: "Could not reach npm to find the newest myrel-runner. Try again in a few minutes." }, 503);
+    const db = createDb(c.env.DB);
+    const [current] = await db.select().from(runners).where(eq(runners.id, id));
+    const runner = await toRunner(c.env, current!);
+    if (runner.version && !isNewerRunner(version, runner.version)) return c.json({ runner });
+    const agent = await getAgentByName(c.env.RUNNER_AGENT, id);
+    const result = await agent.requestUpdate(version, input.data.now);
+    if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
+    const [row] = await db.select().from(runners).where(eq(runners.id, id));
+    return c.json({ runner: await toRunner(c.env, row!) });
   })
   // A code for `myrel-runner pair`. Codes are stored hashed and expire after a few minutes.
   .post("/pairing", async (c) => {

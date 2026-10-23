@@ -38,7 +38,9 @@ import type {
   Runner,
   RunnerDirListing,
   RunnerFolder,
+  RunnerList,
   RunnerPairingCode,
+  UpdateRunnerInput,
   SetWorkspaceInput,
   Skill,
   SkillDetail,
@@ -633,7 +635,23 @@ export class ApiClient {
   // --- local computers (myrel-runner) ---
 
   async listRunners() {
-    return (await this.request<{ runners: Runner[] }>("/api/runners")).runners;
+    return (await this.runnerList()).runners;
+  }
+
+  /** The computers, with the newest myrel-runner version they could update to. */
+  runnerList() {
+    return this.request<RunnerList>("/api/runners");
+  }
+
+  /** Renames a computer or changes its runner's settings (it must be online for those). */
+  async updateRunner(id: string, input: UpdateRunnerInput) {
+    return (await this.request<{ runner: Runner }>(`/api/runners/${encodeURIComponent(id)}`, { method: "PATCH", body: input })).runner;
+  }
+
+  /** Asks the computer to update myrel-runner: after its running tasks, or right away with `now`. */
+  async updateRunnerVersion(id: string, now = false) {
+    return (await this.request<{ runner: Runner }>(`/api/runners/${encodeURIComponent(id)}/update`, { method: "POST", body: { now } }))
+      .runner;
   }
 
   /** A short-lived code for `myrel-runner pair`. */

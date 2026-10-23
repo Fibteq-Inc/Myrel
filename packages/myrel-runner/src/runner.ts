@@ -14,10 +14,16 @@ import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
 import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { saveInterrupted, takeInterrupted, writeRunning } from "./restart";
+import { applySettings, settingsOf, updateMode } from "./self-update";
+import { relaunchService } from "./service";
 import { TaskRunner } from "./tasks";
+import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.12.1";
+export const RUNNER_VERSION = "0.13.0";
+
+/** How often a background runner with auto-update on looks for a newer version. */
+const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
 
 /** Trades a pairing code from the web app for a runner token, and saves it. */
 export async function pair(input: { server: string; code: string; name?: string }): Promise<RunnerConfig> {
@@ -60,14 +66,20 @@ const UNPAIRED =
 /** How long a task's result is sent again after each reconnect. */
 const RESEND_RESULTS_MS = 15 * 60 * 1000;
 
-export type RunnerHandle = { stop(): void; done: Promise<void> };
+/** Why the runner stopped. "restart": to run another version; the caller exits with RESTART_EXIT_CODE. */
+export type StopReason = "stopped" | "revoked" | "replaced" | "refused" | "restart";
+
+export type RunnerHandle = { stop(): void; done: Promise<StopReason> };
+
+/** A failed exit, so launchd and systemd start the background runner again (now the new copy). */
+export const RESTART_EXIT_CODE = 75;
 
 /** Machine-readable state changes, for apps that embed or supervise the runner. */
 export type RunnerStatus =
   | { state: "connecting" }
   | { state: "online"; name: string }
   | { state: "offline"; reason: string; retryInMs: number }
-  | { state: "stopped"; reason: "stopped" | "revoked" | "replaced" | "refused" }
+  | { state: "stopped"; reason: StopReason }
   | { state: "task"; taskId: string; event: "started" | "done"; ok?: boolean };
 
 export type StartOptions = {
@@ -107,12 +119,39 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const interrupted = takeInterrupted();
   if (interrupted.length) log(`${interrupted.length} task(s) stopped when the runner restarted; Myrel continues them.`);
   writeRunning([]);
-  let stopReason: Extract<RunnerStatus, { state: "stopped" }>["reason"] = "stopped";
+  let stopReason: StopReason = "stopped";
   let socket: WebSocket | null = null;
   let stopped = false;
   let attempt = 0;
-  let finish!: () => void;
-  const done = new Promise<void>((r) => (finish = r));
+  let finish!: (reason: StopReason) => void;
+  const done = new Promise<StopReason>((r) => (finish = r));
+  const updates = updateMode();
+  const updater = new Updater({
+    version: RUNNER_VERSION,
+    running: () => tasks.runningIds(),
+    report: (update) => send({ type: "update.status", update }),
+    log,
+    restart: () => {
+      // Windows starts the new copy itself; launchd and systemd do once this process exits.
+      void relaunchService()
+        .catch(() => {})
+        .finally(() => {
+          stopReason = "restart";
+          stop();
+        });
+    },
+  });
+  // A new version that has not connected yet goes back to the previous one if it never does.
+  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+  if (await updater.init()) {
+    confirmTimer = setTimeout(() => {
+      void checkPairing(config).then((pairing) => {
+        // Offline or unpaired is not this version's fault: the previous one would not connect either.
+        if (pairing === "ok" && updater.confirming) void updater.rollback("it did not connect within 2 minutes");
+      });
+    }, CONFIRM_MS);
+    confirmTimer.unref?.();
+  }
 
   // Results of recent tasks, sent again first thing after reconnecting: a result sent just as the
   // connection dropped (a new version of Myrel being deployed) may never have arrived. The server
@@ -140,7 +179,21 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       platform: platform(),
       folders: config.folders,
       clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
-      features: ["folders", "cancel", "agent", "agent-clis", "connectors", "skills", "project-folders", "files"],
+      features: [
+        "folders",
+        "cancel",
+        "agent",
+        "agent-clis",
+        "connectors",
+        "skills",
+        "project-folders",
+        "files",
+        "settings",
+        ...(updates === "service" ? (["update"] as const) : []),
+      ],
+      settings: settingsOf(config),
+      updates,
+      ...(updater.state() && { update: updater.state() }),
       running: tasks.runningIds(),
       interrupted,
     });
@@ -165,16 +218,27 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   prune();
   const pruning = setInterval(prune, 6 * 60 * 60 * 1000);
   pruning.unref?.();
+  // Auto-update (background runner only): a while after starting, then every few hours.
+  const autoUpdate = () => {
+    if (updates === "service" && config.autoUpdate) void updater.checkNewest().catch(() => {});
+  };
+  const firstCheck = setTimeout(autoUpdate, 10 * 60 * 1000);
+  firstCheck.unref?.();
+  const autoUpdating = setInterval(autoUpdate, AUTO_UPDATE_EVERY_MS);
+  autoUpdating.unref?.();
   const stop = () => {
     stopped = true;
     clearInterval(ping);
     clearInterval(pruning);
     clearInterval(codexLimits);
+    clearInterval(autoUpdating);
+    clearTimeout(firstCheck);
+    clearTimeout(confirmTimer);
     unwatchFile(configPath(), onConfigChange);
     saveInterrupted(tasks.stopAll());
     socket?.close(1000);
     status({ state: "stopped", reason: stopReason });
-    finish();
+    finish(stopReason);
   };
 
   // Folder requests from the web app: browse folders, share or stop sharing one.
@@ -182,7 +246,24 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     const { requestId } = frame;
     if (frame.type === "dirs.list") return send({ type: "dirs", requestId, ...(await listDirs(frame.path)) });
     if (frame.type === "file.read") return send({ type: "file", requestId, ...(await readProjectFile(config, frame)) });
+    if (frame.type === "runner.update") {
+      if (updates !== "service") {
+        throw new Error(
+          updates === "app"
+            ? "This runner came with the Myrel desktop app; it updates with the app."
+            : "This runner was started in a terminal, so it cannot restart itself. Start it again with `npx myrel-runner@latest start`.",
+        );
+      }
+      log(`Updating to myrel-runner ${frame.version} (from Myrel)${frame.now ? "" : " once the running tasks finish"}`);
+      return send({ type: "update.accepted", requestId, update: updater.request(frame.version, frame.now) });
+    }
     config = await loadConfig();
+    if (frame.type === "settings.set") {
+      applySettings(config, frame.settings);
+      await saveConfig(config);
+      log(`Settings changed from Myrel: ${Object.entries(frame.settings).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+      return send({ type: "settings", requestId, settings: settingsOf(config) });
+    }
     if (frame.type === "folder.share") {
       const path = await shareableFolder(frame.path);
       if (shareFolder(config, path)) log(`Shared ${path} (from Myrel)`);
@@ -214,6 +295,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       if (frame.type === "welcome") {
         log(`● Connected to ${config.server} as "${frame.name}"`);
         status({ state: "online", name: frame.name });
+        void updater.confirmed();
       }
       if (frame.type === "task.start") {
         status({ state: "task", taskId: frame.taskId, event: "started" });
@@ -250,6 +332,10 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       }
       if (e.code === 4400) {
         log(`The server refused this runner: ${e.reason}`);
+        if (updater.confirming) {
+          await updater.rollback(`the server refused it: ${e.reason}`);
+          if (stopped) return;
+        }
         stopReason = "refused";
         return stop();
       }

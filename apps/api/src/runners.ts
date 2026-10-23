@@ -60,10 +60,36 @@ export async function toRunner(env: Env, row: RunnerRow): Promise<Runner> {
     folders: info?.folders ?? [],
     clis: info?.clis ?? [],
     features: info?.features ?? [],
+    ...(info?.settings && { settings: info.settings }),
+    ...(info?.updates && { updates: info.updates }),
+    ...(info?.update && { update: info.update }),
     online: await isRunnerOnline(env, row.id),
     lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** How long the newest myrel-runner version from npm is remembered (a failed lookup: a few minutes). */
+const LATEST_TTL_MS = 60 * 60 * 1000;
+const LATEST_RETRY_MS = 5 * 60 * 1000;
+let latest: { version: string | null; until: number } | null = null;
+
+/** The newest myrel-runner on npm, for the "update available" button; null when npm cannot be reached. */
+export async function latestRunnerVersion(now = Date.now()): Promise<string | null> {
+  if (latest && latest.until > now) return latest.version;
+  let version: string | null = null;
+  try {
+    const res = await fetch("https://registry.npmjs.org/@fibteq%2Fmyrel-runner/latest", {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = res.ok ? ((await res.json()) as { version?: unknown }) : null;
+    if (typeof body?.version === "string" && /^\d+\.\d+\.\d+$/.test(body.version)) version = body.version;
+  } catch {
+    // Shown without the button until the next try.
+  }
+  latest = { version, until: now + (version ? LATEST_TTL_MS : LATEST_RETRY_MS) };
+  return version;
 }
 
 /** The project's local folder, with whether its computer is connected right now. */

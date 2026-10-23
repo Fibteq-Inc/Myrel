@@ -48,6 +48,26 @@ from npm and restarts the background runner on it once its running tasks finish 
 right away). `service install` again also restarts it; `service status` shows its state and `service uninstall`
 removes it. On Linux it starts when you log in; to start at boot without logging in, run `loginctl enable-linger`.
 
+### Updating and settings from Myrel
+
+From runner 0.13.0 the background runner can be updated and set up from **Myrel > Devices**, without a terminal:
+
+- **Update** shows when npm has a newer version. The runner waits for its running tasks (at most 10 minutes; **Update
+  now** stops them, and Myrel continues them), downloads the package from npm, checks it against npm's integrity
+  hash, runs the new copy once (`--version`) and only then puts it in place of `~/.myrel-runner/bin/myrel-runner.mjs`,
+  keeping the old one as `myrel-runner.prev.mjs`. It then exits with code 75, so launchd or systemd starts the new
+  copy (on Windows it starts the Startup entry itself). If the new version is refused by the server, or does not
+  connect within 2 minutes while the server is reachable, it puts the previous copy back and restarts on it; the card
+  says so. The state across the restart is in `~/.myrel-runner/update.json`.
+- **Settings**: the access level, worktrees and **Update by itself** (auto-update: looks for a newer version every
+  6 hours and installs it when no task is running). They are saved in `config.json` on the computer.
+  `myrel-runner settings` shows and changes the same ones here, and `myrel-runner settings remote off` stops Myrel from
+  changing them (only this computer can turn it back on).
+
+A runner started with `myrel-runner start` in a terminal cannot restart itself, so the card shows the command
+instead; the desktop app's runner updates with the app. Runners before 0.13.0 need `npx myrel-runner@latest update`
+once.
+
 If the runner shuts down while a task is running (an update or a restart of the service), it notes the task in
 `~/.myrel-runner/interrupted.json` and tells the server when it reconnects. From runner 0.12.0, Myrel then continues
 that turn on its own a few times, with growing waits, and says so in the thread instead of reporting a failure.
