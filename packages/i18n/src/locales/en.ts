@@ -918,6 +918,8 @@ export const en = {
   "connectors.pairValue": "Value of {name}",
   "connectors.removePair": "Remove {name}",
   "connectors.removePairTitle": "Remove",
+  "connectors.badHeaderName": "A header name has only letters, digits, - and _ (for example api-key). Put the key itself in the value field.",
+  "connectors.badEnvName": "A variable name has only letters, digits and _ (for example API_KEY). Put the key itself in the value field.",
   "connectors.runsOn": "Where it runs",
   "connectors.runsOn.cloud": "In the cloud",
   "connectors.runsOn.local": "On your computer",

@@ -3,6 +3,7 @@ import {
   ClientEvent,
   decisionPicks,
   decisionsIn,
+  CreateConnectorInput,
   CreateRoutineInput,
   CronExpression,
   createId,
@@ -218,5 +219,20 @@ describe("decision picks", () => {
     ];
     expect([...decisionPicks(messages)]).toEqual(["b"]);
     expect(decisionsIn(`${card}\n\n${card}`)).toHaveLength(2);
+  });
+});
+
+describe("connector inputs", () => {
+  const http = (headers: Record<string, string>) => CreateConnectorInput.safeParse({ transport: "http", name: "PlayFlow", url: "https://mcp.example.com/mcp", headers });
+
+  it("takes header names like api-key and says which name is wrong", () => {
+    expect(http({ "api-key": "abc", "x-api-key": "abc", Authorization: "Bearer abc" }).success).toBe(true);
+    const bad = http({ "api-key: abc": "" });
+    expect(bad.success).toBe(false);
+    expect(bad.error!.issues[0]!.message).toBe(
+      'Header name "api-key: abc" is not valid: use only letters, digits, - and _, with no spaces or ":". Put the value in its own field.',
+    );
+    const env = CreateConnectorInput.safeParse({ transport: "stdio", name: "x", command: "npx", env: { "api-key": "abc" } });
+    expect(env.error!.issues[0]!.message).toMatch(/^Variable name "api-key" is not valid/);
   });
 });

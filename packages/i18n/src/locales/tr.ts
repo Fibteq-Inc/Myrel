@@ -916,6 +916,8 @@ export const tr: Catalog = {
   "connectors.pairValue": "{name} değeri",
   "connectors.removePair": "{name} kaldır",
   "connectors.removePairTitle": "Kaldır",
+  "connectors.badHeaderName": "Başlık adında yalnızca harf, rakam, - ve _ olur (örneğin api-key). Anahtarın kendisini değer alanına yaz.",
+  "connectors.badEnvName": "Değişken adında yalnızca harf, rakam ve _ olur (örneğin API_KEY). Anahtarın kendisini değer alanına yaz.",
   "connectors.runsOn": "Nerede çalışır",
   "connectors.runsOn.cloud": "Bulutta",
   "connectors.runsOn.local": "Bilgisayarında",

@@ -10,6 +10,8 @@ import {
   type ConnectorPreset,
   type ConnectorRunsOn,
   type CreateConnectorInput,
+  ENV_NAME,
+  HEADER_NAME,
   type UpdateConnectorInput,
 } from "@myrel/protocol";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,7 +37,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ClipboardEvent, type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { api, connectorsQuery, platform } from "../lib/api";
 import { Button, cn, errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
 import { Field, Notice, Section } from "./settings";
@@ -60,10 +62,11 @@ const RUNS_ON: { value: ConnectorRunsOn; label: MessageKey }[] = [
 /** The message for a failed connector call: the server's own message, else the first invalid field. */
 function connectorError(err: unknown, t: Translate) {
   if (err instanceof ApiError && typeof err.body === "object" && err.body) {
-    const body = err.body as { message?: unknown; issues?: { path?: unknown[]; message?: string }[] };
+    const body = err.body as { message?: unknown; issues?: { path?: unknown[]; code?: string; message?: string }[] };
     if (typeof body.message === "string" && body.message) return body.message;
     const issue = body.issues?.[0];
-    if (issue?.message) return issue.path?.length ? `${issue.path.join(".")}: ${issue.message}` : issue.message;
+    // A bad header or variable name names itself in the message; other fields need their path.
+    if (issue?.message) return issue.path?.length && issue.code !== "invalid_key" ? `${issue.path.join(".")}: ${issue.message}` : issue.message;
     return t("connectors.invalid");
   }
   return errorMessage(err, t);
@@ -849,7 +852,9 @@ function ConnectorForm({
     onSuccess: (c) => onDone(c),
   });
 
-  const valid = d.name.trim() && (d.transport === "http" ? /^https:\/\/\S+$/.test(d.url.trim()) : d.command.trim());
+  const badName = (d.transport === "http" ? (oauth ? [] : d.headers) : d.env).some((p) => p.key.trim() && !(d.transport === "http" ? HEADER_NAME : ENV_NAME).test(p.key.trim()));
+  const valid =
+    !badName && d.name.trim() && (d.transport === "http" ? /^https:\/\/\S+$/.test(d.url.trim()) : d.command.trim());
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -933,6 +938,8 @@ function ConnectorForm({
               keyPlaceholder="Authorization"
               valuePlaceholder="Bearer …"
               pairs={d.headers}
+              nameRule={HEADER_NAME}
+              badNameHint={t("connectors.badHeaderName")}
               onChange={(v) => set("headers", v)}
             />
           )}
@@ -965,6 +972,8 @@ function ConnectorForm({
             keyPlaceholder="API_KEY"
             valuePlaceholder={t("connectors.valuePlaceholder")}
             pairs={d.env}
+            nameRule={ENV_NAME}
+            badNameHint={t("connectors.badEnvName")}
             onChange={(v) => set("env", v)}
           />
           <FieldGroup label={t("connectors.runsOn")}>
@@ -1048,6 +1057,8 @@ function PairsEditor({
   keyPlaceholder,
   valuePlaceholder,
   pairs,
+  nameRule,
+  badNameHint,
   onChange,
 }: {
   label: string;
@@ -1055,11 +1066,21 @@ function PairsEditor({
   keyPlaceholder: string;
   valuePlaceholder: string;
   pairs: Pair[];
+  nameRule: RegExp;
+  badNameHint: string;
   onChange: (pairs: Pair[]) => void;
 }) {
   const t = useT();
   const id = useId();
   const update = (i: number, patch: Partial<Pair>) => onChange(pairs.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  // Docs often show a whole line ("api-key: abc123", "API_KEY=abc123"): pasted into the name, it is split.
+  const pasteName = (i: number, e: ClipboardEvent<HTMLInputElement>) => {
+    const line = /^\s*([A-Za-z_][\w-]*)\s*[:=]\s*(\S.*?)\s*$/.exec(e.clipboardData.getData("text"));
+    if (!line) return;
+    e.preventDefault();
+    update(i, { key: line[1]!, value: line[2]! });
+  };
+  const bad = pairs.filter((p) => p.key.trim() && !nameRule.test(p.key.trim()));
   return (
     <div className="space-y-1.5" role="group" aria-labelledby={id}>
       <span id={id} className="block text-[13px] font-medium text-muted">
@@ -1070,6 +1091,8 @@ function PairsEditor({
           <Input
             value={p.key}
             onChange={(e) => update(i, { key: e.target.value })}
+            onPaste={(e) => pasteName(i, e)}
+            aria-invalid={!!p.key.trim() && !nameRule.test(p.key.trim())}
             placeholder={keyPlaceholder}
             aria-label={t("connectors.pairName")}
             spellCheck={false}
@@ -1096,6 +1119,11 @@ function PairsEditor({
           </IconButton>
         </div>
       ))}
+      {bad.length > 0 && (
+        <p className="text-xs text-bad" role="alert">
+          {badNameHint}
+        </p>
+      )}
       <button
         type="button"
         onClick={() => onChange([...pairs, pair()])}
