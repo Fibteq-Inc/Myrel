@@ -3,14 +3,33 @@ import { mayBeFileName, resolveFileCode } from "@myrel/protocol";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
-import { type MarkedStyles, Renderer, useMarkdown } from "react-native-marked";
+import { type ImageStyle, Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
+import { type MarkedStyles, MarkedTokenizer, Renderer, useMarkdown } from "react-native-marked";
 import { DECISION_LANG, parseDecision } from "../lib/decision";
 import { useFileRefContext } from "../lib/file-refs";
+import { unwrapHref, wrapHref } from "../lib/raw-href";
 import { colors, mono, radius } from "../theme";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
+
+/** Keeps link targets as written (see wrapHref), so thread links and relative file paths survive parsing. */
+class RawHrefTokenizer extends MarkedTokenizer {
+  override link(src: string) {
+    const token = super.link(src);
+    if (token?.type === "link") token.href = wrapHref(token.href);
+    return token;
+  }
+
+  override reflink(src: string, links: Parameters<MarkedTokenizer["reflink"]>[1]) {
+    const token = super.reflink(src, links);
+    if (token?.type === "link") token.href = wrapHref(token.href);
+    return token;
+  }
+}
+
+// The lexer binds it to itself on each (synchronous) parse, so one instance serves every message.
+const tokenizer = new RawHrefTokenizer();
 
 /** Draws ```decision blocks as cards, code with a copy button, and routes links (and file paths in code) to `onLink`. */
 class MyrelRenderer extends Renderer {
@@ -36,9 +55,17 @@ class MyrelRenderer extends Renderer {
 
   override link(children: string | ReactNode[], href: string, styles?: TextStyle): ReactNode {
     return (
-      <Text key={this.getKey()} accessibilityRole="link" style={styles} onPress={() => this.onLink(href)}>
+      <Text key={this.getKey()} accessibilityRole="link" style={styles} onPress={() => this.onLink(unwrapHref(href))}>
         {children}
       </Text>
+    );
+  }
+
+  override linkImage(href: string, imageUrl: string, alt?: string, style?: ImageStyle, title?: string): ReactNode {
+    return (
+      <Pressable key={this.getKey()} accessibilityRole="link" onPress={() => this.onLink(unwrapHref(href))}>
+        {this.image(imageUrl, alt, style, title)}
+      </Pressable>
     );
   }
 }
@@ -131,7 +158,7 @@ export function MessageMarkdown({
     () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink),
     [hasDecision, answer, onChoose, onLink],
   );
-  const elements = useMarkdown(body, { colorScheme: "dark", renderer, styles: markedStyles });
+  const elements = useMarkdown(body, { colorScheme: "dark", renderer, tokenizer, styles: markedStyles });
   return <View>{elements}</View>;
 }
 

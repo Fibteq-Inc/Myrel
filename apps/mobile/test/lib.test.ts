@@ -2,6 +2,7 @@ import type { Message } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
 import { notificationPath } from "../src/lib/push-target";
+import { unwrapHref, wrapHref } from "../src/lib/raw-href";
 import { secureKey } from "../src/lib/secure-key";
 
 describe("secureKey", () => {
@@ -62,5 +63,15 @@ describe("notificationPath", () => {
     expect(notificationPath({ projectId: "proj_01ABC", threadId: null })).toBe("/projects/proj_01ABC");
     expect(notificationPath({ projectId: "../evil" })).toBeNull();
     expect(notificationPath(null)).toBeNull();
+  });
+});
+
+describe("raw hrefs", () => {
+  it("survive react-native-marked's rewrite of links without a scheme", () => {
+    for (const href of ["#thr_01M5KPJTCFFJ9NBF9VG26M2Y6F", "notes/rapor.md", "/abs/x.ts", "https://x.io"]) {
+      expect(wrapHref(href)).toMatch(/^[a-z]+:/i);
+      expect(unwrapHref(wrapHref(href))).toBe(href);
+    }
+    expect(unwrapHref("https://x.io")).toBe("https://x.io");
   });
 });
