@@ -66,7 +66,7 @@
       "name": "altair-sandbox",
       "class_name": "Sandbox",
       "scheduling_policy": "durable_object",
-      "images": { "base": { "image": "registry.cloudflare.com/823f369ba8524ed9b4bee423749f128b/myrel-sandbox@sha256:a917901ed14ef244c940abce95532fa649b559e57765fef1faf563b69e636947" } }
+      "images": { "base": { "image": "registry.cloudflare.com/823f369ba8524ed9b4bee423749f128b/myrel-sandbox@sha256:301a2c1c9d3ce72f063f2e9cb6e825386e365e25d1d820dbed8ef84892696d30" } }
     }
   ],
 
