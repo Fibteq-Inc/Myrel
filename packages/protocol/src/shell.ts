@@ -1,5 +1,5 @@
 /** `/bin/zsh -lc <script>`, `bash -c <script>` and the like, as coding CLIs report their commands. */
-const SHELL_WRAPPER = /^(?:\/(?:usr\/)?(?:local\/)?bin\/)?(?:ba|z|da|k)?sh\s+-l?c\s+([\s\S]+)$/;
+const SHELL_WRAPPER = /^(?:\/(?:usr\/)?(?:local\/)?bin\/)?(?:ba|z|da|k)?sh\s+-l?c\s+(\S[\s\S]*)$/;
 
 /**
  * The command a shell wrapper runs, so `/bin/zsh -lc "rg -g '"'!obj'"'"` reads as
