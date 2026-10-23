@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { indexListsNotes, knowledgeTools, type KnowledgeHost, renderKnowledge, withoutOwnHeading } from "../src/agents/knowledge";
 import { agentProject, modelAgent, type Turn } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
@@ -71,6 +72,34 @@ describe("project knowledge API", () => {
 
     expect((await api(`${base}/memory/deploy`, { token, method: "DELETE" })).status).toBe(200);
     expect((await api(`${base}/memory/deploy`, { token, method: "DELETE" })).status).toBe(404);
+  });
+
+  it("marks notes stale or checked and keeps the content before a change", async () => {
+    const { token, base } = await setup();
+    const put = (content: string) =>
+      api(`${base}/memory/deploy`, { token, method: "PUT", body: JSON.stringify({ description: "How deploys work", content }) });
+    const read = async () => ((await (await api(`${base}/memory`, { token })).json()) as { memory: MemoryEntry[] }).memory[0]!;
+
+    await put("# deploy\n(How deploys work)\n\nWorkers Builds");
+    let note = await read();
+    // The heading memory_read adds anyway is not stored a second time.
+    expect(note).toMatchObject({ content: "Workers Builds", status: "ok", previousContent: null });
+
+    let res = await api(`${base}/memory/deploy/mark`, { token, method: "PUT", body: JSON.stringify({ status: "stale" }) });
+    expect(res.status).toBe(400);
+    res = await api(`${base}/memory/deploy/mark`, { token, method: "PUT", body: JSON.stringify({ status: "stale", reason: "Moved to GitHub Actions" }) });
+    expect(res.status).toBe(200);
+    note = await read();
+    expect(note).toMatchObject({ status: "stale", staleReason: "Moved to GitHub Actions", content: "Workers Builds" });
+
+    // A rewrite fixes the note: the mark goes, the old content stays one step back.
+    await put("GitHub Actions");
+    note = await read();
+    expect(note).toMatchObject({ status: "ok", staleReason: null, content: "GitHub Actions", previousContent: "Workers Builds" });
+
+    res = await api(`${base}/memory/deploy/mark`, { token, method: "PUT", body: JSON.stringify({ status: "ok" }) });
+    expect(((await res.json()) as { memory: MemoryEntry }).memory.verifiedAt).toBeTruthy();
+    expect((await api(`${base}/memory/nope/mark`, { token, method: "PUT", body: JSON.stringify({ status: "ok" }) })).status).toBe(404);
   });
 
   it("stores files in R2, lists, serves and deletes them", async () => {
@@ -273,5 +302,91 @@ describe("binary files and harness agents", () => {
       { path: "reports/summary.csv", name: "summary.csv", size: 8, contentType: "text/csv; charset=utf-8" },
     ]);
     ws.close();
+  });
+});
+
+describe("memory upkeep in prompts and tools", () => {
+  const entry = (over: Partial<MemoryEntry>): MemoryEntry => ({
+    name: "deploy",
+    description: "How deploys work",
+    content: "Workers Builds",
+    updatedAt: "2026-10-22T10:00:00.000Z",
+    updatedByKind: "agent",
+    updatedBy: "agent",
+    status: "ok",
+    staleReason: null,
+    verifiedAt: null,
+    previousContent: null,
+    previousAt: null,
+    ...over,
+  });
+
+  function fakeHost(notes: MemoryEntry[]) {
+    const store = new Map(notes.map((n) => [n.name, n]));
+    const host: KnowledgeHost = {
+      memoryRead: (name) => store.get(name) ?? null,
+      memoryWrite: (name, description, content) => store.set(name, entry({ name, description, content })),
+      memoryMark: (name, input) => {
+        const n = store.get(name);
+        if (!n) return null;
+        const next = input.status === "ok" ? { ...n, status: "ok" as const, verifiedAt: new Date().toISOString() } : { ...n, status: "stale" as const, staleReason: input.reason };
+        store.set(name, next);
+        return next;
+      },
+      memoryDelete: (name) => store.delete(name),
+      memoryNames: () => [...store.keys()],
+      listFiles: () => [],
+      readText: async () => ({ found: false, text: null, size: 0 }),
+      writeText: async () => {
+        throw new Error("unused");
+      },
+    };
+    const tools = knowledgeTools(host);
+    const run = async (name: string, input: unknown) => (await tools.find((t) => t.name === name)!.run(input as never)) as string;
+    return { store, run };
+  }
+
+  it("shows each note's date, who wrote it and a stale mark", () => {
+    const text = renderKnowledge({
+      instructions: "",
+      memoryIndex: "Reply in Turkish.",
+      memoryIndexAt: "2026-10-20T08:00:00.000Z",
+      memory: [
+        entry({ verifiedAt: "2026-10-23T09:00:00.000Z" }),
+        entry({ name: "pricing", updatedByKind: "user", status: "stale", staleReason: "Prices changed in October" }),
+      ],
+      files: [],
+      moreFiles: 0,
+    });
+    expect(text).toContain("MEMORY (index, shown in full; updated 2026-10-20)");
+    expect(text).toContain("- deploy (2026-10-22, Myrel, checked 2026-10-23): How deploys work");
+    expect(text).toContain("- pricing [MAY BE STALE: Prices changed in October] (2026-10-22, a member): How deploys work");
+  });
+
+  it("lets agents delete only notes marked stale, and warns when the index lists notes", async () => {
+    const { store, run } = fakeHost([entry({}), entry({ name: "pricing" }), entry({ name: "release" })]);
+    await expect(run("memory_delete", { name: "deploy" })).rejects.toThrow(/not marked stale/);
+    await expect(run("memory_mark", { name: "deploy", status: "stale" })).rejects.toThrow(/why/);
+    expect(await run("memory_mark", { name: "deploy", status: "stale", reason: "Moved" })).toContain("stale");
+    expect(await run("memory_delete", { name: "deploy" })).toBe("Deleted deploy.");
+    expect(store.has("deploy")).toBe(false);
+
+    const read = await run("memory_read", { name: "pricing" });
+    expect(read).toContain("Last written (2026-10-22, Myrel).");
+
+    const listing = "- pricing: what we charge\n- release: how we ship\n- `deploy`: gone";
+    // Two names are not a list worth warning about; three are.
+    expect(await run("memory_write", { name: "MEMORY", description: "Index", content: listing })).toBe("Saved memory MEMORY.");
+    expect(indexListsNotes(listing, ["pricing", "release"])).toBe(2);
+    store.set("deploy", entry({}));
+    expect(await run("memory_write", { name: "MEMORY", description: "Index", content: listing })).toContain("lists 3 other notes");
+    expect(await run("memory_write", { name: "MEMORY", description: "Index", content: "Reply in Turkish." })).toBe("Saved memory MEMORY.");
+  });
+
+  it("drops only a heading that repeats the note's own name", () => {
+    expect(withoutOwnHeading("deploy", "How", "# deploy\n(How)\n\nBody")).toBe("Body");
+    expect(withoutOwnHeading("deploy", "How", "\n# deploy\n\nBody")).toBe("Body");
+    expect(withoutOwnHeading("deploy", "How", "# Deploys\nBody")).toBe("# Deploys\nBody");
+    expect(withoutOwnHeading("deploy", "How", "Body\n# deploy")).toBe("Body\n# deploy");
   });
 });

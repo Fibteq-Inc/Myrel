@@ -11,6 +11,7 @@ import {
   formatPlan,
   formatPlanUpdate,
   type PlanUpdate,
+  type MarkMemoryInput,
   type Message,
   type MessageStats,
   type SkillBundle,
@@ -1332,7 +1333,9 @@ export class ThreadAgent extends Agent<Env> {
       ...knowledgeTools({
         memoryRead: (name: string) => project.getMemory(name),
         memoryWrite: (name: string, description: string, content: string) => project.putMemory(name, { description, content }, BY),
+        memoryMark: (name: string, input: MarkMemoryInput) => project.markMemory(name, input),
         memoryDelete: (name: string) => project.deleteMemory(name),
+        memoryNames: async () => (await project.listMemory()).map((m) => m.name),
         listFiles: (prefix?: string) => project.listFiles(prefix),
         readText: (path: string) => project.readFileText(path),
         writeText: (path: string, content: string) => project.writeFileText(path, content, BY),

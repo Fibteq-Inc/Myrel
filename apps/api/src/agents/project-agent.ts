@@ -8,6 +8,7 @@ import {
   ClientEvent,
   type CreateRoutineInput,
   createId,
+  type MarkMemoryInput,
   type Message,
   type MessageRelay,
   type MessageStats,
@@ -1280,6 +1281,10 @@ export class ProjectAgent extends Agent<Env> {
     return this.knowledge.putMemory(name, input, by);
   }
 
+  markMemory(name: string, input: MarkMemoryInput) {
+    return this.knowledge.markMemory(name, input);
+  }
+
   deleteMemory(name: string) {
     return this.knowledge.deleteMemory(name);
   }
@@ -1324,7 +1329,9 @@ export class ProjectAgent extends Agent<Env> {
     return {
       memoryRead: (name) => this.getMemory(name),
       memoryWrite: (name, description, content) => this.putMemory(name, { description, content }, by),
+      memoryMark: (name, input) => this.markMemory(name, input),
       memoryDelete: (name) => this.deleteMemory(name),
+      memoryNames: () => this.listMemory().map((m) => m.name),
       listFiles: (prefix) => this.listFiles(prefix),
       readText: (path) => this.readFileText(path),
       writeText: (path, content) => this.writeFileText(path, content, by),
