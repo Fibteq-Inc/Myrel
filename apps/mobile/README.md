@@ -1,6 +1,7 @@
 # Myrel mobile
 
-The Myrel app for iOS and Android, built with [Expo](https://expo.dev) (SDK 58, Expo Router).
+The Myrel app for iOS and Android, built with [Expo](https://expo.dev) (SDK 58, Expo Router). The Android app
+is on [Google Play](https://play.google.com/store/apps/details?id=io.fibteq.myrel) (`io.fibteq.myrel`).
 It shares the API client, WebSocket sync and project state with the web app through
 `packages/client`, so only the screens live here.
 

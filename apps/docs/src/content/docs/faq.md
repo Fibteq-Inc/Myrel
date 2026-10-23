@@ -33,7 +33,7 @@ Make sure the runner is running (`npx myrel-runner status`) and installed as a b
 
 ### Is there a mobile app?
 
-Yes, for iOS and Android, with push notifications. Desktop apps for macOS, Windows and Linux are on the [Releases page](https://github.com/Fibteq-Inc/myrel/releases).
+Yes, for iOS and Android, with push notifications. Get the Android app on [Google Play](https://play.google.com/store/apps/details?id=io.fibteq.myrel). Desktop apps for macOS, Windows and Linux are on the [Releases page](https://github.com/Fibteq-Inc/myrel/releases).
 
 ### I run my own server and something is broken.
 
