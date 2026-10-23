@@ -6,6 +6,10 @@ name: Release myrel-runner
 #
 # Uses npm trusted publishing (no token): on npmjs.com, each package's
 # Settings > Trusted publishing must name this repository and this workflow file.
+# npm matches the owner and repository name exactly, capitals included
+# (Fibteq-Inc/Myrel, release-runner.yml): after renaming the repository, update
+# it there too, or publishing fails with a 404 on PUT. The repository field in
+# both package.json files has to point at the same name for provenance.
 
 on:
   push:
