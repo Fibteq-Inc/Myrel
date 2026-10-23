@@ -3,6 +3,7 @@ import {
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
+  CloudCli,
   type CliUsage,
   type ConnectorOffer,
   type ConnectorSuggestion,
@@ -526,6 +527,7 @@ export class ThreadAgent extends Agent<Env> {
       language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
       attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
       threadModel: ctx.thread.model,
+      threadCli: ctx.thread.cli?.id ?? null,
     });
   }
 
@@ -555,6 +557,8 @@ export class ThreadAgent extends Agent<Env> {
     requester: string | null;
     /** The model and effort picked for the thread, if any (see resolveTaskModel). */
     threadModel: ThreadModel | null;
+    /** The CLI picked for the thread, if any: in the cloud, one of CloudCli replaces the project's. */
+    threadCli: string | null;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -645,7 +649,8 @@ export class ThreadAgent extends Agent<Env> {
         // The model is reached through Myrel (see modelCaller), so no key, the server's or a member's
         // own, ever enters the sandbox, and an OpenAI-compatible call's cost is counted.
         spec.model = { ...model.model, baseUrl: `${origin}${mcpPath}/model` };
-        const harness = cloudHarness(await projectCloudCli(this.env, projectId), model.model);
+        const picked = CloudCli.safeParse(input.threadCli);
+        const harness = cloudHarness(picked.success ? picked.data : await projectCloudCli(this.env, projectId), model.model);
         spec.harness = harness.id;
         spec.title = harness.title;
         spec.prompt = agentPrompt(

@@ -595,6 +595,7 @@ export const tr: Catalog = {
   "cliPicker.several": { other: "{count} CLI, Myrel seçer" },
   "cliPicker.askHint": "Birden fazla seçersen Myrel işe uygun olanı seçer; limiti dolmuş olanı atlar.",
   "cliPicker.threadHint": "Thread'in bir sonraki turundan itibaren geçerli olur.",
+  "cliPicker.cloudHint": "Bulutta projenin modeliyle çalışır: Claude Code bir Claude modeli, Codex OpenAI uyumlu bir model ister; yoksa OpenCode çalışır.",
   "cliPicker.limited": "limiti dolu",
   "cliPicker.nearLimit": "limite yakın",
   "cliPicker.picked": "Bu thread {cli} ile çalışıyor. Myrel bunu {options} arasından seçti.",

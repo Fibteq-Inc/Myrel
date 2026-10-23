@@ -1,6 +1,6 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type CliModelDefaults, EFFORT_LEVELS, effortsFor, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Brain, Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
@@ -10,7 +10,10 @@ import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors } from "../theme";
 
-export type Pickable = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults };
+/** cloud: the person's threads run in the cloud, where the choice is among the cloud CLIs. */
+export type Pickable = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults; cloud?: boolean };
+
+const CLOUD_CLIS: RunnerCli[] = CloudCli.options.map((id) => ({ id, version: null }));
 
 export function cliName(id: string): string {
   return CLI_NAMES[id as CliId] ?? id;
@@ -18,22 +21,25 @@ export function cliName(id: string): string {
 
 /**
  * The CLIs the signed-in person can pick for this project's threads, as on the web: those on the
- * project folder's computer when it is theirs and the project does not always work in the cloud.
- * Null when there is nothing to pick.
+ * project folder's computer when it is theirs and the project does not always work in the cloud;
+ * otherwise the cloud CLIs, with the project's "CLI in the cloud" as the default. Null when there
+ * is nothing to pick.
  */
 export function usePickableClis(projectId: string): Pickable | null {
   const { api, server } = useSession();
-  const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: workspace, isPending } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
   const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
   const { data: settings } = useQuery({
     queryKey: ["project-settings", server, projectId],
     queryFn: () => api.getProjectSettings(projectId),
-    enabled: !!workspace,
   });
+  if (isPending || !settings) return null;
   // Only your own computers are listed, so finding it means it is yours.
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
-  if (!workspace || !runner || runner.clis.length === 0 || settings?.taskTarget === "cloud") return null;
-  return { clis: runner.clis, folderCli: workspace.cli, defaults: settings?.cliModels ?? {} };
+  const cloud = settings.taskTarget === "cloud" || !workspace || (settings.taskTarget === "auto" && runners !== undefined && !runner);
+  if (cloud) return { clis: CLOUD_CLIS, folderCli: settings.cloudCli, defaults: {}, cloud: true };
+  if (!runner || runner.clis.length === 0) return null;
+  return { clis: runner.clis, folderCli: workspace.cli, defaults: settings.cliModels };
 }
 
 /** Project chat: the CLIs a new ask's thread may run with. None: the folder's. Several: Myrel picks. */
@@ -46,7 +52,7 @@ export function AskCliPicker({ pickable, value, onChange }: { pickable: Pickable
   return (
     <>
       <Chip label={label} active={value.length > 0} several={value.length > 1} title={t("cliPicker.askTitle")} onPress={() => setOpen(true)} />
-      <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.askTitle")} hint={pickable.clis.length > 1 ? t("cliPicker.askHint") : undefined}>
+      <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.askTitle")} hint={[pickable.clis.length > 1 && t("cliPicker.askHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ") || undefined}>
         <Option kind="radio" checked={value.length === 0} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => onChange([])} />
         {pickable.clis.map((c) => (
           <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} note={limitNote(c, t)} onPress={() => toggle(c.id)} />
@@ -74,7 +80,7 @@ export function ThreadCliPicker({ pickable, thread, onChange }: { pickable: Pick
         title={t("cliPicker.threadTitle")}
         onPress={() => setOpen(true)}
       />
-      <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.threadTitle")} hint={t("cliPicker.threadHint")}>
+      <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.threadTitle")} hint={pickable.cloud ? `${t("cliPicker.threadHint")} ${t("cliPicker.cloudHint")}` : t("cliPicker.threadHint")}>
         <Option kind="radio" checked={!current} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => pick(null)} />
         {pickable.clis.map((c) => (
           <Option key={c.id} kind="radio" checked={current === c.id} title={cliName(c.id)} note={limitNote(c, t)} onPress={() => pick(c.id)} />
@@ -107,7 +113,8 @@ export function ThreadModelPicker({
   const colors = useColors();
   const [open, setOpen] = useState(false);
   const cli = (thread.cli?.id as CliId | undefined) ?? pickable.folderCli;
-  const models = pickable.clis.find((c) => c.id === cli)?.models;
+  // In the cloud the project's model runs whichever CLI it is.
+  const models = pickable.cloud ? undefined : pickable.clis.find((c) => c.id === cli)?.models;
   if (!models?.length) return null;
   const own = thread.model?.cli === cli ? thread.model : null;
   const project = pickable.defaults[cli];

@@ -597,6 +597,7 @@ export const en = {
   "cliPicker.several": { other: "{count} CLIs, Myrel picks" },
   "cliPicker.askHint": "Pick several and Myrel chooses the one that fits, skipping one that is at its limit.",
   "cliPicker.threadHint": "Applies from the thread's next turn.",
+  "cliPicker.cloudHint": "In the cloud it runs with the project's model: Claude Code needs a Claude model and Codex an OpenAI-compatible one, otherwise OpenCode runs.",
   "cliPicker.limited": "at its limit",
   "cliPicker.nearLimit": "near its limit",
   "cliPicker.picked": "Myrel picked {cli} for this thread, out of {options}.",

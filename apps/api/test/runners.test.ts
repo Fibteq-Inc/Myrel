@@ -811,6 +811,34 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("lets anyone in a project that works in the cloud pick a cloud CLI for a thread, and nothing else", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const project = await createProject(user);
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const chat = await openChat(project.id, user);
+    const errors: string[] = [];
+    chat.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data as string) as { type: string; code?: string };
+      if (event.type === "error") errors.push(event.code!);
+    });
+    // No local folder: an ask keeps only the cloud CLIs it offered.
+    chat.send(JSON.stringify({ type: "message.send", body: "Fix the tests", clis: ["cursor", "codex", "claude"] }));
+    const ask = await until(async () => (await projectAgent.getMessagesAfter(0)).messages.find((m) => m.body === "Fix the tests"), "the ask");
+    expect(ask.clis).toEqual(["codex", "claude"]);
+
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: await idOf(user), body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Testler");
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "cursor" }));
+    await until(() => errors.includes("no_cli"), "the refusal");
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "codex" }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.cli?.id === "codex", "the pick");
+    // A model and effort only mean something on a computer.
+    chat.send(JSON.stringify({ type: "thread.model", threadId: thread.id, cli: "codex", model: "gpt-x", effort: null }));
+    await until(() => errors.filter((e) => e === "no_cli").length === 2, "the model refusal");
+    expect((await projectAgent.getThread(thread.id))?.model ?? null).toBeNull();
+    chat.close();
+  });
+
   it("runs a thread with its model and effort, else the project's default for its CLI", { timeout: 30_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
@@ -887,7 +915,7 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
-  it("ignores CLIs offered by someone whose computer it is not", async () => {
+  it("keeps only cloud CLIs offered by someone whose computer it is not, since their threads run in the cloud", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
     const runnerSide = await connectRunner(token, ["cancel", "agent"]);
@@ -909,10 +937,13 @@ describe("local workspace", () => {
     const { invite } = (await invited.json()) as { invite: { id: string } };
     expect((await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: member })).status).toBe(200);
     const chat = await openChat(project.id, member);
-    chat.send(JSON.stringify({ type: "message.send", body: "Mine", clis: ["claude"] }));
+    chat.send(JSON.stringify({ type: "message.send", body: "Mine", clis: ["cursor"] }));
+    chat.send(JSON.stringify({ type: "message.send", body: "Mine too", clis: ["cursor", "claude"] }));
     const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
     const ask = await until(async () => (await projectAgent.getMessagesAfter(0)).messages.find((m) => m.body === "Mine"), "the ask");
     expect(ask.clis).toBeUndefined();
+    const other = await until(async () => (await projectAgent.getMessagesAfter(0)).messages.find((m) => m.body === "Mine too"), "the second ask");
+    expect(other.clis).toEqual(["claude"]);
     chat.close();
     runnerSide.ws.close();
   });

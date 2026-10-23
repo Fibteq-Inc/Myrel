@@ -76,6 +76,32 @@ describe("the cloud agent", () => {
     expect(await threadAgent.getTasks()).toEqual([]);
   });
 
+  it("runs a cloud turn with the CLI picked for the thread when the model suits it, else OpenCode and says why", async () => {
+    const { project, projectAgent } = await threadSetup();
+    const run = async (cli: "codex" | "claude") => {
+      const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: `testleri ${cli} ile çalıştır` });
+      const t = await projectAgent.createThread(root.id, cli, null, undefined, { id: cli, options: [cli], by: "person", reason: null });
+      const agent = await getAgentByName(env.THREAD_AGENT, t.id);
+      await agent.start({ projectId: project.id, threadId: t.id, brief: "Run the tests." });
+      const [task] = await until(async () => {
+        const tasks = (await agent.getTasks()) as (Task & { log: { text: string }[] })[];
+        return tasks[0]?.status === "failed" ? tasks : null;
+      }, `the ${cli} turn`);
+      const spec = await runInDurableObject(agent as unknown as DurableObjectStub, (_, state) =>
+        JSON.parse(state.storage.sql.exec<{ spec: string }>("SELECT spec FROM tasks").one().spec),
+      );
+      return { task: task!, spec };
+    };
+    // The project's model (Fireworks) speaks the OpenAI API: Codex takes it.
+    const codex = await run("codex");
+    expect(codex.task).toMatchObject({ title: "Codex", harness: "codex", backend: "sandbox" });
+    expect(codex.spec.prompt).toContain("You run as Codex in this thread's own Linux sandbox");
+    // Claude Code needs a Claude model: the turn runs with OpenCode and says so.
+    const claude = await run("claude");
+    expect(claude.task).toMatchObject({ title: "OpenCode", harness: "opencode" });
+    expect(claude.task.log.map((l) => l.text).join("\n")).toContain("needs a Claude model");
+  });
+
   it("runs the thread's agent as OpenCode in its sandbox, connected to the thread's MCP endpoint", async () => {
     const { project, token, ws, events, projectAgent, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });
