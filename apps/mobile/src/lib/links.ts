@@ -6,9 +6,10 @@ import { Alert, Linking } from "react-native";
 import { useFileRefContext } from "./file-refs";
 
 /**
- * Links in messages: web pages (artifacts above all) open in the in-app
- * viewer so the user stays in the conversation; anything else (mailto:,
- * tel:) goes to the OS. A thread link ([Title](#thr_…)) opens that thread, and
+ * Links in messages: web pages, mail and phone links go to the OS, as on
+ * the web, so a GitHub link opens the GitHub app when it is installed and
+ * the browser otherwise (artifacts open in the in-app viewer through their
+ * own cards, see useOpenArtifact). A thread link ([Title](#thr_…)) opens that thread, and
  * a file's path opens the file: a project file, or one in the project's folder
  * on this person's computer (looked up in `threadId`'s worktree first).
  */
@@ -25,9 +26,9 @@ export function useOpenLink(projectId: string, threadId?: string) {
       else if (file) {
         const local = file.kind === "local" ? `&local=1${threadId ? `&thread=${encodeURIComponent(threadId)}` : ""}` : "";
         router.push(`/projects/${projectId}/file?path=${encodeURIComponent(file.path)}${local}` as Href);
-      } else if (/^https?:\/\//i.test(href)) router.push({ pathname: "/artifact", params: { url: href } });
-      // Only mail and phone links go to the OS: any other scheme would fire another app's deep link.
-      else if (/^(mailto|tel):/i.test(href)) void Linking.openURL(href).catch(() => {});
+      }
+      // Only web, mail and phone links go to the OS: any other scheme would fire another app's deep link.
+      else if (/^(https?|mailto|tel):/i.test(href)) void Linking.openURL(href).catch(() => {});
     },
     [router, projectId, threadId, files, t],
   );

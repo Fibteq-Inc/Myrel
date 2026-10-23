@@ -1,6 +1,5 @@
 import { useI18n, useT } from "@myrel/i18n/react";
 import { type Task, type TerminalLine, unwrapShell } from "@myrel/protocol";
-import * as WebBrowser from "expo-web-browser";
 import {
   ChevronRight,
   CircleAlert,
@@ -13,7 +12,7 @@ import {
   SquareTerminal,
 } from "lucide-react-native";
 import { type ComponentRef, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { formatDuration } from "../../lib/format";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
@@ -108,7 +107,7 @@ function PullRequestLink({ url }: { url: string }) {
   return (
     <Pressable
       accessibilityRole="link"
-      onPress={() => void WebBrowser.openBrowserAsync(url)}
+      onPress={() => void Linking.openURL(url).catch(() => {})}
       hitSlop={6}
       style={styles.action}
     >
