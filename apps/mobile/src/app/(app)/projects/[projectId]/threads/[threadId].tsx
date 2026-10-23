@@ -6,6 +6,7 @@ import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
+import { ThreadCliNote, ThreadCliPicker, usePickableClis } from "../../../../../components/cli-picker";
 import { Conversation } from "../../../../../components/conversation";
 import { Tabs } from "../../../../../components/project/tabs";
 import { WorkspaceFilesTab } from "../../../../../components/thread/files";
@@ -85,7 +86,7 @@ export default function ThreadScreen() {
   const [planOpen, setPlanOpen] = useState(false);
   // The progress line is pinned and opens the whole plan in place; the plan card stays where the work
   // started. It stays once the work is done, so the finished plan is still one tap away.
-  const header = thread?.statusText ? (
+  const progress = thread?.statusText ? (
     <View style={styles.panel}>
       <PlanProgress
         key={threadId}
@@ -97,6 +98,15 @@ export default function ThreadScreen() {
       />
     </View>
   ) : null;
+  // Which CLI Myrel picked, and why, stays in view above the conversation.
+  const header =
+    progress || thread?.cli?.by === "coordinator" ? (
+      <>
+        {progress}
+        {thread && <ThreadCliNote thread={thread} />}
+      </>
+    ) : null;
+  const pickable = usePickableClis(projectId);
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
   const plan =
@@ -157,6 +167,10 @@ export default function ThreadScreen() {
           placeholder={t("thread.placeholder")}
           onSend={onSend}
           header={header}
+          tools={
+            pickable &&
+            thread && <ThreadCliPicker pickable={pickable} thread={thread} onChange={(cli) => emit({ type: "thread.cli", threadId, cli })} />
+          }
           plan={plan}
           onOpenPlan={thread?.statusText ? () => setPlanOpen(true) : undefined}
         />

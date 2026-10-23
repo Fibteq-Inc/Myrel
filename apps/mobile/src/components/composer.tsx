@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import type { ProjectFile } from "@myrel/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CircleAlert, Paperclip, X } from "lucide-react-native";
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { pickPhotos } from "../lib/pick-photos";
 import { platform } from "../lib/platform";
@@ -23,8 +23,11 @@ export function Composer({
   placeholder,
   onSend,
   disabled,
+  tools,
 }: {
   placeholder: string;
+  /** Shown above the text field, e.g. the CLI picker. */
+  tools?: ReactNode;
   /** `attachments` are paths of files already uploaded to the project. */
   onSend: (body: string, attachments: string[]) => void;
   disabled?: boolean;
@@ -102,6 +105,7 @@ export function Composer({
           ))}
         </ScrollView>
       )}
+      {tools}
       <View style={styles.row}>
         <Pressable
           accessibilityRole="button"
