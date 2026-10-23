@@ -1,6 +1,5 @@
 import { useT } from "@myrel/i18n/react";
 import type { PullRequest } from "@myrel/protocol";
-import * as WebBrowser from "expo-web-browser";
 import {
   CircleCheck,
   CircleX,
@@ -13,7 +12,7 @@ import {
   TriangleAlert,
 } from "lucide-react-native";
 import type { ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { makeStyles, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
 import { Spinner } from "../ui";
@@ -58,7 +57,8 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={`${pr.title}, ${pr.repo}#${pr.number}, ${state.label}`}
-      onPress={() => void WebBrowser.openBrowserAsync(pr.url)}
+      // The OS hands it to the GitHub app when it is installed, the browser otherwise.
+      onPress={() => void Linking.openURL(pr.url).catch(() => {})}
       style={({ pressed }) => [styles.card, pressed && { backgroundColor: colors.hover }]}
     >
       <View style={styles.icon}>

@@ -3,20 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { ExternalLink } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { errorMessage, Spinner } from "../../components/ui";
-import { platform } from "../../lib/platform";
 import { useSession } from "../../lib/session";
 import { useColors } from "../../theme";
 
 type Params = { url?: string; projectId?: string; artifactId?: string; version?: string };
 
 /**
- * Artifacts, and other pages linked from messages, open here in a WebView.
+ * Artifacts (and pages sent here as myrel://artifact?url=…) open in a WebView.
  * An artifact is framed through a signed, short-lived link on its own origin,
  * so the page never shares the app's session; the button hands the page to
- * the system browser.
+ * the OS (the browser, or the app that owns the address).
  */
 export default function ArtifactScreen() {
   const colors = useColors();
@@ -81,7 +80,7 @@ export default function ArtifactScreen() {
               <Pressable
                 accessibilityLabel={t("mobile.openInBrowser")}
                 hitSlop={10}
-                onPress={() => void platform.openExternal(url)}
+                onPress={() => void Linking.openURL(url).catch(() => {})}
               >
                 <ExternalLink size={20} color={colors.fg} />
               </Pressable>
