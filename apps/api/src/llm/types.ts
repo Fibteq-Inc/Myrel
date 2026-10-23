@@ -37,6 +37,8 @@ export type ChatResponse = {
   model?: string;
   /** What the call cost in US dollars, when the provider says so in its response. */
   costUsd?: number;
+  /** The answer hit maxTokens and was cut off, so a tool call it was writing may be missing. */
+  truncated?: boolean;
 };
 
 export interface ModelProvider {
