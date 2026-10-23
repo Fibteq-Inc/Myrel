@@ -39,6 +39,8 @@ export const darkColors = {
   accentBorder: "rgba(139,155,255,0.6)",
   accentBorderSoft: "rgba(139,155,255,0.4)",
   accentWash: "rgba(30,33,66,0.35)",
+  /** Dims the screen behind a bottom sheet. */
+  scrim: "rgba(0,0,0,0.5)",
 };
 
 export type Colors = { [K in keyof typeof darkColors]: string };
@@ -77,6 +79,7 @@ export const lightColors: Colors = {
   accentBorder: "rgba(74,85,214,0.55)",
   accentBorderSoft: "rgba(74,85,214,0.35)",
   accentWash: "rgba(236,238,255,0.6)",
+  scrim: "rgba(17,17,20,0.3)",
 };
 
 export const palettes: Record<Theme, Colors> = { dark: darkColors, light: lightColors };

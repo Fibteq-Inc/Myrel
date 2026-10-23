@@ -7,7 +7,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
-import { colors, radius } from "../theme";
+import { makeStyles, radius, useColors } from "../theme";
 
 export type Pickable = { clis: RunnerCli[]; folderCli: CliId };
 
@@ -86,6 +86,8 @@ export function ThreadCliPicker({ pickable, thread, onChange }: { pickable: Pick
 /** The note at the top of a thread whose CLI Myrel picked among the ones the person offered. */
 export function ThreadCliNote({ thread }: { thread: Thread }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   const cli = thread.cli;
   if (!cli || cli.by !== "coordinator") return null;
   return (
@@ -102,6 +104,8 @@ export function ThreadCliNote({ thread }: { thread: Thread }) {
 /** Under a person's ask in the project chat: the CLIs they offered for it. */
 export function OfferedClis({ clis }: { clis: string[] }) {
   const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
   return (
     <View style={styles.offered}>
       <SquareTerminal size={13} color={colors.subtle} />
@@ -113,6 +117,8 @@ export function OfferedClis({ clis }: { clis: string[] }) {
 }
 
 function Chip({ label, active, several, title, onPress }: { label: string; active: boolean; several: boolean; title: string; onPress: () => void }) {
+  const colors = useColors();
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -132,6 +138,7 @@ function Chip({ label, active, several, title, onPress }: { label: string; activ
 
 function Sheet({ open, onClose, title, hint, children }: { open: boolean; onClose: () => void; title: string; hint?: string; children: React.ReactNode }) {
   const t = useT();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
@@ -161,6 +168,8 @@ function Option({
   note?: string;
   onPress: () => void;
 }) {
+  const colors = useColors();
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole={kind === "radio" ? "radio" : "checkbox"}
@@ -169,7 +178,7 @@ function Option({
       style={({ pressed }) => [styles.option, pressed && { backgroundColor: colors.hover }]}
     >
       <View style={[styles.mark, kind === "radio" ? { borderRadius: 10 } : { borderRadius: 5 }, checked && styles.markOn]}>
-        {checked && <Check size={13} strokeWidth={3} color={colors.ground} />}
+        {checked && <Check size={13} strokeWidth={3} color={colors.onAccent} />}
       </View>
       <Text style={styles.optionText} numberOfLines={1}>
         {title}
@@ -185,53 +194,55 @@ function limitNote(cli: RunnerCli, t: ReturnType<typeof useT>): string | undefin
   return undefined;
 }
 
-const styles = StyleSheet.create({
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    gap: 6,
-    maxWidth: 220,
-    borderRadius: radius.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    marginLeft: 4,
-  },
-  chipText: { color: colors.muted, fontSize: 13, flexShrink: 1 },
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
-  sheet: {
-    gap: 12,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.edge,
-    backgroundColor: colors.panel,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  sheetTitle: { color: colors.fg, fontSize: 16, fontWeight: "600" },
-  hint: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
-  option: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 12 },
-  mark: { width: 20, height: 20, borderWidth: 1, borderColor: colors.edge, alignItems: "center", justifyContent: "center" },
-  markOn: { borderColor: colors.accent, backgroundColor: colors.accent },
-  optionText: { flex: 1, color: colors.body, fontSize: 15 },
-  optionNote: { color: colors.subtle, fontSize: 13 },
-  done: { alignItems: "center", borderRadius: radius.md, backgroundColor: colors.hover, paddingVertical: 12 },
-  doneText: { color: colors.fg, fontSize: 15, fontWeight: "600" },
-  note: {
-    flexDirection: "row",
-    gap: 10,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginHorizontal: 16,
-    marginTop: 10,
-  },
-  noteText: { color: colors.body, fontSize: 13, lineHeight: 18 },
-  noteReason: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
-  offered: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
-  offeredText: { color: colors.subtle, fontSize: 12 },
-});
+const useStyles = makeStyles((colors) =>
+  StyleSheet.create({
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      gap: 6,
+      maxWidth: 220,
+      borderRadius: radius.sm,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      marginLeft: 4,
+    },
+    chipText: { color: colors.muted, fontSize: 13, flexShrink: 1 },
+    backdrop: { flex: 1, backgroundColor: colors.scrim },
+    sheet: {
+      gap: 12,
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.edge,
+      backgroundColor: colors.panel,
+      paddingHorizontal: 16,
+      paddingTop: 16,
+    },
+    sheetTitle: { color: colors.fg, fontSize: 16, fontWeight: "600" },
+    hint: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
+    option: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 12 },
+    mark: { width: 20, height: 20, borderWidth: 1, borderColor: colors.edge, alignItems: "center", justifyContent: "center" },
+    markOn: { borderColor: colors.accent, backgroundColor: colors.accent },
+    optionText: { flex: 1, color: colors.body, fontSize: 15 },
+    optionNote: { color: colors.subtle, fontSize: 13 },
+    done: { alignItems: "center", borderRadius: radius.md, backgroundColor: colors.hover, paddingVertical: 12 },
+    doneText: { color: colors.fg, fontSize: 15, fontWeight: "600" },
+    note: {
+      flexDirection: "row",
+      gap: 10,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.panel,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginHorizontal: 16,
+      marginTop: 10,
+    },
+    noteText: { color: colors.body, fontSize: 13, lineHeight: 18 },
+    noteReason: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
+    offered: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+    offeredText: { color: colors.subtle, fontSize: 12 },
+  }),
+);
