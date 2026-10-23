@@ -120,7 +120,7 @@ describe("the cloud agent", () => {
   });
 
   it("ends a turn its sandbox lost (a deploy restarted it), on Stop or on its own check", async () => {
-    const { project, projectAgent, threadAgent, thread } = await threadSetup();
+    const { project, threadAgent, thread } = await threadSetup();
     await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Run the tests." });
     await until(async () => ((await threadAgent.getTasks())[0]?.status === "failed" ? true : null), "the first turn");
 
@@ -150,9 +150,10 @@ describe("the cloud agent", () => {
     await lost("task_turn", true);
     await threadAgent.sandboxCheck({ taskId: "task_turn" });
     expect(await status("task_turn")).toBe("failed");
-    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
-    const resuming = "Bulut sandbox'ı durduğu için görev kesildi; 30 sn içinde kaldığı yerden devam ediyor (1/3).";
-    await until(async () => ((await bodies()).includes(resuming) ? true : null), "the resuming line");
+    const resumes = await runInDurableObject(threadAgent as unknown as DurableObjectStub, (agent: ThreadAgent) =>
+      agent.getSchedules().filter((x) => x.callback === "resumeInterrupted"),
+    );
+    expect(resumes.map((x) => x.payload)).toEqual([{ taskId: "task_turn" }]);
   }, 20_000);
 
   it("opens the model proxy to a cloud turn's token only, never a local turn's", async () => {
