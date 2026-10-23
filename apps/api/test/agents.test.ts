@@ -365,6 +365,41 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("opens a thread the coordinator starts on another thread's report for the person that thread works for", async () => {
+    setFakeModel((req) => {
+      if (req.prompt.includes("Requests from thread agents")) {
+        // The coordinator posts its own line in the project chat and opens a thread on it.
+        if (req.turns === 1) return { text: "", toolCalls: [call("post_message", { text: "CI is red; opening a thread for it." })] };
+        const posted = /Posted (cmsg_[0-9A-Z]{26})/.exec(req.last)?.[1];
+        return posted
+          ? { text: "", toolCalls: [call("start_thread", { message_id: posted, title: "Flaky test", instructions: "Fix the flaky test." })] }
+          : { text: "", toolCalls: [] };
+      }
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Paste", instructions: "Build it.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const play: Play = async (turn) => {
+      if (turn.prompt.includes("Build it.")) await turn.call("request_coordinator", { kind: "routing", reason: "Main CI is red from a flaky test." });
+    };
+    const { ws, agent, token } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "attach long pastes as files" }));
+
+    const flaky: Thread = await until(async () => (await agent.listThreads()).find((t: Thread) => t.title === "Flaky test"), "thread from the report");
+    const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, flaky.id);
+    const meta = (key: string) =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) =>
+        state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value || null,
+      );
+    // Not a thread nobody asked for (which would work in the cloud): it works for whoever the reporting thread did.
+    expect(await meta("start_actor")).toBe(me);
+    expect(await until(() => meta("requester"), "its first turn")).toBe(me);
+    ws.close();
+  });
+
   it("sends a thread agent's choice card to the coordinator first, which answers it or passes it to the person", async () => {
     const questions: string[] = [];
     setFakeModel((req) => {

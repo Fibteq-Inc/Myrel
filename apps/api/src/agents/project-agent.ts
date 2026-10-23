@@ -697,8 +697,8 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** A thread agent asks the coordinator for permission or direction. Callable over RPC. */
-  async requestCoordinator(threadId: string, kind: CoordinatorRequestKind, reason: string): Promise<void> {
-    await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason });
+  async requestCoordinator(threadId: string, kind: CoordinatorRequestKind, reason: string, actor: string | null = null): Promise<void> {
+    await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason, actor });
   }
 
   /**
@@ -1129,7 +1129,7 @@ export class ProjectAgent extends Agent<Env> {
           computerClis,
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox), questions), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox), questions, this.startedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
@@ -1179,10 +1179,27 @@ export class ProjectAgent extends Agent<Env> {
     return people.size === 1 && only ? only : null;
   }
 
+  /**
+   * Who a thread this coordinator turn opens on its own message works for: as forwardedFor, but a
+   * thread's request counts for the person that thread works for. So a thread the coordinator opens
+   * because another thread reported something runs where that one did (their computer), not in the
+   * cloud as a thread nobody asked for. A thread opened on a person's message works for its author.
+   */
+  private startedFor(inbox: InboxItem[]): string | null {
+    const requests = inbox.filter((i) => i.kind === "request");
+    if (requests.length === 0) return this.forwardedFor(inbox);
+    const asked = inbox.filter((i) => i.kind === "message" || i.kind === "routine");
+    const people = new Set(requests.map((r) => r.actor ?? ""));
+    if (asked.length > 0) people.add(this.forwardedFor(asked) ?? "");
+    const [only] = people;
+    return people.size === 1 && only ? only : null;
+  }
+
   private coordinatorHost(
     meter?: TurnMeter,
     forwardedFor: string | null = null,
     questions: TurnQuestions = { open: new Map(), settled: new Set() },
+    startedFor: string | null = null,
   ): CoordinatorHost {
     const post = (body: string, relay?: MessageRelay) =>
       this.sendMessage({
@@ -1218,7 +1235,7 @@ export class ProjectAgent extends Agent<Env> {
         const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null, relay.threadId, cli ?? null);
         relayInThread(relay, ack || relayLine("brief", brief));
         const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
-        await agent.start({ projectId: this.name, threadId: thread.id, brief });
+        await agent.start({ projectId: this.name, threadId: thread.id, brief, actor: startedFor });
         return thread;
       },
       findDuplicate: (messageId) => this.findDuplicateThread(messageId),

@@ -47,7 +47,7 @@ export type Play = (turn: Turn, index: number) => Promise<string | void | { fail
  * the turn's prompt, and its tool calls go to Myrel's tools over MCP. Its text is the final message.
  */
 export const modelAgent: Play = async (turn) => {
-  const res = fakeModel()({ system: "", prompt: turn.prompt, turns: 1 });
+  const res = fakeModel()({ system: "", prompt: turn.prompt, turns: 1, last: turn.prompt });
   for (const c of res.toolCalls) await turn.call(c.name, c.input);
   return res.text;
 };
