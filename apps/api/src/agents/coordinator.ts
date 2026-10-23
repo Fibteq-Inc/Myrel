@@ -112,6 +112,8 @@ export function coordinatorPrompt(input: {
     (r) => `- ${r.createdAt}: "${titles.get(r.fromThreadId) ?? r.fromThreadId}" → "${titles.get(r.toThreadId) ?? r.toThreadId}": ${r.note}`,
   );
   const onlyThreadUpdates = input.inbox.length > 0 && input.inbox.every((i) => i.kind === "thread");
+  // Named again at the end, so a person's ask is not lost among thread updates in the same turn.
+  const newChat = input.chat.filter((m) => newIds.has(m.id)).map((m) => m.id);
 
   return [
     `Project: ${input.projectName}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
@@ -125,7 +127,9 @@ export function coordinatorPrompt(input: {
     relays.length ? `## Notes already relayed between threads, newest last\n${relays.join("\n")}` : "",
     onlyThreadUpdates
       ? "Nothing new in the project chat. Relay only what changes another open thread's work; otherwise call no tools."
-      : "Handle everything new now with your tools.",
+      : newChat.length
+        ? `Handle everything new now with your tools. Each NEW project chat message needs its own handling, even when thread updates or requests arrived with it: ${newChat.map((id) => `[${id}]`).join(", ")}.`
+        : "Handle everything new now with your tools.",
   ]
     .filter(Boolean)
     .join("\n\n");
