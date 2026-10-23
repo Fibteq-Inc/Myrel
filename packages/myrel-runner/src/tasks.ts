@@ -219,7 +219,7 @@ export class TaskRunner {
     child.stdin!.on("error", () => {}); // the CLI may exit before reading all of stdin
     // The prompt lists the skills; only the runner knows where they are on this computer.
     const text = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
-    child.stdin!.end(adapter.input ? adapter.input(text) : text);
+    child.stdin!.end(adapter.input ? adapter.input(text, config.access) : text);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
 
