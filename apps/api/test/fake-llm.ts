@@ -1,7 +1,7 @@
 import type { ChatResponse } from "../src/llm";
 
-/** One OpenAI-style chat request as the fake model sees it. */
-export type FakeRequest = { system: string; prompt: string; turns: number };
+/** One OpenAI-style chat request as the fake model sees it. last: its newest message, e.g. the previous tool's result. */
+export type FakeRequest = { system: string; prompt: string; turns: number; last: string };
 export type FakeHandler = (req: FakeRequest) => ChatResponse;
 
 const silent: FakeHandler = () => ({ text: "", toolCalls: [] });
@@ -78,6 +78,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     system: body.messages[0]!.content ?? "",
     prompt: body.messages[1]!.content ?? "",
     turns: body.messages.length - 1,
+    last: body.messages.at(-1)!.content ?? "",
   });
   return Response.json({
     usage: { prompt_tokens: 1000, completion_tokens: 100 },

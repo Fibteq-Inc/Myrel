@@ -21,7 +21,8 @@ export type InboxItem =
   | { kind: "message"; messageId: string }
   /** A person changed the text of a project-chat message they sent earlier. */
   | { kind: "edited"; messageId: string }
-  | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string }
+  /** actor: who the asking thread works for; a thread the coordinator opens on it works for them too. */
+  | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string; actor?: string | null }
   /** A thread agent's choice card, waiting for the coordinator to answer it or pass it to people. */
   | { kind: "question"; threadId: string; questionId: string; question: string }
   /** A routine ran and posted its prompt in the project chat as messageId. */

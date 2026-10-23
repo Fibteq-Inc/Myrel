@@ -95,7 +95,10 @@ export type ThreadStart = {
   projectId: string;
   threadId: string;
   brief: string;
-  /** Who a thread nobody asked for in the chat (memory upkeep) works for until someone writes in it. */
+  /**
+   * Who a thread nobody asked for in the chat works for until someone writes in it: memory upkeep's
+   * author, or the person behind the coordinator turn that opened it on its own message.
+   */
   actor?: string | null;
 };
 
@@ -1295,7 +1298,7 @@ export class ThreadAgent extends Agent<Env> {
         planned: () => turn().planDone !== undefined,
         requestCoordinator: async (kind, reason) => {
           save({ asked: true });
-          await project.requestCoordinator(threadId, kind, reason);
+          await project.requestCoordinator(threadId, kind, reason, this.getMeta("requester") || null);
           // People see what the thread waits on, instead of a thread that went quiet.
           const body = `${turn()?.language === "tr" ? "Koordinatörün yanıtı bekleniyor" : "Waiting for the coordinator"}: ${reason.length > 300 ? `${reason.slice(0, 300)}…` : reason}`;
           const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
