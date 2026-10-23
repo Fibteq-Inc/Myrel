@@ -1,14 +1,14 @@
 import { ScrollView, Pressable, StyleSheet, Text } from "react-native";
-import { colors } from "../../theme";
+import { colors, mono } from "../../theme";
 
-/** A row of section tabs under a header, scrollable when they don't fit. */
+/** A row of section tabs under a header, scrollable when they don't fit. A count shows beside its label. */
 export function Tabs<K extends string>({
   tabs,
   value,
   onChange,
   label,
 }: {
-  tabs: { key: K; label: string }[];
+  tabs: { key: K; label: string; count?: number }[];
   value: K;
   onChange: (key: K) => void;
   label: string;
@@ -29,10 +29,14 @@ export function Tabs<K extends string>({
             key={tab.key}
             accessibilityRole="tab"
             accessibilityState={{ selected }}
+            accessibilityLabel={tab.count ? `${tab.label} (${tab.count})` : undefined}
             onPress={() => onChange(tab.key)}
             style={[styles.tab, selected && styles.selected]}
           >
-            <Text style={[styles.text, selected && { color: colors.fg }]}>{tab.label}</Text>
+            <Text style={[styles.text, selected && { color: colors.fg }]}>
+              {tab.label}
+              {tab.count ? <Text style={styles.count}>{` ${tab.count}`}</Text> : null}
+            </Text>
           </Pressable>
         );
       })}
@@ -46,4 +50,5 @@ const styles = StyleSheet.create({
   tab: { paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: "transparent" },
   selected: { borderBottomColor: colors.accent },
   text: { color: colors.subtle, fontSize: 14, fontWeight: "500" },
+  count: { color: colors.subtle, fontFamily: mono, fontSize: 12 },
 });
