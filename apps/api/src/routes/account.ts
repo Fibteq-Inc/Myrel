@@ -15,9 +15,18 @@ const { apiKeys, projectInvites, projectMembers, projects, user } = schema;
 /** The signed-in user (mounted at /api/account): profile, model providers and keys, invitations. */
 export const accountRoutes = new Hono<AppEnv>()
   .use(requireUser)
-  .get("/", (c) => {
+  .get("/", async (c) => {
     const { id, name, email, role } = c.get("user");
-    return c.json({ user: { id, name, email, role } satisfies Me });
+    const [row] = await createDb(c.env.DB).select({ onboardedAt: user.onboardedAt }).from(user).where(eq(user.id, id));
+    return c.json({ user: { id, name, email, role, onboarded: !!row?.onboardedAt } satisfies Me });
+  })
+  // The "Get started" list is done or hidden, for this account on every device.
+  .post("/onboarded", async (c) => {
+    await createDb(c.env.DB)
+      .update(user)
+      .set({ onboardedAt: new Date() })
+      .where(and(eq(user.id, c.get("user").id), isNull(user.onboardedAt)));
+    return c.body(null, 204);
   })
   // Where a first email verification leads (see firstVerification in auth.ts): on to the page that
   // sets a new password, with the link made for it. Anyone else goes home.

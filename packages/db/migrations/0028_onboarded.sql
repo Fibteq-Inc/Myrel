@@ -1,0 +1,1 @@
+ALTER TABLE `user` ADD `onboarded_at` integer;

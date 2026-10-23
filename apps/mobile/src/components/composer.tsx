@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import type { ProjectFile } from "@myrel/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CircleAlert, Paperclip, X } from "lucide-react-native";
-import { type ReactNode, useRef, useState } from "react";
+import { type ComponentRef, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { pickPhotos } from "../lib/pick-photos";
 import { platform } from "../lib/platform";
@@ -13,6 +13,12 @@ import { makeStyles, radius, useColors, useTheme } from "../theme";
 import { errorMessage, Spinner } from "./ui";
 
 type Pending = { id: number; name: string; file?: ProjectFile; error?: string };
+
+/** Lets a parent put text in the box, e.g. an example task picked from an empty chat. */
+export type ComposerHandle = {
+  /** Replaces the text with `text`, focuses the field and selects `select` (start, end). */
+  fill: (text: string, select?: [number, number]) => void;
+};
 type Picked = { name: string; blob: Blob };
 
 /**
@@ -24,6 +30,7 @@ export function Composer({
   onSend,
   disabled,
   tools,
+  handle,
 }: {
   placeholder: string;
   /** Shown above the text field, e.g. the CLI picker. */
@@ -31,6 +38,7 @@ export function Composer({
   /** `attachments` are paths of files already uploaded to the project. */
   onSend: (body: string, attachments: string[]) => void;
   disabled?: boolean;
+  handle?: Ref<ComposerHandle>;
 }) {
   const t = useT();
   const theme = useTheme();
@@ -45,6 +53,22 @@ export function Composer({
   const uploading = pending.some((p) => !p.file && !p.error);
   const ready = pending.flatMap((p) => (p.file ? [p.file.path] : []));
   const canSend = (body.trim().length > 0 || ready.length > 0) && !uploading && !disabled;
+  const input = useRef<ComponentRef<typeof TextInput>>(null);
+  // The selection waits for the new text to reach the field.
+  const selection = useRef<[number, number] | null>(null);
+  useImperativeHandle(handle, () => ({
+    fill(text, select) {
+      selection.current = select ?? [text.length, text.length];
+      setBody(text);
+    },
+  }));
+  useEffect(() => {
+    if (!selection.current) return;
+    const [start, end] = selection.current;
+    selection.current = null;
+    input.current?.focus();
+    input.current?.setSelection(start, end);
+  }, [body]);
 
   function attach(files: Picked[]) {
     for (const f of files) {
@@ -120,6 +144,7 @@ export function Composer({
           <Paperclip size={20} color={colors.muted} />
         </Pressable>
         <TextInput
+          ref={input}
           value={body}
           onChangeText={setBody}
           placeholder={placeholder}

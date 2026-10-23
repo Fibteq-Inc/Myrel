@@ -197,6 +197,13 @@
       "when": 1792682807688,
       "tag": "0027_github_user_repos_push",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1792758185008,
+      "tag": "0028_onboarded",
+      "breakpoints": true
     }
   ]
 }

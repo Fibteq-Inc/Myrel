@@ -93,6 +93,8 @@ export const Me = z.object({
   name: z.string(),
   email: z.string(),
   role: InstanceRole,
+  /** Whether the person finished or hid the "Get started" list; older servers do not send it (the apps then never show the list). */
+  onboarded: z.boolean().optional(),
 });
 export type Me = z.infer<typeof Me>;
 

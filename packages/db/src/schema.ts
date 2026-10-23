@@ -25,6 +25,8 @@ export const user = sqliteTable("user", {
   termsAcceptedAt: integer("terms_accepted_at", { mode: "timestamp_ms" }),
   /** The version of those documents (ServerInfo.legal.version); a newer one can ask again. */
   termsVersion: text("terms_version"),
+  /** When the person finished or hid the "Get started" list in the apps (null: still shown). */
+  onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
   ...timestamps,
 });
 

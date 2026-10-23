@@ -130,7 +130,7 @@ export function ProjectHeader() {
         />
         <IconButton
           type="button"
-          onClick={openSettings}
+          onClick={() => openSettings()}
           aria-label={t("chat.projectSettings")}
           title={t("chat.projectSettings")}
           className="-mr-1 size-9 flex-none"

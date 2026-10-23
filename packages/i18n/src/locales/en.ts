@@ -131,6 +131,36 @@ export const en = {
   "chat.emptyBody":
     "Ask for anything. Myrel opens a thread for each piece of work and reports back there, so this chat stays readable.",
 
+  // Get started: examples in an empty project chat and the owner's starter list
+  "starter.try": "Try one to get started:",
+  "starter.page.title": "Make a landing page",
+  "starter.page.body": "A one-page site for your product.",
+  "starter.page.result": "You get a page to open and share",
+  "starter.page.prompt":
+    "Make a one-page landing page for my product: what it does, who it is for, and a sign-up button. Product: [describe your product in one sentence]",
+  "starter.research.title": "Research a topic",
+  "starter.research.body": "Gathers the key findings with their sources.",
+  "starter.research.result": "You get a file in the project",
+  "starter.research.prompt": "Research [topic] and write the 5 most important findings, with their sources, to a file.",
+  "starter.routine.title": "Set up a weekly job",
+  "starter.routine.body": "Prepares something for you every week.",
+  "starter.routine.result": "You get a routine that runs by itself",
+  "starter.routine.prompt": "Every Monday at 9:00, prepare [what you want, e.g. my plan for the week] and send it to me.",
+  "starter.title": "Get started",
+  "starter.progress": "{done}/{total}",
+  "starter.open": "Get started, {done} of {total} done",
+  "starter.hide": "Hide",
+  "starter.optional": "optional",
+  "starter.connect": "Connect",
+  "starter.how": "How?",
+  "starter.step.project": "Create the project",
+  "starter.step.task": "Give the first task",
+  "starter.step.computer": "Connect your computer",
+  "starter.step.computerHint": "Work with your own Claude Code, Codex, Antigravity or OpenCode",
+  "starter.step.computerHintMobile": "From the desktop app or a terminal",
+  "starter.step.github": "Connect GitHub",
+  "starter.step.githubHint": "Agents open branches and pull requests",
+
   // Messages
   "message.copy": "Copy message",
   "message.showMore": "Show more",
