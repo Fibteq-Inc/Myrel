@@ -2,7 +2,7 @@
 
 Connects your computer to a Myrel server, so a project can work in one of your
 local folders with the coding CLI you already use: Claude Code, Codex CLI,
-Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI or Muse Code.
+Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code or Kimi Code.
 
 - It opens an **outbound** WebSocket to the server. No port is opened, and it works behind NAT.
 - The server sends a task (a folder, a CLI and a prompt). The runner starts the CLI in that folder, streams its
@@ -15,7 +15,7 @@ Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI or Muse Code.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI) or `muse` (Muse Code) on your `PATH`, already signed in.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code) or `kimi` (Kimi Code) on your `PATH`, already signed in.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -135,6 +135,13 @@ that run only. With `read` its write and shell tools are taken away (its `:read-
 a command's approval). `full` is `--yolo`: no approval, no sandbox. Muse Code has no `--add-dir`, so below `full` it
 writes only in the project's main folder.
 
+Kimi Code runs as an ACP server (`kimi acp`) like Hermes Agent, whose session takes a permission mode: `plan` with
+`read` (no edits but its own plan file), `default` with `edit` and `auto` (reads and edits inside the folder's git
+repository run, the rest asks) and `auto` ("never ask") with `full`. What it asks permission for is declined below
+`full`, except the run's own MCP tools (`mcp__<server>__…`), which are allowed at every level. It has no sandbox, so
+below `full` its shell commands are declined; its `yolo` mode would run them all but system commands (shutdown,
+`mkfs`), so `auto` stays with `edit` as for Codex. Rules you set to `deny` in its config always hold.
+
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 
@@ -150,8 +157,8 @@ level does not allow on its own (with `edit`: `git commit`, `git push`, tests) i
 Allow commands this turn, Don't run), so there is no need to restart the runner with `--access full` for one task. A
 file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
-are asked about. Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI and Muse Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
-`external_directory` allow rules).
+are asked about. Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code and Kimi Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
+`external_directory` allow rules, Kimi Code as the session's `additionalDirectories`).
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
 
@@ -170,11 +177,12 @@ decisions, artifacts, memory, routines) added over MCP:
 | Hermes Agent | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header |
 | Cursor CLI | `mcp.json` of a plugin folder of the run (`--plugin-dir`, `--approve-mcps`), allowed with `Mcp(plugin-myrel-myrel:*)` in a `cli-config.json` of the run (`CURSOR_CONFIG_DIR`) |
 | Muse Code | `-c 'mcpServers.myrel={"url":…,"headers":{"Authorization":"${MYREL_MCP_AUTH}"}}'`, run with `--approval-mode never` |
+| Kimi Code | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header, its tools allowed when it asks |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
 uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
-for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.19.0 or later for Muse Code.
+for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.19.0 or later for Muse Code, 0.20.0 or later for Kimi Code.
 
 Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
 server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
@@ -214,6 +222,17 @@ its models, so the runner reads the catalog it keeps in `~/.local/share/muse/mod
 effort tiers); a picked model and effort go in as `--model` and `--effort`, otherwise your settings decide. Your own
 MCP servers come from your settings too. Skills: the prompt names the run's skills folder, where Muse Code reads them.
 Detection checks that `muse --version` says Muse Code. Sign in once with `muse login`.
+
+Kimi Code (Moonshot AI's `kimi`, the npm package `@moonshot-ai/kimi-code`) takes MCP servers for a run only in its
+ACP server: `kimi -p` reads them from `~/.kimi-code/mcp.json`. So a run is one ACP session, as with Hermes Agent:
+`session/new` (or `session/resume`) with the run's servers and the project's other folders, `session/set_mode`, the
+model and thinking level with `session/set_config_option`, then `session/prompt`. Nothing is written to your
+`~/.kimi-code`. Its models are the aliases `kimi provider list --json` lists (from your login or your own
+providers), each with its thinking levels (`supportEfforts`); a picked model and level go in as the session's
+`model` and `thinking`, otherwise your `config.toml` decides. Its tools show up as `mcp__<server>__<tool>`; your own
+servers in `mcp.json` load too, but only the run's are allowed without asking. Skills: the prompt names the run's
+skills folder, which Kimi Code may read. Detection checks that `kimi --version` prints a bare version (the archived
+Python kimi-cli prints `kimi, version …`). Sign in once with `kimi login`.
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 

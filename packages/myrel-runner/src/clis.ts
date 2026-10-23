@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type CliModel, type RunnerCli, type TaskModel, unwrapShell } from "@myrel/protocol";
-import type { AcpMcpServer, AcpTurn } from "./acp";
+import type { AcpMcpServer, AcpTurn, AcpTurnOptions } from "./acp";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
@@ -66,10 +66,11 @@ export type CliAdapter = {
   limits?(state: ParseState): Promise<CliLimits | undefined>;
   /**
    * For CLIs that speak the Agent Client Protocol on stdin and stdout instead of taking one prompt:
-   * the session mode for this access, and whether to allow what the agent asks permission for.
-   * The prompt (after `input`) and agent()'s mcpServers go in the session (see acp.ts).
+   * the session mode for this access, whether to allow what the agent asks permission for, and the
+   * session config for the task's model (already checked with safeModelArg). The prompt (after
+   * `input`) and agent()'s mcpServers go in the session (see acp.ts).
    */
-  acp?(access: Access): { mode?: string; allow: boolean };
+  acp?(access: Access, model?: TaskModel): Pick<AcpTurnOptions, "mode" | "allow" | "serverTools" | "config">;
   /** Whether `<bin> --version` printed this CLI's version, for a binary name another tool also uses. */
   isMine?(version: string): boolean;
   /** The models the CLI lists, with the efforts each takes; undefined when it could not be asked. */
@@ -86,14 +87,19 @@ export function safeModelArg(value: string | undefined): value is string {
   return !!value && value.length <= 200 && /^[A-Za-z0-9][\w.:/@+-]*$/.test(value);
 }
 
+/** A task's model and effort without anything unsafe; undefined when nothing is left. */
+export function safeModel(model: TaskModel | undefined): TaskModel | undefined {
+  const safe: TaskModel = {
+    ...(safeModelArg(model?.model) && { model: model.model }),
+    ...(safeModelArg(model?.effort) && { effort: model.effort }),
+  };
+  return safe.model || safe.effort ? safe : undefined;
+}
+
 /** The flags for a task's model and effort, leaving out anything unsafe. */
 export function modelFlags(adapter: CliAdapter, model: TaskModel | undefined): string[] {
-  if (!model || !adapter.modelArgs) return [];
-  const safe: TaskModel = {
-    ...(safeModelArg(model.model) && { model: model.model }),
-    ...(safeModelArg(model.effort) && { effort: model.effort }),
-  };
-  return safe.model || safe.effort ? adapter.modelArgs(safe) : [];
+  const safe = safeModel(model);
+  return safe && adapter.modelArgs ? adapter.modelArgs(safe) : [];
 }
 
 /** stdout of a short command, or null when it fails or takes too long. */
@@ -572,6 +578,20 @@ const HERMES_LIMITED: Record<Access, string | null> = {
   full: null,
 };
 
+/** The run's MCP servers for an ACP session. The token goes in the session over the pipe: never on disk or in the environment. */
+function acpServers({ url, token, connectors = [] }: AgentMcp): AcpMcpServer[] {
+  const headers = [{ name: "Authorization", value: `Bearer ${token}` }];
+  const servers: AcpMcpServer[] = [{ type: "http", name: MYREL_MCP_SERVER, url, headers }];
+  for (const c of connectors) {
+    servers.push(
+      c.transport === "http"
+        ? { type: "http", name: c.name, url: c.url, headers }
+        : { name: c.name, command: c.command, args: c.args, env: Object.entries(c.env).map(([name, value]) => ({ name, value })) },
+    );
+  }
+  return servers;
+}
+
 const hermes: CliAdapter = {
   id: "hermes",
   bin: "hermes",
@@ -584,19 +604,7 @@ const hermes: CliAdapter = {
     allow: access === "full",
   }),
   input: (prompt, access) => (HERMES_LIMITED[access] ? `${prompt}\n\n${HERMES_LIMITED[access]}` : prompt),
-  // The token goes in the session over the pipe: never on disk or in the environment.
-  async agent({ url, token, connectors = [] }) {
-    const headers = [{ name: "Authorization", value: `Bearer ${token}` }];
-    const mcpServers: AcpMcpServer[] = [{ type: "http", name: MYREL_MCP_SERVER, url, headers }];
-    for (const c of connectors) {
-      mcpServers.push(
-        c.transport === "http"
-          ? { type: "http", name: c.name, url: c.url, headers }
-          : { name: c.name, command: c.command, args: c.args, env: Object.entries(c.env).map(([name, value]) => ({ name, value })) },
-      );
-    }
-    return { args: [], mcpServers };
-  },
+  agent: async (mcp) => ({ args: [], mcpServers: acpServers(mcp) }),
   line: (line, state) => state.acp?.receive(line),
   // Another `hermes` (the React Native JavaScript engine) prints something else.
   isMine: (version) => version.startsWith("Hermes Agent"),
@@ -863,7 +871,67 @@ export function parseMuseCatalog(json: string): CliModel[] | undefined {
   }
 }
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor, muse };
+/**
+ * What Kimi Code is told below full access. Nobody can answer its approval questions mid-run, so they
+ * are declined; it has no sandbox to keep commands in the folder instead.
+ */
+const KIMI_LIMITED: Record<Access, string | null> = {
+  read: "(myrel-runner: this run may only read. Do not change files, run commands that change anything, write a plan file or call ExitPlanMode: steps that need approval are declined. Answer with Myrel's tools.)",
+  edit: "(myrel-runner: in this run shell commands and edits outside this folder's git repository are declined, as is anything else that needs approval. Read and edit the files here and use Myrel's tools. If a command is essential, say so in a reply: it needs full access on this computer, which the person sets in Myrel > Devices.)",
+  auto: "(myrel-runner: in this run shell commands and edits outside this folder's git repository are declined, as is anything else that needs approval. Read and edit the files here and use Myrel's tools. If a command is essential, say so in a reply: it needs full access on this computer, which the person sets in Myrel > Devices.)",
+  full: null,
+};
+
+const kimi: CliAdapter = {
+  id: "kimi",
+  bin: "kimi",
+  // `kimi -p` takes MCP servers only from the person's own config; its ACP server takes them per session.
+  args: ({ extra = [] }) => ["acp", ...extra],
+  acp: (access, model) => ({
+    // default: reads, and edits inside the folder's git repository, run; the rest asks (declined here).
+    // plan: no edits but its plan file. auto ("never ask"): everything but what the person's config denies.
+    // Its yolo mode asks only about system commands (shutdown, mkfs): no sandbox, so auto stays with edit.
+    mode: { read: "plan", edit: "default", auto: "default", full: "auto" }[access],
+    allow: access === "full",
+    // Its MCP tools are mcp__<server>__<tool>, and it asks about each: the run's own servers are allowed.
+    serverTools: (server) => `mcp__${server}__`,
+    config: [
+      ...(model?.model ? [{ id: "model", value: model.model }] : []),
+      ...(model?.effort ? [{ id: "thinking", value: model.effort }] : []),
+    ],
+  }),
+  input: (prompt, access) => (KIMI_LIMITED[access] ? `${prompt}\n\n${KIMI_LIMITED[access]}` : prompt),
+  agent: async (mcp) => ({ args: [], mcpServers: acpServers(mcp) }),
+  line: (line, state) => state.acp?.receive(line),
+  // Kimi Code prints its bare version; the archived Python kimi-cli prints "kimi, version …" and has no per-session MCP.
+  isMine: (version) => /^v?\d+\.\d+/.test(version),
+  models: async () => parseKimiModels((await output("kimi", ["provider", "list", "--json"])) ?? ""),
+};
+
+/**
+ * `kimi provider list --json`: the model aliases the person set up or got with their login, with the
+ * thinking levels each takes. The providers next to them (with their keys) are left alone.
+ */
+export function parseKimiModels(json: string): CliModel[] | undefined {
+  try {
+    const { models } = JSON.parse(json) as { models?: unknown };
+    if (!models || typeof models !== "object") return undefined;
+    const list = Object.entries(models as Record<string, Record<string, unknown>>).flatMap(([id, m]) => {
+      if (!safeModelArg(id) || !m || typeof m !== "object") return [];
+      const caps = Array.isArray(m.capabilities) ? m.capabilities : [];
+      const thinks = caps.some((c) => c === "thinking" || c === "always_thinking");
+      const levels = thinks && Array.isArray(m.supportEfforts) ? m.supportEfforts : [];
+      const efforts = levels.filter((e): e is string => typeof e === "string" && e !== "off" && safeModelArg(e));
+      const name = [m.displayName, m.model].find((n): n is string => typeof n === "string" && !!n) ?? id;
+      return [{ id, name, efforts }];
+    });
+    return list.length ? list.slice(0, 100) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor, muse, kimi };
 
 /** The first line `<bin> --version` prints, or null when it does not run. */
 function cliVersion(bin: string): Promise<string | null> {
