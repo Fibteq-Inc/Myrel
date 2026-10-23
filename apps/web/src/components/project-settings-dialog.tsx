@@ -4,30 +4,39 @@ import { LoaderCircle, X } from "lucide-react";
 import { createContext, type ReactNode, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { projectQuery } from "../lib/api";
 import { IconButton } from "../lib/ui";
-import { ProjectSettings, roleKey } from "./project-settings";
+import { ProjectSettings, type ProjectSettingsTab, roleKey } from "./project-settings";
 
-const SettingsDialogContext = createContext<(() => void) | null>(null);
+const SettingsDialogContext = createContext<((tab?: ProjectSettingsTab) => void) | null>(null);
 
 /** Lets anything inside a project open its settings in a dialog over the page. */
 export function ProjectSettingsDialogProvider({ projectId, children }: { projectId: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const show = useCallback(() => setOpen(true), []);
+  // The tab it opens on, or null while closed.
+  const [open, setOpen] = useState<ProjectSettingsTab | null>(null);
+  const show = useCallback((tab: ProjectSettingsTab = "general") => setOpen(tab), []);
   return (
     <SettingsDialogContext.Provider value={show}>
       {children}
-      {open && <ProjectSettingsDialog projectId={projectId} onClose={() => setOpen(false)} />}
+      {open && <ProjectSettingsDialog projectId={projectId} tab={open} onClose={() => setOpen(null)} />}
     </SettingsDialogContext.Provider>
   );
 }
 
-/** Opens the current project's settings dialog. */
+/** Opens the current project's settings dialog, on its general tab unless told otherwise. */
 export function useOpenProjectSettings() {
   const open = useContext(SettingsDialogContext);
   if (!open) throw new Error("useOpenProjectSettings must be used inside <ProjectSettingsDialogProvider>");
   return open;
 }
 
-function ProjectSettingsDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+function ProjectSettingsDialog({
+  projectId,
+  tab,
+  onClose,
+}: {
+  projectId: string;
+  tab: ProjectSettingsTab;
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const { data: project } = useQuery(projectQuery(projectId));
   const t = useT();
@@ -71,7 +80,7 @@ function ProjectSettingsDialog({ projectId, onClose }: { projectId: string; onCl
           </div>
         }
       >
-        <ProjectSettings projectId={projectId} layout="dialog" />
+        <ProjectSettings projectId={projectId} layout="dialog" initialTab={tab} />
       </Suspense>
     </dialog>
   );

@@ -1,4 +1,4 @@
-import type { SessionUser } from "@myrel/client";
+import { DOCS_URL, type SessionUser } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, type MessageKey } from "@myrel/i18n";
 import { useI18n } from "@myrel/i18n/react";
 import { Link, useRouterState } from "@tanstack/react-router";
@@ -8,9 +8,6 @@ import { MyrelMark, cn, UserAvatar } from "../../lib/ui";
 import { NotificationBell } from "../notifications";
 import { viewSearch } from "../project-view";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
-
-/** The user guide (apps/docs). */
-const DOCS_URL = "https://docs.myrel.fibteq.io";
 
 type RailItem = {
   label: MessageKey;

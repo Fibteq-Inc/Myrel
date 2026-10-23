@@ -226,6 +226,18 @@ describe("members and invites", () => {
   });
 });
 
+describe("get started list", () => {
+  it("is shown until the person finishes or hides it, once for the account", async () => {
+    const user = await signUp();
+    const me = () => json<{ user: { onboarded: boolean } }>(api("/api/account", { token: user.token }));
+    expect((await me()).user.onboarded).toBe(false);
+    await json(api("/api/account/onboarded", { method: "POST", token: user.token }), 204);
+    await json(api("/api/account/onboarded", { method: "POST", token: user.token }), 204);
+    expect((await me()).user.onboarded).toBe(true);
+    expect((await api("/api/account/onboarded", { method: "POST" })).status).toBe(401);
+  });
+});
+
 describe("sign-up setting", () => {
   it("is an admin setting that invited people bypass", async () => {
     const admin = await signUp();
@@ -233,7 +245,7 @@ describe("sign-up setting", () => {
     expect((await api("/api/admin/settings", { token: user.token })).status).toBe(403);
     await makeAdmin(admin);
     expect(await json(api("/api/account", { token: admin.token }))).toEqual({
-      user: { id: admin.id, name: "Test", email: admin.email, role: "admin" },
+      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false },
     });
 
     const set = (signUpEnabled: boolean) =>

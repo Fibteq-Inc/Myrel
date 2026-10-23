@@ -1,12 +1,27 @@
 import { useT } from "@myrel/i18n/react";
 import { MAX_MESSAGE_LENGTH, type ProjectFile } from "@myrel/protocol";
 import { ArrowUp, Paperclip } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { errorMessage } from "../../lib/ui";
 import { PendingAttachments } from "../files";
 
 /** `text` is set for a long paste that was turned into a file, so it can go back into the message. */
 type Pending = { id: string; name: string; file?: ProjectFile; error?: string; text?: string };
+
+/** Lets a parent put text in the box, e.g. an example task picked from an empty chat. */
+export type ComposerHandle = {
+  /** Replaces the draft with `text`, focuses the box and selects `select` (start, end). */
+  fill: (text: string, select?: [number, number]) => void;
+};
 
 /** A paste this long becomes a .txt attachment instead of filling the message. */
 const LONG_PASTE_CHARS = 4000;
@@ -31,6 +46,7 @@ export function Composer({
   disabled,
   tools,
   autoFocus,
+  handle,
 }: {
   placeholder: string;
   /** `attachments` are paths of files already uploaded with `onUpload`. */
@@ -39,6 +55,7 @@ export function Composer({
   disabled?: boolean;
   tools?: ReactNode;
   autoFocus?: boolean;
+  handle?: Ref<ComposerHandle>;
 }) {
   const t = useT();
   const [draft, setDraft] = useState("");
@@ -75,12 +92,26 @@ export function Composer({
     ref.current?.focus();
   }
 
+  // The selection waits for the new draft to render.
+  const selection = useRef<[number, number] | null>(null);
+  useImperativeHandle(handle, () => ({
+    fill(text, select) {
+      selection.current = select ?? [text.length, text.length];
+      setDraft(text);
+    },
+  }));
+
   // Grow with the text, up to a cap.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+    if (selection.current) {
+      el.focus();
+      el.setSelectionRange(...selection.current);
+      selection.current = null;
+    }
   }, [draft]);
 
   function submit(e?: FormEvent) {

@@ -268,6 +268,11 @@ export class ApiClient {
     return (await this.request<{ user: Me }>("/api/account")).user;
   }
 
+  /** Marks the "Get started" list done or hidden for this account, on every device. */
+  async markOnboarded() {
+    await this.request("/api/account/onboarded", { method: "POST" });
+  }
+
   /** Deletes the signed-in account for good; projects only this person owns go with it. */
   async deleteAccount() {
     await this.request("/api/account", { method: "DELETE" });

@@ -1,14 +1,14 @@
 import { useT } from "@myrel/i18n/react";
 import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import { ArrowDown } from "lucide-react-native";
-import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentRef, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
 import { makeStyles, useColors } from "../theme";
 import { PlanCard, PlanUpdateNote } from "./checklist";
-import { Composer } from "./composer";
+import { Composer, type ComposerHandle } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
 
 /**
@@ -33,6 +33,7 @@ export function Conversation({
   footerFor,
   empty,
   tools,
+  composer,
 }: {
   messages: Message[];
   me: string;
@@ -58,6 +59,8 @@ export function Conversation({
   empty?: ReactNode;
   /** Controls in the composer, e.g. the CLI picker. */
   tools?: ReactNode;
+  /** Puts text in the composer from outside, e.g. a picked example task. */
+  composer?: Ref<ComposerHandle>;
 }) {
   const t = useT();
   const colors = useColors();
@@ -155,7 +158,7 @@ export function Conversation({
           )}
         </View>
         <View style={{ paddingBottom: keyboardOpen ? 8 : Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
-          <Composer placeholder={placeholder} onSend={onSend} tools={tools} />
+          <Composer placeholder={placeholder} onSend={onSend} tools={tools} handle={composer} />
         </View>
       </KeyboardAvoidingView>
     </View>

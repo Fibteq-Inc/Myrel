@@ -3,12 +3,14 @@ import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import type { CliId } from "@myrel/protocol";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { AskCliPicker, OfferedClis, usePickableClis } from "../../../../components/cli-picker";
+import type { ComposerHandle } from "../../../../components/composer";
 import { Conversation } from "../../../../components/conversation";
 import { ArtifactsTab } from "../../../../components/project/artifacts-tab";
 import { FilesTab } from "../../../../components/project/files-tab";
+import { StarterExamples, StarterList } from "../../../../components/project/starter";
 import { Tabs } from "../../../../components/project/tabs";
 import { ThreadsTab } from "../../../../components/project/threads-tab";
 import { UsageTab } from "../../../../components/project/usage-tab";
@@ -60,7 +62,7 @@ export default function ProjectScreen() {
         ]}
       />
       {tab === "chat" ? (
-        <ChatTab />
+        <ChatTab owner={project.data?.role === "owner"} />
       ) : tab === "threads" ? (
         <ThreadsTab />
       ) : tab === "artifacts" ? (
@@ -74,7 +76,7 @@ export default function ProjectScreen() {
   );
 }
 
-function ChatTab() {
+function ChatTab({ owner }: { owner: boolean }) {
   const t = useT();
   const styles = useStyles();
   const { user } = useSession();
@@ -85,6 +87,8 @@ function ChatTab() {
   // The CLIs the next ask's thread may run with; each ask picks its own.
   const pickable = usePickableClis(projectId);
   const [clis, setClis] = useState<CliId[]>([]);
+  const composer = useRef<ComposerHandle>(null);
+  const asked = messages.length > 0;
   const onSend = useCallback(
     (body: string, attachments?: string[]) => {
       send(body, null, attachments, pickable ? clis : []);
@@ -105,6 +109,8 @@ function ChatTab() {
       placeholder={t("chat.placeholder")}
       onSend={onSend}
       tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
+      composer={composer}
+      header={asked ? <StarterList projectId={projectId} owner={owner} asked folded /> : undefined}
       footerFor={(m) => {
         const thread = threads.get(m.id);
         const offered = m.clis?.length ? <OfferedClis clis={m.clis} /> : null;
@@ -118,9 +124,11 @@ function ChatTab() {
       }}
       empty={
         status === "open" ? (
-          <View style={{ alignItems: "center", gap: 6, paddingHorizontal: 24 }}>
+          <View style={{ alignItems: "center", alignSelf: "stretch", gap: 6, paddingHorizontal: 8 }}>
             <Text style={styles.emptyTitle}>{t("chat.emptyTitle")}</Text>
-            <Text style={styles.emptyHint}>{t("chat.emptyBody")}</Text>
+            <Text style={styles.emptyHint}>{t("starter.try")}</Text>
+            <StarterExamples onPick={(text, select) => composer.current?.fill(text, select)} />
+            <StarterList projectId={projectId} owner={owner} asked={false} />
           </View>
         ) : null
       }

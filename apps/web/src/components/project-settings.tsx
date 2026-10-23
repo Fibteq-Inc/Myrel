@@ -40,6 +40,7 @@ export function ProjectSettings({
   connectorId,
   connectorResult,
   layout = "page",
+  initialTab = "general",
 }: {
   projectId: string;
   github?: string;
@@ -48,13 +49,15 @@ export function ProjectSettings({
   connectorResult?: string;
   /** "dialog" puts the tabs in a side column and leaves the name and role to the dialog's header. */
   layout?: "page" | "dialog";
+  /** The tab to open on when no sign-in round trip picks one. */
+  initialTab?: ProjectSettingsTab;
 }) {
   const t = useT();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const canManage = project.role === "owner" || project.role === "admin";
   // Coming back from a GitHub or connector sign-in opens the tab that started it.
   const [tab, setTab] = useState<ProjectSettingsTab>(
-    github ? "github" : connectorId || connectorResult ? "connectors" : "general",
+    github ? "github" : connectorId || connectorResult ? "connectors" : initialTab,
   );
 
   const tabs: { id: ProjectSettingsTab; label: string; icon: ReactNode }[] = [

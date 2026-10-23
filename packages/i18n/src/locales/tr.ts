@@ -121,6 +121,36 @@ export const tr: Catalog = {
   "chat.emptyBody":
     "Her şeyi isteyebilirsin. Myrel her iş için bir thread açar ve sonucu orada bildirir, böylece bu sohbet okunaklı kalır.",
 
+  // Başlarken: boş proje sohbetindeki örnekler ve sahibin başlangıç listesi
+  "starter.try": "Başlamak için birini dene:",
+  "starter.page.title": "Tanıtım sayfası yap",
+  "starter.page.body": "Ürünün için tek sayfalık bir sayfa hazırlar.",
+  "starter.page.result": "Sonuç: açıp paylaşabileceğin bir sayfa",
+  "starter.page.prompt":
+    "Ürünüm için tek sayfalık bir tanıtım sayfası hazırla: ne işe yaradığı, kimin için olduğu ve bir kayıt butonu. Ürün: [ürününü bir cümleyle anlat]",
+  "starter.research.title": "Bir konuyu araştır",
+  "starter.research.body": "En önemli bulguları kaynaklarıyla toplar.",
+  "starter.research.result": "Sonuç: projede bir dosya",
+  "starter.research.prompt": "[Konu] hakkında araştırma yap, en önemli 5 bulguyu ve kaynaklarını bir dosyaya yaz.",
+  "starter.routine.title": "Düzenli bir iş kur",
+  "starter.routine.body": "Her hafta senin için bir şey hazırlar.",
+  "starter.routine.result": "Sonuç: kendiliğinden çalışan bir rutin",
+  "starter.routine.prompt": "Her pazartesi sabah 9'da bana [ne istediğini yaz, örneğin haftanın planı] hazırlayıp gönder.",
+  "starter.title": "Başlarken",
+  "starter.progress": "{done}/{total}",
+  "starter.open": "Başlarken, {total} adımın {done} tanesi tamam",
+  "starter.hide": "Gizle",
+  "starter.optional": "isteğe bağlı",
+  "starter.connect": "Bağla",
+  "starter.how": "Nasıl?",
+  "starter.step.project": "Projeyi oluştur",
+  "starter.step.task": "İlk görevi ver",
+  "starter.step.computer": "Bilgisayarını bağla",
+  "starter.step.computerHint": "Kendi Claude Code, Codex, Antigravity ya da OpenCode'unla çalışsın",
+  "starter.step.computerHintMobile": "Masaüstü uygulamasından ya da terminalden",
+  "starter.step.github": "GitHub'ı bağla",
+  "starter.step.githubHint": "Ajanlar dal açıp pull request göndersin",
+
   // Messages
   "message.copy": "Mesajı kopyala",
   "message.showMore": "Devamını göster",
