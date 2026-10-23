@@ -493,7 +493,8 @@ describe("local workspace", () => {
     // Answers to the cards did not queue another turn; Ada's message, an ordinary one, queued one.
     runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
-    await new Promise((r) => setTimeout(r, 200));
+    // The queued turn is put together after the thread goes idle, which can take a while on a busy machine.
+    await until(() => runnerSide.frames.filter((f) => f.type === "task.start").length >= 2, "second turn");
     const turns = runnerSide.frames.filter((f): f is Start => f.type === "task.start");
     expect(turns).toHaveLength(2);
     // The first turn has no session to continue; the second can continue the first's with only what is new.
@@ -503,6 +504,10 @@ describe("local workspace", () => {
     expect(turns[1]!.agent!.resume!.prompt).toContain("Bu sefer izin ver");
     expect(turns[1]!.agent!.resume!.prompt).not.toContain("The message this thread started from");
     expect(turns[1]!.prompt).toContain("The message this thread started from");
+    // Nothing is left queued after it: the second turn ends without starting a third.
+    runnerSide.send({ type: "task.done", taskId: turns[1]!.taskId, ok: true, result: "Done." });
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle again");
+    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(2);
     runnerSide.ws.close();
   });
 
