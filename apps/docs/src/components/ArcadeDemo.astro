@@ -1,0 +1,110 @@
+---
+/**
+ * An Arcade (arcade.software) demo. Nothing loads from Arcade until the reader
+ * starts it; on narrow screens it opens full screen instead, where Arcade's own
+ * text is readable.
+ */
+import { Image } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+interface Props {
+  /** The id in https://demo.arcade.software/<id>. */
+  id: string;
+  title: string;
+  poster?: ImageMetadata;
+}
+
+const { id, title, poster } = Astro.props;
+const src = `https://demo.arcade.software/${encodeURIComponent(id)}?embed&embed_mobile=tab&embed_desktop=inline&show_copy_link=true`;
+const page = `https://app.arcade.software/share/${encodeURIComponent(id)}`;
+---
+
+<figure class="arcade not-content" data-arcade data-src={src}>
+  <div class="arcade-frame">
+    {poster && <Image src={poster} alt="" widths={[800, 1360]} sizes="(max-width: 800px) 100vw, 800px" />}
+    <button type="button" class="arcade-start" data-start>
+      <span class="arcade-play" aria-hidden="true"></span>
+      Start the demo: {title}
+    </button>
+  </div>
+  <figcaption class="arcade-caption">
+    {title}. <a href={page} target="_blank" rel="noopener">Open in a new tab</a>
+  </figcaption>
+</figure>
+
+<script>
+  const narrow = window.matchMedia("(max-width: 640px)");
+  for (const root of document.querySelectorAll<HTMLElement>("[data-arcade]")) {
+    root.querySelector("[data-start]")!.addEventListener("click", () => {
+      const src = root.dataset.src!;
+      if (narrow.matches) {
+        window.open(root.querySelector<HTMLAnchorElement>("a")!.href, "_blank", "noopener");
+        return;
+      }
+      const iframe = document.createElement("iframe");
+      iframe.src = src;
+      iframe.title = root.querySelector("figcaption")!.textContent!.trim();
+      iframe.allow = "clipboard-write; fullscreen";
+      iframe.allowFullscreen = true;
+      iframe.loading = "lazy";
+      const frame = root.querySelector(".arcade-frame")!;
+      frame.replaceChildren(iframe);
+      iframe.focus();
+    });
+  }
+</script>
+
+<style>
+  .arcade {
+    margin: 1.5rem 0;
+  }
+  .arcade-frame {
+    position: relative;
+    /* Arcade's own ratio: the demo at 16:9 plus its 41px control bar. */
+    aspect-ratio: 16 / 9;
+    padding-bottom: 41px;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: var(--sl-color-gray-6);
+  }
+  .arcade-frame :global(img),
+  .arcade-frame :global(iframe) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    object-fit: cover;
+  }
+  .arcade-start {
+    position: absolute;
+    inset: auto 50% 50% auto;
+    transform: translate(50%, 50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.7rem 1.2rem;
+    border-radius: 999px;
+    border: 0;
+    background: var(--sl-color-accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.3);
+  }
+  .arcade-start:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .arcade-play {
+    width: 0;
+    height: 0;
+    border-left: 0.6rem solid currentColor;
+    border-top: 0.38rem solid transparent;
+    border-bottom: 0.38rem solid transparent;
+  }
+  .arcade-caption {
+    margin-top: 0.5rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+</style>

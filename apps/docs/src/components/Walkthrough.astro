@@ -1,0 +1,205 @@
+---
+/**
+ * A click-through tour over screenshots. The pictures and where to click come from
+ * scripts/screenshots.mjs (src/assets/walkthroughs/<name>/ and its targets.json);
+ * the words for each step come from the page, so a UI change only needs a new run
+ * of the script.
+ */
+import { Image } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+type Step = { title: string; body: string };
+type Target = { image: string; x: number; y: number; w: number; h: number; width: number; height: number };
+
+interface Props {
+  name: string;
+  steps: Step[];
+  label?: string;
+}
+
+const { name, steps, label = "Interactive walkthrough" } = Astro.props;
+const images = import.meta.glob<{ default: ImageMetadata }>("../assets/walkthroughs/*/*.png", { eager: true });
+const targetFiles = import.meta.glob<{ default: Target[] }>("../assets/walkthroughs/*/targets.json", { eager: true });
+const targets = targetFiles[`../assets/walkthroughs/${name}/targets.json`]?.default;
+if (!targets) throw new Error(`No walkthrough "${name}": run pnpm --filter @myrel/docs screenshots`);
+if (targets.length !== steps.length) {
+  throw new Error(`Walkthrough "${name}" has ${targets.length} screens but the page describes ${steps.length} steps`);
+}
+const pct = (v: number, of: number) => `${((v / of) * 100).toFixed(2)}%`;
+---
+
+<figure class="walkthrough not-content" data-walkthrough aria-label={label}>
+  <div class="wt-stage">
+    {
+      targets.map((t, i) => {
+        const img = images[`../assets/walkthroughs/${name}/${t.image}`]!.default;
+        return (
+          <div class="wt-screen" data-step={i} hidden={i !== 0}>
+            <Image src={img} alt={steps[i]!.title} widths={[800, 1360]} sizes="(max-width: 800px) 100vw, 800px" loading={i === 0 ? "eager" : "lazy"} />
+            <span
+              class="wt-target"
+              aria-hidden="true"
+              style={{ left: pct(t.x, t.width), top: pct(t.y, t.height), width: pct(t.w, t.width), height: pct(t.h, t.height) }}
+            />
+          </div>
+        );
+      })
+    }
+  </div>
+  <figcaption class="wt-caption">
+    {
+      steps.map((s, i) => (
+        <div class="wt-text" data-step={i} hidden={i !== 0} aria-live="polite">
+          <p class="wt-count">
+            Step {i + 1} of {steps.length}
+          </p>
+          <p class="wt-title">{s.title}</p>
+          <p class="wt-body" set:html={s.body} />
+        </div>
+      ))
+    }
+    <div class="wt-nav">
+      <button type="button" class="wt-btn" data-prev disabled>
+        Back
+      </button>
+      <div class="wt-dots" role="tablist" aria-label="Steps">
+        {steps.map((s, i) => <button type="button" role="tab" class="wt-dot" data-go={i} aria-label={`Step ${i + 1}: ${s.title}`} aria-selected={i === 0 ? "true" : "false"} />)}
+      </div>
+      <button type="button" class="wt-btn wt-next" data-next>
+        Next
+      </button>
+    </div>
+  </figcaption>
+</figure>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>("[data-walkthrough]")) {
+    const screens = root.querySelectorAll<HTMLElement>(".wt-screen");
+    const texts = root.querySelectorAll<HTMLElement>(".wt-text");
+    const dots = root.querySelectorAll<HTMLButtonElement>(".wt-dot");
+    const prev = root.querySelector<HTMLButtonElement>("[data-prev]")!;
+    const next = root.querySelector<HTMLButtonElement>("[data-next]")!;
+    const last = screens.length - 1;
+    let at = 0;
+    const show = (i: number) => {
+      at = Math.max(0, Math.min(last, i));
+      screens.forEach((el, n) => (el.hidden = n !== at));
+      texts.forEach((el, n) => (el.hidden = n !== at));
+      dots.forEach((el, n) => el.setAttribute("aria-selected", String(n === at)));
+      prev.disabled = at === 0;
+      next.textContent = at === last ? "Start over" : "Next";
+    };
+    prev.addEventListener("click", () => show(at - 1));
+    next.addEventListener("click", () => show(at === last ? 0 : at + 1));
+    dots.forEach((el, n) => el.addEventListener("click", () => show(n)));
+    // Clicking the highlighted spot moves on, like clicking it in the app.
+    root.querySelectorAll(".wt-target").forEach((el) => el.addEventListener("click", () => show(at + 1)));
+    root.tabIndex = 0;
+    root.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") show(at + 1);
+      else if (e.key === "ArrowLeft") show(at - 1);
+      else return;
+      e.preventDefault();
+    });
+  }
+</script>
+
+<style>
+  .walkthrough {
+    margin: 1.5rem 0;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: var(--sl-color-gray-6);
+  }
+  .walkthrough:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 3px;
+  }
+  .wt-stage {
+    background: #0e0e12;
+  }
+  .wt-screen {
+    position: relative;
+    overflow: hidden;
+  }
+  .wt-screen img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .wt-target {
+    position: absolute;
+    border-radius: 0.5rem;
+    box-shadow:
+      0 0 0 2px var(--sl-color-accent),
+      0 0 0 9999px rgb(0 0 0 / 0.35);
+    cursor: pointer;
+    animation: wt-pulse 1.8s ease-out infinite;
+  }
+  @keyframes wt-pulse {
+    0% { outline: 0 solid rgb(109 99 255 / 0.55); }
+    100% { outline: 14px solid rgb(109 99 255 / 0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wt-target { animation: none; }
+  }
+  .wt-caption {
+    padding: 1rem 1.25rem 1.1rem;
+    display: grid;
+    gap: 0.9rem;
+  }
+  .wt-text p { margin: 0; }
+  .wt-count {
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+  .wt-title {
+    font-weight: 600;
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-lg);
+    margin-top: 0.15rem !important;
+  }
+  .wt-body {
+    color: var(--sl-color-gray-2);
+    margin-top: 0.3rem !important;
+    max-width: 62ch;
+  }
+  .wt-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .wt-btn {
+    font: inherit;
+    font-size: var(--sl-text-sm);
+    padding: 0.4rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--sl-color-gray-4);
+    background: transparent;
+    color: var(--sl-color-white);
+    cursor: pointer;
+  }
+  .wt-btn:disabled { opacity: 0.4; cursor: default; }
+  .wt-next {
+    background: var(--sl-color-accent);
+    border-color: var(--sl-color-accent);
+    color: #fff;
+  }
+  .wt-btn:focus-visible, .wt-dot:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+  .wt-dots { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+  .wt-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    padding: 0;
+    border-radius: 999px;
+    border: 0;
+    background: var(--sl-color-gray-4);
+    cursor: pointer;
+  }
+  .wt-dot[aria-selected="true"] { background: var(--sl-color-accent); width: 1.4rem; }
+</style>

@@ -5,6 +5,14 @@ const repo = "https://github.com/Fibteq-Inc/myrel";
 
 export default defineConfig({
   site: process.env.DOCS_SITE ?? "https://docs.myrel.fibteq.io",
+  // The first version of the guide had these pages; old links keep working.
+  redirects: {
+    "/getting-started/": "/get-started/quickstart/",
+    "/guides/projects-and-threads/": "/work/threads/",
+    "/guides/using-your-computer/": "/computer/connect/",
+    "/guides/github-integration/": "/github/connect/",
+    "/faq/": "/help/faq/",
+  },
   integrations: [
     starlight({
       title: "Myrel Docs",
@@ -16,16 +24,23 @@ export default defineConfig({
       editLink: { baseUrl: `${repo}/edit/main/apps/docs/` },
       lastUpdated: true,
       sidebar: [
-        { label: "Start here", items: ["index", "getting-started"] },
+        { label: "Get started", items: ["index", "get-started/quickstart", "get-started/apps"] },
+        { label: "Projects", items: ["projects/create", "projects/members", "projects/knowledge"] },
         {
-          label: "Using Myrel",
-          items: [
-            "guides/projects-and-threads",
-            "guides/using-your-computer",
-            "guides/github-integration",
-          ],
+          label: "Working with Myrel",
+          items: ["work/asking", "work/threads", "work/decisions", "work/artifacts", "work/finishing"],
         },
-        { label: "Help", items: ["faq"] },
+        {
+          label: "Your computer",
+          items: ["computer/connect", "computer/folders", "computer/clis", "computer/approvals", "computer/runner"],
+        },
+        { label: "GitHub", items: ["github/connect", "github/pull-requests"] },
+        {
+          label: "Automate and extend",
+          items: ["automate/routines", "automate/skills", "automate/connectors", "automate/notifications"],
+        },
+        { label: "Account", items: ["account/settings", "account/usage"] },
+        { label: "Help", items: ["help/faq", "help/troubleshooting"] },
         {
           label: "In the repository",
           items: [
