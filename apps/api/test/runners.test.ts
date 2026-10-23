@@ -493,9 +493,13 @@ describe("local workspace", () => {
     // Answers to the cards did not queue another turn; Ada's message, an ordinary one, queued one.
     runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
+    // Ada's turn starts once the first is over, which can take a moment on a busy machine.
+    const turns = await until(() => {
+      const starts = runnerSide.frames.filter((f): f is Start => f.type === "task.start");
+      return starts.length >= 2 ? starts : null;
+    }, "second turn");
     await new Promise((r) => setTimeout(r, 200));
-    const turns = runnerSide.frames.filter((f): f is Start => f.type === "task.start");
-    expect(turns).toHaveLength(2);
+    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(2);
     // The first turn has no session to continue; the second can continue the first's with only what is new.
     expect(turns[0]!.agent?.resume).toBeUndefined();
     expect(turns[1]!.agent?.resume?.after).toBe(start.taskId);
