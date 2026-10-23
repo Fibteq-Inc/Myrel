@@ -303,7 +303,11 @@ export class Sandbox extends DurableObject<Env> {
         ? { type: "done", ok: false, error: "Cancelled." }
         : { type: "done", ok: false, error: `Timed out after ${run.timeoutSec} seconds.` };
     }
-    if (exitCode === undefined || exitCode === null) return { type: "done", ok: false, error: "The task stopped without finishing." };
+    if (exitCode === undefined || exitCode === null) {
+      // Its output could not be followed to the end: nothing would report the rest, so it stops here.
+      if (exitCode === undefined) await this.kill(container).catch(() => {});
+      return { type: "done", ok: false, error: "The task stopped without finishing." };
+    }
     return { type: "done", ok: exitCode === 0, exitCode, ...(exitCode === 0 ? {} : { error: `Exited with code ${exitCode}.` }) };
   }
 
