@@ -43,9 +43,15 @@ export function openAiCompatible(opts: OpenAiCompatibleOptions): ModelProvider {
     async chat(req: ChatRequest): Promise<ChatResponse> {
       const res = await doFetch(`${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${opts.apiKey}`, ...opts.headers },
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${opts.apiKey}`,
+          ...(req.cacheKey && { "x-session-affinity": req.cacheKey }),
+          ...opts.headers,
+        },
         body: JSON.stringify({
           model: opts.model,
+          ...(req.cacheKey && { user: req.cacheKey }),
           max_tokens: req.maxTokens ?? 4096,
           messages: toMessages(req),
           ...(req.tools.length > 0 && {

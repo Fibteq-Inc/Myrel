@@ -24,6 +24,11 @@ export type ChatRequest = {
   turns: Turn[];
   tools: ToolSpec[];
   maxTokens?: number;
+  /**
+   * Keeps calls that share a prompt prefix on one replica, so the provider's prompt cache hits:
+   * Fireworks caches only within a replica and spreads calls without a key across them.
+   */
+  cacheKey?: string;
 };
 
 /** inputTokens counts every input token, cached ones included. */

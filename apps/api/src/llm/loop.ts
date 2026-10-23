@@ -27,6 +27,8 @@ export type LoopOptions = {
   tools: Tool[];
   /** Model calls per turn, a guard against a model that never stops calling tools. */
   maxSteps?: number;
+  /** Sent with every call of the turn, see ChatRequest.cacheKey. */
+  cacheKey?: string;
 };
 
 export type LoopResult = {
@@ -56,10 +58,10 @@ export async function runLoop(opts: LoopOptions): Promise<LoopResult> {
   const maxSteps = opts.maxSteps ?? 10;
 
   for (let step = 1; step <= maxSteps; step++) {
-    let res: ChatResponse = await opts.provider.chat({ system: opts.system, turns, tools: specs });
+    let res: ChatResponse = await opts.provider.chat({ system: opts.system, turns, tools: specs, cacheKey: opts.cacheKey });
     // A cut-off answer with no tool call would end the turn as if the model chose to do nothing.
     if (res.truncated && res.toolCalls.length === 0) {
-      res = await opts.provider.chat({ system: opts.system, turns, tools: specs, maxTokens: RETRY_MAX_TOKENS });
+      res = await opts.provider.chat({ system: opts.system, turns, tools: specs, maxTokens: RETRY_MAX_TOKENS, cacheKey: opts.cacheKey });
       if (res.truncated && res.toolCalls.length === 0) {
         throw new LlmError(`The model's answer was cut off at ${RETRY_MAX_TOKENS} output tokens before it called a tool.`);
       }
