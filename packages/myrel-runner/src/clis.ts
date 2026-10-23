@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
 import type { AcpMcpServer, AcpTurn } from "./acp";
@@ -495,7 +496,126 @@ const hermes: CliAdapter = {
   isMine: (version) => version.startsWith("Hermes Agent"),
 };
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes };
+/**
+ * What Cursor CLI may do at each access level. In its sandbox, edits and commands stay in the workspace
+ * and commands get no network; what would need approval is declined and the run goes on.
+ */
+const CURSOR_ACCESS: Record<Access, string[]> = {
+  // Plan mode leaves out MCP tools, so Myrel's reply too; ask mode reads and answers.
+  read: ["--mode", "ask"],
+  edit: ["--sandbox", "enabled"],
+  auto: ["--sandbox", "enabled"],
+  full: ["--force", "--sandbox", "disabled"],
+};
+
+const cursor: CliAdapter = {
+  id: "cursor",
+  // The installer links both `agent` and `cursor-agent`; only the second is surely Cursor's.
+  bin: "cursor-agent",
+  // With no prompt argument, print mode reads the prompt from stdin.
+  args: ({ access, resume, extra = [], dirs = [] }) => [
+    "-p",
+    "--output-format",
+    "stream-json",
+    // Headless, an untrusted folder ends the run instead of asking.
+    "--trust",
+    ...CURSOR_ACCESS[access],
+    ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
+    ...(resume ? ["--resume", resume] : []),
+    ...extra,
+  ],
+  // Its MCP servers come from mcp.json files only; a plugin folder of the run brings its own, so
+  // nothing goes into the person's ~/.cursor. The folder (and its token) is deleted after the run.
+  async agent({ url, token, dir, connectors = [], skills }) {
+    // Cursor names a plugin's servers plugin-<folder>-<server>.
+    const plugin = join(dir, MYREL_MCP_SERVER);
+    await mkdir(join(plugin, ".cursor-plugin"), { recursive: true });
+    await writeFile(
+      join(plugin, ".cursor-plugin", "plugin.json"),
+      JSON.stringify({ name: MYREL_MCP_SERVER, description: "Myrel's tools for this run.", version: "1.0.0" }),
+    );
+    const headers = { Authorization: `Bearer ${token}` };
+    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { url, headers } };
+    for (const c of connectors) {
+      servers[c.name] = c.transport === "http" ? { url: c.url, headers } : { command: c.command, args: c.args, env: c.env };
+    }
+    await privateFile(plugin, "mcp.json", { mcpServers: servers });
+    // The skills' folder is a Claude Code plugin; a Cursor manifest makes it one for Cursor too.
+    // (Cursor does not follow a symlinked skills folder.)
+    if (skills) {
+      await mkdir(join(skills.plugin, ".cursor-plugin"), { recursive: true });
+      await writeFile(
+        join(skills.plugin, ".cursor-plugin", "plugin.json"),
+        JSON.stringify({ name: `${MYREL_MCP_SERVER}-skills`, description: "Skills added in Myrel for this run.", version: "1.0.0" }),
+      );
+    }
+    // Headless, a tool that would ask is declined, and --force would also take commands out of the
+    // sandbox. So the run gets the person's CLI config with allow rules for these servers added.
+    const config = await cursorConfig(
+      join(dir, "cursor-config"),
+      Object.keys(servers).map((name) => `Mcp(plugin-${MYREL_MCP_SERVER}-${name}:*)`),
+    );
+    // --approve-mcps: a server not approved yet would be left out without asking.
+    const plugins = [plugin, ...(skills ? [skills.plugin] : [])].flatMap((p) => ["--plugin-dir", quotePath(p)]);
+    return { args: ["--approve-mcps", ...plugins], env: { CURSOR_CONFIG_DIR: config } };
+  },
+  line(line, state) {
+    const event = parseJson(line);
+    if (!event) return;
+    if (typeof event.session_id === "string" && event.session_id) state.sessionId = event.session_id;
+    if (event.type === "system" && typeof event.model === "string") state.model = event.model;
+    if (event.type === "tool_call" && event.subtype === "started") {
+      // One key per tool: readToolCall, shellToolCall, mcpToolCall... or function for the rest.
+      const call = (event.tool_call ?? {}) as Record<string, { args?: Record<string, unknown>; name?: unknown; arguments?: unknown }>;
+      const [key, value] = Object.entries(call).find(([k]) => k.endsWith("ToolCall") || k === "function") ?? [];
+      const args = value?.args;
+      if (key === "mcpToolCall" && typeof args?.toolName === "string") state.progress = describeTool(args.toolName, args.args);
+      else if (key === "function" && typeof value?.name === "string") state.progress = describeTool(value.name, parseArgs(value.arguments));
+      else if (key) state.progress = describeTool(key.replace(/ToolCall$/, ""), args);
+    }
+    if (event.type === "assistant") {
+      const content = ((event.message as { content?: unknown[] } | undefined)?.content ?? []) as Array<Record<string, unknown>>;
+      const text = content.map((p) => (p.type === "text" && typeof p.text === "string" ? p.text : "")).join("");
+      if (text.trim()) {
+        state.draft = text;
+        state.progress = clip(text);
+      }
+    }
+    if (event.type === "result") {
+      // Its result glues every message of the run together; the answer is the last one.
+      state.result = state.draft ?? (typeof event.result === "string" ? event.result : "");
+      state.failed = event.is_error === true || event.subtype !== "success";
+      // Its input tokens leave out cache reads and writes, which Myrel counts as input.
+      const u = (event.usage ?? {}) as Record<string, unknown>;
+      const input = count(u.inputTokens) + count(u.cacheReadTokens) + count(u.cacheWriteTokens);
+      if (input || count(u.outputTokens)) state.usage = { inputTokens: input, outputTokens: count(u.outputTokens) };
+    }
+  },
+};
+
+/** Where Cursor CLI keeps its config (cli-config.json) and chats. */
+function cursorConfigDir(): string {
+  return process.env.CURSOR_CONFIG_DIR?.trim() || (process.env.XDG_CONFIG_HOME?.trim() ? join(process.env.XDG_CONFIG_HOME, "cursor") : join(homedir(), ".cursor"));
+}
+
+/**
+ * A config folder for one Cursor run: the person's cli-config.json with `allow` added to its
+ * permissions, and their chats folder linked in, so the thread's next turn can resume this chat.
+ */
+export async function cursorConfig(dir: string, allow: string[], own = cursorConfigDir()): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const config = ((await readFile(join(own, "cli-config.json"), "utf8").then(JSON.parse, () => null)) ?? { version: 1 }) as Record<string, unknown>;
+  const permissions = (config.permissions ?? {}) as { allow?: unknown; deny?: unknown };
+  config.permissions = { ...permissions, allow: [...(Array.isArray(permissions.allow) ? permissions.allow : []), ...allow] };
+  await writeFile(join(dir, "cli-config.json"), JSON.stringify(config), { mode: 0o600 });
+  // A junction on Windows needs no admin rights. Without the link the run still works, as a new chat.
+  await mkdir(join(own, "chats"), { recursive: true })
+    .then(() => symlink(join(own, "chats"), join(dir, "chats"), process.platform === "win32" ? "junction" : "dir"))
+    .catch(() => {});
+  return dir;
+}
+
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor };
 
 /** The first line `<bin> --version` prints, or null when it does not run. */
 function cliVersion(bin: string): Promise<string | null> {
@@ -547,6 +667,16 @@ function parseJson(line: string): Record<string, unknown> | null {
     return JSON.parse(line) as Record<string, unknown>;
   } catch {
     return null;
+  }
+}
+
+/** A tool call's arguments, which may come as a JSON string. */
+function parseArgs(args: unknown): unknown {
+  if (typeof args !== "string") return args;
+  try {
+    return JSON.parse(args);
+  } catch {
+    return undefined;
   }
 }
 

@@ -2,7 +2,7 @@
 
 Connects your computer to a Myrel server, so a project can work in one of your
 local folders with the coding CLI you already use: Claude Code, Codex CLI,
-Antigravity CLI, OpenCode or Hermes Agent.
+Antigravity CLI, OpenCode, Hermes Agent or Cursor CLI.
 
 - It opens an **outbound** WebSocket to the server. No port is opened, and it works behind NAT.
 - The server sends a task (a folder, a CLI and a prompt). The runner starts the CLI in that folder, streams its
@@ -15,7 +15,7 @@ Antigravity CLI, OpenCode or Hermes Agent.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode` or `hermes` (Hermes Agent) on your `PATH`, already signed in.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent) or `cursor-agent` (Cursor CLI) on your `PATH`, already signed in.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -92,12 +92,12 @@ Read-only tasks (`--access read`) always run in the folder itself.
 `myrel-runner start --access <level>`, or for the background runner `myrel-runner service install --access <level>` or
 `myrel-runner update --access <level>` (both restart it). The level is saved for next time:
 
-| level | Claude Code | Codex | Antigravity CLI | OpenCode |
-|---|---|---|---|---|
-| `read` | `--permission-mode plan` | `--sandbox read-only` | `--mode plan` | edit and bash denied |
-| `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied |
-| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied |
-| `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` |
+| level | Claude Code | Codex | Antigravity CLI | OpenCode | Cursor CLI |
+|---|---|---|---|---|---|
+| `read` | `--permission-mode plan` | `--sandbox read-only` | `--mode plan` | edit and bash denied | `--mode ask` |
+| `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` |
+| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` |
+| `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
 the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode; Codex and
@@ -123,6 +123,11 @@ edits) with `read`, `accept_edits` with `edit` and `auto`, `dont_ask` with `full
 terminal cannot be switched off for one run (toolsets come from its global config), so below `full` it is told not
 to run commands that change anything; this is an instruction, not a sandbox.
 
+Cursor CLI (`cursor-agent -p`) is closest to Codex. With `edit` and `auto`, its sandbox keeps edits and commands in
+the workspace and gives commands no network; what would need approval (a file outside, a command it cannot sandbox)
+is declined and the run goes on. `--force` would also take commands out of the sandbox, so only `full` uses it. With
+`read` it runs in ask mode, which reads and answers but changes nothing (plan mode would leave out Myrel's tools).
+
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 
@@ -138,7 +143,7 @@ level does not allow on its own (with `edit`: `git commit`, `git push`, tests) i
 Allow commands this turn, Don't run), so there is no need to restart the runner with `--access full` for one task. A
 file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
-are asked about. Codex, Antigravity CLI and OpenCode cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
+are asked about. Codex, Antigravity CLI, OpenCode, Hermes Agent and Cursor CLI cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
 `external_directory` allow rules).
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
@@ -156,11 +161,12 @@ decisions, artifacts, memory, routines) added over MCP:
 | Antigravity CLI | `myrel-runner mcp-bridge` in `~/.gemini/config/mcp_config.json`, allowed with `mcp(myrel/*)` in `~/.gemini/antigravity-cli/settings.json` |
 | OpenCode | `mcp.myrel` (remote, `Authorization: Bearer {env:MYREL_MCP_TOKEN}`) in `OPENCODE_CONFIG_CONTENT`, allowed with `myrel_*` |
 | Hermes Agent | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header |
+| Cursor CLI | `mcp.json` of a plugin folder of the run (`--plugin-dir`, `--approve-mcps`), allowed with `Mcp(plugin-myrel-myrel:*)` in a `cli-config.json` of the run (`CURSOR_CONFIG_DIR`) |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
 uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
-for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent.
+for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI.
 
 Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
 server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
@@ -180,6 +186,16 @@ Hermes Agent's `hermes chat` runs every turn in a shared background gateway that
 ends the connection when the prompt is answered. The token travels only over that pipe. Hermes shows the run's
 servers to the model behind its `tool_search`, as `mcp__editor_<server>_<id>__<tool>`. Detection checks that
 `hermes --version` says Hermes Agent (another `hermes` is the React Native JavaScript engine).
+
+Cursor CLI takes MCP servers only from `mcp.json` files (`~/.cursor/mcp.json`, the project's `.cursor/mcp.json`) and
+from plugins. So each run gets a plugin folder named `myrel` (`--plugin-dir`) whose `mcp.json` holds Myrel's server
+and the connectors; Cursor names them `plugin-myrel-<server>`. Headless, a tool that would ask is declined, so the run
+also gets its own config folder (`CURSOR_CONFIG_DIR`): your `cli-config.json` (model, rules) with allow rules for
+those servers added, and a link to your chats folder so the thread's next turn resumes the chat (`--resume`). Nothing
+is written to your `~/.cursor`; both folders and the token in them are deleted after the run. The skills' folder
+gets a `.cursor-plugin` manifest and goes in as a second plugin. The runner looks for `cursor-agent` rather than
+`agent`, the other name Cursor's installer links. Sign in once with `cursor-agent login`. Your own servers in
+`~/.cursor/mcp.json` load too, approved like the run's (`--approve-mcps` cannot pick).
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 

@@ -12,6 +12,7 @@ On your computer, tasks run through a coding CLI you already have.
 | Antigravity CLI | `agy` | No | A step that needs approval ends the run, which then says what stopped it |
 | OpenCode | `opencode` | No | Doesn't run shell commands below **Full access** |
 | Hermes Agent | `hermes` | No | Needs `hermes pm install --extra acp` once |
+| Cursor CLI | `cursor-agent` | No | Below **Full access**, commands run in Cursor's sandbox, without network |
 
 Install the CLI and sign in to it before you pair the computer. CLIs that can't ask mid-task stay inside the project's folders, so add any folder they need under **Also allowed** ([Folders](/computer/folders/)).
 
