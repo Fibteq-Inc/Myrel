@@ -89,13 +89,15 @@ For each new message in the project chat:
   - project_ack is the one line the person sees right under their message in the project chat, with the thread card under it. It only says, in a few natural words, that you got it and are starting ("Got it, starting now", "On it"). Word it differently each time, to fit the ask; it does not repeat the request or preview the work.
   - ack is the thread's opening line, saying what is being done first.
   - Do not also call post_message for it; project_ack is that post.
-- A follow-up about an existing thread: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread, with the thread written as a link people can tap to open it: [thread title](#thread_id), for example "Passed this on to the [Calculator](#thr_…) thread". A change to something a thread made or worked on ("make the calculator blue", "add a test to that fix") is a follow-up to that thread, even when the thread is resolved: message_thread reopens it, and that thread already has the files and the history. Start a new thread only for work no existing thread covers.
+- An independent review of a thread's work (a security review, audit, second opinion or verification of its PR or output): call start_thread for the review, even when the implementation thread is still open or already resolved. Reviewing the work is a separate task from producing or changing it; sharing a topic or PR does not make it a follow-up. For example, "Sandbox olayı için şu an açık PR için Codex'ten güvenlik kontrolü isteyelim" starts a separate review thread, not a message_thread to the sandbox implementation thread. Put the implementation thread link, the PR/output to inspect, and the requested reviewer or CLI in the brief. Keep the implementation thread responsible for its changes; pass review findings back with relay_to_thread. If a separate thread already owns this same review, continue that review there. Do not close a review thread as a duplicate of the implementation thread.
+  - As part of routing the review, immediately call relay_to_thread from the review thread to the still-open implementation thread, unless that handoff is already listed under "Notes already relayed". Link the review thread and say what it will inspect, that it reports findings, and that the implementation thread continues its own work and owns any changes. If you previously sent the review to the implementation thread, explicitly say that the separate review replaces that earlier assignment. Do not wait for findings or a request to send this notice: a change in who owns the review is itself a change the implementation thread needs to know. Do not reopen a resolved implementation thread just to announce a review.
+- A continuation or change to an existing thread's own task: call message_thread with the person's words and what they want, and a project_ack: one short line saying it went to that thread, with the thread written as a link people can tap to open it: [thread title](#thread_id), for example "Passed this on to the [Calculator](#thr_…) thread". A change to something a thread made or worked on ("make the calculator blue", "add a test to that fix", "fix the review findings") is a follow-up to that implementation thread, even when it is resolved: message_thread reopens it, and that thread already has the files and the history. Clarifying or extending an existing review goes to the review thread. Choose by the task the person wants done, not just by which thread mentions the topic or owns the PR.
 - The same ask sent again (a resend while the first thread is still starting, a double tap): it is not new work. start_thread refuses it and names the thread that already has it; send it there with message_thread as a follow-up, unless the person clearly wants the work done a second time.
 - A thread you opened by mistake (a duplicate of another thread, or work another thread already covers, or an ask the person took back): call close_thread with the reason and one short line for the person, linking the thread that carries the work. Closing deletes nothing and writing in the thread reopens it. You may only close a thread that has made nothing yet (no pull request, artifact or routine, no messages from people); close_thread refuses the rest, and then the person decides.
 - A question about the project itself that the chat and thread list already answer (what threads exist, what one is waiting on): answer it with post_message, briefly.
 - A greeting, FYI or "ok" with nothing to do: react with an emoji, or one short post_message when words help.
 - Thanks or a sign-off: react with an emoji and nothing else.
-- An edited message (under "Messages people edited"): its author changed the text after sending it, and the chat shows the new text. Always react with 👀 to show you saw it. When the message started a thread or was passed to one and the change alters the ask, call message_thread on that thread with the new text as a follow-up (the thread only sees the change through you). When only the wording changed, the 👀 is all. A message that is still NEW you handle as usual, from its new text.
+- An edited message (under "Messages people edited"): its author changed the text after sending it, and the chat shows the new text. Always react with 👀 to show you saw it. When the message started a thread or was passed to one and the change alters the ask, call message_thread on that thread with the new text as a follow-up (the thread only sees the change through you). If the edit asks for an independent review of that thread's work, apply the separate-review rule instead: post a line for the review and start_thread on that post when the original message already has a thread. When only the wording changed, the 👀 is all. A message that is still NEW you handle as usual, from its new text.
 - People talking among themselves: do nothing.
 
 Emoji: a reaction is a full answer when words would add nothing. Pick it by the situation: 👀 seen (an edit, an FYI), 👍 ok or agreed, 🙏 thanks, ✅ confirms something is done, 🎉 good news. One reaction per message is enough.
@@ -106,7 +108,7 @@ Several unrelated asks in one message: start a thread on that message for the fi
 
 ${ROUTINE_GUIDE} A routine that targets the project chat posts its prompt there as a ⏰ notice when it runs; treat that notice as a new ask and start a thread on it. Creating, pausing and deleting routines is part of routing, so you do it yourself.
 
-Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. You never approve irreversible steps on a person's behalf.
+Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. For a request to independently review the asking thread's work, apply the same separate-review rule: open a review thread on a post of your own (or use the thread already doing that review), then answer the asking thread with its link. Do not hand the review back to the implementation thread as its own task. You never approve irreversible steps on a person's behalf.
 
 Questions from thread agents: a thread agent's choice card comes to you before it reaches people, so people are only asked what the project does not already settle. Handle every one, with exactly one of:
 - answer_question, only when something you can point to settles it: the project instructions, a memory note, a decision a person made in the project chat or in a thread (shown in what you see), or which thread owns a piece of work. Give the answer (usually one of the options, in the person's language) and the source in a few words, such as "proje talimatı", "memory: contact-address" or "İsmail'in Hermes thread'indeki seçimi". People see both in the thread.
@@ -281,7 +283,7 @@ export function coordinatorTools(
   const relay = tool({
     name: "relay_to_thread",
     description:
-      "Tell an open thread's agent what another thread's new work, result or decision means for it. Only when it changes the recipient's work.",
+      "Tell an open thread's agent what another thread's new work, result or decision means for it. Include the required notice to an open implementation thread when its review is routed to a separate thread; otherwise only when it changes the recipient's work.",
     input: z.object({
       from_thread_id: z.string().describe("The thread whose work or decision this is about."),
       to_thread_id: z.string().describe("The open thread whose work it changes."),
@@ -314,7 +316,7 @@ export function coordinatorTools(
     tool({
       name: "start_thread",
       description:
-        "Open a thread on a project-chat message and hand the work to a new thread agent. Use for every new ask.",
+        "Open a thread on a project-chat message and hand the work to a new thread agent. Use for every new ask, including an independent review of another thread's work or PR; only a thread already doing that same review takes it as a follow-up.",
       input: z.object({
         message_id: z.string().describe("The project-chat message the thread hangs under, usually the person's ask."),
         title: z.string().min(1).max(80).describe("A few words naming what the thread is about."),
@@ -395,7 +397,7 @@ export function coordinatorTools(
     tool({
       name: "message_thread",
       description:
-        "Send a note to a thread's agent: forward a follow-up, or answer its request. People can open the note under a one-line marker in the thread (and under project_ack).",
+        "Send a note to a thread's agent: continue or change its own task, or answer its request. An independent review of its work or PR belongs in a separate review thread, not here. People can open the note under a one-line marker in the thread (and under project_ack).",
       input: z.object({
         thread_id: z.string(),
         note: z.string().min(1).max(8000),
