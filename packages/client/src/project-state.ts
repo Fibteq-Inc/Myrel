@@ -235,6 +235,19 @@ export function threadUsage(s: ProjectState, threadId: string): { tokens: number
   return total;
 }
 
+/**
+ * How many agents are working in the project right now: the coordinator and every thread that is
+ * active or marked working and not resolved, each once. Counts the same way as the project list's
+ * `activity.working`, which the server keeps from the same signals.
+ */
+export function workingCount(s: ProjectState): number {
+  const working = new Set(Object.keys(s.active));
+  for (const thread of Object.values(s.threads)) {
+    if (thread.status === "working" && !thread.resolved) working.add(thread.id);
+  }
+  return working.size;
+}
+
 /** How many replies a thread has, not counting the agent's plan cards and plan update notes. */
 export function threadReplyCount(s: ProjectState, threadId: string): number {
   const messages = threadMessages(s, threadId);

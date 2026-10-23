@@ -102,6 +102,7 @@ export const en = {
   "sidebar.switchProject": "Switch project",
   "sidebar.members": { one: "1 member", other: "{count} members" },
   "sidebar.current": "Current",
+  "sidebar.working": { one: "1 working", other: "{count} working" },
   "sidebar.newProject": "New project",
   "tabs.label": "Project sections",
   "tabs.chat": "Conversation",

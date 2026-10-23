@@ -99,6 +99,7 @@ export const tr: Catalog = {
   "sidebar.switchProject": "Proje değiştir",
   "sidebar.members": { other: "{count} üye" },
   "sidebar.current": "Şu anki",
+  "sidebar.working": { other: "{count} çalışıyor" },
   "sidebar.newProject": "Yeni proje",
   "tabs.label": "Proje bölümleri",
   "tabs.chat": "Konuşma",
