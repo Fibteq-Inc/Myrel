@@ -1,5 +1,5 @@
 //! The bundled myrel-runner (packages/myrel-runner) as a sidecar, so projects can work in local
-//! folders with the user's own Claude Code, Codex, Antigravity CLI or OpenCode without installing anything.
+//! folders with the user's own Claude Code, Codex, Antigravity CLI, OpenCode or Hermes Agent without installing anything.
 //!
 //! The runner keeps its shared folders (added from Myrel > Devices) in `<app data>/runner`,
 //! separate from a standalone `npx myrel-runner` install. Its login (server + runner token) stays in the OS keychain and
