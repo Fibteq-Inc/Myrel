@@ -39,10 +39,24 @@ export const ConnectorSlug = z
 export const ConnectorTool = z.object({ name: z.string(), description: z.string().optional() });
 export type ConnectorTool = z.infer<typeof ConnectorTool>;
 
-/** Header and variable names are a secret's label; values are never sent back. */
-const SecretMap = z.record(z.string().regex(/^[A-Za-z_][\w-]{0,99}$/), z.string().max(4000));
+/** A header name such as Authorization or api-key: letters, digits, - and _, no spaces or ":". */
+export const HEADER_NAME = /^[A-Za-z_][\w-]{0,99}$/;
 /** Environment variable names are stricter than header names. */
-const EnvMap = z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,99}$/), z.string().max(4000));
+export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
+
+/**
+ * Header and variable names are a secret's label; values are never sent back. A bad name says which
+ * one and why, instead of zod's bare "Invalid key in record" (a pasted "api-key: …" line, say).
+ */
+const secretMap = (name: RegExp, what: string, allowed: string) =>
+  z.record(z.string().regex(name), z.string().max(4000), {
+    error: (iss) =>
+      iss.code === "invalid_key"
+        ? `${what} name ${JSON.stringify(iss.input)} is not valid: use only ${allowed}, with no spaces or ":". Put the value in its own field.`
+        : undefined,
+  });
+const SecretMap = secretMap(HEADER_NAME, "Header", "letters, digits, - and _");
+const EnvMap = secretMap(ENV_NAME, "Variable", "letters, digits and _");
 
 export const Connector = z.object({
   id: z.string(),
