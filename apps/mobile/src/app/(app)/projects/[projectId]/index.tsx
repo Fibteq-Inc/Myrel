@@ -78,7 +78,7 @@ function ChatTab() {
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
   const threads = useMemo(() => threadByCard(state), [state]);
-  const onSend = useCallback((body: string) => send(body, null), [send]);
+  const onSend = useCallback((body: string, attachments?: string[]) => send(body, null, attachments), [send]);
 
   return (
     <Conversation
