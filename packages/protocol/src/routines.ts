@@ -75,6 +75,8 @@ export const UpdateRoutineInput = z
   .object({
     name: z.string().trim().min(1).max(120),
     prompt: z.string().trim().min(1).max(8000),
+    target: RoutineTarget,
+    /** A whole new schedule; it may switch kind (cron <-> once). */
     schedule: RoutineSchedule,
     paused: z.boolean(),
   })

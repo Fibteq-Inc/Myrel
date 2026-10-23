@@ -701,17 +701,23 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /**
-   * Renames, reschedules, pauses or resumes a routine. Callable over RPC. Whoever changes its prompt
-   * (`editedBy`) answers for it from then on: its runs work as them (see fireRoutine).
+   * Edits a routine: renames it, changes its prompt or target, reschedules it (a new schedule may
+   * switch between cron and once), pauses or resumes it. Callable over RPC. Throws on a bad target or
+   * a new time in the past; an unchanged schedule is kept even if its one-off time has passed. Whoever
+   * changes its prompt or target (`editedBy`) answers for it from then on: its runs work as them (see
+   * fireRoutine). Re-arming computes the next run from the resulting schedule.
    */
   async updateRoutine(id: string, patch: UpdateRoutineInput, editedBy?: string): Promise<Routine | null> {
     const current = this.getRoutine(id);
     if (!current) return null;
-    if (patch.schedule) this.checkSchedule(patch.schedule);
+    const changed = <K extends keyof UpdateRoutineInput>(key: K) =>
+      patch[key] !== undefined && JSON.stringify(patch[key]) !== JSON.stringify(current[key]);
+    if (changed("target")) this.checkTarget(patch.target!);
+    if (changed("schedule")) this.checkSchedule(patch.schedule!);
     const next = { ...current, ...patch };
-    const by = editedBy && patch.prompt !== undefined && patch.prompt !== current.prompt ? editedBy : current.createdBy;
-    this.sql`UPDATE routines SET name = ${next.name}, prompt = ${next.prompt}, schedule = ${JSON.stringify(next.schedule)},
-      paused = ${next.paused ? 1 : 0}, created_by = ${by} WHERE id = ${id}`;
+    const by = editedBy && (changed("prompt") || changed("target")) ? editedBy : current.createdBy;
+    this.sql`UPDATE routines SET name = ${next.name}, prompt = ${next.prompt}, target = ${JSON.stringify(next.target)},
+      schedule = ${JSON.stringify(next.schedule)}, paused = ${next.paused ? 1 : 0}, created_by = ${by} WHERE id = ${id}`;
     return this.arm(id);
   }
 
@@ -1278,10 +1284,14 @@ function sameAsk(body: string): string {
     .trim();
 }
 
-/** When a routine runs next: the next cron match, or a one-off time that has not run yet. */
+/**
+ * When a routine runs next: the next cron match, or a one-off time that has not run yet and is still
+ * ahead (one whose time passed while it was paused is finished, not fired late on resume or edit).
+ */
 function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | null {
   if (schedule.kind === "cron") return nextCronRun(schedule.cron, schedule.timezone, new Date());
   const at = new Date(schedule.at);
+  if (at.getTime() <= Date.now()) return null;
   return lastRunAt && Date.parse(lastRunAt) >= at.getTime() - 1000 ? null : at;
 }
 

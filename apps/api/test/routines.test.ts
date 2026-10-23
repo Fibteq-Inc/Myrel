@@ -136,6 +136,58 @@ describe("routines", () => {
     ws.close();
   });
 
+  it("edits a routine, switching between repeating and once, and re-arms it", async () => {
+    const { token, project, ws } = await setup();
+    const path = `/api/projects/${project.id}/routines`;
+    const { routine } = await json<{ routine: Routine }>(
+      api(path, {
+        method: "POST",
+        token,
+        body: JSON.stringify({ name: "Digest", prompt: "Summarize.", schedule: { kind: "cron", cron: "0 9 * * *", timezone: "UTC" } }),
+      }),
+    );
+    const patch = (body: unknown) => api(`${path}/${routine.id}`, { method: "PATCH", token, body: JSON.stringify(body) });
+
+    // Repeating -> once: the next run is the new one-off time.
+    const at = new Date(Date.now() + 3 * 3600_000).toISOString();
+    const once = await json<{ routine: Routine }>(
+      patch({ name: "Reminder", prompt: "Remind me.", schedule: { kind: "once", at } }),
+    );
+    expect(once.routine).toMatchObject({ name: "Reminder", prompt: "Remind me.", schedule: { kind: "once", at }, nextRunAt: at });
+
+    // A new time in the past is refused and leaves the routine as it was.
+    expect((await patch({ schedule: { kind: "once", at: "2020-01-01T00:00:00Z" } })).status).toBe(400);
+    expect((await patch({ schedule: { kind: "cron", cron: "0 0 31 2 *" } })).status).toBe(400);
+    expect((await json<{ routines: Routine[] }>(api(path, { token }))).routines[0]).toMatchObject({ nextRunAt: at });
+
+    // Once -> repeating: the cron's next match, in its time zone.
+    const daily = await json<{ routine: Routine }>(
+      patch({ schedule: { kind: "cron", cron: "30 8 * * *", timezone: "Europe/Istanbul" } }),
+    );
+    expect(daily.routine.schedule).toEqual({ kind: "cron", cron: "30 8 * * *", timezone: "Europe/Istanbul" });
+    const next = new Date(daily.routine.nextRunAt!);
+    expect([next.getUTCHours(), next.getUTCMinutes()]).toEqual([5, 30]);
+    expect(next.getTime()).toBeGreaterThan(Date.now());
+
+    // The target can move to a thread, but not to one that does not exist.
+    expect((await patch({ target: { kind: "thread", threadId: "thr_00000000000000000000000000" } })).status).toBe(400);
+    ws.close();
+  });
+
+  it("finishes a paused one-off routine whose time passed instead of firing it late", async () => {
+    const { agent, ws } = await setup();
+    const routine = await agent.createRoutine(
+      { name: "Soon", prompt: "Ping.", target: { kind: "coordinator" }, schedule: { kind: "once", at: new Date(Date.now() + 200).toISOString() } },
+      "agent",
+    );
+    await agent.updateRoutine(routine.id, { paused: true });
+    await new Promise((r) => setTimeout(r, 300));
+    // Renaming keeps the (now past) schedule, and resuming leaves it finished.
+    expect(await agent.updateRoutine(routine.id, { name: "Late" })).toMatchObject({ name: "Late", nextRunAt: null });
+    expect(await agent.updateRoutine(routine.id, { paused: false })).toMatchObject({ paused: false, nextRunAt: null, runCount: 0 });
+    ws.close();
+  });
+
   it("posts a project-chat run that the coordinator routes into a thread", async () => {
     setFakeModel((req) => {
       if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };

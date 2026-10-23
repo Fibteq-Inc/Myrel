@@ -51,7 +51,7 @@ Under **Files**:
 
 ## Routines
 
-The **Routines** button in the project header schedules work: a prompt that runs every weekday, daily, weekly, hourly, once or on a custom cron. Each run either posts in the project chat (Myrel opens a thread each time) or continues an existing thread. You can also just ask in the chat, for example "every weekday at 9, summarize open threads".
+The **Routines** button in the project header schedules work: a prompt that runs every weekday, daily, weekly, hourly, once or on a custom cron. Each run either posts in the project chat (Myrel opens a thread each time) or continues an existing thread. To change a routine, open the panel and press the pencil on its card: you can rename it, rewrite its prompt, move it to another thread or the project chat, and change its schedule, including switching between repeating and once. The next run is worked out again from the new schedule. You can also just ask in the chat, for example "every weekday at 9, summarize open threads".
 
 ## Notifications
 
