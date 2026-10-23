@@ -63,6 +63,8 @@ export function threadPrompt(input: {
   messages: Message[];
   names: Record<string, string>;
   lastSeenSeq: number;
+  /** When the agent's last turn began: a message a person edited after it is new again. */
+  lastSeenAt?: string;
   notes: CoordinatorNote[];
   knowledge: KnowledgeSnapshot;
   repos: ProjectRepo[];
@@ -84,8 +86,9 @@ export function threadPrompt(input: {
   /** The thread's plan belongs to a round that finished before the thread was reopened. */
   planFinished?: boolean;
 }): string {
-  const shown = input.followUp ? input.messages.filter((m) => m.seq > input.lastSeenSeq) : input.messages;
-  const history = shown.map((m) => renderMessage(m, input.names, { isNew: m.seq > input.lastSeenSeq }));
+  const isNew = (m: Message) => m.seq > input.lastSeenSeq || editedSince(m, input.lastSeenAt);
+  const shown = input.followUp ? input.messages.filter(isNew) : input.messages;
+  const history = shown.map((m) => renderMessage(m, input.names, { isNew: isNew(m) }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
   const github = (input.githubEvents ?? []).map((g) => `- ${g.createdAt}${g.isNew ? " · NEW" : ""}: ${g.body}`);
   const pulls = (input.pullRequests ?? []).map(renderPullRequest);
@@ -102,8 +105,8 @@ export function threadPrompt(input: {
       : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
     input.followUp ? "" : `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
     input.followUp
-      ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already)\n${history.join("\n\n") || "(no new messages)"}`
-      : `## Thread so far, oldest first (NEW = arrived since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
+      ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already; one marked edited is an earlier message a person changed, so its new text replaces the old)\n${history.join("\n\n") || "(no new messages)"}`
+      : `## Thread so far, oldest first (NEW = arrived, or edited by its author, since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
     notes.length ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${notes.join("\n")}` : "",
     pulls.length ? `## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}` : "",
     github.length ? `## GitHub events on those pull requests (NEW = since your last turn)\n${github.join("\n\n")}` : "",
@@ -307,4 +310,9 @@ export function threadTools(host: ThreadHost): Tool[] {
       },
     }),
   ];
+}
+
+/** A person changed the message's text after the given time (the agent's last turn). */
+export function editedSince(m: Message, since: string | undefined): boolean {
+  return !!since && !!m.editedAt && m.editedAt > since;
 }

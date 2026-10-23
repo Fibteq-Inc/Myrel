@@ -733,6 +733,82 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("lets people edit their own messages; the coordinator marks a project-chat edit seen", async () => {
+    const prompts: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };
+      prompts.push(req.prompt);
+      return { text: "", toolCalls: [] }; // says nothing, so Myrel adds the 👀 itself
+    });
+    const { ws, events, agent } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "helo" }));
+    const sent = await until(async () => (prompts.length ? (await agent.getMessagesAfter(0)).messages[0] : null), "first turn");
+
+    ws.send(JSON.stringify({ type: "message.edit", messageId: sent.id, body: "hello" }));
+    const seen = await until(
+      () => events.find((e) => e.type === "reaction.added" && e.reaction.messageId === sent.id) ?? null,
+      "seen reaction",
+    );
+    expect(seen).toMatchObject({ reaction: { emoji: "👀", authorKind: "agent", authorId: "coordinator" } });
+    const updated = events.find((e) => e.type === "message.updated" && e.message.id === sent.id);
+    expect(updated).toMatchObject({ message: { body: "hello", seq: sent.seq } });
+    expect(updated?.type === "message.updated" && updated.message.editedAt).toBeTruthy();
+    expect(prompts[1]).toContain("## Messages people edited");
+    expect(prompts[1]).toMatch(/· edited [^\n]+\n\s+hello/);
+
+    // Only one's own messages, and not into an empty one.
+    ws.send(JSON.stringify({ type: "message.edit", messageId: sent.id, body: "" }));
+    await until(() => events.find((e) => e.type === "error" && e.code === "cannot_edit") ?? null, "empty refused");
+    const notice = await agent.sendMessage({ threadId: null, authorKind: "agent", authorId: "coordinator", body: "Hi" });
+    ws.send(JSON.stringify({ type: "message.edit", messageId: notice.id, body: "Bye" }));
+    await until(() => (events.filter((e) => e.type === "error" && e.code === "cannot_edit").length === 2 ? true : null), "agent message refused");
+    expect((await agent.getMessage(notice.id))?.body).toBe("Hi");
+    ws.close();
+  });
+
+  it("shows a thread agent the message a person edited as new, and marks it seen", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Color", instructions: "Paint it.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const prompts: string[] = [];
+    const play: Play = async (turn) => {
+      prompts.push(turn.prompt);
+      await turn.call("reply", { text: `Turn ${prompts.length}.` });
+    };
+    const { ws, events, agent } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "paint the button" }));
+    const thread: Thread = await until(async () => (await agent.listThreads())[0], "thread");
+    await until(() => (prompts.length === 1 ? true : null), "first turn");
+    await until(async () => ((await agent.getThread(thread.id))?.status === "review_ready" ? true : null), "first turn over");
+
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "make it blue" }));
+    await until(() => (prompts.length === 2 ? true : null), "second turn");
+    await until(async () => ((await agent.getThread(thread.id))?.status === "review_ready" ? true : null), "second turn over");
+    const mine = (await agent.getThreadContext(thread.id))!.messages.find((m: Message) => m.body === "make it blue")!;
+
+    ws.send(JSON.stringify({ type: "message.edit", messageId: mine.id, body: "make it red" }));
+    await until(() => (prompts.length === 3 ? true : null), "turn for the edit");
+    expect(prompts[2]).toMatch(/· edited [^\n]+· NEW\n\s+make it red/);
+    const seen = await until(
+      () => events.find((e) => e.type === "reaction.added" && e.reaction.messageId === mine.id) ?? null,
+      "seen reaction",
+    );
+    expect(seen).toMatchObject({ reaction: { emoji: "👀", authorId: "thread-agent" } });
+    const bodies = async () => (await agent.getThreadContext(thread.id))!.messages.map((m: Message) => m.body);
+    await until(async () => ((await bodies()).includes("Turn 3.") ? true : null), "edit turn reply");
+    // The turn lets go of the runner before the socket closes.
+    const after = events.indexOf(seen);
+    await until(
+      () => (events.slice(after).some((e) => e.type === "agent.activity" && e.threadId === thread.id && !e.active) ? true : null),
+      "edit turn over",
+    );
+    ws.close();
+  }, 20_000);
+
   it("names every new project chat message again after the thread updates", () => {
     const m = { id: "cmsg_A", threadId: null, authorKind: "user", authorId: "u1", body: "two asks", createdAt: "2026-10-23T09:30:00.000Z", seq: 1 };
     const prompt = coordinatorPrompt({

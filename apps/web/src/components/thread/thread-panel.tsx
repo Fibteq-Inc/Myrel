@@ -382,7 +382,15 @@ function Conversation({
         className="flex-1 overflow-y-auto"
       >
         <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
-          {root && !history.hidden && <MessageView message={root} me={me} names={names} />}
+          {root && !history.hidden && (
+            <MessageView
+              message={root}
+              me={me}
+              names={names}
+              reactions={state.reactions[root.id]}
+              onEdit={(body) => emit({ type: "message.edit", messageId: root.id, body })}
+            />
+          )}
           {!history.hidden && <ThreadCliNote thread={thread} />}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
@@ -413,6 +421,7 @@ function Conversation({
                 names={names}
                 reactions={state.reactions[m.id]}
                 decision={{ answer: answers.get(m.id), onChoose: choose }}
+                onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
               >
                 {m.artifacts?.length ? (
                   <ArtifactCards
