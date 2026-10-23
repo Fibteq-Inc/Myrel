@@ -131,6 +131,7 @@ describe("project settings", () => {
       model: "claude-opus-5-5",
       keyId: aliceKey.id,
       taskTarget: "auto",
+      cliModels: {},
     });
     const cloud = await json<{ settings: ProjectSettings }>(patch(alice.token, { taskTarget: "cloud" }));
     expect(cloud.settings.taskTarget).toBe("cloud");

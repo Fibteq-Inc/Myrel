@@ -1,5 +1,15 @@
 import { useT } from "@myrel/i18n/react";
-import type { InviteRole, ProjectRole, ProviderId, TaskTarget, UpdateProjectSettingsInput } from "@myrel/protocol";
+import {
+  type CliId,
+  type CliModelDefaults,
+  effortsFor,
+  type InviteRole,
+  type ProjectRole,
+  type ProviderId,
+  type RunnerCli,
+  type TaskTarget,
+  type UpdateProjectSettingsInput,
+} from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, Users, X } from "lucide-react";
@@ -20,7 +30,10 @@ import {
   projectSettingsQuery,
   projectsQuery,
   providersQuery,
+  runnersQuery,
+  workspaceQuery,
 } from "../lib/api";
+import { cliName, effortName } from "./chat/cli-picker";
 import { Button, errorMessage, GhostButton, IconButton, initials, Input } from "../lib/ui";
 import { useConfirm } from "./ui/confirm";
 
@@ -256,10 +269,12 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
   const [provider, setProvider] = useState<ProviderId | "">(settings.provider ?? "");
   const [model, setModel] = useState(settings.model ?? "");
   const [keyId, setKeyId] = useState(settings.keyId ?? "");
+  const [cliModels, setCliModels] = useState<CliModelDefaults>(settings.cliModels);
   useEffect(() => {
     setProvider(settings.provider ?? "");
     setModel(settings.model ?? "");
     setKeyId(settings.keyId ?? "");
+    setCliModels(settings.cliModels);
   }, [settings]);
   const save = useSaveSettings(projectId);
 
@@ -272,7 +287,10 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    save.mutate({ provider: provider || null, model: model.trim() || null, keyId: keyId || null });
+    // Every CLI it ever had a default for goes along, so one set back to its own default is cleared.
+    const clis = new Set([...Object.keys(settings.cliModels), ...Object.keys(cliModels)] as CliId[]);
+    const nextCliModels = Object.fromEntries([...clis].map((c) => [c, cliModels[c] ?? { model: null, effort: null }]));
+    save.mutate({ provider: provider || null, model: model.trim() || null, keyId: keyId || null, cliModels: nextCliModels });
   }
 
   return (
@@ -348,8 +366,82 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
         )}
       </Section>
 
+      <CliModels projectId={projectId} value={cliModels} onChange={setCliModels} disabled={!canManage} />
+
       {canManage && <SaveBar save={save} />}
     </form>
+  );
+}
+
+/**
+ * The project's default model and effort for each CLI on its folder's computer, from the lists the
+ * CLIs gave the runner. Only the computer's owner sees them (only their own computers are listed).
+ */
+function CliModels({
+  projectId,
+  value,
+  onChange,
+  disabled,
+}: {
+  projectId: string;
+  value: CliModelDefaults;
+  onChange: (next: CliModelDefaults) => void;
+  disabled: boolean;
+}) {
+  const t = useT();
+  const { data: workspace } = useQuery(workspaceQuery(projectId));
+  const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
+  const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
+  if (!workspace || !runner || runner.clis.length === 0) return null;
+  const listing = runner.clis.filter((c): c is RunnerCli & { models: NonNullable<RunnerCli["models"]> } => !!c.models?.length);
+  const set = (cli: CliId, model: string | null, effort: string | null) => {
+    // An effort the model does not take would be dropped when it runs: clear it here instead.
+    const models = listing.find((c) => c.id === cli)!.models;
+    onChange({ ...value, [cli]: { model, effort: effort && effortsFor(models, model).includes(effort) ? effort : null } });
+  };
+  return (
+    <Section title={t("projectSettings.cliModels")} description={t("projectSettings.cliModelsDescription", { computer: runner.name })}>
+      {listing.length === 0 ? (
+        <Notice>{t("projectSettings.cliModelsEmpty", { computer: runner.name })}</Notice>
+      ) : (
+        <div className="space-y-4">
+          {listing.map((c) => {
+            const current = value[c.id] ?? { model: null, effort: null };
+            const efforts = effortsFor(c.models, current.model);
+            return (
+              <div key={c.id} className="grid gap-3 sm:grid-cols-2">
+                <Field label={cliName(c.id)}>
+                  <Select value={current.model ?? ""} disabled={disabled} onChange={(e) => set(c.id, e.target.value || null, current.effort)}>
+                    <option value="">{t("modelPicker.cliDefault")}</option>
+                    {/* A default the CLI no longer lists stays visible until someone changes it. */}
+                    {current.model && !c.models.some((m) => m.id === current.model) && <option value={current.model}>{current.model}</option>}
+                    {c.models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t("modelPicker.effort")} hint={efforts.length === 0 ? t("modelPicker.noEffort") : undefined}>
+                  <Select
+                    value={current.effort ?? ""}
+                    disabled={disabled || efforts.length === 0}
+                    onChange={(e) => set(c.id, current.model, e.target.value || null)}
+                  >
+                    <option value="">{t("modelPicker.effortDefault")}</option>
+                    {efforts.map((e) => (
+                      <option key={e} value={e}>
+                        {effortName(e, t)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Section>
   );
 }
 

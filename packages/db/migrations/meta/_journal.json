@@ -204,6 +204,13 @@
       "when": 1792758185008,
       "tag": "0028_onboarded",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1792770163600,
+      "tag": "0029_project_cli_models",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ProjectRole } from "./models";
+import { CliId } from "./runner";
 
 /** Model providers a server can call. Each has its own key format and default model. */
 export const ProviderId = z.enum(["fireworks", "anthropic", "openai"]);
@@ -43,12 +44,25 @@ export type CreateApiKeyInput = z.input<typeof CreateApiKeyInput>;
 export const TaskTarget = z.enum(["auto", "local", "cloud"]);
 export type TaskTarget = z.infer<typeof TaskTarget>;
 
+/** A project's default model and effort for one CLI; null: the CLI's own default. */
+export const CliModelDefault = z.object({
+  model: z.string().trim().min(1).max(200).nullable(),
+  effort: z.string().trim().min(1).max(20).nullable(),
+});
+export type CliModelDefault = z.infer<typeof CliModelDefault>;
+
+/** Defaults per CLI for the project's threads on a computer, keyed by CliId. */
+export const CliModelDefaults = z.partialRecord(CliId, CliModelDefault);
+export type CliModelDefaults = z.infer<typeof CliModelDefaults>;
+
 export const ProjectSettings = z.object({
   name: z.string(),
   provider: ProviderId.nullable(),
   model: z.string().nullable(),
   keyId: z.string().nullable(),
   taskTarget: TaskTarget,
+  /** Older servers never send it. */
+  cliModels: CliModelDefaults.default({}),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -58,6 +72,8 @@ export const UpdateProjectSettingsInput = z.object({
   model: z.string().trim().max(200).nullable().optional(),
   keyId: z.string().nullable().optional(),
   taskTarget: TaskTarget.optional(),
+  /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
+  cliModels: CliModelDefaults.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 

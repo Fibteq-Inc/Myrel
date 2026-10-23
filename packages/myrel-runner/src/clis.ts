@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
+import { type CliId, type CliLimits, type CliModel, type RunnerCli, type TaskModel, unwrapShell } from "@myrel/protocol";
 import type { AcpMcpServer, AcpTurn } from "./acp";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
@@ -70,7 +70,99 @@ export type CliAdapter = {
   acp?(access: Access): { mode?: string; allow: boolean };
   /** Whether `<bin> --version` printed this CLI's version, for a binary name another tool also uses. */
   isMine?(version: string): boolean;
+  /** The models the CLI lists, with the efforts each takes; undefined when it could not be asked. */
+  models?(): Promise<CliModel[] | undefined>;
+  /** The flags that run this model and effort, both already checked with safeModelArg. */
+  modelArgs?(model: TaskModel): string[];
 };
+
+/**
+ * Whether a model id or effort from the server may go on the command line. Windows runs the CLI
+ * through a shell, so only plain names pass: the server sends only what the CLI listed anyway.
+ */
+export function safeModelArg(value: string | undefined): value is string {
+  return !!value && value.length <= 200 && /^[A-Za-z0-9][\w.:/@+-]*$/.test(value);
+}
+
+/** The flags for a task's model and effort, leaving out anything unsafe. */
+export function modelFlags(adapter: CliAdapter, model: TaskModel | undefined): string[] {
+  if (!model || !adapter.modelArgs) return [];
+  const safe: TaskModel = {
+    ...(safeModelArg(model.model) && { model: model.model }),
+    ...(safeModelArg(model.effort) && { effort: model.effort }),
+  };
+  return safe.model || safe.effort ? adapter.modelArgs(safe) : [];
+}
+
+/** stdout of a short command, or null when it fails or takes too long. */
+function output(bin: string, args: string[], timeout = 20_000): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
+      resolve(err ? null : stdout);
+    });
+  });
+}
+
+/**
+ * Claude Code has no list of models: its --help names the aliases that always mean the newest
+ * model of a kind, and the effort levels it takes.
+ */
+export function parseClaudeHelp(help: string): CliModel[] | undefined {
+  const text = help.replace(/\s+/g, " ");
+  const aliases = helpParens(text, "--model <model>", "(e.g. ")?.match(/'[a-z0-9-]+'/g)?.map((a) => a.slice(1, -1));
+  if (!aliases?.length) return undefined;
+  const efforts = helpParens(text, "--effort <level>", "(")?.split(",").map((e) => e.trim()).filter(safeModelArg) ?? [];
+  // Haiku takes no effort.
+  return [...aliases, ...(aliases.includes("haiku") ? [] : ["haiku"])].map((id) => ({
+    id,
+    name: id[0]!.toUpperCase() + id.slice(1),
+    efforts: id === "haiku" ? [] : efforts,
+  }));
+}
+
+/** What is inside the parentheses opened by `open` in the description of `flag`, found without regexes over the help. */
+function helpParens(text: string, flag: string, open: string): string | undefined {
+  const at = text.indexOf(flag);
+  if (at < 0) return undefined;
+  const description = text.slice(at + flag.length, at + flag.length + 400);
+  const start = description.indexOf(open);
+  const end = start < 0 ? -1 : description.indexOf(")", start + open.length);
+  return end < 0 ? undefined : description.slice(start + open.length, end);
+}
+
+/** `codex debug models`: the catalog the person's Codex uses, with each model's reasoning levels. */
+export function parseCodexModels(json: string): CliModel[] | undefined {
+  try {
+    const { models } = JSON.parse(json) as { models?: unknown };
+    if (!Array.isArray(models)) return undefined;
+    const list = models.flatMap((m: Record<string, unknown>) => {
+      if (typeof m.slug !== "string" || !safeModelArg(m.slug) || m.visibility === "hide") return [];
+      const levels = Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [];
+      const efforts = levels.map((l: { effort?: unknown }) => l?.effort).filter((e): e is string => typeof e === "string" && safeModelArg(e));
+      return [{ id: m.slug, name: typeof m.display_name === "string" ? m.display_name : m.slug, efforts }];
+    });
+    return list.length ? list.slice(0, 100) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One model per line, its id first and maybe a name after a tab or " - " (Antigravity CLI, OpenCode,
+ * Cursor CLI). These take no separate effort: where a model thinks more, it is its own model id.
+ */
+export function parseModelLines(text: string): CliModel[] | undefined {
+  const list = text.split(/\r?\n/).flatMap((line) => {
+    const trimmed = line.trim();
+    const tab = trimmed.indexOf("\t");
+    const cut = tab >= 0 ? tab : trimmed.indexOf(" - ");
+    const id = cut >= 0 ? trimmed.slice(0, cut).trim() : trimmed;
+    const name = cut >= 0 ? trimmed.slice(cut + (tab >= 0 ? 1 : 3)).trim() : "";
+    if (!safeModelArg(id) || /^(available|fetching|loading)$/i.test(id) || id.endsWith(":")) return [];
+    return [{ id, name: name || id, efforts: [] }];
+  });
+  return list.length ? list.slice(0, 100) : undefined;
+}
 
 /** Name of Myrel's MCP server in the CLI's config; its tools show up as mcp__myrel__<tool> in Claude Code. */
 export const MYREL_MCP_SERVER = "myrel";
@@ -212,6 +304,8 @@ const claude: CliAdapter = {
       state.failed = event.is_error === true || (typeof event.subtype === "string" && event.subtype !== "success");
     }
   },
+  models: async () => parseClaudeHelp((await output("claude", ["--help"])) ?? ""),
+  modelArgs: ({ model, effort }) => [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])],
 };
 
 const codex: CliAdapter = {
@@ -287,6 +381,11 @@ const codex: CliAdapter = {
   },
   // `codex exec --json` leaves its rate limits out; the session file it writes has them.
   limits: (state) => readCodexLimits(state.sessionId),
+  models: async () => parseCodexModels((await output("codex", ["debug", "models"])) ?? ""),
+  modelArgs: ({ model, effort }) => [
+    ...(model ? ["-m", model] : []),
+    ...(effort ? ["-c", `model_reasoning_effort=${JSON.stringify(effort)}`] : []),
+  ],
 };
 
 /** What Antigravity CLI is told below full access, where a step that needs approval ends the run. */
@@ -364,6 +463,9 @@ const antigravity: CliAdapter = {
       }
     }
   },
+  // Its model ids carry their thinking level (gemini-…-high), so no effort is offered on top.
+  models: async () => parseModelLines((await output("agy", ["models"], 30_000)) ?? ""),
+  modelArgs: ({ model }) => (model ? ["--model", model] : []),
 };
 
 /**
@@ -447,6 +549,8 @@ const opencode: CliAdapter = {
       state.result = typeof message === "string" ? message : "opencode reported an error.";
     }
   },
+  models: async () => parseModelLines((await output("opencode", ["models"])) ?? ""),
+  modelArgs: ({ model }) => (model ? ["--model", model] : []),
 };
 
 /** `opencode --version` prints "1.19.4"; opencode 2 prints "opencode v2.0.28": the first number is the major. */
@@ -591,6 +695,8 @@ const cursor: CliAdapter = {
       if (input || count(u.outputTokens)) state.usage = { inputTokens: input, outputTokens: count(u.outputTokens) };
     }
   },
+  models: async () => parseModelLines((await output("cursor-agent", ["models"])) ?? ""),
+  modelArgs: ({ model }) => (model ? ["--model", model] : []),
 };
 
 /** Where Cursor CLI keeps its config (cli-config.json) and chats. */

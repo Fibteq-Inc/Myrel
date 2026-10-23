@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, CLI_NAMES, CliId, type ProjectWorkspace, TaskTarget } from "@myrel/protocol";
+import { type AgentStart, CLI_NAMES, CliId, type ProjectWorkspace, type TaskModel, TaskTarget } from "@myrel/protocol";
 import type { RunnerBackend, TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -31,9 +31,9 @@ export function sandboxBackend(env: Env, threadId: string, principal = ""): Runn
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart },
+  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent } = where;
+  const { projectId, threadId, workspace, agent, model } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -49,6 +49,7 @@ export function localBackend(
         cli: workspace.cli,
         prompt: spec.prompt,
         agent,
+        model,
       });
       if (!started.ok) throw new Error(started.reason);
     },

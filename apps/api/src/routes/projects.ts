@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import {
   AddProjectRepoInput,
+  type CliModelDefaults,
   CreateInviteInput,
   CreateProjectInput,
   createId,
@@ -28,6 +29,7 @@ import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
 import { getWorkspace, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
+import { parseCliModels } from "../task-model";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
 
@@ -99,7 +101,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, model, taskTarget } = input.data;
+    const { name, model, taskTarget, cliModels } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -118,6 +120,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(name !== undefined && { name }),
         ...(model !== undefined && { llmModel: model || null }),
         ...(taskTarget !== undefined && { taskTarget }),
+        ...(cliModels !== undefined && { cliModels: mergeCliModels(current.cliModels, cliModels) }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -595,6 +598,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       model: projects.llmModel,
       keyId: projects.llmKeyId,
       taskTarget: projects.taskTarget,
+      cliModels: projects.cliModels,
     })
     .from(projects)
     .where(eq(projects.id, projectId));
@@ -602,5 +606,16 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
     ...row!,
     provider: row!.provider as ProjectSettings["provider"],
     taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
+    cliModels: parseCliModels(row!.cliModels),
   };
+}
+
+/** The project's per-CLI defaults with `changes` applied; a CLI set to null and null is dropped. Null when none is left. */
+function mergeCliModels(current: CliModelDefaults, changes: CliModelDefaults): string | null {
+  const next: CliModelDefaults = { ...current };
+  for (const [cli, value] of Object.entries(changes) as [keyof CliModelDefaults, CliModelDefaults[keyof CliModelDefaults]][]) {
+    if (value && (value.model || value.effort)) next[cli] = value;
+    else delete next[cli];
+  }
+  return Object.keys(next).length ? JSON.stringify(next) : null;
 }

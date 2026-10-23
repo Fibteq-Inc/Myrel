@@ -1,15 +1,16 @@
+import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, type CliId, type CliModelDefaults, EFFORT_LEVELS, effortsFor, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react-native";
+import { Brain, Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors } from "../theme";
 
-export type Pickable = { clis: RunnerCli[]; folderCli: CliId };
+export type Pickable = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults };
 
 export function cliName(id: string): string {
   return CLI_NAMES[id as CliId] ?? id;
@@ -32,7 +33,7 @@ export function usePickableClis(projectId: string): Pickable | null {
   // Only your own computers are listed, so finding it means it is yours.
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
   if (!workspace || !runner || runner.clis.length === 0 || settings?.taskTarget === "cloud") return null;
-  return { clis: runner.clis, folderCli: workspace.cli };
+  return { clis: runner.clis, folderCli: workspace.cli, defaults: settings?.cliModels ?? {} };
 }
 
 /** Project chat: the CLIs a new ask's thread may run with. None: the folder's. Several: Myrel picks. */
@@ -83,6 +84,86 @@ export function ThreadCliPicker({ pickable, thread, onChange }: { pickable: Pick
   );
 }
 
+/** An effort level's name; one Myrel does not know shows as the CLI wrote it. */
+function effortName(effort: string, t: ReturnType<typeof useT>): string {
+  return (EFFORT_LEVELS as readonly string[]).includes(effort) ? t(`modelPicker.effort.${effort}` as MessageKey) : effort;
+}
+
+/**
+ * Thread: the model and effort its CLI runs with from the next turn, as on the web. Only for a CLI
+ * that lists its models; efforts only those the model takes, none for a model that takes none.
+ */
+export function ThreadModelPicker({
+  pickable,
+  thread,
+  onChange,
+}: {
+  pickable: Pickable;
+  thread: Thread;
+  onChange: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
+}) {
+  const t = useT();
+  const styles = useStyles();
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  const cli = (thread.cli?.id as CliId | undefined) ?? pickable.folderCli;
+  const models = pickable.clis.find((c) => c.id === cli)?.models;
+  if (!models?.length) return null;
+  const own = thread.model?.cli === cli ? thread.model : null;
+  const project = pickable.defaults[cli];
+  const model = models.find((m) => m.id === (own?.model ?? project?.model));
+  const efforts = effortsFor(models, model?.id ?? null);
+  const effortId = own?.effort ?? project?.effort ?? null;
+  const effort = effortId && efforts.includes(effortId) ? effortId : null;
+  const pick = (next: { model?: string | null; effort?: string | null }) => {
+    const m = next.model !== undefined ? next.model : (own?.model ?? null);
+    let e = next.effort !== undefined ? next.effort : (own?.effort ?? null);
+    if (e && !effortsFor(models, m ?? project?.model ?? null).includes(e)) e = null;
+    onChange({ cli, model: m, effort: e });
+  };
+  const label = [model?.name ?? t("modelPicker.cliDefault"), effort && effortName(effort, t)].filter(Boolean).join(" · ");
+  const projectModel = project?.model ? (models.find((m) => m.id === project.model)?.name ?? project.model) : null;
+  return (
+    <>
+      <Chip label={label} active={!!own} several={false} model title={t("modelPicker.title")} onPress={() => setOpen(true)} />
+      <Sheet open={open} onClose={() => setOpen(false)} title={t("modelPicker.title")} hint={t("cliPicker.threadHint")}>
+        <ScrollView style={{ maxHeight: 320 }}>
+          <Option
+            kind="radio"
+            checked={!own?.model}
+            title={projectModel ? t("modelPicker.projectDefault", { model: projectModel }) : t("modelPicker.cliDefault")}
+            onPress={() => pick({ model: null })}
+          />
+          {models.map((m) => (
+            <Option key={m.id} kind="radio" checked={own?.model === m.id} title={m.name} onPress={() => pick({ model: m.id })} />
+          ))}
+        </ScrollView>
+        <Text style={styles.section}>{t("modelPicker.effort")}</Text>
+        {efforts.length > 0 ? (
+          <View style={styles.efforts}>
+            {[null, ...efforts].map((e) => {
+              const on = (own?.effort ?? null) === e;
+              return (
+                <Pressable
+                  key={e ?? ""}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: on }}
+                  onPress={() => pick({ effort: e })}
+                  style={({ pressed }) => [styles.effort, on && styles.effortOn, pressed && !on && { backgroundColor: colors.hover }]}
+                >
+                  <Text style={[styles.effortText, on && { color: colors.onAccent }]}>{e ? effortName(e, t) : t("modelPicker.effortDefault")}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={styles.hint}>{t("modelPicker.noEffort")}</Text>
+        )}
+      </Sheet>
+    </>
+  );
+}
+
 /** The note at the top of a thread whose CLI Myrel picked among the ones the person offered. */
 export function ThreadCliNote({ thread }: { thread: Thread }) {
   const t = useT();
@@ -116,7 +197,21 @@ export function OfferedClis({ clis }: { clis: string[] }) {
   );
 }
 
-function Chip({ label, active, several, title, onPress }: { label: string; active: boolean; several: boolean; title: string; onPress: () => void }) {
+function Chip({
+  label,
+  active,
+  several,
+  model,
+  title,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  several: boolean;
+  model?: boolean;
+  title: string;
+  onPress: () => void;
+}) {
   const colors = useColors();
   const styles = useStyles();
   return (
@@ -127,7 +222,13 @@ function Chip({ label, active, several, title, onPress }: { label: string; activ
       onPress={onPress}
       style={({ pressed }) => [styles.chip, pressed && { backgroundColor: colors.hover }]}
     >
-      {several ? <Sparkles size={14} color={colors.accent} /> : <SquareTerminal size={14} color={active ? colors.accent : colors.muted} />}
+      {several ? (
+        <Sparkles size={14} color={colors.accent} />
+      ) : model ? (
+        <Brain size={14} color={active ? colors.accent : colors.muted} />
+      ) : (
+        <SquareTerminal size={14} color={active ? colors.accent : colors.muted} />
+      )}
       <Text style={[styles.chipText, active && { color: colors.fg }]} numberOfLines={1}>
         {label}
       </Text>
@@ -244,5 +345,10 @@ const useStyles = makeStyles((colors) =>
     noteReason: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
     offered: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
     offeredText: { color: colors.subtle, fontSize: 12 },
+    section: { color: colors.subtle, fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+    efforts: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    effort: { borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
+    effortOn: { borderColor: colors.accent, backgroundColor: colors.accent },
+    effortText: { color: colors.body, fontSize: 13 },
   }),
 );
