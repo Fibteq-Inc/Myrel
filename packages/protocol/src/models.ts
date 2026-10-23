@@ -80,7 +80,7 @@ export type MessageStats = z.infer<typeof MessageStats>;
  * brief: the coordinator opened a thread with this brief. follow_up: it forwarded a person's
  * follow-up. reply: it answered a thread's request. relay: it passed news from another thread.
  */
-export const RelayKind = z.enum(["brief", "follow_up", "reply", "relay"]);
+export const RelayKind = z.enum(["brief", "follow_up", "reply", "relay", "answer"]);
 export type RelayKind = z.infer<typeof RelayKind>;
 
 /** What the coordinator sent a thread's agent, carried by the one-line message that says so. */

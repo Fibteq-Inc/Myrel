@@ -139,6 +139,7 @@ export const en = {
   "relay.kind.follow_up": "Follow-up forwarded to the thread",
   "relay.kind.reply": "The coordinator's answer to the thread",
   "relay.kind.relay": "Note from another thread",
+  "relay.kind.answer": "The agent's question, answered by the coordinator",
   "stats.label": "How this reply was made",
   "stats.cloud": "Cloud",
   "stats.local": "Your computer",

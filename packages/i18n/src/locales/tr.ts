@@ -136,6 +136,7 @@ export const tr: Catalog = {
   "relay.kind.follow_up": "Thread'e iletilen takip mesajı",
   "relay.kind.reply": "Koordinatörün thread'e yanıtı",
   "relay.kind.relay": "Başka bir thread'den gelen not",
+  "relay.kind.answer": "Ajanın sorusu ve koordinatörün cevabı",
   "stats.label": "Bu cevap nasıl üretildi",
   "stats.cloud": "Bulut",
   "stats.local": "Bilgisayarın",

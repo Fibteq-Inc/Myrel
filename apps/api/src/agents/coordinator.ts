@@ -20,6 +20,8 @@ import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
 export type InboxItem =
   | { kind: "message"; messageId: string }
   | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string }
+  /** A thread agent's choice card, waiting for the coordinator to answer it or pass it to people. */
+  | { kind: "question"; threadId: string; questionId: string; question: string }
   /** A routine ran and posted its prompt in the project chat as messageId. */
   | { kind: "routine"; messageId: string; routineId: string; name: string }
   /** Someone wrote in a thread (a person's decision, or the thread agent's reply) while other threads are open. */
@@ -53,6 +55,10 @@ export type CoordinatorHost = {
   messageThread(threadId: string, note: string, kind: "follow_up" | "reply"): Promise<void>;
   /** Tell an open thread what another thread's work means for it. Throws when the relay would repeat or bounce. */
   relay(fromThreadId: string, toThreadId: string, note: string): Promise<void>;
+  /** Answers a thread agent's choice card from what the project knows; it never reaches people. Throws when it is not open. */
+  answerQuestion(questionId: string, answer: string, source: string): Promise<void>;
+  /** Passes a thread agent's choice card to people, with an optional line of context. Throws when it is not open. */
+  askPerson(questionId: string, note?: string): Promise<void>;
 };
 
 export const COORDINATOR_SYSTEM = `You are Myrel, the coordinator of a shared project chat. People post requests here; focused work happens in threads, each handled by its own thread agent. To people, you and every thread agent are one assistant called Myrel.
@@ -79,6 +85,11 @@ Several unrelated asks in one message: start a thread on that message for the fi
 ${ROUTINE_GUIDE} A routine that targets the project chat posts its prompt there as a ⏰ notice when it runs; treat that notice as a new ask and start a thread on it. Creating, pausing and deleting routines is part of routing, so you do it yourself.
 
 Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. You never approve irreversible steps on a person's behalf.
+
+Questions from thread agents: a thread agent's choice card comes to you before it reaches people, so people are only asked what the project does not already settle. Handle every one, with exactly one of:
+- answer_question, only when something you can point to settles it: the project instructions, a memory note, a decision a person made in the project chat or in a thread (shown in what you see), or which thread owns a piece of work. Give the answer (usually one of the options, in the person's language) and the source in a few words, such as "proje talimatı", "memory: contact-address" or "İsmail'in Hermes thread'indeki seçimi". People see both in the thread.
+- ask_person, for everything else: anything irreversible, spending, deleting or sending outside the project; taste and product choices nobody has made yet (design, names, prices, scope); and anything you are not sure of. Never guess, and never pick an option only because the agent recommends it. Add a note only when you know something that helps the person choose, such as a related earlier decision, in one sentence in their language.
+When a person answers such a card in a way that sets a rule for the project ("always open a PR", "keep replies in Turkish"), save the rule in memory, so the same question is answered next time without them.
 
 Keeping threads in step: threads work in parallel, and what one thread starts, decides or delivers can change another thread's work. Examples: a new feature that another thread has to account for (a thread for a new kind of connector means the thread on plan limits must count it), a rename or a new server address, a renamed shared package, a decision a person made in one thread that another thread is waiting for, two threads about to change the same file. When you see such a link, call relay_to_thread to tell the affected thread in one or two sentences what changed and what it means for its work; when two threads would change the same file, say which thread owns it. Check for links whenever you start a thread (does an open thread need to know about this new work?) and whenever "Thread updates" lists new messages from inside threads. Relay only when it changes the recipient's work: most updates need nothing, and then you call no tools. Never send a note listed under "Notes already relayed" again, and never pass a thread's answer to your note back to the thread it came from. A decision people made in a thread that the whole project should keep (a name, a price, a rule) also goes in memory. Thread updates never get a post in the project chat: people already saw them in the thread.
 
@@ -123,10 +134,14 @@ export function coordinatorPrompt(input: {
   const requests = input.inbox.flatMap((i) =>
     i.kind === "request" ? [`- Thread [${i.threadId}] asks (${i.request}): ${i.reason}`] : [],
   );
+  const titles = new Map(input.threads.map((t) => [t.id, t.title]));
+  const questionItems = input.inbox.flatMap((i) => (i.kind === "question" ? [i] : []));
+  const questions = questionItems.map(
+    (q) => `- Question [${q.questionId}] from thread [${q.threadId}] "${titles.get(q.threadId) ?? ""}":\n${indent(q.question)}`,
+  );
   const ran = input.inbox.flatMap((i) =>
     i.kind === "routine" ? [`- Routine [${i.routineId}] "${i.name}" ran and posted [${i.messageId}]`] : [],
   );
-  const titles = new Map(input.threads.map((t) => [t.id, t.title]));
   const updates = (input.threadUpdates ?? []).map(
     ({ thread, message }) =>
       `- Thread [${thread.id}] "${thread.title}" · ${authorLabel(message, input.names)} · ${message.createdAt}\n${indent(clip(message.body, UPDATE_MAX))}`,
@@ -137,6 +152,9 @@ export function coordinatorPrompt(input: {
   const onlyThreadUpdates = input.inbox.length > 0 && input.inbox.every((i) => i.kind === "thread");
   // Named again at the end, so a person's ask is not lost among thread updates in the same turn.
   const newChat = input.chat.filter((m) => newIds.has(m.id)).map((m) => m.id);
+  const asked = questionItems.length
+    ? ` Each question from a thread agent needs answer_question or ask_person: ${questionItems.map((q) => `[${q.questionId}]`).join(", ")}.`
+    : "";
 
   return [
     `Project: ${input.projectName}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
@@ -146,14 +164,17 @@ export function coordinatorPrompt(input: {
     choosing ? `## The computer's CLIs\n${(input.computerClis ?? []).map(renderCli).join("\n") || "(not reported)"}` : "",
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
     requests.length ? `## Requests from thread agents\n${requests.join("\n")}` : "",
+    questions.length
+      ? `## Questions from thread agents (answer each with answer_question when something you can point to settles it, otherwise ask_person)\n${questions.join("\n")}`
+      : "",
     ran.length ? `## Routines that just ran (start a thread on each post)\n${ran.join("\n")}` : "",
     updates.length ? `## Thread updates (NEW messages inside threads; people saw them there)\n${updates.join("\n\n")}` : "",
     relays.length ? `## Notes already relayed between threads, newest last\n${relays.join("\n")}` : "",
     onlyThreadUpdates
       ? "Nothing new in the project chat. Relay only what changes another open thread's work; otherwise call no tools."
       : newChat.length
-        ? `Handle everything new now with your tools. Each NEW project chat message needs its own handling, even when thread updates or requests arrived with it: ${newChat.map((id) => `[${id}]`).join(", ")}.`
-        : "Handle everything new now with your tools.",
+        ? `Handle everything new now with your tools. Each NEW project chat message needs its own handling, even when thread updates or requests arrived with it: ${newChat.map((id) => `[${id}]`).join(", ")}.${asked}`
+        : `Handle everything new now with your tools.${asked}`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -347,6 +368,40 @@ export function coordinatorTools(
           });
         }
         return "Delivered.";
+      },
+    }),
+    tool({
+      name: "answer_question",
+      description:
+        "Answer a thread agent's question (from \"Questions from thread agents\") yourself, only when the project instructions, memory or a decision people already made settle it. People see your answer and its source in the thread.",
+      input: z.object({
+        question_id: z.string(),
+        answer: z.string().min(1).max(300).describe("The answer, usually one of the options' labels, in the person's language."),
+        source: z
+          .string()
+          .min(1)
+          .max(200)
+          .describe("Where it comes from, in a few words people can check: an instruction, a memory note, a person's earlier decision."),
+      }),
+      run: async ({ question_id, answer, source }) => {
+        await host.answerQuestion(question_id, answer, source);
+        return "Answered; the thread carries on with it.";
+      },
+    }),
+    tool({
+      name: "ask_person",
+      description: "Pass a thread agent's question (from \"Questions from thread agents\") to people as its card in the thread.",
+      input: z.object({
+        question_id: z.string(),
+        note: z
+          .string()
+          .max(300)
+          .optional()
+          .describe("Only when it helps the person choose: one sentence, in their language, such as a related earlier decision."),
+      }),
+      run: async ({ question_id, note }) => {
+        await host.askPerson(question_id, note);
+        return "Passed to the person.";
       },
     }),
     tool({

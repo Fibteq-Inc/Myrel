@@ -48,7 +48,7 @@ import {
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
 import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
-import { relayLine } from "./relay-line";
+import { answerLine, relayLine } from "./relay-line";
 import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
 
@@ -137,6 +137,9 @@ export type ThreadContext = {
 };
 
 export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
+
+/** The thread agents' choice cards one coordinator turn took, and which of them it answered or passed on. */
+type TurnQuestions = { open: Map<string, { threadId: string }>; settled: Set<string> };
 
 /**
  * How long the coordinator waits after a message inside a thread before looking at thread updates,
@@ -673,6 +676,14 @@ export class ProjectAgent extends Agent<Env> {
     await this.notifyCoordinator({ kind: "request", threadId, request: kind, reason });
   }
 
+  /**
+   * A thread agent's choice card goes to the coordinator before people: it answers what the project
+   * already settles and passes the rest on. Callable over RPC.
+   */
+  async askCoordinator(threadId: string, input: { questionId: string; question: string }): Promise<void> {
+    await this.notifyCoordinator({ kind: "question", threadId, ...input });
+  }
+
   override onStart(): void {
     // Activity lives in memory, so a restart (an eviction or a crash mid-turn) clears whatever was left in D1.
     this.syncActivity();
@@ -970,18 +981,30 @@ export class ProjectAgent extends Agent<Env> {
     const first = rows[0]!.id;
     const last = rows.at(-1)!.id;
     this.coordinatorTaken = last;
+    const inbox = rows.map((r) => JSON.parse(r.payload) as InboxItem);
+    const questions: TurnQuestions = {
+      open: new Map(inbox.flatMap((i) => (i.kind === "question" ? [[i.questionId, { threadId: i.threadId }] as const] : []))),
+      settled: new Set(),
+    };
     // The rows stay until the turn is over: deleting them first lost a person's message whenever
     // the turn threw or the object restarted, since the queue's retry then found an empty inbox.
     try {
-      await this.runCoordinatorTurn(rows.map((r) => JSON.parse(r.payload) as InboxItem));
+      await this.runCoordinatorTurn(inbox, questions);
     } catch (err) {
       if (this.coordinatorTaken === last) this.coordinatorTaken = first - 1;
       throw err;
     }
+    // A question the turn left alone (the model skipped it, its call failed, or the coordinator could
+    // not run at all) goes to the person rather than waiting for the timeout.
+    for (const [id, { threadId }] of questions.open) {
+      if (questions.settled.has(id)) continue;
+      const agent = await getAgentByName(this.env.THREAD_AGENT, threadId);
+      await agent.escalateQuestion(id).catch((err) => console.error("passing a question on failed", err));
+    }
     this.sql`DELETE FROM coordinator_inbox WHERE id BETWEEN ${first} AND ${last}`;
   }
 
-  private async runCoordinatorTurn(inbox: InboxItem[]): Promise<void> {
+  private async runCoordinatorTurn(inbox: InboxItem[], questions: TurnQuestions): Promise<void> {
     const allowed = await canUseCoordinator(this.env, this.name);
     if (!allowed.ok) {
       this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: allowed.reason });
@@ -1034,7 +1057,7 @@ export class ProjectAgent extends Agent<Env> {
           computerClis,
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox), questions), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
@@ -1084,7 +1107,11 @@ export class ProjectAgent extends Agent<Env> {
     return people.size === 1 && only ? only : null;
   }
 
-  private coordinatorHost(meter?: TurnMeter, forwardedFor: string | null = null): CoordinatorHost {
+  private coordinatorHost(
+    meter?: TurnMeter,
+    forwardedFor: string | null = null,
+    questions: TurnQuestions = { open: new Map(), settled: new Set() },
+  ): CoordinatorHost {
     const post = (body: string, relay?: MessageRelay) =>
       this.sendMessage({
         threadId: null,
@@ -1097,6 +1124,14 @@ export class ProjectAgent extends Agent<Env> {
     // The line in the thread where a note arrived, so people can open what the coordinator said.
     const relayInThread = (relay: MessageRelay, body: string) =>
       this.sendMessage({ threadId: relay.threadId, authorKind: "agent", authorId: COORDINATOR_ID, body, relay });
+    // A question is settled once per turn, whichever way; the thread agent knows if it already went to people.
+    const openQuestion = async (questionId: string) => {
+      const q = questions.open.get(questionId);
+      if (!q) throw new Error(`No question ${questionId} in this turn.`);
+      if (questions.settled.has(questionId)) throw new Error(`Question ${questionId} is already handled.`);
+      questions.settled.add(questionId);
+      return { threadId: q.threadId, agent: await getAgentByName(this.env.THREAD_AGENT, q.threadId) };
+    };
     return {
       getMessage: (id) => this.getMessage(id),
       getThread: (id) => this.getThread(id),
@@ -1124,6 +1159,21 @@ export class ProjectAgent extends Agent<Env> {
         relayInThread({ kind, threadId, note }, relayLine(kind, note));
         // A forwarded ask works for whoever asked it; an answer to the thread's own request changes nothing.
         await this.wakeThread(threadId, { kind: "coordinator", note, reopened, ...(kind === "follow_up" && { forwardedFor }) });
+      },
+      answerQuestion: async (questionId, answer, source) => {
+        const { threadId, agent } = await openQuestion(questionId);
+        const taken = await agent.answeredQuestion(questionId);
+        if (!taken) throw new Error("That question already went to the person (it waited too long). Leave it.");
+        const line = answerLine(answer, source, taken.question);
+        relayInThread({ kind: "answer", threadId, note: `${taken.question}\n\n→ **${answer}** · ${source}` }, line);
+        await this.wakeThread(threadId, {
+          kind: "coordinator",
+          note: `The coordinator answered your question "${taken.question}" from what the project already settles: ${answer} (source: ${source}). Carry on with it; people see the answer in the thread and can still change it there.`,
+        });
+      },
+      askPerson: async (questionId, note) => {
+        const { agent } = await openQuestion(questionId);
+        if (!(await agent.escalateQuestion(questionId, note))) throw new Error("That question already went to the person.");
       },
       relay: async (fromThreadId, toThreadId, note) => {
         const from = this.getThread(fromThreadId);
