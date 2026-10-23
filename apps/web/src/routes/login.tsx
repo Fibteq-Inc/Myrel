@@ -1,7 +1,9 @@
 import { useT } from "@myrel/i18n/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
+import { Monitor, Smartphone, TabletSmartphone } from "lucide-react";
+import { type FormEvent, type ReactNode, useState } from "react";
+import { DOWNLOADS } from "../lib/downloads";
 import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
 import { Checkbox } from "../components/ui/controls";
 import { Turnstile } from "../components/turnstile";
@@ -150,8 +152,47 @@ function LoginPage() {
           )}
         </form>
       )}
+      {/* Inside the desktop and mobile apps the person already has one. */}
+      {!canChooseServer && <GetTheApps />}
       <LanguageSelect />
     </main>
+  );
+}
+
+/** Links to the desktop app and the store listings, under the sign-in form on the web. */
+function GetTheApps() {
+  const t = useT();
+  return (
+    <nav aria-labelledby="get-apps" className="flex w-full max-w-sm flex-col items-center gap-2">
+      <h2 id="get-apps" className="text-xs text-subtle">
+        {t("login.getApps")}
+      </h2>
+      <ul className="flex flex-wrap justify-center gap-2">
+        <AppLink href={DOWNLOADS.desktop} icon={<Monitor size={14} />} label={t("login.getDesktop")} hint={t("login.getDesktopHint")} />
+        <AppLink href={DOWNLOADS.android} icon={<Smartphone size={14} />} label={t("login.getAndroid")} hint={t("login.getAndroidHint")} />
+        {DOWNLOADS.ios && (
+          <AppLink href={DOWNLOADS.ios} icon={<TabletSmartphone size={14} />} label={t("login.getIos")} hint={t("login.getIosHint")} />
+        )}
+      </ul>
+    </nav>
+  );
+}
+
+function AppLink({ href, icon, label, hint }: { href: string; icon: ReactNode; label: string; hint: string }) {
+  return (
+    <li>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={hint}
+        title={hint}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-edge px-3 text-sm text-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <span aria-hidden="true">{icon}</span>
+        {label}
+      </a>
+    </li>
   );
 }
 
