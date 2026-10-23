@@ -7,18 +7,33 @@ import { colors } from "../theme";
  * Folds long content to `height` points behind a "Show more" button, so one
  * long message does not take over the conversation. Content only a little
  * over the limit (under `slack` times it) stays open: folding away a line or
- * two helps nobody.
+ * two helps nobody. `long` starts it folded when the caller already knows the
+ * content is long, so it does not first show in full and then jump.
  */
-export function Collapsible({ height, slack = 1.3, children }: { height: number; slack?: number; children: ReactNode }) {
+export function Collapsible({
+  height,
+  slack = 1.3,
+  long: knownLong = false,
+  children,
+}: {
+  height: number;
+  slack?: number;
+  long?: boolean;
+  children: ReactNode;
+}) {
   const t = useT();
-  const [long, setLong] = useState(false);
+  const [measuredLong, setMeasuredLong] = useState(false);
   const [open, setOpen] = useState(false);
+  const long = knownLong || measuredLong;
   const folded = long && !open;
   return (
     <View>
       <View style={folded ? { maxHeight: height, overflow: "hidden" } : undefined}>
-        {/* The inner view keeps its full height while the outer one clips it. */}
-        <View onLayout={(e) => setLong(e.nativeEvent.layout.height > height * slack)}>{children}</View>
+        {/* Only measure unfolded: text laid out inside the clip is cut to its height, so measuring it
+            then would unfold the content, measure it long again and fold it, over and over (a flicker). */}
+        <View onLayout={(e) => !folded && setMeasuredLong(e.nativeEvent.layout.height > height * slack)}>
+          {children}
+        </View>
       </View>
       {long && (
         <Pressable
