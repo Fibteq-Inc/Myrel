@@ -1,21 +1,21 @@
 {
   "name": "@fibteq/myrel-runner",
-  "version": "0.12.1",
-  "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Gemini CLI.",
+  "version": "0.14.1",
+  "description": "Connects your computer to Myrel so projects can work in your local folders with your own Claude Code, Codex or Antigravity CLI.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",
-  "homepage": "https://github.com/Fibteq-Inc/myrel/tree/main/packages/myrel-runner#readme",
+  "homepage": "https://github.com/Fibteq-Inc/Myrel/tree/main/packages/myrel-runner#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Fibteq-Inc/myrel.git",
+    "url": "git+https://github.com/Fibteq-Inc/Myrel.git",
     "directory": "packages/myrel-runner"
   },
-  "bugs": "https://github.com/Fibteq-Inc/myrel/issues",
+  "bugs": "https://github.com/Fibteq-Inc/Myrel/issues",
   "keywords": [
     "myrel",
     "claude-code",
     "codex",
-    "gemini-cli",
+    "antigravity-cli",
     "agent",
     "runner"
   ],

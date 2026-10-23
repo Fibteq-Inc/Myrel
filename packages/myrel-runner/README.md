@@ -2,7 +2,7 @@
 
 Connects your computer to a Myrel server, so a project can work in one of your
 local folders with the coding CLI you already use: Claude Code, Codex CLI or
-Gemini CLI.
+Antigravity CLI.
 
 - It opens an **outbound** WebSocket to the server. No port is opened, and it works behind NAT.
 - The server sends a task (a folder, a CLI and a prompt). The runner starts the CLI in that folder, streams its
@@ -15,7 +15,7 @@ Gemini CLI.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex` or `gemini` on your `PATH`, already signed in.
+Requires Node 22+ and at least one of `claude`, `codex` or `agy` (Antigravity CLI) on your `PATH`, already signed in.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -41,12 +41,32 @@ cache) and registers it to start at login:
 | Linux | systemd user service `myrel-runner.service` | `journalctl --user -u myrel-runner` |
 | Windows | `myrel-runner.vbs` in the Startup folder | `~/.myrel-runner/runner.log` |
 
-It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `gemini`.
+It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `agy`.
 On macOS and Linux it restarts after a crash, but not after a clean stop (the computer was removed in Myrel, or
 `myrel-runner start` was run somewhere else with the same pairing). `myrel-runner update` installs the newest version
 from npm and restarts the background runner on it once its running tasks finish (at most 10 minutes; `--now` restarts
 right away). `service install` again also restarts it; `service status` shows its state and `service uninstall`
 removes it. On Linux it starts when you log in; to start at boot without logging in, run `loginctl enable-linger`.
+
+### Updating and settings from Myrel
+
+From runner 0.14.0 the background runner can be updated and set up from **Myrel > Devices**, without a terminal:
+
+- **Update** shows when npm has a newer version. The runner waits for its running tasks (at most 10 minutes; **Update
+  now** stops them, and Myrel continues them), downloads the package from npm, checks it against npm's integrity
+  hash, runs the new copy once (`--version`) and only then puts it in place of `~/.myrel-runner/bin/myrel-runner.mjs`,
+  keeping the old one as `myrel-runner.prev.mjs`. It then exits with code 75, so launchd or systemd starts the new
+  copy (on Windows it starts the Startup entry itself). If the new version is refused by the server, or does not
+  connect within 2 minutes while the server is reachable, it puts the previous copy back and restarts on it; the card
+  says so. The state across the restart is in `~/.myrel-runner/update.json`.
+- **Settings**: the access level, worktrees and **Update by itself** (auto-update: looks for a newer version every
+  6 hours and installs it when no task is running). They are saved in `config.json` on the computer.
+  `myrel-runner settings` shows and changes the same ones here, and `myrel-runner settings remote off` stops Myrel from
+  changing them (only this computer can turn it back on).
+
+A runner started with `myrel-runner start` in a terminal cannot restart itself, so the card shows the command
+instead; the desktop app's runner updates with the app. Runners before 0.14.0 need `npx myrel-runner@latest update`
+once.
 
 If the runner shuts down while a task is running (an update or a restart of the service), it notes the task in
 `~/.myrel-runner/interrupted.json` and tells the server when it reconnects. From runner 0.12.0, Myrel then continues
@@ -72,16 +92,24 @@ Read-only tasks (`--access read`) always run in the folder itself.
 `myrel-runner start --access <level>`, or for the background runner `myrel-runner service install --access <level>` or
 `myrel-runner update --access <level>` (both restart it). The level is saved for next time:
 
-| level | Claude Code | Codex | Gemini CLI |
+| level | Claude Code | Codex | Antigravity CLI |
 |---|---|---|---|
-| `read` | `--permission-mode plan` | `--sandbox read-only` | `--approval-mode default` |
-| `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--approval-mode auto_edit` |
-| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--approval-mode auto_edit` |
-| `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--approval-mode yolo` |
+| `read` | `--permission-mode plan` | `--sandbox read-only` | `--mode plan` |
+| `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits` |
+| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` |
+| `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
 the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode; Codex and
-Gemini CLI cannot ask mid-run, so for them `auto` is the same as `edit`.
+Antigravity CLI cannot ask mid-run, so for them `auto` is the same as `edit` (Antigravity's own auto mode needs its
+terminal sandbox and is missing on business accounts).
+
+Antigravity CLI is stricter than Codex below `full`: there is no sandbox where its commands run on their own. A
+command, a web page or a file outside the folders needs approval, which it cannot ask for when Myrel runs it, and
+being declined ends the whole run with no answer. So with `read`, `edit` and `auto` it is told to keep to the files
+and Myrel's tools, and a run that still stops says which permission stopped it. Give it `full` to let it run
+commands, or allow single ones under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (e.g.
+`command(git)`).
 
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
@@ -89,7 +117,7 @@ With `edit`, the CLI can change files in the folder but cannot run commands that
 ### Project folders and asking first
 
 A project can list other folders besides its main one (Project settings > Folders). They must be shared on this
-computer too; the CLI gets them with `--add-dir` (Claude Code, Codex) or `--include-directories` (Gemini CLI).
+computer too; the CLI gets them with `--add-dir`.
 
 When Claude Code runs as a thread's agent, its permission prompts go to Myrel (`--permission-prompt-tool
 mcp__myrel__approve_access`). If a step reaches a file outside the project's folders, Myrel asks you in the thread
@@ -98,7 +126,7 @@ level does not allow on its own (with `edit`: `git commit`, `git push`, tests) i
 Allow commands this turn, Don't run), so there is no need to restart the runner with `--access full` for one task. A
 file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
-are asked about. Codex and Gemini CLI cannot ask mid-run, so they stay inside the folders.
+are asked about. Codex and Antigravity CLI cannot ask mid-run, so they stay inside the folders.
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
 
@@ -112,11 +140,18 @@ decisions, artifacts, memory, routines) added over MCP:
 |---|---|
 | Claude Code | `--mcp-config <file>`, allowed with `--allowedTools mcp__myrel` |
 | Codex CLI | `-c mcp_servers.myrel.url=…` and `-c mcp_servers.myrel.bearer_token_env_var="MYREL_MCP_TOKEN"` |
-| Gemini CLI | its own settings file, through `GEMINI_CLI_SYSTEM_SETTINGS_PATH` |
+| Antigravity CLI | `myrel-runner mcp-bridge` in `~/.gemini/config/mcp_config.json`, allowed with `mcp(myrel/*)` in `~/.gemini/antigravity-cli/settings.json` |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
-uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex and Gemini CLI.
+uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
+for Antigravity CLI.
+
+Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
+server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
+bridge its thread's endpoint, token and connectors in a private file (`MYREL_MCP_BRIDGE`), deleted after the run, so
+the global config never holds a token. When you start `agy` yourself, the bridge has no run and offers no tools.
+Connectors' tools show up there as `<connector>__<tool>`. Sign in to `agy` once yourself; runs reuse that login.
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 
 ### For apps that run it (the desktop app)

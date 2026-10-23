@@ -1,4 +1,4 @@
-import { useT } from "@myrel/i18n/react";
+import { useI18n, useT } from "@myrel/i18n/react";
 import {
   type Artifact,
   type Attachment,
@@ -7,9 +7,13 @@ import {
   parseConnectorSuggestion,
   type Reaction,
 } from "@myrel/protocol";
-import { CircleAlert, Paperclip } from "lucide-react-native";
+import { type Href, useRouter } from "expo-router";
+import { CircleAlert, FileImage, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { fileKind } from "../lib/files";
+import { surelyLong } from "../lib/fold";
+import { formatBytes } from "../lib/format";
 import { colors, radius } from "../theme";
 import { ArtifactCards } from "./artifact-card";
 import { Collapsible } from "./collapsible";
@@ -81,7 +85,7 @@ export function MessageView({
             )
           )}
           {message.relay && <RelayNote relay={message.relay} onLink={onLink} />}
-          <Attachments attachments={message.attachments} />
+          <Attachments projectId={message.projectId} attachments={message.attachments} />
           {!!message.artifacts?.length && (
             <ArtifactCards refs={message.artifacts} artifacts={artifacts} onOpen={onOpenArtifact} />
           )}
@@ -102,14 +106,14 @@ export function MessageView({
       {!mine && <Text style={styles.author}>{names[message.authorId] ?? t("common.member")}</Text>}
       {!!message.body && (
         <View style={styles.bubble}>
-          <Collapsible height={BUBBLE_LINE * 10}>
+          <Collapsible height={BUBBLE_LINE * 10} long={surelyLong(message.body, 10)}>
             <Text selectable style={styles.bubbleText}>
               {message.body}
             </Text>
           </Collapsible>
         </View>
       )}
-      <Attachments attachments={message.attachments} />
+      <Attachments projectId={message.projectId} attachments={message.attachments} />
       <Reactions reactions={reactions} />
       {children && <View style={{ width: "100%" }}>{children}</View>}
     </View>
@@ -122,21 +126,38 @@ export function MessageView({
  */
 function FoldIfLong({ body, children }: { body: string; children: ReactNode }) {
   if (body.includes("```" + DECISION_LANG)) return children;
-  return <Collapsible height={MARKDOWN_LINE * 24}>{children}</Collapsible>;
+  return (
+    <Collapsible height={MARKDOWN_LINE * 24} long={surelyLong(body, 24)}>
+      {children}
+    </Collapsible>
+  );
 }
 
-function Attachments({ attachments }: { attachments?: Attachment[] }) {
+/** Files on a message, as chips that open the file's preview, like the web's. */
+function Attachments({ projectId, attachments }: { projectId: string; attachments?: Attachment[] }) {
+  const { t, locale } = useI18n();
+  const router = useRouter();
   if (!attachments?.length) return null;
   return (
     <View style={styles.attachments}>
-      {attachments.map((a) => (
-        <View key={a.path} style={styles.attachment}>
-          <Paperclip size={13} color={colors.subtle} />
-          <Text style={styles.attachmentName} numberOfLines={1}>
-            {a.name}
-          </Text>
-        </View>
-      ))}
+      {attachments.map((a) => {
+        const Icon = fileKind(a.contentType, a.path) === "image" ? FileImage : Paperclip;
+        return (
+          <Pressable
+            key={a.path}
+            accessibilityRole="button"
+            accessibilityHint={t("mobile.openAttachment")}
+            onPress={() => router.push(`/projects/${projectId}/file?path=${encodeURIComponent(a.path)}` as Href)}
+            style={({ pressed }) => [styles.attachment, pressed && { backgroundColor: colors.hover }]}
+          >
+            <Icon size={13} color={colors.subtle} />
+            <Text style={styles.attachmentName} numberOfLines={1}>
+              {a.name}
+            </Text>
+            <Text style={styles.attachmentSize}>{formatBytes(a.size, locale)}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -212,9 +233,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.raised,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    maxWidth: 220,
+    maxWidth: 260,
   },
   attachmentName: { color: colors.body, fontSize: 13, flexShrink: 1 },
+  attachmentSize: { color: colors.subtle, fontSize: 12 },
   reaction: {
     borderRadius: 999,
     borderWidth: 1,

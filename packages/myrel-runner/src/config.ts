@@ -1,17 +1,14 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import type { CliId, RunnerFolder } from "@myrel/protocol";
+import type { CliId, RunnerAccess, RunnerFolder } from "@myrel/protocol";
 
 /**
- * How much the CLI may do on its own in a shared folder.
- * read: look only. edit (default): change files, but not run arbitrary commands. full: anything, no prompts.
+ * What the CLI may do without asking. read: look only. edit (default): change files, but not run
+ * arbitrary commands. auto: Claude Code's auto mode, where it decides itself which steps are safe and
+ * asks (through Myrel) about the rest; other CLIs treat it like edit. full: anything, no prompts.
  */
-/**
- * What the CLI may do without asking. auto: Claude Code's auto mode, where it decides itself which
- * steps are safe and asks (through Myrel) about the rest; other CLIs treat it like edit.
- */
-export type Access = "read" | "edit" | "auto" | "full";
+export type Access = RunnerAccess;
 
 export type RunnerConfig = {
   /** Origin of the Myrel server, e.g. https://myrel.example.com */
@@ -26,6 +23,10 @@ export type RunnerConfig = {
    * repository, so threads working at the same time never touch each other's files. Default on.
    */
   worktrees?: boolean;
+  /** Install newer versions by itself when no task is running (background runner only). Default off. */
+  autoUpdate?: boolean;
+  /** false: settings cannot be changed from Myrel, only here. Default on. */
+  remoteSettings?: boolean;
 };
 
 /** ~/.myrel-runner, or MYREL_RUNNER_HOME. Holds config.json (mode 600) and sessions.json. */

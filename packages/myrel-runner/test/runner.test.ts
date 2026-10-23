@@ -85,7 +85,7 @@ describe("CLI output parsing", () => {
     const args = ADAPTERS.claude.args({ access: "auto", asks: true });
     expect(args).toEqual(expect.arrayContaining(["--permission-mode", "auto", "--permission-prompt-tool", "mcp__myrel__approve_access"]));
     expect(ADAPTERS.codex.args({ access: "auto" })).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));
-    expect(ADAPTERS.gemini.args({ access: "auto" })).toEqual(expect.arrayContaining(["--approval-mode", "auto_edit"]));
+    expect(ADAPTERS.antigravity.args({ access: "auto" })).toEqual(expect.arrayContaining(["--mode", "accept-edits"]));
   });
 
   it("starts Claude Code with only Myrel's MCP servers, its own tools loaded up front", async () => {
@@ -105,21 +105,58 @@ describe("CLI output parsing", () => {
     expect(ADAPTERS.codex.args({ access: "edit", dirs: ["/a", "/b"] })).toEqual(
       expect.arrayContaining(["--add-dir", "/a", "--add-dir", "/b"]),
     );
-    expect(ADAPTERS.gemini.args({ access: "edit", dirs: ["/a", "/b"] })).toEqual(
-      expect.arrayContaining(["--include-directories", "/a,/b"]),
+    expect(ADAPTERS.antigravity.args({ access: "edit", dirs: ["/a", "/b"] })).toEqual(
+      expect.arrayContaining(["--add-dir", "/a", "--add-dir", "/b"]),
     );
   });
 
-  it("reads Codex JSONL and Gemini JSON", () => {
+  it("reads Codex JSONL and Antigravity's stream-json", () => {
     const codex: ParseState = {};
     ADAPTERS.codex.line(JSON.stringify({ type: "item.started", item: { type: "command_execution", command: "ls" } }), codex);
     expect(codex.progress).toBe("$ ls");
     ADAPTERS.codex.line(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Done." } }), codex);
     expect(codex.result).toBe("Done.");
 
-    const gemini: ParseState = {};
-    ADAPTERS.gemini.end!(JSON.stringify({ response: "Merhaba" }), gemini);
-    expect(gemini.result).toBe("Merhaba");
+    const agy: ParseState = {};
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "init", conversation_id: "c-1", init: { cwd: "/w", tools: [] } }), agy);
+    expect(agy.sessionId).toBe("c-1");
+    const step = (s: Record<string, unknown>) => JSON.stringify({ event: "step_update", step_update: { conversation_id: "c-1", ...s } });
+    ADAPTERS.antigravity.line(step({ step_index: 1, state: "ACTIVE", step_type: "tool", tool_info: { name: "run_command", parameters: { command: "ls" } } }), agy);
+    expect(agy.progress).toBe("run_command: ls");
+    ADAPTERS.antigravity.line(step({ step_index: 2, state: "ACTIVE", step_type: "agent_response", text_delta: "Mer" }), agy);
+    ADAPTERS.antigravity.line(step({ step_index: 2, state: "ACTIVE", step_type: "agent_response", text_delta: "haba" }), agy);
+    expect(agy.progress).toBe("Merhaba");
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "result", result: { conversation_id: "c-1", status: "SUCCESS", response: "Merhaba" } }), agy);
+    expect(agy).toMatchObject({ result: "Merhaba", failed: false });
+  });
+
+  it("gives Antigravity the prompt on stdin and reads its errors", () => {
+    expect(JSON.parse(ADAPTERS.antigravity.input!("a\nb", "full"))).toEqual({ event: "user", message: { content: "a\nb" } });
+    // Below full access it is told that a step needing approval would end the run.
+    expect(JSON.parse(ADAPTERS.antigravity.input!("a", "edit")).message.content).toMatch(/^a\n\n\(myrel-runner: .*cannot run shell commands/);
+    expect(ADAPTERS.antigravity.args({ access: "full", resume: "c-1" })).toEqual(
+      expect.arrayContaining(["--dangerously-skip-permissions", "--conversation", "c-1"]),
+    );
+    // As agy prints it when nobody signed in.
+    const agy: ParseState = {};
+    ADAPTERS.antigravity.line(
+      JSON.stringify({ event: "result", result: { conversation_id: "", status: "ERROR", response: "", error: "authentication failed or timed out" } }),
+      agy,
+    );
+    expect(agy).toMatchObject({ failed: true, result: "authentication failed or timed out" });
+  });
+
+  it("says what stopped Antigravity when a step it may not take ended the run", () => {
+    // As agy 1.4.6 prints it after declining `ls -la` with --mode accept-edits: a success with no answer.
+    const agy: ParseState = {};
+    const denied = [{ action: "command", display_name: "RunCommand" }];
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "result", result: { conversation_id: "c", status: "SUCCESS", response: "", num_turns: 1, denied_actions: denied } }), agy);
+    expect(agy.failed).toBe(true);
+    expect(agy.result).toContain('the "command" permission');
+    // An answer it still gave stands.
+    const answered: ParseState = {};
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "Bitti.", denied_actions: denied } }), answered);
+    expect(answered).toMatchObject({ failed: false, result: "Bitti." });
   });
 
   it("shows Codex's commands without their shell wrapper and its messages whole", () => {
@@ -165,17 +202,17 @@ describe("CLI usage", () => {
     expect(state.usage).toEqual({ inputTokens: 300, outputTokens: 15 });
   });
 
-  it("reads Codex's turn usage and Gemini's per-model stats", () => {
+  it("reads Codex's turn usage and Antigravity's run totals", () => {
     const codex: ParseState = {};
     ADAPTERS.codex.line(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 500, cached_input_tokens: 400, output_tokens: 40 } }), codex);
     expect(codex.usage).toEqual({ inputTokens: 500, outputTokens: 40 });
 
-    const gemini: ParseState = {};
-    ADAPTERS.gemini.end!(
-      JSON.stringify({ response: "ok", stats: { models: { "gemini-3-pro": { tokens: { prompt: 700, candidates: 50, thoughts: 20 } } } } }),
-      gemini,
-    );
-    expect(gemini).toMatchObject({ model: "gemini-3-pro", usage: { inputTokens: 700, outputTokens: 70 } });
+    const agy: ParseState = {};
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "init", conversation_id: "c", init: { model: "gemini-3.1-pro" } }), agy);
+    const usage = { input_tokens: 300, output_tokens: 50, thinking_tokens: 20, cache_read_tokens: 400, total_tokens: 770 };
+    ADAPTERS.antigravity.line(JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "ok", usage } }), agy);
+    // The total counts the cache reads apart from input_tokens here, so they are input too.
+    expect(agy).toMatchObject({ model: "gemini-3.1-pro", usage: { inputTokens: 700, outputTokens: 70 } });
   });
 });
 
@@ -200,14 +237,44 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     expect(ADAPTERS.codex.args({ access: "edit", extra: agent.args }).at(-1)).toBe("-");
   });
 
-  it("gives Gemini CLI its own settings file, readable only by the user", async () => {
-    const agent = await ADAPTERS.gemini.agent(mcp());
-    const path = agent.env!.GEMINI_CLI_SYSTEM_SETTINGS_PATH!;
-    expect(path).toBe(join(home, "settings.json"));
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-      mcpServers: { myrel: { httpUrl: mcp().url, headers: { Authorization: `Bearer ${"t".repeat(32)}` }, trust: true } },
-    });
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  it("adds Myrel's bridge to Antigravity's global config once and keeps the run's token out of it", async () => {
+    const saved = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      await mkdir(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+      await writeFile(join(home, ".gemini", "antigravity-cli", "settings.json"), JSON.stringify({ model: "x", permissions: { allow: ["command(git)"] } }));
+      const connectors = [{ transport: "http" as const, name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" }];
+      const agent = await ADAPTERS.antigravity.agent({ ...mcp(), dir: await mkdtemp(join(home, "run-")), connectors });
+      await ADAPTERS.antigravity.agent({ ...mcp(), dir: await mkdtemp(join(home, "run-")) });
+
+      const global = await readFile(join(home, ".gemini", "config", "mcp_config.json"), "utf8");
+      expect(JSON.parse(global).mcpServers.myrel.args.at(-1)).toBe("mcp-bridge");
+      expect(global).not.toContain("t".repeat(32));
+      const settings = JSON.parse(await readFile(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8"));
+      expect(settings).toEqual({ model: "x", permissions: { allow: ["command(git)", "mcp(myrel/*)"] } });
+
+      const run = agent.env!.MYREL_MCP_BRIDGE!;
+      expect(JSON.parse(await readFile(run, "utf8"))).toEqual({
+        token: "t".repeat(32),
+        servers: [{ transport: "http", name: "myrel", url: mcp().url }, connectors[0]],
+      });
+      expect((await stat(run)).mode & 0o777).toBe(0o600);
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+
+  it("leaves Antigravity's settings alone when they are not JSON", async () => {
+    const saved = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      await mkdir(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+      await writeFile(join(home, ".gemini", "antigravity-cli", "settings.json"), "{ broken");
+      await expect(ADAPTERS.antigravity.agent(mcp())).rejects.toThrow(/as JSON/);
+      expect(await readFile(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8")).toBe("{ broken");
+    } finally {
+      process.env.HOME = saved;
+    }
   });
 
   it("adds the thread's connectors and allows their tools", async () => {

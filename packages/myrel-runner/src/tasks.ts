@@ -12,7 +12,7 @@ type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
 
 /** The CLIs whose sessions a thread's next turn continues. */
-const RESUMES = new Set<CliId>(["claude", "codex"]);
+const RESUMES = new Set<CliId>(["claude", "codex", "antigravity"]);
 /** Results are cut to fit the protocol's limit. */
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
@@ -218,7 +218,8 @@ export class TaskRunner {
     });
     child.stdin!.on("error", () => {}); // the CLI may exit before reading all of stdin
     // The prompt lists the skills; only the runner knows where they are on this computer.
-    child.stdin!.end(skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt);
+    const text = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
+    child.stdin!.end(adapter.input ? adapter.input(text, config.access) : text);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
 

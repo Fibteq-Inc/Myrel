@@ -1,5 +1,4 @@
-import type { ComputerAccess, ComputerInfo, ComputerStatus, LocalComputer } from "@myrel/client";
-import type { MessageKey } from "@myrel/i18n";
+import type { ComputerInfo, ComputerStatus, LocalComputer } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { CLI_NAMES, type CliId } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,19 +8,12 @@ import { api, platform, runnersQuery, server } from "../lib/api";
 import { Button, errorMessage, GhostButton } from "../lib/ui";
 import { OnlineDot } from "./runners";
 
-const ACCESS: { value: ComputerAccess; label: MessageKey }[] = [
-  { value: "read", label: "thisComputer.accessRead" },
-  { value: "edit", label: "thisComputer.accessEdit" },
-  { value: "auto", label: "thisComputer.accessAuto" },
-  { value: "full", label: "thisComputer.accessFull" },
-];
-
 const INFO_KEY = ["this-computer"];
 
 /**
  * Desktop app only: connects the computer the app runs on with one click, using the bundled
- * myrel-runner, instead of the terminal steps. Its folders are managed in the list below like
- * any other computer's.
+ * myrel-runner, instead of the terminal steps. Its folders and settings are managed in the list
+ * below like any other computer's.
  */
 export function ThisComputer() {
   const computer = platform.computer;
@@ -57,7 +49,6 @@ function ThisComputerCard({ computer }: { computer: LocalComputer }) {
     },
     onSuccess: refresh,
   });
-  const setAccess = useMutation({ mutationFn: (a: ComputerAccess) => computer.setAccess(a), onSuccess: refresh });
   const start = useMutation({ mutationFn: () => computer.start(), onSuccess: refresh });
   const disconnect = useMutation({
     mutationFn: async () => {
@@ -67,7 +58,7 @@ function ThisComputerCard({ computer }: { computer: LocalComputer }) {
     onSuccess: refresh,
   });
 
-  const failure = error ?? connect.error ?? setAccess.error ?? start.error ?? disconnect.error;
+  const failure = error ?? connect.error ?? start.error ?? disconnect.error;
   const pairedHere = info?.paired && info.server === origin;
   const running = info && ["online", "connecting", "offline"].includes(info.status.state);
 
@@ -139,23 +130,6 @@ function ThisComputerCard({ computer }: { computer: LocalComputer }) {
                 {CLI_NAMES[c.id as CliId] ?? c.id}
               </span>
             ))
-          )}
-          {pairedHere && (
-            <label className="ml-auto flex items-center gap-2 text-xs text-subtle">
-              {t("thisComputer.access")}
-              <select
-                value={info.access}
-                disabled={setAccess.isPending}
-                onChange={(e) => setAccess.mutate(e.target.value as ComputerAccess)}
-                className="rounded-md border border-edge bg-panel px-2 py-1 text-[13px] text-fg"
-              >
-                {ACCESS.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {t(a.label)}
-                  </option>
-                ))}
-              </select>
-            </label>
           )}
         </div>
       )}

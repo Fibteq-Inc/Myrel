@@ -528,6 +528,33 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("drops Gemini CLI from older runners and asks for another CLI where a folder still uses it", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const clis = [{ id: "claude", version: "2.1.0" }, { id: "gemini", version: "0.40.0" }];
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "agent-clis"], { clis });
+    const online = await until(async () => (await listRunners(user)).find((r) => r.online && r.folders.length), "hello");
+    expect(online.clis).toEqual([{ id: "claude", version: "2.1.0" }]);
+    const project = await createProject(user);
+    const body = JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "gemini" });
+    expect((await api(`/api/projects/${project.id}/workspace`, { method: "PUT", token: user, body })).status).toBe(400);
+    // A folder saved before Gemini CLI was dropped.
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    await env.DB.prepare("UPDATE project_workspaces SET cli = 'gemini' WHERE project_id = ?").bind(project.id).run();
+    const { projectAgent, thread } = await startThread(project.id, user);
+    const notice = await until(
+      async () => (await projectAgent.getThreadContext(thread.id))?.messages.find((m) => m.authorKind === "system"),
+      "the notice",
+    );
+    expect(notice.body).toContain("no longer supports the CLI");
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    runnerSide.ws.close();
+  });
+
   it("runs another member's thread in the cloud, never on the folder owner's computer", { timeout: 20_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);
@@ -720,5 +747,76 @@ describe("local workspace", () => {
     await runnerAgent.startTask({ taskId, projectId: "proj_x", threadId: "thr_01JTEST0000000000000000000", folder: "/x", cli: "claude", prompt: "p" });
     expect(await runnerAgent.cancelTask(taskId)).toMatchObject({ ok: false, reason: expect.stringContaining("Update myrel-runner") });
     runnerSide.ws.close();
+  });
+});
+
+describe("runner settings and updates", () => {
+  it("shows the runner's settings and changes them on the computer", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const settings = { access: "edit", worktrees: true, autoUpdate: false, remote: true };
+    const { frames, send } = await connectRunner(token, ["folders", "settings"], { settings, updates: "service" });
+    await until(async () => (await listRunners(user))[0]?.settings, "settings in the list");
+
+    const patch = api(`/api/runners/${runner.id}`, {
+      method: "PATCH",
+      token: user,
+      body: JSON.stringify({ name: "Work laptop", settings: { access: "full" } }),
+    });
+    const asked = await until(() => frames.find((f) => f.type === "settings.set"), "settings.set");
+    if (asked.type !== "settings.set") throw new Error("unreachable");
+    expect(asked.settings).toEqual({ access: "full" });
+    send({ type: "settings", requestId: asked.requestId, settings: { ...settings, access: "full" } });
+    const res = await patch;
+    expect(res.status).toBe(200);
+    const { runner: changed } = (await res.json()) as { runner: Runner };
+    expect(changed).toMatchObject({ name: "Work laptop", settings: { access: "full" }, updates: "service" });
+  });
+
+  it("says why a computer cannot change settings or update from here", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const offline = await api(`/api/runners/${runner.id}`, { method: "PATCH", token: user, body: JSON.stringify({ settings: { access: "auto" } }) });
+    expect(offline.status).toBe(409);
+    await connectRunner(token, ["folders"]);
+    await until(async () => (await listRunners(user))[0]?.online, "online");
+    const old = await api(`/api/runners/${runner.id}/update`, { method: "POST", token: user, body: "{}" });
+    expect(old.status).toBe(409);
+    expect(((await old.json()) as { message: string }).message).toMatch(/npx myrel-runner@latest update/);
+    // Only the computer's owner can change it.
+    const other = await signUp();
+    expect((await api(`/api/runners/${runner.id}`, { method: "PATCH", token: other, body: JSON.stringify({ name: "x" }) })).status).toBe(404);
+  });
+
+  it("asks the computer to update to the newest version and shows how it goes", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const list = (await (await api("/api/runners", { token: user })).json()) as { latestVersion: string | null };
+    expect(list.latestVersion).toBe("0.13.0");
+    const { frames, send } = await connectRunner(token, ["folders", "update"], { updates: "service" });
+    await until(async () => (await listRunners(user))[0]?.online, "online");
+
+    const req = api(`/api/runners/${runner.id}/update`, { method: "POST", token: user, body: JSON.stringify({ now: false }) });
+    const asked = await until(() => frames.find((f) => f.type === "runner.update"), "runner.update");
+    if (asked.type !== "runner.update") throw new Error("unreachable");
+    expect(asked).toMatchObject({ version: "0.13.0", now: false });
+    const at = new Date().toISOString();
+    send({ type: "update.accepted", requestId: asked.requestId, update: { state: "waiting", version: "0.13.0", running: 1, at } });
+    expect(((await (await req).json()) as { runner: Runner }).runner.update).toMatchObject({ state: "waiting", running: 1 });
+
+    send({ type: "update.status", update: { state: "restarting", version: "0.13.0", at } });
+    await until(async () => (await listRunners(user))[0]?.update?.state === "restarting", "restarting");
+    send({ type: "update.status", update: null });
+    await until(async () => !(await listRunners(user))[0]?.update, "update cleared");
+  });
+
+  it("does not ask a runner that is already on the newest version", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const { frames } = await connectRunner(token, ["update"], { version: "0.13.0", updates: "service" });
+    await until(async () => (await listRunners(user))[0]?.version === "0.13.0", "hello");
+    const res = await api(`/api/runners/${runner.id}/update`, { method: "POST", token: user, body: "{}" });
+    expect(res.status).toBe(200);
+    expect(frames.some((f) => f.type === "runner.update")).toBe(false);
   });
 });

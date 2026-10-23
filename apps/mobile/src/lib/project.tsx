@@ -30,7 +30,7 @@ type ProjectValue = {
   projectId: string;
   state: ProjectState;
   status: SocketStatus;
-  send(body: string, threadId?: string | null): void;
+  send(body: string, threadId?: string | null, attachments?: string[]): void;
   emit(event: ClientEventInput): void;
 };
 
@@ -91,7 +91,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
   }, [api, server, projectId, queryClient]);
 
   const send = useCallback(
-    (body: string, threadId: string | null = null) => socketRef.current?.sendMessage(body, { threadId }),
+    (body: string, threadId: string | null = null, attachments?: string[]) =>
+      socketRef.current?.sendMessage(body, { threadId, attachments }),
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);

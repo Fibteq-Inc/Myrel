@@ -18,6 +18,7 @@ import {
   threadReplyCount,
   threadTasks,
   threadUsage,
+  workingCount,
 } from "../src/project-state";
 
 const projectId = createId("project");
@@ -247,5 +248,19 @@ describe("pull request folding", () => {
     const prs = [pr(1, "merged", "2026-10-22T10:00:00Z"), pr(2, "merged", "2026-10-22T12:00:00Z"), pr(3, "merged", "2026-10-22T11:00:00Z")];
     const { shown, folded } = foldPullRequests(prs);
     expect([numbers(shown), numbers(folded)]).toEqual([[2], [1, 3]]);
+  });
+});
+
+describe("working count", () => {
+  it("counts the coordinator and each working thread once, skipping resolved and finished ones", () => {
+    const working = thread(msg(1).id);
+    const alsoActive = thread(msg(2).id, { status: "done" });
+    const resolved = thread(msg(3).id, { resolved: true });
+    const blocked = thread(msg(4).id, { status: "blocked" });
+    const threads = Object.fromEntries([working, alsoActive, resolved, blocked].map((t) => [t.id, t]));
+    expect(workingCount({ ...emptyProjectState, threads })).toBe(1);
+    // A thread both marked working and reporting activity counts once; the coordinator ("") counts too.
+    const active = { "": true, [working.id]: true, [alsoActive.id]: true } as const;
+    expect(workingCount({ ...emptyProjectState, threads, active })).toBe(3);
   });
 });

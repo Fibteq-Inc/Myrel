@@ -68,6 +68,20 @@ jobs:
           printf '%s' "$CONTENT" > "$RUNNER_TEMP/google-services.json"
           echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
 
+      # The app shows the version from the running update's config, which is evaluated here. Store builds
+      # take it from their tag (mobile.yml), so updates use the latest mobile tag too; without it they
+      # fell back to package.json and showed 0.2.0 on a 0.3.0 build. The version isn't part of the
+      # fingerprint, so this doesn't change which builds receive the update.
+      - name: Use the latest store version
+        shell: bash
+        run: |
+          git fetch --force --depth=1 origin 'refs/tags/mobile-v*:refs/tags/mobile-v*'
+          tag="$(git tag --list 'mobile-v*' --sort=-v:refname | head -n1)"
+          if [ -n "$tag" ]; then
+            echo "MYREL_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+            echo "Publishing with the version of $tag"
+          fi
+
       - name: Publish
         working-directory: apps/mobile
         env:

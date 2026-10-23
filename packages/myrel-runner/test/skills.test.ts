@@ -43,13 +43,19 @@ describe("skills", () => {
     expect(await downloadSkills("http://127.0.0.1:1/nothing", "tok", dir)).toBeNull();
   });
 
-  it("hands the skills to Claude Code as a plugin and lets Gemini CLI read them", async () => {
+  it("hands the skills to Claude Code as a plugin and lets Antigravity CLI read them", async () => {
     const dir = mkdtempSync(join(tmpdir(), "myrel-agent-"));
     const skills = { plugin: "/tmp/p", dir: "/tmp/p/skills" };
     const claude = await ADAPTERS.claude.agent({ url: "https://m.test/api/agent-mcp/t", token: "t", dir, skills });
     expect(claude.args.join(" ")).toContain("--plugin-dir /tmp/p --add-dir /tmp/p/skills");
-    const gemini = await ADAPTERS.gemini.agent({ url: "https://m.test/api/agent-mcp/t", token: "t", dir, skills });
-    expect(gemini.args).toEqual(["--include-directories", "/tmp/p/skills"]);
+    const home = process.env.HOME;
+    process.env.HOME = dir;
+    try {
+      const agy = await ADAPTERS.antigravity.agent({ url: "https://m.test/api/agent-mcp/t", token: "t", dir, skills });
+      expect(agy.args).toEqual(["--add-dir", "/tmp/p/skills"]);
+    } finally {
+      process.env.HOME = home;
+    }
     expect((await ADAPTERS.claude.agent({ url: "https://m.test/api/agent-mcp/t", token: "t", dir })).args).not.toContain("--plugin-dir");
   });
 });

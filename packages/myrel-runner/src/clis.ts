@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type RunnerCli, unwrapShell } from "@myrel/protocol";
+import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
 
@@ -25,6 +26,9 @@ export type ParseState = {
   counted?: Set<string>;
   /** The subscription limits the CLI reported in its output (Claude Code's rate_limit_event). */
   limits?: CliLimits;
+  /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI). */
+  draft?: string;
+  draftStep?: unknown;
 };
 
 /**
@@ -46,6 +50,8 @@ export type CliAdapter = {
    * for config files, deleted after the run.
    */
   agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string> }>;
+  /** What goes on stdin for this prompt, when the CLI does not take it as plain text. */
+  input?(prompt: string, access: Access): string;
   /** Feeds one line of stdout; updates `state` in place. */
   line(line: string, state: ParseState): void;
   /** Called with all of stdout when the CLI exits, for CLIs that print one JSON document. */
@@ -269,51 +275,84 @@ const codex: CliAdapter = {
   limits: (state) => readCodexLimits(state.sessionId),
 };
 
-const gemini: CliAdapter = {
-  id: "gemini",
-  bin: "gemini",
-  args: ({ access, extra = [], dirs = [] }) => [
+/** What Antigravity CLI is told below full access, where a step that needs approval ends the run. */
+const AGY_LIMITED =
+  "(myrel-runner: in this run you cannot run shell commands, open web pages or use any tool that needs approval: asking for one ends your run at once, with no answer. Read and edit the files here and use Myrel's tools. If a command is essential, say so in a reply: it needs full access on this computer, which the person sets in Myrel > Devices.)";
+
+const antigravity: CliAdapter = {
+  id: "antigravity",
+  bin: "agy",
+  // -p takes the prompt as its value, so the prompt comes on stdin as stream-json instead (see input).
+  args: ({ access, resume, extra = [], dirs = [] }) => [
     "--output-format",
-    "json",
-    "--approval-mode",
-    { read: "default", edit: "auto_edit", auto: "auto_edit", full: "yolo" }[access],
-    ...(dirs.length ? ["--include-directories", dirs.map(quotePath).join(",")] : []),
+    "stream-json",
+    "--input-format",
+    "stream-json",
+    // Headless runs cannot ask: what the mode does not allow is declined. Its auto mode needs the
+    // terminal sandbox and is missing on business accounts, so auto stays with edits like Codex.
+    ...{ read: ["--mode", "plan"], edit: ["--mode", "accept-edits"], auto: ["--mode", "accept-edits"], full: ["--dangerously-skip-permissions"] }[access],
+    ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
+    ...(resume ? ["--conversation", resume] : []),
     ...extra,
   ],
-  // Gemini CLI has no flag for an MCP config, so the run gets its own system settings file.
-  async agent({ url, token, dir, connectors = [], skills }) {
-    const headers = { Authorization: `Bearer ${token}` };
-    const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { httpUrl: url, headers, trust: true } };
-    for (const c of connectors) {
-      servers[c.name] =
-        c.transport === "http" ? { httpUrl: c.url, headers, trust: true } : { command: c.command, args: c.args, env: c.env, trust: true };
-    }
-    const settings = await privateFile(dir, "settings.json", { mcpServers: servers });
-    // Its workspace takes in the skills' folder, so it may read them.
-    return {
-      args: skills ? ["--include-directories", quotePath(skills.dir)] : [],
-      env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settings.replace(/^"|"$/g, "") },
-    };
+  // Below full access, a step that needs approval (a command, a web page) is declined and ends the
+  // whole run with no answer, so the agent is told up front to keep to files and Myrel's tools.
+  input: (prompt, access) => {
+    const content = access === "full" ? prompt : `${prompt}\n\n${AGY_LIMITED}`;
+    return `${JSON.stringify({ event: "user", message: { content } })}\n`;
   },
-  line() {},
-  end(stdout, state) {
-    const doc = parseJson(stdout.trim());
-    if (doc && typeof doc.response === "string") state.result = doc.response;
-    // stats.models: { "<model>": { tokens: { prompt, candidates, thoughts, … } } }
-    const models = (doc?.stats as { models?: Record<string, { tokens?: Record<string, unknown> }> } | undefined)?.models;
-    for (const [model, m] of Object.entries(models ?? {})) {
-      state.model ??= model;
-      const tokens = m.tokens ?? {};
-      addUsage(state, { inputTokens: count(tokens.prompt), outputTokens: count(tokens.candidates) + count(tokens.thoughts) });
+  // Its MCP servers come only from its global config, which holds Myrel's bridge (see bridge.ts):
+  // the run's servers and token go to the bridge in a private file, never into that config.
+  async agent({ url, token, dir, connectors = [], skills }) {
+    await ensureBridge(MYREL_MCP_SERVER);
+    const run: BridgeRun = { token, servers: [{ transport: "http", name: MYREL_MCP_SERVER, url }, ...connectors] };
+    const file = await privateFile(dir, "bridge.json", run);
+    // Its workspace takes in the skills' folder, so it may read them.
+    return { args: skills ? ["--add-dir", quotePath(skills.dir)] : [], env: { [BRIDGE_VAR]: file.replace(/^"|"$/g, "") } };
+  },
+  line(line, state) {
+    const event = parseJson(line);
+    if (!event) return;
+    if (typeof event.conversation_id === "string" && event.conversation_id) state.sessionId = event.conversation_id;
+    const init = event.init as { model?: unknown } | undefined;
+    if (event.event === "init" && typeof init?.model === "string") state.model = init.model;
+    if (event.event === "step_update") {
+      const step = (event.step_update ?? {}) as Record<string, unknown>;
+      const tool = step.tool_info as { name?: unknown; parameters?: unknown } | undefined;
+      if (step.step_type === "tool" && step.state === "ACTIVE") {
+        const name = typeof tool?.name === "string" ? tool.name : step.tool_name;
+        if (typeof name === "string") state.progress = describeTool(name, tool?.parameters);
+      }
+      // The answer arrives in pieces; the text so far is the latest step.
+      if (step.step_type === "agent_response" && typeof step.text_delta === "string") {
+        state.draft = step.step_index === state.draftStep ? (state.draft ?? "") + step.text_delta : step.text_delta;
+        state.draftStep = step.step_index;
+        if (state.draft.trim()) state.progress = clip(state.draft);
+      }
     }
-    if (doc?.error) {
-      state.failed = true;
-      state.result = String((doc.error as { message?: string }).message ?? doc.error);
+    if (event.event === "result") {
+      const result = (event.result ?? {}) as Record<string, unknown>;
+      if (typeof result.conversation_id === "string" && result.conversation_id) state.sessionId = result.conversation_id;
+      // The run's totals. Whether input_tokens holds the cache reads is not documented: what the total
+      // has beyond the output is input either way.
+      const u = (result.usage ?? {}) as Record<string, unknown>;
+      const output = count(u.output_tokens) + count(u.thinking_tokens);
+      const input = Math.max(count(u.input_tokens), count(u.total_tokens) - output);
+      if (input || output) state.usage = { inputTokens: input, outputTokens: output };
+      state.failed = result.status !== "SUCCESS";
+      state.result = state.failed && typeof result.error === "string" && result.error ? result.error : typeof result.response === "string" ? result.response : "";
+      // A step it had no permission for ends the run as a success with no answer; say what stopped it.
+      const denied = Array.isArray(result.denied_actions) ? (result.denied_actions as Array<{ action?: unknown }>) : [];
+      if (denied.length && !state.result.trim()) {
+        const actions = [...new Set(denied.map((d) => String(d.action ?? "a tool")))].join(", ");
+        state.failed = true;
+        state.result = `Antigravity CLI stopped: a step needed the "${actions}" permission, which it cannot ask for when Myrel runs it. Set this computer's access to full in Myrel > Devices, or allow it under permissions.allow in ~/.gemini/antigravity-cli/settings.json (for example command(git)).`;
+      }
     }
   },
 };
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, gemini };
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity };
 
 /** Which CLIs are installed, by running `<bin> --version`. */
 export async function detectClis(): Promise<RunnerCli[]> {

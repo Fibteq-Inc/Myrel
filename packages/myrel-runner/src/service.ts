@@ -35,7 +35,7 @@ export type ServiceInfo = {
  */
 export async function installService(script: string): Promise<ServiceInfo> {
   const manager = serviceManager();
-  const bin = join(runnerHome(), "bin", "myrel-runner.mjs");
+  const bin = serviceBin();
   await mkdir(join(runnerHome(), "bin"), { recursive: true, mode: 0o700 });
   if (script !== bin) await copyFile(script, bin);
   const args = [process.execPath, bin, "start"];
@@ -66,7 +66,19 @@ export async function installService(script: string): Promise<ServiceInfo> {
   return serviceStatus();
 }
 
-/** Stops the background runner and removes it from login. */
+/** The copy of myrel-runner the background service runs. */
+export const serviceBin = () => join(runnerHome(), "bin", "myrel-runner.mjs");
+
+/**
+ * Starts the background runner again after this one exits, where the system does not by itself.
+ * launchd and systemd restart it after a failed exit; the Windows Startup entry only runs at login.
+ */
+export async function relaunchService(): Promise<void> {
+  if (serviceManager() !== "startup") return;
+  const info = await describe("startup");
+  if (info.installed) spawn("wscript.exe", [info.file], { detached: true, stdio: "ignore" }).unref();
+}
+
 /**
  * Replaces the loaded launchd agent with the one in `file`. `bootout` returns before launchd has
  * finished unloading the old one, and bootstrapping meanwhile fails with "5: Input/output error",
@@ -96,6 +108,7 @@ async function restartLaunchd(file: string) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Stops the background runner and removes it from login. */
 export async function uninstallService(): Promise<ServiceInfo> {
   const manager = serviceManager();
   const info = await describe(manager);
@@ -146,7 +159,7 @@ async function describe(manager: ServiceManager): Promise<Omit<ServiceInfo, "run
 /**
  * The environment the service runs with. Login services start with a bare
  * PATH, so the current one is kept: that is where `claude`, `codex` and
- * `gemini` were found. npx's temporary folders are dropped.
+ * `agy` were found. npx's temporary folders are dropped.
  */
 function serviceEnv(): Record<string, string> {
   const path = (process.env.PATH ?? "")

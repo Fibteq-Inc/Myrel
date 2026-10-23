@@ -7,7 +7,11 @@ import {
   type RunnerFeature,
   type RunnerFile,
   type RunnerFolder,
+  type RunnerInfo,
+  type RunnerSettings,
+  type RunnerSettingsInput,
   RunnerToServer,
+  type RunnerUpdateState,
   type ServerToRunner,
 } from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
@@ -163,8 +167,19 @@ export class RunnerAgent extends Agent<Env> {
       }
       case "folders":
         // Saved now, so the web app sees the change as soon as its request returns.
-        await this.saveFolders(frame.folders);
+        await this.saveInfo({ folders: frame.folders });
         this.waiting.get(frame.requestId)?.(frame);
+        return;
+      case "settings":
+        await this.saveInfo({ settings: frame.settings });
+        this.waiting.get(frame.requestId)?.(frame);
+        return;
+      case "update.accepted":
+        await this.saveInfo({ update: frame.update });
+        this.waiting.get(frame.requestId)?.(frame);
+        return;
+      case "update.status":
+        await this.saveInfo({ update: frame.update ?? undefined });
         return;
       case "dirs":
       case "request.failed":
@@ -256,6 +271,22 @@ export class RunnerAgent extends Agent<Env> {
     return { ok: true, folders: answer.folders };
   }
 
+  /** Changes the runner's settings on the computer. Callable over RPC. */
+  async setSettings(settings: RunnerSettingsInput): Promise<RunnerResult<{ settings: RunnerSettings }>> {
+    const answer = await this.ask({ type: "settings.set", settings }, "settings");
+    if (answer.ok === false) return answer;
+    if (answer.type !== "settings") return { ok: false, reason: "Unexpected answer from the computer." };
+    return { ok: true, settings: answer.settings };
+  }
+
+  /** Asks the computer to update myrel-runner to `version`. Callable over RPC. */
+  async requestUpdate(version: string, now: boolean): Promise<RunnerResult<{ update: RunnerUpdateState }>> {
+    const answer = await this.ask({ type: "runner.update", version, now }, "update");
+    if (answer.ok === false) return answer;
+    if (answer.type !== "update.accepted") return { ok: false, reason: "Unexpected answer from the computer." };
+    return { ok: true, update: answer.update };
+  }
+
   /** Stops every task and closes the connection, e.g. when the runner is removed. Callable over RPC. */
   async revoke(): Promise<void> {
     for (const task of this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running'`) {
@@ -281,7 +312,11 @@ export class RunnerAgent extends Agent<Env> {
         reason:
           feature === "files"
             ? "Update myrel-runner on this computer to open its files from here (npx myrel-runner@latest update)."
-            : "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update).",
+            : feature === "settings"
+              ? "Update myrel-runner on this computer to change its settings from here (npx myrel-runner@latest update)."
+              : feature === "update"
+                ? "This runner cannot update itself from here. Run `npx myrel-runner@latest update` on the computer once."
+                : "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update).",
       };
     }
     const requestId = crypto.randomUUID();
@@ -298,14 +333,15 @@ export class RunnerAgent extends Agent<Env> {
     return answer;
   }
 
-  private async saveFolders(folders: RunnerFolder[]) {
+  /** Saves part of what the computer told us, between two hellos. */
+  private async saveInfo(patch: Partial<Pick<RunnerInfo, "folders" | "settings" | "update">>) {
     const db = createDb(this.env.DB);
     const [row] = await db.select({ info: schema.runners.info }).from(schema.runners).where(eq(schema.runners.id, this.name));
     const info = parseInfo(row?.info ?? null);
     if (!info) return;
     await db
       .update(schema.runners)
-      .set({ info: JSON.stringify({ ...info, folders }) })
+      .set({ info: JSON.stringify({ ...info, ...patch }) })
       .where(eq(schema.runners.id, this.name));
   }
 

@@ -71,7 +71,7 @@ export function ProjectFolders({ project, canManage }: { project: Project; canMa
           <OnlineDot online={workspace.online} />
           <span className="truncate">{folderName(workspace.path)}</span>
           <span className="flex-none text-xs font-normal text-subtle">
-            {t("projectFolders.main")} · {t("projectFolders.mainHint", { computer: workspace.runnerName, cli: CLI_NAMES[workspace.cli] })}
+            {t("projectFolders.main")} · {t("projectFolders.mainHint", { computer: workspace.runnerName, cli: CLI_NAMES[workspace.cli] ?? workspace.cli })}
           </span>
         </div>
         <FolderPath path={workspace.path} />
@@ -112,7 +112,7 @@ export function ProjectFolders({ project, canManage }: { project: Project; canMa
     <Section title={t("projectFolders.title")} description={description}>
       <List empty="">{rows}</List>
       <p className="text-[13px] text-subtle">
-        {workspace.cli === "claude" ? t("projectFolders.asksClaude") : t("projectFolders.asksOther", { cli: CLI_NAMES[workspace.cli] })}
+        {workspace.cli === "claude" ? t("projectFolders.asksClaude") : t("projectFolders.asksOther", { cli: CLI_NAMES[workspace.cli] ?? workspace.cli })}
       </p>
       {canManage &&
         runner &&

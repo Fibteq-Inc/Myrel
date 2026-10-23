@@ -11,6 +11,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
   <a href="https://github.com/Fibteq-Inc/myrel/releases/latest"><img alt="Desktop app for macOS, Windows and Linux" src="https://img.shields.io/badge/desktop-macOS%20%7C%20Windows%20%7C%20Linux-6d63ff"></a>
+  <a href="https://play.google.com/store/apps/details?id=io.fibteq.myrel"><img alt="Get it on Google Play" src="https://img.shields.io/badge/Google%20Play-Android-34A853?logo=googleplay&logoColor=white"></a>
   <a href="https://www.npmjs.com/package/myrel-runner"><img alt="myrel-runner on npm" src="https://img.shields.io/npm/v/myrel-runner?label=myrel-runner"></a>
   <a href="https://github.com/Fibteq-Inc/myrel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Fibteq-Inc/myrel/actions/workflows/ci.yml/badge.svg?branch=main"></a>
 </p>
@@ -46,16 +47,16 @@ and running on your own Cloudflare account.
   shows a live checklist and asks for permission or a decision when it needs one.
 - **Real agents, your choice of where.** A thread's agent is a coding harness:
   OpenCode in a per-thread Cloudflare Sandbox, or your own Claude Code, Codex
-  or Gemini CLI on your computer through `myrel-runner`. Your CLI logins never
+  or Antigravity CLI on your computer through `myrel-runner`. Your CLI logins never
   leave your computer.
 - **Any model.** Fireworks, Anthropic and OpenAI out of the box, optionally
   through Cloudflare AI Gateway. Bring your own key.
 - **Yours to run.** One Cloudflare Worker with Durable Objects, D1, R2 and
   Containers. No servers to manage.
-- **Apps that follow you.** Web, iOS and Android apps, and a desktop app for
-  macOS, Windows and Linux with the runner built in
-  ([releases](https://github.com/Fibteq-Inc/myrel/releases)), all connect to
-  any Myrel server you point them at.
+- **Apps that follow you.** Web, iOS and Android apps (Android on
+  [Google Play](https://play.google.com/store/apps/details?id=io.fibteq.myrel)), and a desktop app for macOS, Windows and Linux with
+  the runner built in ([releases](https://github.com/Fibteq-Inc/myrel/releases)),
+  all connect to any Myrel server you point them at.
 
 ## What it does
 
@@ -85,6 +86,7 @@ and running on your own Cloudflare account.
   [latest release](https://github.com/Fibteq-Inc/myrel/releases/latest)
   (`.dmg`, `.exe`/`.msi`, `.AppImage`, `.deb`, `.rpm`). The app updates itself
   and has the runner built in.
+- **Android:** [Google Play](https://play.google.com/store/apps/details?id=io.fibteq.myrel).
 - **Runner only:** `npx myrel-runner pair <code>` pairs a computer without the
   desktop app (the code is in Myrel under Devices). See
   [packages/myrel-runner/README.md](packages/myrel-runner/README.md).
@@ -193,7 +195,7 @@ connecting the apps.
 |---|---|---|
 | 0 | Monorepo, auth, D1, deploy pipeline | Done |
 | 1 | Coordinator and thread agents, project chat | Done |
-| 1.5 | Local `myrel-runner` with your own Claude Code, Codex or Gemini CLI | Done |
+| 1.5 | Local `myrel-runner` with your own Claude Code, Codex or Antigravity CLI | Done |
 | 2 | Cloud sandbox (OpenCode), project files on R2, GitHub (clone, branch, PR) | Done |
 | 3 | Artifacts, project memory, decision cards, mobile app | Done |
 | 4 | Routines, notifications, MCP connectors, skills, desktop app | Done |

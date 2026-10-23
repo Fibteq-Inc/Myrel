@@ -91,7 +91,7 @@ function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
       ))}
       <span className="flex items-center gap-1.5 text-subtle">
         <OnlineDot online={workspace.online} />
-        {workspace.runnerName} · {CLI_NAMES[workspace.cli]} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
+        {workspace.runnerName} · {CLI_NAMES[workspace.cli] ?? workspace.cli} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
       </span>
     </div>
   );
