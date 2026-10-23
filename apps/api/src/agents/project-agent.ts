@@ -29,6 +29,7 @@ import {
   SYNC_PAGE_SIZE,
   type Thread,
   type ThreadCli,
+  type ThreadModel,
   type ThreadCloseReason,
   type ThreadStatus,
   type UpdateRoutineInput,
@@ -108,6 +109,8 @@ type ThreadRow = {
   label: string | null;
   /** JSON ThreadCli, or null. */
   cli: string | null;
+  /** JSON ThreadModel, or null. */
+  model: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -138,7 +141,7 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
 };
 
 export type ThreadPatch = Partial<
-  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli">
+  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "model">
 >;
 
 /** What a thread agent reads at the start of each turn. */
@@ -249,6 +252,8 @@ export class ProjectAgent extends Agent<Env> {
     }
     // Added with picking a thread's CLI.
     if (!threadColumns.some((c) => c.name === "cli")) this.sql`ALTER TABLE threads ADD COLUMN cli TEXT`;
+    // Added with picking a thread's model and effort.
+    if (!threadColumns.some((c) => c.name === "model")) this.sql`ALTER TABLE threads ADD COLUMN model TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -397,6 +402,25 @@ export class ProjectAgent extends Agent<Env> {
           });
         }
         this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null } });
+        return;
+      }
+      case "thread.model": {
+        const thread = this.getThread(event.threadId);
+        if (!thread) return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
+        if (event.model === null && event.effort === null) {
+          this.updateThread(thread.id, { model: null });
+          return;
+        }
+        // The same people as for the CLI: the model runs on that computer, with its owner's login.
+        const [cli] = await this.offeredClis(userId, [event.cli]);
+        if (!cli) {
+          return send(connection, {
+            type: "error",
+            code: "no_cli",
+            message: "Only the person whose computer runs this project can pick its model, and only for a CLI installed there.",
+          });
+        }
+        this.updateThread(thread.id, { model: { cli, model: event.model, effort: event.effort } });
         return;
       }
       case "sync": {
@@ -600,7 +624,8 @@ export class ProjectAgent extends Agent<Env> {
     }
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
       resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
-      label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
+      label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null},
+      model = ${next.model ? JSON.stringify(next.model) : null}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
     this.syncActivity();
     // Every way a thread finishes passes here (its agent, a person, its pull requests merging), and
@@ -1613,6 +1638,7 @@ export class ProjectAgent extends Agent<Env> {
       duplicateOf: r.duplicate_of ?? null,
       label: r.label,
       cli: r.cli ? (JSON.parse(r.cli) as ThreadCli) : null,
+      model: r.model ? (JSON.parse(r.model) as ThreadModel) : null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

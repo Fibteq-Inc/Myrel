@@ -22,7 +22,7 @@ import {
   Thinking,
   useHistoryWindow,
 } from "../chat";
-import { ThreadCliNote, ThreadCliPicker, usePickableClis } from "../chat/cli-picker";
+import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, usePickableClis } from "../chat/cli-picker";
 import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
@@ -448,11 +448,18 @@ function Conversation({
           onUpload={(file) => api.upload(project.id, file.name, file)}
           tools={
             pickable && (
-              <ThreadCliPicker
-                pickable={pickable}
-                thread={thread}
-                onChange={(cli) => emit({ type: "thread.cli", threadId: thread.id, cli })}
-              />
+              <>
+                <ThreadCliPicker
+                  pickable={pickable}
+                  thread={thread}
+                  onChange={(cli) => emit({ type: "thread.cli", threadId: thread.id, cli })}
+                />
+                <ThreadModelPicker
+                  pickable={pickable}
+                  thread={thread}
+                  onChange={(pick) => emit({ type: "thread.model", threadId: thread.id, ...pick })}
+                />
+              </>
             )
           }
         />

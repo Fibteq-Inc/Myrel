@@ -57,12 +57,41 @@ export const CliLimits = z.object({
 });
 export type CliLimits = z.infer<typeof CliLimits>;
 
+/** Effort (thinking) levels a CLI may take, lowest first; a CLI's own list may hold others too. */
+export const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
+
+/**
+ * A model a CLI offers, as the CLI itself lists it. `efforts`: the effort levels this model takes;
+ * empty when the CLI takes no effort for it, so none is offered.
+ */
+export const CliModel = z.object({
+  id: z.string().min(1).max(200),
+  name: z.string().max(200),
+  efforts: z.array(z.string().min(1).max(20)).max(10),
+});
+export type CliModel = z.infer<typeof CliModel>;
+
+/**
+ * The efforts to offer for `model` of a CLI's list. With no model picked the CLI's default runs, which
+ * may be any of them: then only the efforts every model that takes one takes. Empty: offer none.
+ */
+export function effortsFor(models: CliModel[], model: string | null): string[] {
+  if (model) return models.find((m) => m.id === model)?.efforts ?? [];
+  const taking = models.filter((m) => m.efforts.length > 0);
+  return taking.reduce<string[]>((all, m, i) => (i === 0 ? [...m.efforts] : all.filter((e) => m.efforts.includes(e))), []);
+}
+
 /** A CLI the runner found installed on the computer. */
 export const RunnerCli = z.object({
   id: CliId,
   version: z.string().max(200).nullable(),
   /** Older runners never send it; a malformed one is dropped, not the whole hello. */
   limits: CliLimits.optional().catch(undefined),
+  /**
+   * The models the CLI lists, read in the background after the runner starts (feature "models").
+   * Absent when the CLI lists none or could not be asked: then nothing is offered and it runs with its own default.
+   */
+  models: z.array(CliModel).max(100).optional().catch(undefined),
 });
 export type RunnerCli = z.infer<typeof RunnerCli>;
 
@@ -79,6 +108,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * anything outside them (the thread's approve_access tool).
  * "settings": reports its settings in hello and changes them when asked ("settings.set").
  * "update": updates itself to a newer version when asked ("runner.update"), if it can (`updates`).
+ * "models": lists each CLI's models (RunnerCli.models) and runs the one in task.start's `model`.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -91,6 +121,7 @@ export const RunnerFeature = z.enum([
   "files",
   "settings",
   "update",
+  "models",
 ]);
 
 /**
@@ -232,6 +263,16 @@ export const RunnerFile = z.object({
 });
 export type RunnerFile = z.infer<typeof RunnerFile>;
 
+/**
+ * The model and effort a run uses (feature "models"). Either may be absent: then the CLI's own
+ * default. The server only sends a model the CLI listed and an effort that model takes.
+ */
+export const TaskModel = z.object({
+  model: z.string().min(1).max(200).optional(),
+  effort: z.string().min(1).max(20).optional(),
+});
+export type TaskModel = z.infer<typeof TaskModel>;
+
 /** Frames the runner sends. */
 export const RunnerToServer = z.discriminatedUnion("type", [
   RunnerInfo.extend({
@@ -286,6 +327,8 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     folder: z.string().min(1).max(1024),
     cli: CliId,
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
+    /** The model and effort to run with (feature "models"); absent: the CLI's own default. */
+    model: TaskModel.optional(),
     /** The project's other folders the CLI may also work in; each must be shared too (feature "project-folders"). */
     folders: z.array(z.string().min(1).max(1024)).max(50).optional(),
     /**

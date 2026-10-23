@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ADAPTERS, detectClis, type ParseState } from "../src/clis";
+import { ADAPTERS, detectClis, type ParseState, parseMuseCatalog } from "../src/clis";
 import { type RunnerConfig, SessionStore } from "../src/config";
 import { TaskRunner } from "../src/tasks";
 
@@ -180,5 +180,30 @@ echo "{\\"stream\\":{\\"kind\\":\\"session\\",\\"id\\":\\"s-1\\"},\\"payload_typ
     expect([mode, text]).toEqual(["600", "hello"]);
     await expect.poll(() => import("node:fs").then((fs) => fs.existsSync(file!))).toBe(false);
     expect(await sessions.get(threadId, "muse")).toMatchObject({ id: "s-1" });
+  });
+});
+
+describe("Muse Code models", () => {
+  it("lists the catalog's visible models with their effort tiers", () => {
+    const tiers = (...t: string[]) => t.map((tier) => ({ tier, description: null }));
+    const catalog = JSON.stringify({
+      schema_version: 2,
+      provider_id: "meta",
+      rows: [
+        { model_id: "muse-wonder-1.0", display_label: "muse-wonder-1.0", visibility: "visible", reasoning_effort_variants: tiers("low", "high", "max") },
+        { model_id: "muse-wonder-1.0-contributor", visibility: "hidden", reasoning_effort_variants: tiers("low") },
+        { model_id: "muse-spark-1.3", visibility: "visible", reasoning_effort_variants: null },
+      ],
+    });
+    expect(parseMuseCatalog(catalog)).toEqual([
+      { id: "muse-wonder-1.0", name: "muse-wonder-1.0", efforts: ["low", "high", "max"] },
+      { id: "muse-spark-1.3", name: "muse-spark-1.3", efforts: [] },
+    ]);
+    expect(parseMuseCatalog("not json")).toBeUndefined();
+  });
+
+  it("runs the picked model and effort", () => {
+    expect(muse.modelArgs!({ model: "muse-spark-1.3", effort: "low" })).toEqual(["--model", "muse-spark-1.3", "--effort", "low"]);
+    expect(muse.modelArgs!({ effort: "high" })).toEqual(["--effort", "high"]);
   });
 });

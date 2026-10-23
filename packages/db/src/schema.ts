@@ -111,6 +111,8 @@ export const projects = sqliteTable("projects", {
   llmModel: text("llm_model"),
   /** Key the project's agents call the model with; null = an instance key for the provider. */
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+  /** Default model and effort per CLI for threads on a computer, JSON (CliModelDefaults in @myrel/protocol); null = none. */
+  cliModels: text("cli_models"),
   /** Where tasks run: auto, local or cloud (see TaskTarget in @myrel/protocol). */
   taskTarget: text("task_target").notNull().default("auto"),
   /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */

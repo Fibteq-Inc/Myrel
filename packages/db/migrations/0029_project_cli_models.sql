@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `cli_models` text;

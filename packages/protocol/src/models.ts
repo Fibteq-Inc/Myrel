@@ -153,6 +153,18 @@ export const ThreadCli = z.object({
 });
 export type ThreadCli = z.infer<typeof ThreadCli>;
 
+/**
+ * The model and effort a person picked for a thread, for the CLI `cli`. When the thread runs with
+ * another CLI, it does not apply (models belong to one CLI) and the project's default for that CLI does.
+ * null model or effort: the project's default for that part.
+ */
+export const ThreadModel = z.object({
+  cli: z.string().max(40),
+  model: z.string().max(200).nullable(),
+  effort: z.string().max(20).nullable(),
+});
+export type ThreadModel = z.infer<typeof ThreadModel>;
+
 export const ThreadCloseReason = z.enum(["duplicate", "misrouted", "cancelled"]);
 export type ThreadCloseReason = z.infer<typeof ThreadCloseReason>;
 
@@ -177,6 +189,8 @@ export const Thread = z.object({
   label: z.string().nullable(),
   /** The CLI it runs with on the person's computer; null: the project folder's (and from older servers). */
   cli: ThreadCli.nullable().default(null),
+  /** The model and effort picked for this thread; null: the project's defaults (and from older servers). */
+  model: ThreadModel.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

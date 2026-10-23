@@ -18,6 +18,7 @@ import {
   type Task,
   type TaskStatus,
   type TerminalLine,
+  type ThreadModel,
 } from "@myrel/protocol";
 import {
   emptyProgress,
@@ -44,10 +45,11 @@ import { CONFLICT_RETRY_SEC, type ConflictCheck, checkConflict, listPullRequests
 import { connectRepoByName, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
-import { getWorkspace, runnerHasFeature, setWorkspaceFolder } from "../runners";
+import { getWorkspace, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { localBackend, localCanceller, ownsComputer, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
+import { projectCliModels, resolveTaskModel } from "../task-model";
 import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
 import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
 import {
@@ -516,6 +518,7 @@ export class ThreadAgent extends Agent<Env> {
       timezone: ctx.defaultTimezone,
       language: /[çğıöşüÇĞİÖŞÜ]/.test(lastHuman.body) ? "tr" : "en",
       attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
+      threadModel: ctx.thread.model,
     });
   }
 
@@ -543,6 +546,8 @@ export class ThreadAgent extends Agent<Env> {
     attachments: Attachment[];
     /** Who the thread works for, whose own connectors it may use. */
     requester: string | null;
+    /** The model and effort picked for the thread, if any (see resolveTaskModel). */
+    threadModel: ThreadModel | null;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -611,7 +616,9 @@ export class ThreadAgent extends Agent<Env> {
           ...(skills.length && { skills: { path: `${mcpPath}/skills` } }),
           ...(resume && { resume }),
         };
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent });
+        const installed = (await workspaceClis(this.env, projectId))?.clis.find((c) => c.id === workspace.cli);
+        const model = resolveTaskModel(workspace.cli, input.threadModel, await projectCliModels(this.env, projectId), installed);
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.

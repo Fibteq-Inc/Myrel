@@ -174,7 +174,7 @@ decisions, artifacts, memory, routines) added over MCP:
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
 uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
-for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.18.0 or later for Muse Code.
+for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.19.0 or later for Muse Code.
 
 Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
 server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
@@ -209,8 +209,10 @@ Muse Code takes one `-c mcpServers.<name>=<json>` per server for a run (it refus
 server with a `type`), so nothing is written to your `~/.config/muse/settings.json`. A secret goes in `-c` only as a
 whole `${VAR}`, so the token's `Authorization` header and connectors' environment values stay in the run's
 environment. `muse exec` does not read stdin: the prompt goes in a file only you can read (`--prompt-file`), deleted
-after the run. The thread's next turn continues the session with `--session-id`. Your model, effort and own MCP
-servers come from your settings. Skills: the prompt names the run's skills folder, where Muse Code reads them.
+after the run. The thread's next turn continues the session with `--session-id`. Muse Code has no command that lists
+its models, so the runner reads the catalog it keeps in `~/.local/share/muse/model-catalog` (visible models and their
+effort tiers); a picked model and effort go in as `--model` and `--effort`, otherwise your settings decide. Your own
+MCP servers come from your settings too. Skills: the prompt names the run's skills folder, where Muse Code reads them.
 Detection checks that `muse --version` says Muse Code. Sign in once with `muse login`.
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.

@@ -1,7 +1,8 @@
+import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type Project, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, type CliId, type CliModelDefaults, EFFORT_LEVELS, effortsFor, type Project, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react";
+import { Brain, Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 import { projectSettingsQuery, runnersQuery, workspaceQuery } from "../../lib/api";
 import { cn } from "../../lib/ui";
@@ -16,14 +17,16 @@ export function cliName(id: string): string {
  * computer, when that computer is theirs (a turn only runs there for its owner) and the project does
  * not always work in the cloud. Null when there is nothing to pick.
  */
-export function usePickableClis(project: Project): { clis: RunnerCli[]; folderCli: CliId } | null {
+export type PickableClis = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults };
+
+export function usePickableClis(project: Project): PickableClis | null {
   const { data: workspace } = useQuery(workspaceQuery(project.id));
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
   const { data: settings } = useQuery({ ...projectSettingsQuery(project.id), enabled: !!workspace });
   // Only your own computers are listed, so finding it means it is yours.
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
   if (!workspace || !runner || runner.clis.length === 0 || settings?.taskTarget === "cloud") return null;
-  return { clis: runner.clis, folderCli: workspace.cli };
+  return { clis: runner.clis, folderCli: workspace.cli, defaults: settings?.cliModels ?? {} };
 }
 
 /**
@@ -35,7 +38,7 @@ export function AskCliPicker({
   value,
   onChange,
 }: {
-  pickable: { clis: RunnerCli[]; folderCli: CliId };
+  pickable: PickableClis;
   value: CliId[];
   onChange: (next: CliId[]) => void;
 }) {
@@ -88,7 +91,7 @@ export function ThreadCliPicker({
   thread,
   onChange,
 }: {
-  pickable: { clis: RunnerCli[]; folderCli: CliId };
+  pickable: PickableClis;
   thread: Thread;
   onChange: (cli: CliId | null) => void;
 }) {
@@ -132,6 +135,110 @@ export function ThreadCliPicker({
         </>
       )}
     </Menu>
+  );
+}
+
+/** An effort level's name, e.g. "xhigh" as "Extra high"; one Myrel does not know shows as the CLI wrote it. */
+export function effortName(effort: string, t: ReturnType<typeof useT>): string {
+  return (EFFORT_LEVELS as readonly string[]).includes(effort) ? t(`modelPicker.effort.${effort}` as MessageKey) : effort;
+}
+
+/**
+ * Composer control in a thread: the model and effort its CLI runs with from the next turn. Only for a
+ * CLI that lists its models; efforts only those the picked model takes, and none for a model that takes none.
+ */
+export function ThreadModelPicker({
+  pickable,
+  thread,
+  onChange,
+}: {
+  pickable: PickableClis;
+  thread: Thread;
+  onChange: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
+}) {
+  const t = useT();
+  const cli = (thread.cli?.id as CliId | undefined) ?? pickable.folderCli;
+  const models = pickable.clis.find((c) => c.id === cli)?.models;
+  if (!models?.length) return null;
+  const own = thread.model?.cli === cli ? thread.model : null;
+  const project = pickable.defaults[cli];
+  const modelId = own?.model ?? project?.model ?? null;
+  const model = modelId ? models.find((m) => m.id === modelId) : undefined;
+  const efforts = effortsFor(models, model?.id ?? null);
+  const effortId = own?.effort ?? project?.effort ?? null;
+  const effort = effortId && efforts.includes(effortId) ? effortId : null;
+  const pick = (next: { model?: string | null; effort?: string | null }) => {
+    const m = next.model !== undefined ? next.model : (own?.model ?? null);
+    let e = next.effort !== undefined ? next.effort : (own?.effort ?? null);
+    // An effort the new model does not take would be dropped anyway: say so by clearing it.
+    if (e && !effortsFor(models, m ?? project?.model ?? null).includes(e)) e = null;
+    onChange({ cli, model: m, effort: e });
+  };
+  const label = [model?.name ?? t("modelPicker.cliDefault"), effort && effortName(effort, t)].filter(Boolean).join(" · ");
+  const projectModel = project?.model ? (models.find((m) => m.id === project.model)?.name ?? project.model) : null;
+  return (
+    <Menu
+      label={t("modelPicker.title")}
+      side="top"
+      trigger={<ModelTrigger label={label} active={!!own} />}
+      className={triggerClass}
+      panelClassName="w-72 max-h-[min(28rem,70vh)] overflow-y-auto"
+    >
+      {() => (
+        <>
+          <MenuLabel>{t("modelPicker.title")}</MenuLabel>
+          <Option
+            role="menuitemradio"
+            checked={!own?.model}
+            onSelect={() => pick({ model: null })}
+            title={projectModel ? t("modelPicker.projectDefault", { model: projectModel }) : t("modelPicker.cliDefault")}
+          />
+          {models.map((m) => (
+            <Option key={m.id} role="menuitemradio" checked={own?.model === m.id} onSelect={() => pick({ model: m.id })} title={m.name} />
+          ))}
+          <MenuSeparator />
+          <MenuLabel>{t("modelPicker.effort")}</MenuLabel>
+          {efforts.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 px-2.5 pb-1.5 pt-1">
+              <EffortChip checked={!own?.effort} onSelect={() => pick({ effort: null })} label={t("modelPicker.effortDefault")} />
+              {efforts.map((e) => (
+                <EffortChip key={e} checked={own?.effort === e} onSelect={() => pick({ effort: e })} label={effortName(e, t)} />
+              ))}
+            </div>
+          ) : (
+            <p className="px-2.5 pb-1.5 pt-1 text-xs leading-relaxed text-subtle">{t("modelPicker.noEffort")}</p>
+          )}
+          <p className="px-2.5 pb-1.5 pt-2 text-xs leading-relaxed text-subtle">{t("cliPicker.threadHint")}</p>
+        </>
+      )}
+    </Menu>
+  );
+}
+
+function ModelTrigger({ label, active }: { label: string; active: boolean }) {
+  return (
+    <>
+      <Brain size={14} className={cn("flex-none", active && "text-accent")} aria-hidden="true" />
+      <span className={cn("truncate", active && "text-fg")}>{label}</span>
+      <ChevronDown size={12} className="flex-none text-subtle" aria-hidden="true" />
+    </>
+  );
+}
+
+function EffortChip({ checked, onSelect, label }: { checked: boolean; onSelect: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={checked}
+      onClick={onSelect}
+      className={cn(
+        "rounded-full border px-2.5 py-1 text-xs",
+        checked ? "border-accent bg-accent text-ground" : "border-edge text-body hover:bg-hover hover:text-fg",
+      )}
+    >
+      {label}
+    </button>
   );
 }
 
