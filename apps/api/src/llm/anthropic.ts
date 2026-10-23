@@ -10,6 +10,7 @@ type AnthropicMessage = { role: "user" | "assistant"; content: string | Block[] 
 type AnthropicResponse = {
   content?: Block[];
   model?: string;
+  stop_reason?: string | null;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -69,6 +70,7 @@ export function anthropic(opts: AnthropicOptions): ModelProvider {
           cachedInputTokens: data.usage.cache_read_input_tokens ?? 0,
         },
         model: data.model,
+        ...(data.stop_reason === "max_tokens" && { truncated: true }),
       };
     },
   };

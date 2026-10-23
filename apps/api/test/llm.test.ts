@@ -11,6 +11,7 @@ import {
   parsePrices,
   priceFor,
   readsImages,
+  RETRY_MAX_TOKENS,
   runLoop,
   taskModel,
   tool,
@@ -68,6 +69,13 @@ describe("createProvider", () => {
       usage: { inputTokens: 3, outputTokens: 2, cachedInputTokens: 1 },
       model: "accounts/fireworks/models/kimi-k2p6",
     });
+  });
+
+  it("flags an answer cut off at max_tokens", async () => {
+    const f = recordingFetch({ choices: [{ finish_reason: "length", message: { content: "" } }] });
+    const res = createProvider({ FIREWORKS_API_KEY: "fw" }, f.fetchImpl);
+    if (!res.ok) throw new Error(res.reason);
+    expect(await res.provider.chat(request)).toMatchObject({ toolCalls: [], truncated: true });
   });
 
   it("takes the call's cost from the response when the provider sends one", async () => {
@@ -190,6 +198,22 @@ describe("runLoop", () => {
       maxSteps: 2,
     });
     expect(capped).toMatchObject({ steps: 2, stopped: "max_steps" });
+  });
+
+  it("asks again with a bigger budget when an answer is cut off before any tool call", async () => {
+    const t = tool({ name: "t", description: "t", input: z.object({}), run: () => "x" });
+    const cut = { text: "", toolCalls: [], truncated: true };
+    const call = { text: "", toolCalls: [{ id: "1", name: "t", input: {} }] };
+
+    const provider = scripted([cut, call, { text: "", toolCalls: [] }]);
+    const result = await runLoop({ provider, system: "", prompt: "", tools: [t] });
+    expect(result).toMatchObject({ steps: 2, stopped: "done", toolCalls: [{ name: "t" }] });
+    expect(provider.requests.map((r) => r.maxTokens)).toEqual([undefined, RETRY_MAX_TOKENS, undefined]);
+    // The cut-off answer is not part of the conversation the model sees next.
+    expect(provider.requests[2]!.turns.map((turn) => turn.role)).toEqual(["user", "assistant", "tool"]);
+
+    // Cut off again: the turn fails loudly instead of ending as if the model chose to do nothing.
+    await expect(runLoop({ provider: scripted([cut, cut]), system: "", prompt: "", tools: [t] })).rejects.toThrow("cut off");
   });
 });
 
