@@ -2,6 +2,7 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@myrel/protocol";
+import { readBridgeRun, runBridge } from "./bridge";
 import { detectClis } from "./clis";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RUNNER_VERSION, startRunner } from "./runner";
@@ -12,7 +13,7 @@ import { listWorktrees, pruneWorktrees, removeWorktree, worktreeState } from "./
 
 const HELP = `myrel-runner ${RUNNER_VERSION}
 Connects this computer to Myrel, so projects can work in folders you share
-using your own Claude Code, Codex or Gemini CLI. Your CLI logins never leave
+using your own Claude Code, Codex or Antigravity CLI. Your CLI logins never leave
 this computer.
 
 Usage:
@@ -69,6 +70,14 @@ async function main(argv: string[]) {
   if (values.help || !command) return console.log(HELP);
 
   switch (command) {
+    // Started by Antigravity CLI from its global config, as its MCP server (see bridge.ts). Not for people.
+    case "mcp-bridge":
+      return runBridge({
+        input: process.stdin,
+        write: (line) => process.stdout.write(`${line}\n`),
+        run: await readBridgeRun(),
+        version: RUNNER_VERSION,
+      });
     case "pair": {
       const server = values.server ?? (await loadConfig()).server;
       if (!arg || !server) throw new Error("Usage: myrel-runner pair <code> --server <url>");

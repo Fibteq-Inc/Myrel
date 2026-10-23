@@ -46,7 +46,7 @@ and running on your own Cloudflare account.
   shows a live checklist and asks for permission or a decision when it needs one.
 - **Real agents, your choice of where.** A thread's agent is a coding harness:
   OpenCode in a per-thread Cloudflare Sandbox, or your own Claude Code, Codex
-  or Gemini CLI on your computer through `myrel-runner`. Your CLI logins never
+  or Antigravity CLI on your computer through `myrel-runner`. Your CLI logins never
   leave your computer.
 - **Any model.** Fireworks, Anthropic and OpenAI out of the box, optionally
   through Cloudflare AI Gateway. Bring your own key.
@@ -193,7 +193,7 @@ connecting the apps.
 |---|---|---|
 | 0 | Monorepo, auth, D1, deploy pipeline | Done |
 | 1 | Coordinator and thread agents, project chat | Done |
-| 1.5 | Local `myrel-runner` with your own Claude Code, Codex or Gemini CLI | Done |
+| 1.5 | Local `myrel-runner` with your own Claude Code, Codex or Antigravity CLI | Done |
 | 2 | Cloud sandbox (OpenCode), project files on R2, GitHub (clone, branch, PR) | Done |
 | 3 | Artifacts, project memory, decision cards, mobile app | Done |
 | 4 | Routines, notifications, MCP connectors, skills, desktop app | Done |
