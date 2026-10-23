@@ -1,9 +1,23 @@
 import { useI18n } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Share2 } from "lucide-react-native";
+import { useState } from "react";
+import {
+  Alert,
+  Image,
+  type LayoutChangeEvent,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { Empty } from "../../../../components/project/empty";
-import { errorMessage, Spinner } from "../../../../components/ui";
+import { Button, errorMessage, Spinner } from "../../../../components/ui";
+import { displayName, fileKind } from "../../../../lib/files";
+import { openWithSystem } from "../../../../lib/open-file";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
 import { colors, mono } from "../../../../theme";
@@ -11,15 +25,8 @@ import { colors, mono } from "../../../../theme";
 /** Largest text file shown in full; longer ones are cut. */
 const MAX_TEXT = 200_000;
 
-type Preview = { kind: "text"; text: string } | { kind: "image"; uri: string } | { kind: "none" };
-
-function isText(type: string, path: string) {
-  return (
-    type.startsWith("text/") ||
-    /json|xml|javascript|typescript|yaml|toml|csv|markdown/.test(type) ||
-    /\.(md|txt|json|ya?ml|toml|csv|tsx?|jsx?|py|go|rs|sh|html?|css|sql)$/i.test(path)
-  );
-}
+/** The file as a data URL (what the phone's viewer gets), and its text when it is text. */
+type Preview = { kind: "text" | "image" | "other"; type: string; dataUrl: string; text?: string };
 
 function readBlob(blob: Blob, as: "text" | "dataURL") {
   return new Promise<string>((resolve, reject) => {
@@ -33,8 +40,9 @@ function readBlob(blob: Blob, as: "text" | "dataURL") {
 
 /**
  * A preview of one project file, or with `local`, one in the project's folder on this person's
- * computer (an agent's message pointed to it; `thread` is where its worktree is): text and images;
- * other kinds just show their name.
+ * computer (an agent's message pointed to it; `thread` is where its worktree is): text, and images
+ * that pinch to zoom on iOS. The header button hands any file to the phone (Quick Look on iOS,
+ * a viewer app on Android) to zoom, share or save it; files with no preview offer that in place.
  */
 export default function FileScreen() {
   const { t } = useI18n();
@@ -45,17 +53,41 @@ export default function FileScreen() {
     queryKey: local ? ["local-file", server, projectId, thread ?? null, path] : ["file", server, projectId, path],
     queryFn: async (): Promise<Preview> => {
       const blob = local ? await api.getLocalFile(projectId, path, thread) : await api.getFile(projectId, path);
-      if (blob.type.startsWith("image/")) return { kind: "image", uri: await readBlob(blob, "dataURL") };
-      if (isText(blob.type, path)) return { kind: "text", text: (await readBlob(blob, "text")).slice(0, MAX_TEXT) };
-      return { kind: "none" };
+      const kind = fileKind(blob.type, path);
+      const dataUrl = await readBlob(blob, "dataURL");
+      const text = kind === "text" ? (await readBlob(blob, "text")).slice(0, MAX_TEXT) : undefined;
+      return { kind, type: blob.type, dataUrl, text };
     },
     retry: local ? false : undefined,
   });
-  const name = path.split("/").pop() ?? path;
+  const name = displayName(path);
+  const [opening, setOpening] = useState(false);
+
+  const open = async () => {
+    if (!preview.data || opening) return;
+    setOpening(true);
+    try {
+      await openWithSystem(preview.data.dataUrl, path, preview.data.type);
+    } catch (err) {
+      Alert.alert(t("mobile.openFileFailed"), errorMessage(err, ""));
+    } finally {
+      setOpening(false);
+    }
+  };
 
   return (
     <View style={{ flex: 1 }}>
-      <Stack.Screen options={{ title: name }} />
+      <Stack.Screen
+        options={{
+          title: name,
+          headerRight: () =>
+            preview.data ? (
+              <Pressable accessibilityLabel={t("mobile.openFile")} hitSlop={10} disabled={opening} onPress={() => void open()}>
+                <Share2 size={20} color={opening ? colors.subtle : colors.fg} />
+              </Pressable>
+            ) : null,
+        }}
+      />
       {preview.isPending ? (
         <View style={styles.center}>
           <Spinner size={22} color={colors.subtle} />
@@ -69,11 +101,50 @@ export default function FileScreen() {
           </Text>
         </ScrollView>
       ) : preview.data.kind === "image" ? (
-        <Image source={{ uri: preview.data.uri }} style={{ flex: 1 }} resizeMode="contain" accessibilityLabel={name} />
+        <ZoomableImage uri={preview.data.dataUrl} label={name} onOpen={() => void open()} />
       ) : (
-        <Empty title={name} body={t("mobile.noPreview")} />
+        <View style={{ flex: 1 }}>
+          <Empty title={name} body={t("mobile.noPreviewOpen")} />
+          <View style={{ paddingHorizontal: 24 }}>
+            <Button onPress={() => void open()} pending={opening}>
+              {t("mobile.openFile")}
+            </Button>
+          </View>
+        </View>
       )}
     </View>
+  );
+}
+
+/**
+ * The image fit to the screen. iOS zooms it with a pinch in place; Android's ScrollView cannot
+ * zoom, so a tap there opens it in the phone's viewer instead.
+ */
+function ZoomableImage({ uri, label, onOpen }: { uri: string; label: string; onOpen: () => void }) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const image = size.height > 0 && (
+    <Image source={{ uri }} style={size} resizeMode="contain" accessibilityLabel={label} />
+  );
+  const measure = (e: LayoutChangeEvent) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height });
+  if (Platform.OS !== "ios")
+    return (
+      <Pressable style={{ flex: 1 }} onLayout={measure} onPress={onOpen}>
+        {image}
+      </Pressable>
+    );
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      onLayout={measure}
+      maximumZoomScale={5}
+      minimumZoomScale={1}
+      centerContent
+      bouncesZoom
+      showsHorizontalScrollIndicator={false}
+      showsVerticalScrollIndicator={false}
+    >
+      {image}
+    </ScrollView>
   );
 }
 

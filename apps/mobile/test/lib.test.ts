@@ -1,6 +1,7 @@
 import type { Message } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
+import { dataUrlBase64, displayName, fileKind } from "../src/lib/files";
 import { surelyLong } from "../src/lib/fold";
 import { notificationPath } from "../src/lib/push-target";
 import { secureKey } from "../src/lib/secure-key";
@@ -72,5 +73,25 @@ describe("surelyLong", () => {
     expect(surelyLong("line\n".repeat(15), 10)).toBe(false);
     expect(surelyLong("line\n".repeat(25), 10)).toBe(true);
     expect(surelyLong("a".repeat(45 * 21), 10)).toBe(true);
+  });
+});
+
+describe("files", () => {
+  it("drops the upload stamp from names", () => {
+    expect(displayName("uploads/mvkokmoc16c9-image.png")).toBe("image.png");
+    expect(displayName("reports/mvk-summary.md")).toBe("mvk-summary.md");
+  });
+
+  it("goes by content type, falling back to the extension", () => {
+    expect(fileKind("image/png", "uploads/x-photo.png")).toBe("image");
+    expect(fileKind("", "uploads/x-photo.JPEG")).toBe("image");
+    expect(fileKind("application/octet-stream", "notes.md")).toBe("text");
+    expect(fileKind("application/json", "data")).toBe("text");
+    expect(fileKind("application/pdf", "report.pdf")).toBe("other");
+  });
+
+  it("takes the payload of a data URL", () => {
+    expect(dataUrlBase64("data:image/png;base64,iVBORw0K")).toBe("iVBORw0K");
+    expect(dataUrlBase64("nonsense")).toBe("");
   });
 });
