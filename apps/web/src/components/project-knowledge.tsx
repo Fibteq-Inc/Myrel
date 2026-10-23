@@ -1,13 +1,14 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { MEMORY_INDEX, type MemoryEntry } from "@myrel/protocol";
+import { MEMORY_INDEX, type MemoryEntry, MemoryUpkeepMode } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, Check, FolderOpen, Plus, ScrollText, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { api, filesQuery, instructionsQuery, memoryQuery } from "../lib/api";
+import { api, filesQuery, instructionsQuery, memoryQuery, memoryUpkeepQuery, projectQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton, Input } from "../lib/ui";
 import { displayName, FileIcon, FilePreview, formatSize } from "./files";
 import { useConfirm } from "./ui/confirm";
+import { Select } from "./ui/controls";
 
 export type PanelTab = "files" | "memory" | "instructions";
 
@@ -212,6 +213,7 @@ function MemoryTab({ projectId }: { projectId: string }) {
         </GhostButton>
       </div>
       <div className="flex flex-col gap-2 px-4 pb-4">
+        {memory.some((m) => m.name !== MEMORY_INDEX) && <MemoryUpkeep projectId={projectId} />}
         {creating && (
           <MemoryEditor
             projectId={projectId}
@@ -233,6 +235,68 @@ function MemoryTab({ projectId }: { projectId: string }) {
           ),
         )}
       </div>
+    </div>
+  );
+}
+
+const UPKEEP_MODE_KEYS: Record<MemoryUpkeepMode, MessageKey> = {
+  auto: "knowledge.upkeepAuto",
+  on: "knowledge.upkeepOn",
+  off: "knowledge.upkeepOff",
+};
+
+/** How often Myrel checks the notes against the project, and a way to have it check now. */
+function MemoryUpkeep({ projectId }: { projectId: string }) {
+  const { t, locale } = useI18n();
+  const queryClient = useQueryClient();
+  const { data: project } = useQuery(projectQuery(projectId));
+  const { data: upkeep } = useQuery(memoryUpkeepQuery(projectId));
+  const canManage = project?.role === "owner" || project?.role === "admin";
+  const refresh = () => queryClient.invalidateQueries({ queryKey: memoryUpkeepQuery(projectId).queryKey });
+  const setMode = useMutation({ mutationFn: (mode: MemoryUpkeepMode) => api.setMemoryUpkeep(projectId, mode), onSuccess: refresh });
+  const run = useMutation({ mutationFn: () => api.runMemoryUpkeep(projectId), onSuccess: refresh });
+  if (!upkeep) return null;
+
+  const status = upkeep.threadId
+    ? t("knowledge.upkeepRunning")
+    : !upkeep.active
+      ? t("knowledge.upkeepPaused")
+      : t("knowledge.upkeepNext", { done: upkeep.threadsSince, needed: upkeep.threadsNeeded });
+  const last = upkeep.lastRunAt
+    ? t("knowledge.upkeepLast", { date: new Date(upkeep.lastRunAt).toLocaleDateString(locale) })
+    : t("knowledge.upkeepNever");
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-edge bg-panel px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-medium">{t("knowledge.upkeep")}</span>
+        {canManage ? (
+          <Select
+            aria-label={t("knowledge.upkeep")}
+            value={upkeep.mode}
+            onChange={(e) => setMode.mutate(MemoryUpkeepMode.parse(e.target.value))}
+            disabled={setMode.isPending}
+            className="h-8 w-auto text-[13px]"
+          >
+            {MemoryUpkeepMode.options.map((mode) => (
+              <option key={mode} value={mode}>
+                {t(UPKEEP_MODE_KEYS[mode])}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <span className="text-[13px] text-muted">{t(UPKEEP_MODE_KEYS[upkeep.mode])}</span>
+        )}
+        {canManage && !upkeep.threadId && (
+          <GhostButton type="button" className="ml-auto" onClick={() => run.mutate()} disabled={run.isPending}>
+            {t("knowledge.upkeepNow")}
+          </GhostButton>
+        )}
+      </div>
+      <p className="text-xs text-subtle">
+        {status} · {last}
+      </p>
+      <p className="text-xs text-subtle">{t(upkeep.mode === "auto" ? "knowledge.upkeepAutoHint" : "knowledge.upkeepHint")}</p>
+      {(setMode.error || run.error) && <p className="text-[13px] text-bad">{errorMessage(setMode.error ?? run.error, t)}</p>}
     </div>
   );
 }

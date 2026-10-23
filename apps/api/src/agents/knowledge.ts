@@ -131,6 +131,16 @@ export class KnowledgeStore {
     return this.getInstructions();
   }
 
+  /** A project-level value other features keep next to the instructions (memory upkeep's counters). */
+  getSetting(key: string): string | null {
+    return this.sql<{ value: string }>`SELECT value FROM settings WHERE key = ${key}`[0]?.value ?? null;
+  }
+
+  setSetting(key: string, value: string | null): void {
+    if (value === null) this.sql`DELETE FROM settings WHERE key = ${key}`;
+    else this.sql`INSERT INTO settings (key, value) VALUES (${key}, ${value}) ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
+  }
+
   // ---- Memory ------------------------------------------------------------
 
   listMemory(): MemoryEntry[] {

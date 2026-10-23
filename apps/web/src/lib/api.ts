@@ -44,6 +44,9 @@ export const filesQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "files"], queryFn: () => api.listFiles(id) });
 export const memoryQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "memory"], queryFn: () => api.listMemory(id) });
+/** Under "memory" so a knowledge.changed event for memory refetches it too. */
+export const memoryUpkeepQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "memory", "upkeep"], queryFn: () => api.memoryUpkeep(id) });
 export const instructionsQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "instructions"], queryFn: () => api.getInstructions(id) });
 export const githubStatusQuery = queryOptions({ queryKey: ["github"], queryFn: () => api.getGithubStatus() });

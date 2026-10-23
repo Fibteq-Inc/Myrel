@@ -90,7 +90,13 @@ import {
 
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
-export type ThreadStart = { projectId: string; threadId: string; brief: string };
+export type ThreadStart = {
+  projectId: string;
+  threadId: string;
+  brief: string;
+  /** Who a thread nobody asked for in the chat (memory upkeep) works for until someone writes in it. */
+  actor?: string | null;
+};
 
 /** A connector card the agent posted, and the message that shows it. */
 type StoredSuggestion = ConnectorSuggestion & { messageId: string };
@@ -264,6 +270,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("project_id", input.projectId);
     this.setMeta("thread_id", input.threadId);
     this.setMeta("brief", input.brief);
+    if (input.actor) this.setMeta("start_actor", input.actor);
     await this.markDirty();
   }
 
@@ -436,7 +443,7 @@ export class ThreadAgent extends Agent<Env> {
       : !wroteSince && routineActor
         ? await member(routineActor.actor)
         : // Someone who has left the project since writing here gets no more turns.
-          await member(lastWriter);
+          await member(lastWriter ?? (this.getMeta("start_actor") || null));
     this.setMeta("requester", requester ?? "");
     const place = await taskPlace(this.env, projectId, requester, ctx.thread.cli?.id);
     if (place.kind === "error") return this.cannotWork(place.message);

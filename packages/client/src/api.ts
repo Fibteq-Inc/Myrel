@@ -24,6 +24,8 @@ import type {
   Member,
   MarkMemoryInput,
   MemoryEntry,
+  MemoryUpkeepMode,
+  MemoryUpkeepState,
   Message,
   Project,
   ProjectFile,
@@ -46,6 +48,7 @@ import type {
   Skill,
   SkillDetail,
   Task,
+  Thread,
   ThreadFiles,
   TerminalLine,
   UpdateAdminSettingsInput,
@@ -532,6 +535,18 @@ export class ApiClient {
   async markMemory(projectId: string, name: string, input: MarkMemoryInput) {
     const path = `${projectPath(projectId)}/memory/${encodeURIComponent(name)}/mark`;
     return (await this.request<{ memory: MemoryEntry }>(path, { method: "PUT", body: input })).memory;
+  }
+
+  async memoryUpkeep(projectId: string) {
+    return (await this.request<{ upkeep: MemoryUpkeepState }>(`${projectPath(projectId)}/memory-upkeep`)).upkeep;
+  }
+
+  async setMemoryUpkeep(projectId: string, mode: MemoryUpkeepMode) {
+    return (await this.request<{ upkeep: MemoryUpkeepState }>(`${projectPath(projectId)}/memory-upkeep`, { method: "PUT", body: { mode } })).upkeep;
+  }
+
+  async runMemoryUpkeep(projectId: string) {
+    return (await this.request<{ thread: Thread }>(`${projectPath(projectId)}/memory-upkeep/run`, { method: "POST" })).thread;
   }
 
   async deleteMemory(projectId: string, name: string) {
