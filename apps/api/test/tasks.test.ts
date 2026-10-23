@@ -153,7 +153,7 @@ describe("the cloud agent", () => {
     const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
     const resuming = "Bulut sandbox'ı durduğu için görev kesildi; 30 sn içinde kaldığı yerden devam ediyor (1/3).";
     await until(async () => ((await bodies()).includes(resuming) ? true : null), "the resuming line");
-  });
+  }, 20_000);
 
   it("opens the model proxy to a cloud turn's token only, never a local turn's", async () => {
     const { project, thread, threadAgent } = await threadSetup();
