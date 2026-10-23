@@ -2,13 +2,14 @@ import { useT } from "@myrel/i18n/react";
 import type { Runner, RunnerPairingCode } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Folder, FolderPlus, MonitorSmartphone, Plus, Trash2, X } from "lucide-react";
+import { Folder, FolderPlus, MonitorSmartphone, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { FolderPicker, folderPickerBlocker } from "../../components/folder-picker";
 import { NavToggle } from "../../components/shell/shell";
+import { RunnerSettingsPanel, RunnerUpdate, updating } from "../../components/runner-settings";
 import { CliChips, CliLimitsList, lastSeen, OnlineDot, PairingSteps, RunnerIcon } from "../../components/runners";
 import { ThisComputer } from "../../components/this-computer";
-import { api, runnersQuery, server } from "../../lib/api";
+import { api, runnerListQuery, runnersQuery, server } from "../../lib/api";
 import { Button, errorMessage, GhostButton, IconButton } from "../../lib/ui";
 
 export const Route = createFileRoute("/_app/devices")({
@@ -20,8 +21,12 @@ function DevicesPage() {
   const queryClient = useQueryClient();
   const [pairing, setPairing] = useState<RunnerPairingCode | null>(null);
   const [pairedBefore, setPairedBefore] = useState<Set<string>>(new Set());
-  // While the pairing steps are open, watch for the new computer to appear.
-  const { data: runners = [], isPending } = useQuery({ ...runnersQuery, refetchInterval: pairing ? 3000 : 15_000 });
+  // While the pairing steps are open, watch for the new computer to appear; during an update, for how it goes.
+  const { data, isPending } = useQuery({
+    ...runnerListQuery,
+    refetchInterval: (query) => (pairing || query.state.data?.runners.some(updating) ? 3000 : 15_000),
+  });
+  const runners = data?.runners ?? [];
   const newRunner = pairing ? runners.find((r) => !pairedBefore.has(r.id)) : undefined;
 
   const createCode = useMutation({
@@ -98,6 +103,7 @@ function DevicesPage() {
                   <RunnerRow
                     key={r.id}
                     runner={r}
+                    latest={data?.latestVersion ?? null}
                     onRemoved={() => queryClient.invalidateQueries({ queryKey: runnersQuery.queryKey })}
                   />
                 ))}
@@ -110,10 +116,11 @@ function DevicesPage() {
   );
 }
 
-function RunnerRow({ runner, onRemoved }: { runner: Runner; onRemoved: () => void }) {
+function RunnerRow({ runner, latest, onRemoved }: { runner: Runner; latest: string | null; onRemoved: () => void }) {
   const t = useT();
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const remove = useMutation({ mutationFn: () => api.removeRunner(runner.id), onSuccess: onRemoved });
   const unshare = useMutation({
@@ -151,16 +158,30 @@ function RunnerRow({ runner, onRemoved }: { runner: Runner; onRemoved: () => voi
             </GhostButton>
           </span>
         ) : (
-          <IconButton
-            type="button"
-            aria-label={t("devices.removeLabel", { name: runner.name })}
-            title={t("devices.remove")}
-            onClick={() => setConfirming(true)}
-          >
-            <Trash2 size={16} />
-          </IconButton>
+          <span className="flex items-center gap-0.5">
+            <IconButton
+              type="button"
+              aria-label={t("devices.settingsLabel", { name: runner.name })}
+              aria-expanded={settingsOpen}
+              title={t("devices.settings")}
+              className={settingsOpen ? "bg-hover text-fg" : ""}
+              onClick={() => setSettingsOpen((o) => !o)}
+            >
+              <SlidersHorizontal size={16} />
+            </IconButton>
+            <IconButton
+              type="button"
+              aria-label={t("devices.removeLabel", { name: runner.name })}
+              title={t("devices.remove")}
+              onClick={() => setConfirming(true)}
+            >
+              <Trash2 size={16} />
+            </IconButton>
+          </span>
         )}
       </div>
+      <RunnerUpdate runner={runner} latest={latest} />
+      {settingsOpen && <RunnerSettingsPanel runner={runner} />}
       <CliChips runner={runner} />
       <CliLimitsList runner={runner} />
       <div className="flex flex-col gap-1 border-t border-line pt-3">

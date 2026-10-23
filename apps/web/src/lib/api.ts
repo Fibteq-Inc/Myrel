@@ -51,6 +51,8 @@ export const githubReposQuery = queryOptions({ queryKey: ["github", "repos"], qu
 export const projectReposQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "repos"], queryFn: () => api.listProjectRepos(id) });
 export const runnersQuery = queryOptions({ queryKey: ["runners"], queryFn: () => api.listRunners() });
+/** The Devices page's list: the computers and the newest myrel-runner. Refreshed with runnersQuery. */
+export const runnerListQuery = queryOptions({ queryKey: ["runners", "list"], queryFn: () => api.runnerList() });
 export const workspaceQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "workspace"], queryFn: () => api.getWorkspace(id) });
 /** What the current server allows (e.g. whether new accounts can be created). */

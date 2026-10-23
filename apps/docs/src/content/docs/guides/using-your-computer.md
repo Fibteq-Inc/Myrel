@@ -48,4 +48,12 @@ When the folder is a git repository, each thread works in its own git worktree o
 
 ## Updating
 
-Run `npx myrel-runner@latest update`. The desktop app updates itself.
+When a newer runner is out, its computer in **Devices** shows **Update**. The runner finishes its running tasks first (or stops them with **Update now**, and Myrel continues them), installs the new version and restarts. If the new version does not come up, the computer goes back to the previous one and the card says so. Turn on **Update by itself** in the computer's settings to have it update on its own when nothing is running.
+
+A runner from before 0.14.0 needs `npx myrel-runner@latest update` once on the computer; after that, updates are a button. The desktop app updates its own runner with the app.
+
+## Settings
+
+The settings button on a computer in **Devices** opens its name, what the CLI may do on its own (**Only read**, **Edit files**, **Automatic**, **Full access**), whether each thread works in its own copy, and **Update by itself**. Changes are saved on the computer right away, so it must be online. **Full access** asks you to confirm first.
+
+To allow changes only at the computer itself, run `myrel-runner settings remote off` there.

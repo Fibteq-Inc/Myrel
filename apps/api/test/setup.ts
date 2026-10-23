@@ -20,6 +20,7 @@ import { afterAll, afterEach } from "vitest";
 import { closeRunners } from "./fake-agent";
 import { captureEmail } from "./fake-llm";
 import "./fake-github";
+import "./fake-npm";
 
 captureEmail(env.EMAIL);
 
