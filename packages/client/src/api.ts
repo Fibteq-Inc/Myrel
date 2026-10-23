@@ -615,6 +615,12 @@ export class ApiClient {
     return this.request<{ ok: true }>(path, { method: "POST", body: {} });
   }
 
+  /** Stops the thread's running turn so the messages waiting for it go to its agent now. */
+  interruptThread(projectId: string, threadId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/interrupt`;
+    return this.request<{ ok: true }>(path, { method: "POST", body: {} });
+  }
+
   // --- usage ---
 
   /** Model usage across the caller's projects, bucketed by day in the caller's time zone. */

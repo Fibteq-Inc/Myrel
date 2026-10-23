@@ -84,6 +84,7 @@ import {
   type CoordinatorNote,
   decisionCard,
   editedSince,
+  newsNote,
   type ReplyNeeds,
   type RoutineRun,
   renderQuestion,
@@ -309,6 +310,11 @@ export class ThreadAgent extends Agent<Env> {
       this.sql`INSERT INTO routine_runs (name, prompt, created_at, actor)
         VALUES (${reason.name}, ${reason.prompt}, ${new Date().toISOString()}, ${reason.actor ?? null})`;
     }
+    // What the next turn is for: a running turn that takes in the new messages (takeNews) needs no
+    // next turn for them, but still does for anything else.
+    if (reason.kind === "message" && !reason.edited && reason.seq !== undefined) {
+      this.setMeta("wake_seq", String(Math.max(reason.seq, Number(this.getMeta("wake_seq") ?? 0))));
+    } else this.setMeta("wake_other", "1");
     await this.markDirty();
   }
 
@@ -418,6 +424,7 @@ export class ThreadAgent extends Agent<Env> {
     // The agent is mid-turn; this wake waits for it (finishAgentTurn queues the next turn).
     if (this.runningTask()) return;
     this.setMeta("dirty", "0");
+    this.deleteMeta("wake_other");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) return;
@@ -588,7 +595,8 @@ export class ThreadAgent extends Agent<Env> {
     if (place.kind === "local") this.setMeta("access_folders", JSON.stringify([place.workspace.path, ...place.workspace.folders]));
     this.setMeta("agent_token", hash);
     this.deleteMeta("task_checklist");
-    await project.updateThread(threadId, { status: "working" });
+    // People's messages up to here are this turn's; any after it show as waiting for the agent.
+    await project.updateThread(threadId, { status: "working", seenSeq: Number(this.getMeta("last_seen_seq") ?? 0) });
     await project.setActivity(threadId, true);
     try {
       const mcpPath = `/api/agent-mcp/${threadId}`;
@@ -741,6 +749,24 @@ export class ThreadAgent extends Agent<Env> {
     if (this.getMeta("closed") === "1") return void (await project.setActivity(threadId, false));
     let pending = turn?.pending ?? [];
     const replied = turn?.replied ?? false;
+    const interrupted = this.getMeta("interrupted_task") === taskId;
+    this.deleteMeta("interrupted_task");
+    if (interrupted) {
+      // Stopped for a message that waits: one line, and that message's turn starts now.
+      const tr = (this.getMeta("language") ?? row.language).startsWith("tr");
+      await project.sendMessage({
+        threadId,
+        authorKind: "system",
+        authorId: SYSTEM_ID,
+        body: tr ? "Durduruldu; yeni mesajla devam ediyor." : "Stopped; continuing with the new message.",
+        artifacts: pending,
+        stats: this.runStats(row, turn?.mark).stats,
+      });
+      await project.setActivity(threadId, false);
+      this.setMeta("dirty", "1");
+      await this.queue("threadTurn", null);
+      return;
+    }
     const resuming = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; delaySec: number; where?: ResumeWhere } | null;
     // A turn that ended on its own ends the chain of automatic continues.
     if (!resuming) this.deleteMeta("auto_resume");
@@ -1058,7 +1084,10 @@ export class ThreadAgent extends Agent<Env> {
       await project.editMessage(r.messageId, answeredAccessMessage(r, turn?.language ?? "en")).catch((err) => console.warn("access card not shortened", err));
     }
     // The answer was for this turn: it is not news for the next one.
-    if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(reason.seq));
+    if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) {
+      this.setMeta("last_seen_seq", String(reason.seq));
+      await project.updateThread(this.ids().threadId, { seenSeq: reason.seq });
+    }
     return true;
   }
 
@@ -1263,8 +1292,7 @@ export class ThreadAgent extends Agent<Env> {
       for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
       return m;
     };
-    return [
-      ...(local ? [this.approveAccessTool()] : []),
+    const tools: Tool[] = [
       ...threadTools({
         reply,
         askDecision: async ({ decision, context, askPerson }) => {
@@ -1385,6 +1413,47 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
       }),
     ];
+    // What people wrote since the turn started reaches it with its next call to Myrel, without stopping it.
+    // The folder-approval tool is left out: the CLI reads its answer as JSON.
+    const delivering = tools.map(
+      (t): Tool => ({
+        ...t,
+        run: async (input) => {
+          const out = await t.run(input);
+          const news = await this.takeNews().catch((err) => (console.warn("delivering new messages failed", err), null));
+          if (!news) return out;
+          const outcome = typeof out === "string" ? { output: out } : out;
+          return { ...outcome, output: `${outcome.output}\n\n${news}` };
+        },
+      }),
+    );
+    return [...(local ? [this.approveAccessTool()] : []), ...delivering];
+  }
+
+  /**
+   * People's messages the running turn has not seen, as a note to add to a tool's result, and from
+   * then on seen. Only the messages of the person the turn works for: anyone else's ask may need
+   * another person's computer or connectors, so it waits for a turn of its own (or Interrupt).
+   */
+  private async takeNews(): Promise<string | null> {
+    const requester = this.getMeta("requester");
+    if (!requester || !this.runningTask()) return null;
+    const seen = Number(this.getMeta("last_seen_seq") ?? 0);
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const { messages, names } = await project.threadMessagesAfter(threadId, seen);
+    const other = messages.findIndex((m) => m.authorKind === "user" && m.authorId !== requester);
+    const taken = other === -1 ? messages : messages.slice(0, other);
+    const news = taken.filter((m) => m.authorKind === "user");
+    if (!news.length) return null;
+    const last = taken.at(-1)!.seq;
+    // Read again: another call may have taken them meanwhile.
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== seen) return null;
+    this.setMeta("last_seen_seq", String(last));
+    // Taken in whole, with nothing else waiting: no turn after this one just for them.
+    if (other === -1 && !this.getMeta("wake_other") && Number(this.getMeta("wake_seq") ?? 0) <= last) this.setMeta("dirty", "0");
+    await project.updateThread(threadId, { seenSeq: last });
+    return newsNote(news, names);
   }
 
   /**
@@ -1560,6 +1629,32 @@ export class ThreadAgent extends Agent<Env> {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /**
+   * A person asked to stop the running turn so the messages waiting for it go now ("Interrupt and
+   * send"). The turn ends with one line instead of a failure report, and the next turn starts at once
+   * with what is waiting; a local CLI continues the same session. A cloud turn's harness is ended so
+   * its task still saves the work. Nothing running: the waiting messages get their turn. Callable over RPC.
+   */
+  async interrupt(): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.getMeta("closed") === "1") return { ok: false, error: "This thread is closed." };
+    const row = this.runningTask();
+    this.setMeta("dirty", "1");
+    if (!row) {
+      await this.queue("threadTurn", null);
+      return { ok: true };
+    }
+    this.setMeta("interrupted_task", row.id);
+    if (row.backend === "sandbox") {
+      const ended = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!)
+        .finish(row.id)
+        .catch((err) => (console.warn("ending an interrupted turn failed", err), false));
+      if (ended) return { ok: true };
+    }
+    const cancelled = await this.cancelTask(row.id);
+    if (!cancelled.ok) this.deleteMeta("interrupted_task");
+    return cancelled;
   }
 
   /**

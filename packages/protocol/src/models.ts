@@ -191,6 +191,11 @@ export const Thread = z.object({
   cli: ThreadCli.nullable().default(null),
   /** The model and effort picked for this thread; null: the project's defaults (and from older servers). */
   model: ThreadModel.nullable().default(null),
+  /**
+   * The last message the thread's agent has taken in. A person's message after it, while the thread
+   * is working, waits for the agent: clients show it as queued. Null: not known (older servers).
+   */
+  seenSeq: z.number().int().nonnegative().nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

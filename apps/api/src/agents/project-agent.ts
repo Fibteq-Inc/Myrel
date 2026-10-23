@@ -111,6 +111,7 @@ type ThreadRow = {
   cli: string | null;
   /** JSON ThreadModel, or null. */
   model: string | null;
+  seen_seq: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -141,7 +142,7 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
 };
 
 export type ThreadPatch = Partial<
-  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "model">
+  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "model" | "seenSeq">
 >;
 
 /** What a thread agent reads at the start of each turn. */
@@ -254,6 +255,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!threadColumns.some((c) => c.name === "cli")) this.sql`ALTER TABLE threads ADD COLUMN cli TEXT`;
     // Added with picking a thread's model and effort.
     if (!threadColumns.some((c) => c.name === "model")) this.sql`ALTER TABLE threads ADD COLUMN model TEXT`;
+    // Added with showing people's messages the agent has not taken in yet.
+    if (!threadColumns.some((c) => c.name === "seen_seq")) this.sql`ALTER TABLE threads ADD COLUMN seen_seq INTEGER`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -625,7 +628,7 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
       resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
       label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null},
-      model = ${next.model ? JSON.stringify(next.model) : null}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
+      model = ${next.model ? JSON.stringify(next.model) : null}, seen_seq = ${next.seenSeq}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
     this.syncActivity();
     // Every way a thread finishes passes here (its agent, a person, its pull requests merging), and
@@ -725,6 +728,14 @@ export class ProjectAgent extends Agent<Env> {
       routines: this.listRoutines(),
       defaultTimezone: this.defaultTimezone(),
     };
+  }
+
+  /** A thread's messages after `seq`, with the members' names, for a running turn to take in. Callable over RPC. */
+  async threadMessagesAfter(threadId: string, seq: number): Promise<{ messages: Message[]; names: Record<string, string> }> {
+    const messages = this.sql<MessageRow>`SELECT * FROM messages WHERE thread_id = ${threadId} AND seq > ${seq} ORDER BY seq`.map((r) =>
+      this.toMessage(r),
+    );
+    return { messages, names: messages.length ? (await this.directory()).names : {} };
   }
 
   /** This server's public address (for links and for the sandbox to call back), or null before anyone connected. Callable over RPC. */
@@ -1639,6 +1650,7 @@ export class ProjectAgent extends Agent<Env> {
       label: r.label,
       cli: r.cli ? (JSON.parse(r.cli) as ThreadCli) : null,
       model: r.model ? (JSON.parse(r.model) as ThreadModel) : null,
+      seenSeq: r.seen_seq ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

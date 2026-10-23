@@ -1,6 +1,6 @@
 import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { planChecklist } from "@myrel/protocol";
+import { planChecklist, waitsForAgent } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -33,7 +33,7 @@ export default function ThreadScreen() {
   const styles = useStyles();
   const t = useT();
   const { threadId } = useLocalSearchParams<{ threadId: string }>();
-  const { user } = useSession();
+  const { user, api } = useSession();
   const { projectId, state, status, send, emit, loadTasks } = useProject();
   const names = useNames(projectId);
   const thread = state.threads[threadId];
@@ -52,6 +52,8 @@ export default function ThreadScreen() {
     const replies = threadMessages(state, threadId);
     return root ? [root, ...replies] : replies;
   }, [state, thread, threadId]);
+  // Messages the working agent has not taken in yet: the newest says so, with a way to send them now.
+  const waiting = thread ? messages.findLast((m) => waitsForAgent(m, thread)) : undefined;
   const onSend = useCallback(
     (body: string, attachments?: string[]) => send(body, threadId, attachments),
     [send, threadId],
@@ -169,6 +171,7 @@ export default function ThreadScreen() {
           placeholder={t("thread.placeholder")}
           onSend={onSend}
           onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
+          onInterrupt={waiting && { messageId: waiting.id, run: () => api.interruptThread(projectId, threadId) }}
           header={header}
           tools={
             pickable &&

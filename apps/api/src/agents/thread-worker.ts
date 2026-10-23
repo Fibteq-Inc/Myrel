@@ -316,3 +316,16 @@ export function threadTools(host: ThreadHost): Tool[] {
 export function editedSince(m: Message, since: string | undefined): boolean {
   return !!since && !!m.editedAt && m.editedAt > since;
 }
+
+/**
+ * People's messages that arrived while the turn runs, added to the result of its next Myrel tool
+ * call. People see them as delivered from then on, and the next turn does not show them as NEW.
+ */
+export function newsNote(messages: Message[], names: Record<string, string>): string {
+  const many = messages.length > 1;
+  return [
+    `## ${many ? "New messages" : "A new message"} in this thread while you work`,
+    `${many ? "They arrived" : "It arrived"} after this turn started; people see ${many ? "them" : "it"} as delivered to you now. Take ${many ? "them" : "it"} into account from here on: ${many ? "they" : "it"} may change, add to or stop the work. When ${many ? "they ask" : "it asks"} something, answer with reply.`,
+    ...messages.map((m) => renderMessage(m, names, { isNew: true })),
+  ].join("\n\n");
+}

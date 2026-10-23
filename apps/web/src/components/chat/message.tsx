@@ -8,6 +8,7 @@ import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
+import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
 
 export type Names = Record<string, string>;
@@ -16,7 +17,8 @@ export type Names = Record<string, string>;
  * One message, Claude style: people's messages as bubbles on the right,
  * the assistant's as open text beside its mark, system notes as a banner.
  * `children` renders under the message (e.g. its thread card). `onEdit` lets the
- * person change their own message's text.
+ * person change their own message's text. `onInterrupt`: the message waits for the
+ * thread's working agent, which this stops so it goes now.
  */
 export function MessageView({
   message,
@@ -25,6 +27,7 @@ export function MessageView({
   reactions,
   decision,
   onEdit,
+  onInterrupt,
   children,
 }: {
   message: Message;
@@ -33,6 +36,7 @@ export function MessageView({
   reactions?: Reaction[];
   decision?: DecisionHandlers;
   onEdit?: (body: string) => void;
+  onInterrupt?: () => Promise<unknown>;
   children?: ReactNode;
 }) {
   const t = useT();
@@ -94,7 +98,13 @@ export function MessageView({
   }
 
   return (
-    <PersonMessage message={message} names={names} reactions={reactions} onEdit={message.authorId === me ? onEdit : undefined}>
+    <PersonMessage
+      message={message}
+      names={names}
+      reactions={reactions}
+      onEdit={message.authorId === me ? onEdit : undefined}
+      onInterrupt={onInterrupt}
+    >
       {children}
     </PersonMessage>
   );
@@ -106,12 +116,14 @@ function PersonMessage({
   names,
   reactions,
   onEdit,
+  onInterrupt,
   children,
 }: {
   message: Message;
   names: Names;
   reactions?: Reaction[];
   onEdit?: (body: string) => void;
+  onInterrupt?: () => Promise<unknown>;
   children?: ReactNode;
 }) {
   const t = useT();
@@ -191,6 +203,7 @@ function PersonMessage({
           )}
         </div>
       )}
+      {onInterrupt && draft === null && <QueuedLine onInterrupt={onInterrupt} />}
       <Reactions reactions={reactions} />
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
     </div>
