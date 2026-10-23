@@ -22,6 +22,7 @@ import type {
   Invite,
   Me,
   Member,
+  MarkMemoryInput,
   MemoryEntry,
   Message,
   Project,
@@ -525,6 +526,11 @@ export class ApiClient {
 
   async putMemory(projectId: string, name: string, input: PutMemoryInput) {
     const path = `${projectPath(projectId)}/memory/${encodeURIComponent(name)}`;
+    return (await this.request<{ memory: MemoryEntry }>(path, { method: "PUT", body: input })).memory;
+  }
+
+  async markMemory(projectId: string, name: string, input: MarkMemoryInput) {
+    const path = `${projectPath(projectId)}/memory/${encodeURIComponent(name)}/mark`;
     return (await this.request<{ memory: MemoryEntry }>(path, { method: "PUT", body: input })).memory;
   }
 

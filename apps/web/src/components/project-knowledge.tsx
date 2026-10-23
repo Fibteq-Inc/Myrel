@@ -2,7 +2,7 @@ import type { MessageKey } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { MEMORY_INDEX, type MemoryEntry } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, FolderOpen, Plus, ScrollText, Trash2, Upload } from "lucide-react";
+import { Brain, Check, FolderOpen, Plus, ScrollText, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, filesQuery, instructionsQuery, memoryQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton, Input } from "../lib/ui";
@@ -229,7 +229,7 @@ function MemoryTab({ projectId }: { projectId: string }) {
           editing === m.name ? (
             <MemoryEditor key={m.name} projectId={projectId} initial={m} onDone={() => setEditing(null)} />
           ) : (
-            <MemoryCard key={m.name} entry={m} onEdit={() => setEditing(m.name)} />
+            <MemoryCard key={m.name} projectId={projectId} entry={m} onEdit={() => setEditing(m.name)} />
           ),
         )}
       </div>
@@ -237,23 +237,56 @@ function MemoryTab({ projectId }: { projectId: string }) {
   );
 }
 
-function MemoryCard({ entry, onEdit }: { entry: MemoryEntry; onEdit: () => void }) {
+function MemoryCard({ projectId, entry, onEdit }: { projectId: string; entry: MemoryEntry; onEdit: () => void }) {
   const { t, locale } = useI18n();
+  const confirm = useConfirm();
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: memoryQuery(projectId).queryKey });
+  const date = (iso: string) => new Date(iso).toLocaleDateString(locale);
+  const stale = entry.status === "stale";
+  const checked = entry.verifiedAt && entry.verifiedAt > entry.updatedAt ? entry.verifiedAt : null;
+  const keep = useMutation({ mutationFn: () => api.markMemory(projectId, entry.name, { status: "ok" }), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: () => api.deleteMemory(projectId, entry.name), onSuccess: refresh });
   return (
-    <button
-      type="button"
-      onClick={onEdit}
-      className="flex flex-col gap-1 rounded-xl border border-edge bg-raised px-3.5 py-3 text-left hover:border-edge-strong"
-    >
-      <span className="flex items-center gap-2">
-        <span className="font-mono text-[13px] font-medium">{entry.name}</span>
-        <span className="ml-auto text-xs text-subtle">
-          {entry.updatedByKind === "agent" ? "Myrel" : t("common.member")} · {new Date(entry.updatedAt).toLocaleDateString(locale)}
+    <div className={`flex flex-col rounded-xl border bg-raised ${stale ? "border-warn-line" : "border-edge hover:border-edge-strong"}`}>
+      <button type="button" onClick={onEdit} className="flex flex-col gap-1 px-3.5 py-3 text-left">
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-[13px] font-medium">{entry.name}</span>
+          <span className="ml-auto text-xs text-subtle">
+            {entry.updatedByKind === "agent" ? "Myrel" : t("common.member")} · {date(entry.updatedAt)}
+            {checked && ` · ${t("knowledge.memoryChecked", { date: date(checked) })}`}
+          </span>
         </span>
-      </span>
-      {entry.description && <span className="text-[13px] text-muted">{entry.description}</span>}
-      <span className="line-clamp-3 whitespace-pre-wrap text-[13px] text-body">{entry.content}</span>
-    </button>
+        {entry.description && <span className="text-[13px] text-muted">{entry.description}</span>}
+        <span className="line-clamp-3 whitespace-pre-wrap text-[13px] text-body">{entry.content}</span>
+      </button>
+      {stale && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-warn-line bg-warn-soft px-3.5 py-2">
+          <TriangleAlert size={14} className="flex-none text-warn" aria-hidden="true" />
+          <span className="min-w-0 flex-1 text-[13px] text-body">
+            <span className="font-medium text-warn">{t("knowledge.memoryStale")}</span>
+            {entry.staleReason && `: ${entry.staleReason}`}
+          </span>
+          <GhostButton type="button" onClick={() => keep.mutate()} disabled={keep.isPending}>
+            <Check size={14} aria-hidden="true" />
+            {t("knowledge.memoryStillTrue")}
+          </GhostButton>
+          <GhostButton
+            type="button"
+            className="text-bad"
+            disabled={remove.isPending}
+            onClick={async () => {
+              if (await confirm({ title: t("knowledge.deleteMemoryConfirm", { name: entry.name }), action: t("knowledge.delete"), danger: true }))
+                remove.mutate();
+            }}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            {t("knowledge.delete")}
+          </GhostButton>
+        </div>
+      )}
+      {(keep.error || remove.error) && <p className="px-3.5 pb-2 text-[13px] text-bad">{errorMessage(keep.error ?? remove.error, t)}</p>}
+    </div>
   );
 }
 
@@ -264,11 +297,11 @@ function MemoryEditor({
   onDone,
 }: {
   projectId: string;
-  initial: { name: string; description: string; content: string };
+  initial: { name: string; description: string; content: string; previousContent?: string | null; previousAt?: string | null };
   isNew?: boolean;
   onDone: () => void;
 }) {
-  const t = useT();
+  const { t, locale } = useI18n();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [name, setName] = useState(initial.name);
@@ -322,6 +355,17 @@ function MemoryEditor({
         aria-label={t("knowledge.memoryContent")}
         className="w-full resize-y rounded-lg border border-edge bg-panel p-3 font-mono text-[12.5px] text-fg outline-none focus:border-accent"
       />
+      {initial.previousContent != null && initial.previousAt && (
+        <details className="rounded-lg border border-edge bg-panel px-3 py-2 text-[13px]">
+          <summary className="cursor-pointer text-muted">
+            {t("knowledge.memoryPrevious", { date: new Date(initial.previousAt).toLocaleDateString(locale) })}
+          </summary>
+          <pre className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap font-mono text-[12.5px] text-body">{initial.previousContent}</pre>
+          <GhostButton type="button" className="mt-1" onClick={() => setContent(initial.previousContent ?? "")}>
+            {t("knowledge.memoryRestorePrevious")}
+          </GhostButton>
+        </details>
+      )}
       {(save.error || remove.error) && <p className="text-[13px] text-bad">{errorMessage(save.error ?? remove.error, t)}</p>}
       <div className="flex items-center gap-2">
         {!isNew && (

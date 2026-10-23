@@ -19,6 +19,17 @@ Notes Myrel keeps across tasks, so you don't explain the same thing twice: decis
 
 - **MEMORY** is the short index every task reads first.
 - Choose **New** to add a note yourself, with a name, a one-line description and the content.
+- Each note shows who last wrote it and when. Myrel sees those dates too, so it knows how old a note is.
+
+### Notes that may be out of date
+
+When Myrel finds a note that no longer matches the project and can't tell what is right, it doesn't delete it. It marks it **May be stale** with the reason, and the note gets a yellow strip.
+
+- Choose **Still true** if the note is right after all.
+- Choose **Delete** if it no longer applies.
+- To fix it, open the note, change it and choose **Save**.
+
+Myrel only deletes a note you agreed to remove. When a note changes, its previous version is kept: open the note and expand **Previous version** to see it, or choose **Bring this version back** and **Save** to undo the change.
 
 ## Files
 

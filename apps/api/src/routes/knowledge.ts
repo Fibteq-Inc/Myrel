@@ -1,5 +1,6 @@
 import {
   isValidFilePath,
+  MarkMemoryInput,
   MAX_FILE_SIZE,
   MemoryName,
   normalizeFilePath,
@@ -46,6 +47,12 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     if (!name.success) return c.json({ error: "invalid_name", issues: name.error.issues }, 400);
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     return c.json({ memory: await (await agent(c)).putMemory(name.data, input.data, by(c)) });
+  })
+  .put("/:id/memory/:name/mark", member, async (c) => {
+    const input = MarkMemoryInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const memory = await (await agent(c)).markMemory(c.req.param("name"), input.data);
+    return memory ? c.json({ memory }) : c.json({ error: "not_found" }, 404);
   })
   .delete("/:id/memory/:name", member, async (c) => {
     const deleted = await (await agent(c)).deleteMemory(c.req.param("name"));

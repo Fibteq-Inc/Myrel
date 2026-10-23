@@ -36,6 +36,10 @@ export const MemoryName = z
   .max(80)
   .regex(/^[\p{L}\p{N}][\p{L}\p{N} _.-]*$/u, "Use letters, numbers, spaces, dots, dashes or underscores");
 
+/** `stale`: someone found the note may no longer be true; it stays until a person deletes or fixes it. */
+export const MemoryStatus = z.enum(["ok", "stale"]);
+export type MemoryStatus = z.infer<typeof MemoryStatus>;
+
 export const MemoryEntry = z.object({
   name: MemoryName,
   /** One line saying when to read it. */
@@ -44,11 +48,26 @@ export const MemoryEntry = z.object({
   updatedAt: Timestamp,
   updatedByKind: AuthorKind,
   updatedBy: z.string(),
+  status: MemoryStatus.default("ok"),
+  /** Why it was marked stale. */
+  staleReason: z.string().max(300).nullable().default(null),
+  /** When someone last checked it still holds, without changing it. */
+  verifiedAt: Timestamp.nullable().default(null),
+  /** The content before the last change, so a bad rewrite can be undone. */
+  previousContent: z.string().nullable().default(null),
+  previousAt: Timestamp.nullable().default(null),
 });
 export type MemoryEntry = z.infer<typeof MemoryEntry>;
 
 export const PutMemoryInput = MemoryEntry.pick({ description: true, content: true });
 export type PutMemoryInput = z.infer<typeof PutMemoryInput>;
+
+/** Marks a note checked (still true) or stale (may no longer be true, with why). */
+export const MarkMemoryInput = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("ok") }),
+  z.object({ status: z.literal("stale"), reason: z.string().trim().min(1).max(300) }),
+]);
+export type MarkMemoryInput = z.infer<typeof MarkMemoryInput>;
 
 export const Instructions = z.object({
   text: z.string().max(MAX_INSTRUCTIONS_LENGTH),
