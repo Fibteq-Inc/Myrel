@@ -115,6 +115,8 @@ export const projects = sqliteTable("projects", {
   cliModels: text("cli_models"),
   /** Where tasks run: auto, local or cloud (see TaskTarget in @myrel/protocol). */
   taskTarget: text("task_target").notNull().default("auto"),
+  /** The CLI cloud turns run with (CloudCli in @myrel/protocol); null = OpenCode. */
+  cloudCli: text("cloud_cli"),
   /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
   activeCount: integer("active_count").notNull().default(0),
   /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */

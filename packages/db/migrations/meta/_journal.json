@@ -211,6 +211,13 @@
       "when": 1792770163600,
       "tag": "0029_project_cli_models",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1792783474054,
+      "tag": "0030_project_cloud_cli",
+      "breakpoints": true
     }
   ]
 }

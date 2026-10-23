@@ -5,9 +5,10 @@ import { z } from "zod";
  * runs commands on its own; Myrel only starts it and reads its output.
  * - opencode: OpenCode, any model (the default, since Myrel is multi-model).
  * - claude-code: Claude Code (`claude -p`), Claude models only.
+ * - codex: Codex CLI (`codex exec`), OpenAI-compatible models with the Responses API.
  * - shell: no model; the prompt is a bash script. For running tests or a build.
  */
-export const HarnessId = z.enum(["opencode", "claude-code", "shell"]);
+export const HarnessId = z.enum(["opencode", "claude-code", "codex", "shell"]);
 export type HarnessId = z.infer<typeof HarnessId>;
 
 /** How the harness reaches its model. The key itself is a secret and travels separately. */

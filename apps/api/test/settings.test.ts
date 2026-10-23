@@ -131,8 +131,13 @@ describe("project settings", () => {
       model: "claude-opus-5-5",
       keyId: aliceKey.id,
       taskTarget: "auto",
+      cloudCli: "opencode",
       cliModels: {},
     });
+    const claude = await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "claude" }));
+    expect(claude.settings.cloudCli).toBe("claude");
+    expect((await patch(alice.token, { cloudCli: "gemini" })).status).toBe(400);
+    expect((await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "opencode" }))).settings.cloudCli).toBe("opencode");
     const cloud = await json<{ settings: ProjectSettings }>(patch(alice.token, { taskTarget: "cloud" }));
     expect(cloud.settings.taskTarget).toBe("cloud");
     expect((await patch(alice.token, { taskTarget: "moon" })).status).toBe(400);

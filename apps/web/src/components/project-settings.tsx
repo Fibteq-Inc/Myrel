@@ -2,6 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import {
   type CliId,
   type CliModelDefaults,
+  type CloudCli,
   effortsFor,
   type InviteRole,
   type ProjectRole,
@@ -226,15 +227,17 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
   const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
   const [name, setName] = useState(settings.name);
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
+  const [cloudCli, setCloudCli] = useState<CloudCli>(settings.cloudCli);
   useEffect(() => {
     setName(settings.name);
     setTaskTarget(settings.taskTarget);
+    setCloudCli(settings.cloudCli);
   }, [settings]);
   const save = useSaveSettings(projectId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate({ name: name.trim(), taskTarget });
+    if (name.trim()) save.mutate({ name: name.trim(), taskTarget, cloudCli });
   }
 
   return (
@@ -251,6 +254,13 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
             <option value="auto">{t("projectSettings.taskTarget.auto")}</option>
             <option value="local">{t("projectSettings.taskTarget.local")}</option>
             <option value="cloud">{t("projectSettings.taskTarget.cloud")}</option>
+          </Select>
+        </Field>
+        <Field label={t("projectSettings.cloudCli")} hint={t("projectSettings.cloudCliHint")}>
+          <Select value={cloudCli} onChange={(e) => setCloudCli(e.target.value as CloudCli)} disabled={!canManage}>
+            <option value="opencode">{t("projectSettings.cloudCli.opencode")}</option>
+            <option value="claude">{t("projectSettings.cloudCli.claude")}</option>
+            <option value="codex">{t("projectSettings.cloudCli.codex")}</option>
           </Select>
         </Field>
       </Section>
