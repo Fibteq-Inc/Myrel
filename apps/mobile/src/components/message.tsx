@@ -10,6 +10,7 @@ import {
 import { CircleAlert, Paperclip } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { surelyLong } from "../lib/fold";
 import { colors, radius } from "../theme";
 import { ArtifactCards } from "./artifact-card";
 import { Collapsible } from "./collapsible";
@@ -102,7 +103,7 @@ export function MessageView({
       {!mine && <Text style={styles.author}>{names[message.authorId] ?? t("common.member")}</Text>}
       {!!message.body && (
         <View style={styles.bubble}>
-          <Collapsible height={BUBBLE_LINE * 10}>
+          <Collapsible height={BUBBLE_LINE * 10} long={surelyLong(message.body, 10)}>
             <Text selectable style={styles.bubbleText}>
               {message.body}
             </Text>
@@ -122,7 +123,11 @@ export function MessageView({
  */
 function FoldIfLong({ body, children }: { body: string; children: ReactNode }) {
   if (body.includes("```" + DECISION_LANG)) return children;
-  return <Collapsible height={MARKDOWN_LINE * 24}>{children}</Collapsible>;
+  return (
+    <Collapsible height={MARKDOWN_LINE * 24} long={surelyLong(body, 24)}>
+      {children}
+    </Collapsible>
+  );
 }
 
 function Attachments({ attachments }: { attachments?: Attachment[] }) {

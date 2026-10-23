@@ -1,6 +1,7 @@
 import type { Message } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
+import { surelyLong } from "../src/lib/fold";
 import { notificationPath } from "../src/lib/push-target";
 import { secureKey } from "../src/lib/secure-key";
 
@@ -62,5 +63,14 @@ describe("notificationPath", () => {
     expect(notificationPath({ projectId: "proj_01ABC", threadId: null })).toBe("/projects/proj_01ABC");
     expect(notificationPath({ projectId: "../evil" })).toBeNull();
     expect(notificationPath(null)).toBeNull();
+  });
+});
+
+describe("surelyLong", () => {
+  it("folds up front only text far past the limit", () => {
+    expect(surelyLong("short note", 10)).toBe(false);
+    expect(surelyLong("line\n".repeat(15), 10)).toBe(false);
+    expect(surelyLong("line\n".repeat(25), 10)).toBe(true);
+    expect(surelyLong("a".repeat(45 * 21), 10)).toBe(true);
   });
 });
