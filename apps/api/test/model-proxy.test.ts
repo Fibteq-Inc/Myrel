@@ -196,7 +196,7 @@ describe("proxyModel with the Responses API (Codex)", () => {
       'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"hi"}\n\n' +
       'event: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-x","usage":{"input_tokens":2000,"input_tokens_details":{"cached_tokens":1000},"output_tokens":100}}}\n\n';
     const upstream = new Response(sse, { headers: { "content-type": "text/event-stream" } });
-    const body = { model: "gpt-x", stream: true, input: [] };
+    const body = { model: "gpt-x", stream: true, input: [], store: false };
     const { res, seen, costs, settle } = run(upstream, body, "openai", prices, url);
     expect(await (await res).text()).toBe(sse);
     await settle();
@@ -216,6 +216,9 @@ describe("proxyModel with the Responses API (Codex)", () => {
     for (const extra of [
       { background: true },
       { store: true },
+      // The provider keeps the response unless told not to.
+      { store: undefined },
+      { store: null },
       { previous_response_id: "resp_1" },
       { conversation: "conv_1" },
       { tools: [...codexTools, { type: "web_search" }] },
@@ -223,7 +226,7 @@ describe("proxyModel with the Responses API (Codex)", () => {
       { tools: [{ type: "namespace", tools: [{ type: "file_search" }] }] },
       { tools: [{ type: "mcp", server_url: "https://x.test" }] },
     ]) {
-      const { res, seen } = run(Response.json({}), { model: "gpt-x", input: [], ...extra }, "openai", prices, url);
+      const { res, seen } = run(Response.json({}), { model: "gpt-x", input: [], store: false, ...extra }, "openai", prices, url);
       expect((await res).status, JSON.stringify(extra)).toBe(400);
       expect(seen).toEqual([]);
     }
@@ -231,7 +234,7 @@ describe("proxyModel with the Responses API (Codex)", () => {
 
   it("prices a JSON response from its usage", async () => {
     const upstream = Response.json({ model: "gpt-x", usage: { input_tokens: 1000, output_tokens: 200 } });
-    const { res, costs, settle } = run(upstream, { model: "gpt-x", input: [] }, "openai", prices, url);
+    const { res, costs, settle } = run(upstream, { model: "gpt-x", input: [], store: false }, "openai", prices, url);
     await res;
     await settle();
     expect(costs).toEqual([0.006]);
