@@ -12,6 +12,19 @@ pnpm --filter @myrel/docs deploy    # build and upload to the myrel-docs Worker 
 
 Pages are Markdown in `src/content/docs/`; the sidebar is in `astro.config.mjs`.
 
+Write each page for someone using Myrel, not for someone building it: what to do, step by step,
+with the exact labels from the app. Only describe what is released.
+
+## Walkthroughs and demos
+
+- `<Walkthrough name="quickstart" steps={[...]} />` (src/components/Walkthrough.astro) is a
+  click-through tour. Its screenshots and the spot to click on each one come from
+  `scripts/screenshots.mjs` (`src/assets/walkthroughs/<name>/`, `targets.json`); the page only
+  gives each step's title and text, one per screenshot.
+- `<ArcadeDemo id="..." title="..." />` embeds an [Arcade](https://www.arcade.software) demo
+  recorded on Arcade. Nothing loads from Arcade until the reader starts it; on phones it opens
+  full screen.
+
 ## Deploying with Workers Builds
 
 The `myrel-docs` Worker can deploy on every merge through Cloudflare Workers Builds:

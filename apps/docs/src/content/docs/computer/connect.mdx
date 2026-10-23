@@ -1,0 +1,41 @@
+---
+title: Connect a computer
+description: Let tasks run in folders on your machine with your own coding CLI.
+---
+
+import Walkthrough from "../../../components/Walkthrough.astro";
+
+Tasks can run on your own computer instead of the cloud. They work in folders you choose, with the coding CLI you already use and pay for (Claude Code, Codex CLI, Antigravity CLI, OpenCode or Hermes Agent). Your CLI's login never leaves your computer, and these tasks don't count toward your plan's limits.
+
+The bridge between Myrel and your computer is a small program called **myrel-runner**.
+
+## Before you start
+
+- Node.js 22 or newer
+- At least one supported CLI installed and signed in. See [Choose a coding CLI](/computer/clis/).
+
+:::tip[Desktop app]
+The desktop app has myrel-runner built in. Open **Devices** → **This computer** → **Connect this computer** and skip the terminal steps below.
+:::
+
+<Walkthrough
+  name="computer"
+  label="Connect a computer walkthrough"
+  steps={[
+    { title: "Start pairing", body: "Open <strong>Devices</strong> in the left rail and choose <strong>Connect a computer</strong>." },
+    { title: "Run the two commands", body: "Copy the first command and run it in a terminal on the computer; the code works once and expires in 10 minutes. Then run the second one, <code>npx myrel-runner service install</code>, so the runner keeps going in the background and starts when you log in." },
+    { title: "Share a folder", body: "The computer appears under <strong>Your computers</strong>. Choose <strong>Add folder</strong> and pick the folder a project may work in. Your home folder and the disk root cannot be shared." },
+    { title: "Give the project its folder", body: "In the project, choose the folder button at the top right and pick the shared folder and the CLI. The green dot shows the computer is online." },
+  ]}
+/>
+
+## Check it works
+
+Ask for something small in the project, like "list the files in this folder". Under the reply you should see **Your computer** and the name of your CLI.
+
+## Next steps
+
+- [Folders and where tasks run](/computer/folders/)
+- [Choose a coding CLI](/computer/clis/)
+- [Approve access](/computer/approvals/)
+- [Update and configure the runner](/computer/runner/)
