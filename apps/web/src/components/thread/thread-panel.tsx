@@ -1,6 +1,6 @@
 import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { decisionPicks, parsePlanUpdate, planChecklist } from "@myrel/protocol";
+import { decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -351,6 +351,8 @@ function Conversation({
   const active = !!state.active[thread.id];
   const last = messages.at(-1);
   const working = thread.status === "working" && !thread.resolved;
+  // Messages the working agent has not taken in yet: the newest says so, with a way to send them now.
+  const waiting = messages.findLast((m) => waitsForAgent(m, thread));
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
   const planAnchor = (id: string) => `plan-${id}`;
@@ -422,6 +424,7 @@ function Conversation({
                 reactions={state.reactions[m.id]}
                 decision={{ answer: answers.get(m.id), onChoose: choose }}
                 onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
+                onInterrupt={m.id === waiting?.id ? () => api.interruptThread(project.id, thread.id) : undefined}
               >
                 {m.artifacts?.length ? (
                   <ArtifactCards

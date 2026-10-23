@@ -370,6 +370,14 @@ export const projectRoutes = new Hono<AppEnv>()
     const cancelled = await agent.cancelTask(c.req.param("taskId"));
     return cancelled.ok ? c.json({ ok: true }) : c.json({ error: "cannot_cancel", message: cancelled.error }, 409);
   })
+  // Stops the thread's running turn so the messages waiting for it go now.
+  .post("/:id/threads/:threadId/interrupt", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    const done = await agent.interrupt();
+    return done.ok ? c.json({ ok: true }) : c.json({ error: "cannot_interrupt", message: done.error }, 409);
+  })
   // The local folder this project works in, on one of the user's computers.
   .get("/:id/workspace", async (c) => {
     const id = c.req.param("id");
