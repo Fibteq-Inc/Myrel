@@ -13,7 +13,7 @@ Connectors give Myrel tools from other services, through MCP servers. With a Sen
 ## Add a connector
 
 - **Ready to connect** lists services you can add in one step.
-- **Browse connectors** searches the public MCP Registry.
+- **Browse connectors** searches the public MCP Registry. Servers marked **Official** are the service's own, checked by Myrel; the badge never comes from what a server says about itself, and a connector keeps it only while its address matches.
 - **Add connector** adds any MCP server by hand:
   - **Type**: a remote server (its URL) or a command
   - **Sign-in method**: OAuth or headers

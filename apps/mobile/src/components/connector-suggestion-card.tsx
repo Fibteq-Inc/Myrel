@@ -4,7 +4,7 @@ import type { ConnectorOffer, ConnectorSuggestion } from "@myrel/protocol";
 import { useMutation } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import { CircleCheck, CircleSlash, Plug } from "lucide-react-native";
+import { CircleCheck, CircleSlash, Plug, ShieldCheck } from "lucide-react-native";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { platform } from "../lib/platform";
@@ -84,9 +84,17 @@ export function ConnectorSuggestionCard({
                   <Text style={styles.iconText}>{offer.name.slice(0, 1).toUpperCase()}</Text>
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {offer.name}
-                  </Text>
+                  <View style={styles.nameRow}>
+                    <Text style={[styles.name, { flexShrink: 1 }]} numberOfLines={1}>
+                      {offer.name}
+                    </Text>
+                    {offer.official && (
+                      <View style={styles.official} accessibilityLabel={t("connectors.officialHint", { name: offer.name })}>
+                        <ShieldCheck size={12} color={colors.ok} />
+                        <Text style={styles.officialText}>{t("connectors.official")}</Text>
+                      </View>
+                    )}
+                  </View>
                   {!!offer.description && (
                     <Text style={styles.description} numberOfLines={2}>
                       {offer.description}
@@ -159,6 +167,9 @@ const useStyles = makeStyles((colors) =>
     icon: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.hover, alignItems: "center", justifyContent: "center" },
     iconText: { color: colors.muted, fontSize: 15, fontWeight: "600" },
     name: { color: colors.fg, fontSize: 15, fontWeight: "600" },
+    nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+    official: { flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0 },
+    officialText: { color: colors.ok, fontSize: 12, fontWeight: "600" },
     description: { color: colors.muted, fontSize: 13, lineHeight: 18 },
     note: { color: colors.subtle, fontSize: 12, lineHeight: 17 },
     warn: { color: colors.warn, fontSize: 14 },

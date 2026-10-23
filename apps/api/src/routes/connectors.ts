@@ -14,9 +14,10 @@ import {
   findConnector,
   freeSlug,
   ownerWhere,
+  presentConnector,
+  presentConnectors,
   readSecrets,
   sealSecrets,
-  toConnector,
 } from "../connectors/store";
 import { canAddConnector } from "../extensions";
 import { type AppEnv, requireUser } from "../middleware";
@@ -38,7 +39,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       const s = await scope(c);
       if (!s) return c.json({ error: "not_found" }, 404);
       const rows = await createDb(c.env.DB).select().from(connectors).where(ownerWhere(s.owner)).orderBy(asc(connectors.createdAt));
-      return c.json({ connectors: rows.map((r) => toConnector(r, s.canEdit)) });
+      return c.json({ connectors: await presentConnectors(c.env, rows, s.canEdit) });
     })
     .post("/", async (c) => {
       const s = await scope(c);
@@ -85,23 +86,23 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
         await createDb(c.env.DB).insert(connectors).values(row);
         try {
           const authorizeUrl = await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id);
-          return c.json({ connector: toConnector(row, true), authorizeUrl }, 201);
+          return c.json({ connector: await presentConnector(c.env, row, true), authorizeUrl }, 201);
         } catch (err) {
           // A server without a sign-in may need none at all (catalog entries don't say): try it as it is.
           const open = await checkConnector(c.env, { ...row, auth: "none" });
           if (open.status === "ok") {
             const next = { ...row, auth: "none" as const, ...open };
             await createDb(c.env.DB).update(connectors).set({ auth: "none", ...open }).where(eq(connectors.id, id));
-            return c.json({ connector: toConnector(next, true) }, 201);
+            return c.json({ connector: await presentConnector(c.env, next, true) }, 201);
           }
           const lastError = err instanceof Error ? err.message : String(err);
           await createDb(c.env.DB).update(connectors).set({ status: "error", lastError }).where(eq(connectors.id, id));
-          return c.json({ connector: toConnector({ ...row, status: "error", lastError }, true) }, 201);
+          return c.json({ connector: await presentConnector(c.env, { ...row, status: "error", lastError }, true) }, 201);
         }
       }
       Object.assign(row, await checkConnector(c.env, row));
       await createDb(c.env.DB).insert(connectors).values(row);
-      return c.json({ connector: toConnector(row, true) }, 201);
+      return c.json({ connector: await presentConnector(c.env, row, true) }, 201);
     })
     .patch("/:connectorId", async (c) => {
       const s = await scope(c);
@@ -164,7 +165,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       }
       const { id: _, ...set } = next;
       await createDb(c.env.DB).update(connectors).set(set).where(eq(connectors.id, row.id));
-      return c.json({ connector: toConnector(next, true) });
+      return c.json({ connector: await presentConnector(c.env, next, true) });
     })
     .delete("/:connectorId", async (c) => {
       const s = await scope(c);
@@ -185,7 +186,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
         .update(connectors)
         .set({ status: next.status, lastError: next.lastError, tools: next.tools, updatedAt: next.updatedAt })
         .where(and(eq(connectors.id, row.id), ownerWhere(s.owner)));
-      return c.json({ connector: toConnector(next, s.canEdit) });
+      return c.json({ connector: await presentConnector(c.env, next, s.canEdit) });
     })
     /** Sign in (again) to an OAuth connector: the link to open in the browser. */
     .post("/:connectorId/authorize", async (c) => {

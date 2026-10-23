@@ -79,6 +79,8 @@ export const Connector = z.object({
   /** Whether the caller may change it. */
   canEdit: z.boolean(),
   createdAt: z.iso.datetime(),
+  /** Set when its address is an official catalog server's (OFFICIAL_CATALOG); changing the address drops it. */
+  official: z.object({ id: z.string(), title: z.string(), iconUrl: z.string().nullable() }).nullable().default(null),
 });
 export type Connector = z.infer<typeof Connector>;
 
@@ -241,8 +243,8 @@ export const CatalogConnector = z.object({
   auth: z.enum(["oauth", "headers"]),
   headerHint: z.object({ name: z.string(), placeholder: z.string() }).nullable(),
   category: CatalogCategory,
-  /** One of the well-known services Myrel lists first. */
-  popular: z.boolean(),
+  /** The service's own server, checked by Myrel (OFFICIAL_CATALOG); never what the server says of itself. */
+  official: z.boolean(),
 });
 export type CatalogConnector = z.infer<typeof CatalogConnector>;
 
@@ -258,11 +260,12 @@ export const CatalogPage = z.object({
 export type CatalogPage = z.infer<typeof CatalogPage>;
 
 /**
- * Registry names of the services' own servers, listed first in this order, with their category.
- * The registry has thousands of entries, many of them tests or unofficial copies, so these are
- * picked by hand.
+ * Registry names of the services' own servers, shown as official and listed first in this order,
+ * with their category. The registry has thousands of entries, many of them tests or unofficial
+ * copies, and anyone can call their server "official", so these are checked and picked by hand:
+ * add one only after confirming the service itself publishes it (its docs link to the address).
  */
-export const POPULAR_CATALOG: { id: string; category: CatalogCategory }[] = [
+export const OFFICIAL_CATALOG: { id: string; category: CatalogCategory }[] = [
   { id: "com.notion/mcp", category: "productivity" },
   { id: "app.linear/linear", category: "productivity" },
   { id: "com.atlassian/atlassian-mcp-server", category: "productivity" },
@@ -286,4 +289,4 @@ export const POPULAR_CATALOG: { id: string; category: CatalogCategory }[] = [
   { id: "ai.exa/exa", category: "search" },
   { id: "com.microsoft/microsoft-learn-mcp", category: "search" },
 ];
-export const POPULAR_CATALOG_IDS = POPULAR_CATALOG.map((p) => p.id);
+export const OFFICIAL_CATALOG_IDS = OFFICIAL_CATALOG.map((p) => p.id);

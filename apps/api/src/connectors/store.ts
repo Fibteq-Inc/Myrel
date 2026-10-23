@@ -2,6 +2,7 @@ import { createDb, schema } from "@myrel/db";
 import { type Connector, connectorSlug, type ConnectorScope } from "@myrel/protocol";
 import { and, eq, inArray } from "drizzle-orm";
 import { decryptSecret, encryptSecret } from "../crypto";
+import { type OfficialMark, officialMarks, sameAddress } from "./catalog";
 import { probeConnector } from "./client";
 import { accessToken } from "./oauth";
 
@@ -9,7 +10,7 @@ const { connectors, projectConnectors, runners } = schema;
 
 export type ConnectorRow = typeof connectors.$inferSelect;
 
-export function toConnector(row: ConnectorRow, canEdit: boolean): Connector {
+export function toConnector(row: ConnectorRow, canEdit: boolean, official: OfficialMark | null = null): Connector {
   return {
     id: row.id,
     name: row.name,
@@ -28,7 +29,20 @@ export function toConnector(row: ConnectorRow, canEdit: boolean): Connector {
     tools: row.tools,
     canEdit,
     createdAt: row.createdAt.toISOString(),
+    official,
   };
+}
+
+/** Connectors as the settings show them, each marked official when its address is an official server's. */
+export async function presentConnectors(env: Env, rows: ConnectorRow[], canEdit: boolean): Promise<Connector[]> {
+  const marks = rows.some((r) => r.url) ? await officialMarks(env) : new Map<string, OfficialMark>();
+  return rows.map((r) => toConnector(r, canEdit, (r.transport === "http" && r.url && marks.get(sameAddress(r.url))) || null));
+}
+
+/** One connector as the settings show it (see presentConnectors). */
+export async function presentConnector(env: Env, row: ConnectorRow, canEdit: boolean): Promise<Connector> {
+  const [connector] = await presentConnectors(env, [row], canEdit);
+  return connector!;
 }
 
 /** A connector's headers (http) or environment variables (stdio). Not for OAuth connectors: see connectorHeaders. */

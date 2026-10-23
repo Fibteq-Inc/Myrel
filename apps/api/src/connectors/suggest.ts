@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { CONNECTOR_PRESETS, type ConnectorOffer, createId, POPULAR_CATALOG_IDS } from "@myrel/protocol";
+import { CONNECTOR_PRESETS, type ConnectorOffer, createId, OFFICIAL_CATALOG_IDS } from "@myrel/protocol";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { canAddConnector } from "../extensions";
 import { searchCatalog } from "./catalog";
@@ -28,6 +28,7 @@ function presetOffers(): ConnectorOffer[] {
             auth: p.auth,
             headerHint: p.headerHint ?? null,
             iconUrl: null,
+            official: false,
             featured: p.featured ?? false,
           },
         ]
@@ -61,7 +62,7 @@ function toOffer(e: {
   auth: "oauth" | "headers";
   headerHint: { name: string; placeholder: string } | null;
   iconUrl: string | null;
-  popular?: boolean;
+  official?: boolean;
 }): ConnectorOffer {
   return {
     id: e.id,
@@ -70,8 +71,9 @@ function toOffer(e: {
     url: e.url,
     auth: e.auth,
     headerHint: e.headerHint,
-    // Only the well-known services load an icon of their own: the rest would tell their hosts who opened the thread.
-    iconUrl: e.popular ? e.iconUrl : null,
+    // Only the official servers load an icon of their own: the rest would tell their hosts who opened the thread.
+    iconUrl: e.official ? e.iconUrl : null,
+    official: !!e.official,
     featured: false,
   };
 }
@@ -81,7 +83,7 @@ export async function findOffers(env: Env, ids: string[]): Promise<ConnectorOffe
   const presets = presetOffers();
   const catalogIds = ids.filter((id) => !id.startsWith(PRESET_PREFIX));
   const rows = catalogIds.length ? await createDb(env.DB).select().from(connectorCatalog).where(inArray(connectorCatalog.id, catalogIds)) : [];
-  const popular = new Set(POPULAR_CATALOG_IDS);
+  const official = new Set(OFFICIAL_CATALOG_IDS);
   return ids.flatMap((id) => {
     const preset = presets.find((p) => p.id === id);
     if (preset) return [preset];
@@ -91,7 +93,7 @@ export async function findOffers(env: Env, ids: string[]): Promise<ConnectorOffe
       toOffer({
         ...r,
         headerHint: r.headerName ? { name: r.headerName, placeholder: r.headerPlaceholder ?? "" } : null,
-        popular: popular.has(r.id),
+        official: official.has(r.id),
       }),
     ];
   });

@@ -936,9 +936,11 @@ export const en = {
   "connectors.preset.sentry": "Errors, issues and releases.",
   "connectors.preset.postgres": "Read a PostgreSQL database. Runs as a command next to the agent.",
   "connectors.catalog": "Browse connectors",
-  "connectors.catalogDescription": "Remote MCP servers from the official MCP Registry, updated every hour. Servers there are published by their makers; Myrel does not review them.",
+  "connectors.catalogDescription":
+    "Remote MCP servers from the official MCP Registry, updated every hour. Servers there are published by their makers; Myrel reviews only the ones marked Official.",
   "connectors.catalogSearch": "Search Notion, Linear, Stripe…",
-  "connectors.catalogPopular": "Popular",
+  "connectors.official": "Official",
+  "connectors.officialHint": "Myrel checked that this is {name}'s own server.",
   "connectors.catalogEmpty": "No connector matches “{q}”.",
   "connectors.catalogFilling": "The catalog is being filled from the MCP Registry. Check back in a few minutes.",
   "connectors.catalogMore": "Show more",

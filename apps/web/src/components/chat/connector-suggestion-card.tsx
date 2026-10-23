@@ -8,7 +8,7 @@ import { CircleCheck, CircleSlash, KeyRound, LoaderCircle, LogIn, Plug, Sparkles
 import { type FormEvent, useId, useState } from "react";
 import { api, platform } from "../../lib/api";
 import { Button, cn, errorMessage, GhostButton, Input } from "../../lib/ui";
-import { OfferIcon } from "../connectors";
+import { OfferIcon, OfficialBadge } from "../connectors";
 
 /**
  * The thread agent's offer of a connector it needs: one to three services, connected with a click
@@ -107,6 +107,7 @@ export function ConnectorSuggestionCard({
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium text-fg">{offer.name}</span>
                     {offer.featured && <Sparkles size={12} className="flex-none text-accent" aria-hidden="true" />}
+                    {offer.official && <OfficialBadge name={offer.name} />}
                   </div>
                   {offer.description && <p className="line-clamp-2 text-[13px] text-muted">{offer.description}</p>}
                 </div>
