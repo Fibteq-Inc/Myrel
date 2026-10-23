@@ -143,7 +143,7 @@ const useMarkedStyles = makeStyles((colors): MarkedStyles => ({
   tableCell: { borderColor: colors.line, padding: 6 },
 }));
 
-/** Agent message markdown. */
+/** Agent message markdown, also used for .md files in the file screen. */
 export function MessageMarkdown({
   body,
   decision,
