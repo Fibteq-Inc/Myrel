@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
-import { ADAPTERS, type CliAdapter, modelFlags, type ParseState } from "./clis";
+import { ADAPTERS, type CliAdapter, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { downloadSkills, type RunSkills } from "./skills";
 import { threadWorktree, type Worktree } from "./worktrees";
@@ -13,7 +13,7 @@ type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
 
 /** The CLIs whose sessions a thread's next turn continues. */
-const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "hermes", "cursor", "muse"]);
+const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "hermes", "cursor", "muse", "kimi"]);
 /** Results are cut to fit the protocol's limit. */
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
@@ -235,7 +235,8 @@ export class TaskRunner {
     if (adapter.acp) {
       // An ACP agent gets the prompt in a session; the turn ends its stdin once the prompt is answered.
       const io = { write: (line: string) => void child.stdin!.write(line), end: () => child.stdin!.end() };
-      state.acp = new AcpTurn(io, { cwd, prompt: input, mcpServers: agent.mcpServers ?? [], resume, ...adapter.acp(config.access) }, state);
+      const session = { cwd, prompt: input, mcpServers: agent.mcpServers ?? [], resume, dirs, ...adapter.acp(config.access, safeModel(task.model)) };
+      state.acp = new AcpTurn(io, session, state);
       state.acp.start();
     } else child.stdin!.end(promptFile ? "" : input);
 

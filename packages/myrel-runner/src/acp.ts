@@ -21,6 +21,15 @@ export type AcpTurnOptions = {
   mode?: string;
   /** Whether to allow a step the agent asks permission for. Nobody can answer mid-run, so this decides. */
   allow: boolean;
+  /**
+   * The title the agent gives a tool of one of the run's MCP servers, when that title starts with the
+   * server's name: such tools are allowed at any access, like the other CLIs pre-approve them.
+   */
+  serverTools?: (server: string) => string;
+  /** Session config options to set before the prompt (model, thinking level), in order. One the agent refuses is skipped. */
+  config?: Array<{ id: string; value: string }>;
+  /** Other folders the session may work in, for an agent that takes them. */
+  dirs?: string[];
 };
 
 type Message = { jsonrpc?: string; id?: number | string; method?: string; params?: unknown; result?: unknown; error?: { code?: number; message?: string } };
@@ -39,10 +48,16 @@ export class AcpTurn {
   ) {}
 
   start(): void {
-    this.call("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, () => {
-      const { cwd, mcpServers, resume } = this.opts;
+    this.call("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, (init) => {
+      const { cwd, mcpServers, resume, dirs = [] } = this.opts;
+      const caps = (init as { agentCapabilities?: { sessionCapabilities?: Record<string, unknown> } } | undefined)?.agentCapabilities?.sessionCapabilities;
+      const extra = dirs.length && caps?.additionalDirectories ? { additionalDirectories: dirs } : {};
       if (resume) this.call("session/resume", { sessionId: resume, cwd, mcpServers }, () => this.opened(resume));
-      else this.call("session/new", { cwd, mcpServers }, (r) => this.opened(String((r as { sessionId?: unknown }).sessionId ?? "")));
+      else
+        this.call("session/new", { cwd, mcpServers, ...extra }, (r) => {
+          this.configured(r);
+          this.opened(String((r as { sessionId?: unknown }).sessionId ?? ""));
+        });
     });
   }
 
@@ -80,8 +95,27 @@ export class AcpTurn {
         this.finish();
       });
     };
-    if (this.opts.mode) this.call("session/set_mode", { sessionId, modeId: this.opts.mode }, prompt);
-    else prompt();
+    // Config options one after another, then the prompt. A model or level the agent no longer has is
+    // skipped: the turn runs with its default rather than not at all.
+    const config = [...(this.opts.config ?? [])];
+    const next = () => {
+      const option = config.shift();
+      if (!option) return prompt();
+      this.request("session/set_config_option", { sessionId, configId: option.id, value: option.value }, (m) => {
+        if (!m.error) this.configured(m.result);
+        next();
+      });
+    };
+    if (this.opts.mode) this.call("session/set_mode", { sessionId, modeId: this.opts.mode }, next);
+    else next();
+  }
+
+  /** The model a session or config change reports, as the run's model. */
+  private configured(result: unknown) {
+    const options = (result as { configOptions?: unknown } | undefined)?.configOptions;
+    if (!Array.isArray(options)) return;
+    const model = (options as Array<{ category?: unknown; currentValue?: unknown }>).find((o) => o.category === "model");
+    if (typeof model?.currentValue === "string" && model.currentValue) this.state.model = model.currentValue;
   }
 
   private update(u: Record<string, unknown>) {
@@ -101,17 +135,29 @@ export class AcpTurn {
   /** The agent's own requests: permissions are decided by the run's access; nothing else is offered. */
   private answer(m: Message) {
     if (m.method === "session/request_permission") {
-      const options = ((m.params as { options?: unknown })?.options ?? []) as Array<{ optionId?: unknown; kind?: unknown }>;
-      const pick = options.find((o) => o.kind === (this.opts.allow ? "allow_once" : "reject_once"));
+      const params = (m.params ?? {}) as { options?: unknown; toolCall?: { title?: unknown } };
+      const options = (params.options ?? []) as Array<{ optionId?: unknown; kind?: unknown }>;
+      const allow = this.opts.allow || this.ownTool(params.toolCall?.title);
+      const pick = options.find((o) => o.kind === (allow ? "allow_once" : "reject_once"));
       const outcome = pick ? { outcome: "selected", optionId: pick.optionId } : { outcome: "cancelled" };
       return this.send({ jsonrpc: "2.0", id: m.id, result: { outcome } });
     }
     this.send({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: `${m.method} is not offered by myrel-runner` } });
   }
 
+  /** Whether a permission request is for a tool of one of the run's own MCP servers. */
+  private ownTool(title: unknown): boolean {
+    const { serverTools, mcpServers } = this.opts;
+    return !!serverTools && typeof title === "string" && mcpServers.some((s) => title.startsWith(serverTools(s.name)));
+  }
+
   private call(method: string, params: unknown, then: (result: unknown) => void) {
+    this.request(method, params, (m) => (m.error ? this.fail(m.error.message || `${method} failed`) : then(m.result)));
+  }
+
+  private request(method: string, params: unknown, then: (m: Message) => void) {
     const id = ++this.nextId;
-    this.pending.set(id, (m) => (m.error ? this.fail(m.error.message || `${method} failed`) : then(m.result)));
+    this.pending.set(id, then);
     this.send({ jsonrpc: "2.0", id, method, params });
   }
 

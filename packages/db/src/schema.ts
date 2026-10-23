@@ -403,7 +403,7 @@ export const projectWorkspaces = sqliteTable(
     /** JSON array of other folders on the same runner the agent may work in too. */
     folders: text("folders").notNull().default("[]"),
     /** A CLI Myrel dropped since (e.g. "gemini") may still be stored; such a folder must pick a CLI again. */
-    cli: text("cli", { enum: ["claude", "codex", "antigravity", "opencode", "hermes", "cursor", "muse"] }).notNull(),
+    cli: text("cli", { enum: ["claude", "codex", "antigravity", "opencode", "hermes", "cursor", "muse", "kimi"] }).notNull(),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
