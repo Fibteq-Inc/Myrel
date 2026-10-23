@@ -198,11 +198,13 @@ export function coordinatorPrompt(input: {
     ? ` Each question from a thread agent needs answer_question or ask_person: ${questionItems.map((q) => `[${q.questionId}]`).join(", ")}.`
     : "";
 
+  // What changes least comes first and the time last, so turns share a long prefix for the
+  // provider's prompt cache: a time at the top made every turn's prompt differ from its first line.
   return [
-    `Project: ${input.projectName}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
+    `Project: ${input.projectName}`,
     renderKnowledge(input.knowledge),
-    `## Threads (open ones with their current plan)\n${input.threads.map(renderThreadWithPlan).join("\n") || "(none yet)"}`,
     `## Routines\n${input.routines.map(renderRoutine).join("\n") || "(none)"}`,
+    `## Threads (open ones with their current plan)\n${input.threads.map(renderThreadWithPlan).join("\n") || "(none yet)"}`,
     choosing ? `## The computer's CLIs\n${(input.computerClis ?? []).map(renderCli).join("\n") || "(not reported)"}` : "",
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
     edits.length
@@ -218,6 +220,7 @@ export function coordinatorPrompt(input: {
       ? `## Threads that just finished (tell every open thread that waits on one, with relay_to_thread)\n${finished.join("\n\n")}`
       : "",
     relays.length ? `## Notes already relayed between threads, newest last\n${relays.join("\n")}` : "",
+    `Current time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
     onlyThreadUpdates
       ? `Nothing new in the project chat. Relay only what changes another open thread's work${finished.length ? ", and tell threads waiting on a finished one that it is done" : ""}; otherwise call no tools.`
       : newChat.length

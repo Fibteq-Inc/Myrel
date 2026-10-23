@@ -863,6 +863,24 @@ describe("coordinator and thread agent", () => {
     expect(prompt.trim().split("\n").at(-1)).toContain("[cmsg_A]");
   });
 
+  it("puts the time last in the coordinator's prompt, so turns share a prefix for the prompt cache", () => {
+    const input = {
+      projectName: "P",
+      names: {},
+      chat: [],
+      threads: [],
+      routines: [],
+      inbox: [],
+      knowledge: { instructions: "", memoryIndex: "", memory: [], files: [], moreFiles: 0 },
+      defaultTimezone: "UTC",
+    };
+    const a = coordinatorPrompt({ ...input, now: new Date("2026-10-23T09:30:05Z") });
+    const b = coordinatorPrompt({ ...input, now: new Date("2026-10-23T09:41:17Z") });
+    const timeAt = a.indexOf("Current time:");
+    expect(timeAt).toBeGreaterThan(a.indexOf("## Project chat"));
+    expect(b.slice(0, timeAt)).toBe(a.slice(0, timeAt));
+  });
+
   it("reports a failed coordinator turn in the project chat", async () => {
     setFakeModel(() => {
       throw new Error("should not be called");

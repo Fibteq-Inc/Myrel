@@ -71,6 +71,18 @@ describe("createProvider", () => {
     });
   });
 
+  it("keeps calls with a cache key on one replica and sends none without one", async () => {
+    const f = recordingFetch({ choices: [{ message: { content: "" } }] });
+    const res = createProvider({ FIREWORKS_API_KEY: "fw" }, f.fetchImpl);
+    if (!res.ok) throw new Error(res.reason);
+    await res.provider.chat({ ...request, cacheKey: "proj_1" });
+    await res.provider.chat(request);
+    expect((f.calls[0]!.init.headers as Record<string, string>)["x-session-affinity"]).toBe("proj_1");
+    expect(JSON.parse(f.calls[0]!.init.body as string).user).toBe("proj_1");
+    expect((f.calls[1]!.init.headers as Record<string, string>)["x-session-affinity"]).toBeUndefined();
+    expect(JSON.parse(f.calls[1]!.init.body as string).user).toBeUndefined();
+  });
+
   it("flags an answer cut off at max_tokens", async () => {
     const f = recordingFetch({ choices: [{ finish_reason: "length", message: { content: "" } }] });
     const res = createProvider({ FIREWORKS_API_KEY: "fw" }, f.fetchImpl);

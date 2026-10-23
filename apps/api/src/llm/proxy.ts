@@ -35,7 +35,15 @@ const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-
  */
 export async function proxyModel(
   req: Request,
-  target: { url: string; apiKey: string; kind: "openai" | "anthropic"; model?: string; prices?: Record<string, Price> },
+  target: {
+    url: string;
+    apiKey: string;
+    kind: "openai" | "anthropic";
+    model?: string;
+    prices?: Record<string, Price>;
+    /** Keeps the turn's calls on one replica so the provider's prompt cache hits (see ChatRequest.cacheKey). */
+    cacheKey?: string;
+  },
   onCost: (usd: number | null) => Promise<void>,
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
@@ -44,6 +52,7 @@ export async function proxyModel(
     const v = req.headers.get(name);
     if (v) headers.set(name, v);
   }
+  if (target.cacheKey && target.kind === "openai") headers.set("x-session-affinity", target.cacheKey);
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const text = hasBody ? await req.text() : undefined;
   // An OpenAI-compatible call names its model in the body: only the project's model is paid for here.

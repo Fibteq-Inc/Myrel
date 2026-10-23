@@ -1205,6 +1205,8 @@ export class ProjectAgent extends Agent<Env> {
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
         ],
         maxSteps: 8,
+        // One key per project: its turns share the system prompt, tools and most of the prompt.
+        cacheKey: this.name,
       });
       // People always see that an edit was seen, even when the model skipped the reaction.
       for (const item of inbox) {

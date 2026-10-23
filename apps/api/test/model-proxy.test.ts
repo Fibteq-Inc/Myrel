@@ -62,6 +62,20 @@ describe("proxyModel", () => {
     expect(costs).toEqual([0.002]);
   });
 
+  it("sends the turn's cache key to an OpenAI-compatible provider as session affinity", async () => {
+    const seen: RequestInit[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      seen.push(init);
+      return Response.json({});
+    });
+    const req = () => new Request("https://myrel.test/m", { method: "POST", body: "{}" });
+    const target = { url: "https://up.test/v1/chat/completions", apiKey: "k", cacheKey: "thr_1" };
+    await proxyModel(req(), { ...target, kind: "openai" }, async () => {}, () => {});
+    await proxyModel(req(), { ...target, kind: "anthropic" }, async () => {}, () => {});
+    expect(new Headers(seen[0]!.headers).get("x-session-affinity")).toBe("thr_1");
+    expect(new Headers(seen[1]!.headers).get("x-session-affinity")).toBeNull();
+  });
+
   it("passes a stream through as is, asks for its usage chunk and takes the cost from it", async () => {
     const sse = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":15,"cost":0.00002725}}\n\ndata: [DONE]\n\n';
     const upstream = new Response(

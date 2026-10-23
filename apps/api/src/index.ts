@@ -108,7 +108,14 @@ const app = new Hono<AppEnv>()
     const url = `${model.model.baseUrl.replace(/\/+$/, "")}/${rest}`;
     return proxyModel(
       c.req.raw,
-      { url, apiKey: model.apiKey, kind: model.model.kind, model: model.model.id, prices: { ...DEFAULT_PRICES, ...parsePrices(c.env.LLM_PRICES) } },
+      {
+        url,
+        apiKey: model.apiKey,
+        kind: model.model.kind,
+        model: model.model.id,
+        prices: { ...DEFAULT_PRICES, ...parsePrices(c.env.LLM_PRICES) },
+        cacheKey: threadId.data,
+      },
       (usd) => thread.modelCost(caller.taskId, usd),
       (p) => c.executionCtx.waitUntil(p),
     );
