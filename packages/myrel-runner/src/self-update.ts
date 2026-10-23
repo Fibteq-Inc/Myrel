@@ -7,7 +7,7 @@ import { gunzipSync } from "node:zlib";
 import type { RunnerSettings, RunnerSettingsInput, RunnerUpdates, RunnerUpdateState } from "@myrel/protocol";
 import { readJson, type RunnerConfig, runnerHome, writeJson } from "./config";
 import { serviceBin } from "./service";
-import { PACKAGE_NAME } from "./update";
+import { PACKAGE_PATH } from "./update";
 
 const run = promisify(execFile);
 
@@ -60,7 +60,7 @@ export const FAILED_SHOWN_MS = 24 * 60 * 60 * 1000;
  * returns its bundled CLI (dist/cli.js), without running npm.
  */
 export async function downloadRunner(version: string, registry = "https://registry.npmjs.org"): Promise<Buffer> {
-  const meta = await fetch(`${registry}/${PACKAGE_NAME.replace("/", "%2F")}/${version}`, { signal: AbortSignal.timeout(30_000) });
+  const meta = await fetch(`${registry}/${PACKAGE_PATH}/${version}`, { signal: AbortSignal.timeout(30_000) });
   if (!meta.ok) throw new Error(`npm does not have myrel-runner ${version} (${meta.status}).`);
   const { dist } = (await meta.json()) as { dist?: { tarball?: string; integrity?: string } };
   const integrity = dist?.integrity?.match(/^sha512-([A-Za-z0-9+/=]+)$/)?.[1];

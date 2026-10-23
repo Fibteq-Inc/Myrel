@@ -2,13 +2,15 @@ import { spawn } from "node:child_process";
 import { isNewerRunner } from "@myrel/protocol";
 
 export const PACKAGE_NAME = "@fibteq/myrel-runner";
+/** The package name as the registry's URLs take it (scope slash encoded). */
+export const PACKAGE_PATH = "@fibteq%2Fmyrel-runner";
 
 const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
 /** The version npm installs as latest, or null when npm cannot be reached. */
 export async function latestVersion(registry = "https://registry.npmjs.org"): Promise<string | null> {
   try {
-    const res = await fetch(`${registry}/${PACKAGE_NAME.replace("/", "%2F")}/latest`, {
+    const res = await fetch(`${registry}/${PACKAGE_PATH}/latest`, {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
