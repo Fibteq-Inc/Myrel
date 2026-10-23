@@ -80,7 +80,7 @@ function ChatTab({ owner }: { owner: boolean }) {
   const t = useT();
   const styles = useStyles();
   const { user } = useSession();
-  const { projectId, state, status, send } = useProject();
+  const { projectId, state, status, send, emit } = useProject();
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
   const threads = useMemo(() => threadByCard(state), [state]);
@@ -108,6 +108,7 @@ function ChatTab({ owner }: { owner: boolean }) {
       working={state.active[""] ? (state.progress[""] ?? t("message.thinking")) : null}
       placeholder={t("chat.placeholder")}
       onSend={onSend}
+      onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
       tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
       composer={composer}
       header={asked ? <StarterList projectId={projectId} owner={owner} asked folded /> : undefined}

@@ -23,6 +23,15 @@ export const ClientEvent = z.discriminatedUnion("type", [
      */
     clis: z.array(CliId).max(MAX_THREAD_CLIS).optional(),
   }).refine((e) => e.body.length > 0 || e.attachments.length > 0, "Write something or attach a file"),
+  /**
+   * A person changes the text of their own message. Attachments stay; the text may be empty only when
+   * the message has some. Comes back as `message.updated` with editedAt set.
+   */
+  z.object({
+    type: z.literal("message.edit"),
+    messageId: Message.shape.id,
+    body: z.string().trim().max(MAX_MESSAGE_LENGTH),
+  }),
   /** A person marks a thread resolved (optionally closing it with a reason), or reopens it. */
   z.object({
     type: z.literal("thread.resolve"),
@@ -53,7 +62,7 @@ export type ClientEventInput = z.input<typeof ClientEvent>;
 /** Events the server sends over the project WebSocket. */
 export const ServerEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("message.created"), message: Message }),
-  /** A message's body changed in place (an agent's plan card moving along). Keeps its seq. */
+  /** A message's body changed in place (an agent's plan card moving along, a person's edit). Keeps its seq. */
   z.object({ type: z.literal("message.updated"), message: Message }),
   z.object({
     type: z.literal("message.ack"),

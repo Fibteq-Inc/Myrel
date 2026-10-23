@@ -8,13 +8,13 @@ import {
   type Reaction,
 } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
-import { CircleAlert, FileImage, Paperclip } from "lucide-react-native";
-import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { CircleAlert, FileImage, Paperclip, Pencil } from "lucide-react-native";
+import { type ReactNode, useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { fileKind } from "../lib/files";
 import { surelyLong } from "../lib/fold";
 import { formatBytes } from "../lib/format";
-import { makeStyles, radius, useColors } from "../theme";
+import { makeStyles, radius, useColors, useTheme } from "../theme";
 import { ArtifactCards } from "./artifact-card";
 import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
@@ -32,7 +32,8 @@ const MARKDOWN_LINE = 24;
 /**
  * One message, Claude style: people's messages as bubbles on the right,
  * the assistant's as open text beside its mark, system notes as a banner.
- * `children` renders under the message (e.g. its thread card).
+ * `children` renders under the message (e.g. its thread card). `onEdit` lets the
+ * person change their own message's text.
  */
 export function MessageView({
   message,
@@ -43,6 +44,7 @@ export function MessageView({
   artifacts,
   onLink,
   onOpenArtifact,
+  onEdit,
   children,
 }: {
   message: Message;
@@ -53,6 +55,7 @@ export function MessageView({
   artifacts: Record<string, Artifact>;
   onLink: (href: string) => void;
   onOpenArtifact: (artifactId: string, version?: number) => void;
+  onEdit?: (body: string) => void;
   children?: ReactNode;
 }) {
   const t = useT();
@@ -102,20 +105,112 @@ export function MessageView({
     );
   }
 
-  const mine = message.authorId === me;
+  return (
+    <PersonMessage message={message} names={names} reactions={reactions} onEdit={message.authorId === me ? onEdit : undefined}>
+      {children}
+    </PersonMessage>
+  );
+}
+
+/**
+ * A person's bubble. A tap on their own shows its actions (Edit), which turns it into a text box in
+ * place; long presses stay free for selecting text. An edited one says so, with the time a tap away.
+ */
+function PersonMessage({
+  message,
+  names,
+  reactions,
+  onEdit,
+  children,
+}: {
+  message: Message;
+  names: Names;
+  reactions?: Reaction[];
+  onEdit?: (body: string) => void;
+  children?: ReactNode;
+}) {
+  const t = useT();
+  const colors = useColors();
+  const theme = useTheme();
+  const styles = useStyles();
+  const relativeTime = useRelativeTime();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const mine = !!onEdit;
+  // A message with files may lose its text; one without keeps at least a word.
+  const canSave = draft !== null && (draft.trim().length > 0 || !!message.attachments?.length);
+  const save = () => {
+    if (!canSave) return;
+    if (draft.trim() !== message.body) onEdit?.(draft.trim());
+    setDraft(null);
+    setOpen(false);
+  };
+  const actions = mine || !!message.editedAt;
+
   return (
     <View style={styles.user}>
       {!mine && <Text style={styles.author}>{names[message.authorId] ?? t("common.member")}</Text>}
-      {!!message.body && (
-        <View style={styles.bubble}>
-          <Collapsible height={BUBBLE_LINE * 10} long={surelyLong(message.body, 10)}>
-            <Text selectable style={styles.bubbleText}>
-              {message.body}
-            </Text>
-          </Collapsible>
+      {draft !== null ? (
+        <View style={[styles.bubble, styles.editing]}>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            multiline
+            autoFocus
+            keyboardAppearance={theme}
+            accessibilityLabel={t("message.edit")}
+            style={[styles.bubbleText, styles.editInput]}
+          />
+          <View style={styles.editActions}>
+            <Pressable accessibilityRole="button" onPress={() => setDraft(null)} style={styles.editButton}>
+              <Text style={{ color: colors.muted, fontSize: 14 }}>{t("common.cancel")}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canSave}
+              onPress={save}
+              style={[styles.editButton, styles.saveButton, !canSave && { opacity: 0.5 }]}
+            >
+              <Text style={{ color: colors.ground, fontSize: 14, fontWeight: "600" }}>{t("message.editSave")}</Text>
+            </Pressable>
+          </View>
         </View>
+      ) : (
+        !!message.body && (
+          <Pressable
+            disabled={!actions}
+            onPress={() => setOpen((o) => !o)}
+            accessibilityHint={mine ? t("message.edit") : undefined}
+            style={styles.bubble}
+          >
+            <Collapsible height={BUBBLE_LINE * 10} long={surelyLong(message.body, 10)}>
+              <Text selectable style={styles.bubbleText}>
+                {message.body}
+              </Text>
+            </Collapsible>
+          </Pressable>
+        )
       )}
       <Attachments projectId={message.projectId} attachments={message.attachments} />
+      {draft === null && (open || message.editedAt) && (
+        <View style={styles.meta}>
+          {message.editedAt && (
+            <Text style={styles.time}>
+              {open ? t("message.editedAt", { time: relativeTime(message.editedAt) }) : t("message.edited")}
+            </Text>
+          )}
+          {open && mine && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setDraft(message.body)}
+              style={({ pressed }) => [styles.editLink, pressed && { backgroundColor: colors.hover }]}
+            >
+              <Pencil size={13} color={colors.muted} />
+              <Text style={{ color: colors.muted, fontSize: 13 }}>{t("message.edit")}</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
       <Reactions reactions={reactions} />
       {children && <View style={{ width: "100%" }}>{children}</View>}
     </View>
@@ -231,6 +326,12 @@ const useStyles = makeStyles((colors) =>
       paddingVertical: 10,
     },
     bubbleText: { color: colors.fg, fontSize: 16, lineHeight: BUBBLE_LINE },
+    editing: { width: "85%", borderColor: colors.accentLine, gap: 8 },
+    editInput: { padding: 0, minHeight: BUBBLE_LINE * 2, maxHeight: BUBBLE_LINE * 10, textAlignVertical: "top" },
+    editActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
+    editButton: { borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 },
+    saveButton: { backgroundColor: colors.accent },
+    editLink: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 },
     attachments: { flexDirection: "row", flexWrap: "wrap", gap: 6, maxWidth: "85%" },
     attachment: {
       flexDirection: "row",

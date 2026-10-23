@@ -18,7 +18,7 @@ import { ThreadCard } from "./thread-card";
 /** The project chat: everything said to the coordinator, with a card for each thread it opened. */
 export function ProjectChat({ me, className = "" }: { me: string; className?: string }) {
   const t = useT();
-  const { project, names, state, ready, send } = useProjectContext();
+  const { project, names, state, ready, send, emit } = useProjectContext();
   const chat = projectChat(state);
   const history = useHistoryWindow(chat);
   const choose = useCallback((label: string) => send(label), [send]);
@@ -70,6 +70,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 names={names}
                 reactions={state.reactions[m.id]}
                 decision={{ answer: answers.get(m.id), onChoose: choose }}
+                onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
               >
                 {m.artifacts?.length ? (
                   <ArtifactCards projectId={project.id} refs={m.artifacts} artifacts={state.artifacts} />

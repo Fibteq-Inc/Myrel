@@ -62,7 +62,7 @@ import {
   upkeepDue,
   upkeepNotice,
 } from "./memory-upkeep";
-import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
+import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SEEN_EMOJI, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
 import { answerLine, relayLine } from "./relay-line";
 import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
@@ -90,6 +90,8 @@ type MessageRow = {
   relay: string | null;
   /** JSON array of CliId, or null. */
   clis: string | null;
+  /** When its author last changed the text, or null. */
+  edited_at: string | null;
   created_at: string;
 };
 
@@ -224,6 +226,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "relay")) this.sql`ALTER TABLE messages ADD COLUMN relay TEXT`;
     // Added with picking CLIs per ask.
     if (!columns.some((c) => c.name === "clis")) this.sql`ALTER TABLE messages ADD COLUMN clis TEXT`;
+    // Added with people editing their messages.
+    if (!columns.some((c) => c.name === "edited_at")) this.sql`ALTER TABLE messages ADD COLUMN edited_at TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -356,6 +360,11 @@ export class ProjectAgent extends Agent<Env> {
         }
         if (message.threadId) await this.threadMessageArrived(message, userId);
         else await this.notifyCoordinator({ kind: "message", messageId: message.id });
+        return;
+      }
+      case "message.edit": {
+        const error = await this.editOwnMessage(event.messageId, userId, event.body);
+        if (error) send(connection, { type: "error", code: "cannot_edit", message: error });
         return;
       }
       case "thread.resolve": {
@@ -491,6 +500,30 @@ export class ProjectAgent extends Agent<Env> {
     const message = this.getMessage(id);
     if (message) this.emit({ type: "message.updated", message });
     return message;
+  }
+
+  /**
+   * A person changes the text of their own message. In the project chat the coordinator looks at it
+   * (and marks it seen); in a thread the thread's agent wakes to it. Returns why it was refused, or null.
+   */
+  private async editOwnMessage(id: string, userId: string, body: string): Promise<string | null> {
+    const current = this.getMessage(id);
+    if (!current || current.authorKind !== "user" || current.authorId !== userId) return "You can only edit your own messages.";
+    if (!body && !current.attachments?.length) return "Write something, or keep the old text.";
+    if (body === current.body) return null;
+    const editedAt = new Date().toISOString();
+    this.sql`UPDATE messages SET body = ${body}, edited_at = ${editedAt} WHERE id = ${id}`;
+    const message = this.getMessage(id)!;
+    this.emit({ type: "message.updated", message });
+    if (message.threadId) {
+      // A finished thread is not woken for a changed word; its agent sees the edit when it works again.
+      const thread = this.getThread(message.threadId);
+      if (!thread || thread.resolved) return null;
+      await this.wakeThread(message.threadId, { kind: "message", messageId: id, edited: true });
+    } else {
+      await this.notifyCoordinator({ kind: "edited", messageId: id });
+    }
+    return null;
   }
 
   /** Replaces what an agent message's stats line says, e.g. with usage reported after it was sent. Callable over RPC. */
@@ -1094,6 +1127,7 @@ export class ProjectAgent extends Agent<Env> {
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
       const meter = new TurnMeter(llm.provider.model);
+      const reacted = new Set<string>();
       const threadUpdates = inbox.flatMap((item) => {
         if (item.kind !== "thread") return [];
         const thread = this.getThread(item.threadId);
@@ -1129,13 +1163,20 @@ export class ProjectAgent extends Agent<Env> {
           computerClis,
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox), questions), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox), questions, reacted), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
         ],
         maxSteps: 8,
       });
+      // People always see that an edit was seen, even when the model skipped the reaction.
+      for (const item of inbox) {
+        if (item.kind === "edited" && !reacted.has(item.messageId) && this.getMessage(item.messageId)) {
+          this.addReaction({ messageId: item.messageId, emoji: SEEN_EMOJI, authorKind: "agent", authorId: COORDINATOR_ID });
+          reacted.add(item.messageId);
+        }
+      }
     } catch (err) {
       console.error("coordinator turn failed", err);
       this.sendMessage({
@@ -1152,7 +1193,7 @@ export class ProjectAgent extends Agent<Env> {
   /** The person whose message this coordinator turn answers, for usage attribution. */
   private turnRequester(inbox: InboxItem[]): string | null {
     for (const item of inbox) {
-      const m = item.kind === "message" ? this.getMessage(item.messageId) : null;
+      const m = item.kind === "message" || item.kind === "edited" ? this.getMessage(item.messageId) : null;
       if (m?.authorKind === "user") return m.authorId;
     }
     return null;
@@ -1167,7 +1208,7 @@ export class ProjectAgent extends Agent<Env> {
   private forwardedFor(inbox: InboxItem[]): string | null {
     const people = new Set<string>();
     for (const item of inbox) {
-      if (item.kind === "message") {
+      if (item.kind === "message" || item.kind === "edited") {
         const m = this.getMessage(item.messageId);
         if (m?.authorKind === "user") people.add(m.authorId);
       } else if (item.kind === "routine") {
@@ -1183,6 +1224,8 @@ export class ProjectAgent extends Agent<Env> {
     meter?: TurnMeter,
     forwardedFor: string | null = null,
     questions: TurnQuestions = { open: new Map(), settled: new Set() },
+    /** Collects the messages the coordinator reacted to this turn. */
+    reacted?: Set<string>,
   ): CoordinatorHost {
     const post = (body: string, relay?: MessageRelay) =>
       this.sendMessage({
@@ -1209,7 +1252,10 @@ export class ProjectAgent extends Agent<Env> {
       getThread: (id) => this.getThread(id),
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
       post,
-      react: (messageId, emoji) => this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID }),
+      react: (messageId, emoji) => {
+        reacted?.add(messageId);
+        this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID });
+      },
       startThread: async ({ rootMessageId, title, brief, ack, projectAck, cli }) => {
         // The id comes first so the "on it" line can carry the brief before the thread exists.
         const relay: MessageRelay = { kind: "brief", threadId: createId("thread"), note: brief };
@@ -1532,6 +1578,7 @@ export class ProjectAgent extends Agent<Env> {
       ...(r.clis && { clis: JSON.parse(r.clis) as string[] }),
       seq: r.seq,
       createdAt: r.created_at,
+      ...(r.edited_at && { editedAt: r.edited_at }),
     };
   }
 
@@ -1595,7 +1642,8 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 /** reopened: the thread was resolved and this wake opens it again, so its work starts a new round with its own plan card. */
 export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
-  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean }
+  /** edited: a person changed an earlier message's text; it shows as new in the agent's next turn. */
+  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean; edited?: boolean }
   /**
    * forwardedFor: set when the note forwards a person's ask from the project chat: who asked (see
    * ProjectAgent.forwardedFor), or null when that is not one known person.

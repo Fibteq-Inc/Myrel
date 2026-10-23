@@ -19,6 +19,8 @@ import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
 /** Something the coordinator has not seen yet. */
 export type InboxItem =
   | { kind: "message"; messageId: string }
+  /** A person changed the text of a project-chat message they sent earlier. */
+  | { kind: "edited"; messageId: string }
   | { kind: "request"; threadId: string; request: "permission" | "routing" | "handoff"; reason: string }
   /** A thread agent's choice card, waiting for the coordinator to answer it or pass it to people. */
   | { kind: "question"; threadId: string; questionId: string; question: string }
@@ -90,9 +92,12 @@ For each new message in the project chat:
 - The same ask sent again (a resend while the first thread is still starting, a double tap): it is not new work. start_thread refuses it and names the thread that already has it; send it there with message_thread as a follow-up, unless the person clearly wants the work done a second time.
 - A thread you opened by mistake (a duplicate of another thread, or work another thread already covers, or an ask the person took back): call close_thread with the reason and one short line for the person, linking the thread that carries the work. Closing deletes nothing and writing in the thread reopens it. You may only close a thread that has made nothing yet (no pull request, artifact or routine, no messages from people); close_thread refuses the rest, and then the person decides.
 - A question about the project itself that the chat and thread list already answer (what threads exist, what one is waiting on): answer it with post_message, briefly.
-- A greeting or FYI with nothing to do: one short post_message, or a react.
+- A greeting, FYI or "ok" with nothing to do: react with an emoji, or one short post_message when words help.
 - Thanks or a sign-off: react with an emoji and nothing else.
+- An edited message (under "Messages people edited"): its author changed the text after sending it, and the chat shows the new text. Always react with 👀 to show you saw it. When the message started a thread or was passed to one and the change alters the ask, call message_thread on that thread with the new text as a follow-up (the thread only sees the change through you). When only the wording changed, the 👀 is all. A message that is still NEW you handle as usual, from its new text.
 - People talking among themselves: do nothing.
+
+Emoji: a reaction is a full answer when words would add nothing. Pick it by the situation: 👀 seen (an edit, an FYI), 👍 ok or agreed, 🙏 thanks, ✅ confirms something is done, 🎉 good news. One reaction per message is enough.
 
 Picking a CLI: a person can offer CLIs from their computer with their ask, shown under the message. When it offers several, start_thread needs cli (one of them) and cli_reason: one short sentence in the person's language saying why, which people see in the thread. Pick the one that suits the work and can work right now: skip a CLI whose limits are used up or nearly so (see "The computer's CLIs"), and otherwise prefer the first one offered. With one CLI offered, or none, leave cli out.
 
@@ -139,6 +144,7 @@ export function coordinatorPrompt(input: {
   computerClis?: RunnerCli[];
 }): string {
   const newIds = new Set(input.inbox.flatMap((i) => (i.kind === "message" || i.kind === "routine" ? [i.messageId] : [])));
+  const editedIds = [...new Set(input.inbox.flatMap((i) => (i.kind === "edited" ? [i.messageId] : [])))];
   const threadByRoot = new Map(input.threads.map((t) => [t.rootMessageId, t]));
   const chat = input.chat.map((m) => {
     const line = renderMessage(m, input.names, { isNew: newIds.has(m.id) });
@@ -183,6 +189,10 @@ export function coordinatorPrompt(input: {
   const onlyThreadUpdates = onlyObserving(input.inbox);
   // Named again at the end, so a person's ask is not lost among thread updates in the same turn.
   const newChat = input.chat.filter((m) => newIds.has(m.id)).map((m) => m.id);
+  const edits = editedIds.map((id) => {
+    const thread = threadByRoot.get(id);
+    return `- [${id}]${thread ? ` (started thread [${thread.id}] "${thread.title}")` : ""}`;
+  });
   const asked = questionItems.length
     ? ` Each question from a thread agent needs answer_question or ask_person: ${questionItems.map((q) => `[${q.questionId}]`).join(", ")}.`
     : "";
@@ -194,6 +204,9 @@ export function coordinatorPrompt(input: {
     `## Routines\n${input.routines.map(renderRoutine).join("\n") || "(none)"}`,
     choosing ? `## The computer's CLIs\n${(input.computerClis ?? []).map(renderCli).join("\n") || "(not reported)"}` : "",
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
+    edits.length
+      ? `## Messages people edited (react 👀 on each; pass a changed ask on to its thread)\n${edits.join("\n")}`
+      : "",
     requests.length ? `## Requests from thread agents\n${requests.join("\n")}` : "",
     questions.length
       ? `## Questions from thread agents (answer each with answer_question when something you can point to settles it, otherwise ask_person)\n${questions.join("\n")}`
@@ -442,7 +455,7 @@ export function coordinatorTools(
     }),
     tool({
       name: "react",
-      description: "Add an emoji reaction to a message, e.g. 👍 for thanks or an acknowledgement.",
+      description: "Add an emoji reaction to a message: 👀 seen (an edit, an FYI), 👍 ok, 🙏 thanks, ✅ done, 🎉 good news.",
       input: z.object({ message_id: z.string(), emoji: z.string().min(1).max(16) }),
       run: ({ message_id, emoji }) => {
         if (!host.getMessage(message_id)) throw new Error(`No message ${message_id}.`);

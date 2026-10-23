@@ -163,6 +163,11 @@ export const en = {
 
   // Messages
   "message.copy": "Copy message",
+  "message.edit": "Edit message",
+  "message.edited": "edited",
+  "message.editedAt": "Edited {time}",
+  "message.editSave": "Save",
+  "message.editHint": "Enter saves, Esc cancels",
   "message.showMore": "Show more",
   "message.showLess": "Show less",
   "message.thinking": "Thinking",

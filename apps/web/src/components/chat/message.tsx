@@ -1,7 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import { DECISION_LANG, type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
-import { AlarmClock, CircleAlert, LoaderCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import { AlarmClock, CircleAlert, LoaderCircle, Pencil } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { MyrelMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
 import { Collapsible } from "./collapsible";
@@ -15,7 +15,8 @@ export type Names = Record<string, string>;
 /**
  * One message, Claude style: people's messages as bubbles on the right,
  * the assistant's as open text beside its mark, system notes as a banner.
- * `children` renders under the message (e.g. its thread card).
+ * `children` renders under the message (e.g. its thread card). `onEdit` lets the
+ * person change their own message's text.
  */
 export function MessageView({
   message,
@@ -23,6 +24,7 @@ export function MessageView({
   names,
   reactions,
   decision,
+  onEdit,
   children,
 }: {
   message: Message;
@@ -30,6 +32,7 @@ export function MessageView({
   names: Names;
   reactions?: Reaction[];
   decision?: DecisionHandlers;
+  onEdit?: (body: string) => void;
   children?: ReactNode;
 }) {
   const t = useT();
@@ -90,18 +93,104 @@ export function MessageView({
     );
   }
 
-  const mine = message.authorId === me;
+  return (
+    <PersonMessage message={message} names={names} reactions={reactions} onEdit={message.authorId === me ? onEdit : undefined}>
+      {children}
+    </PersonMessage>
+  );
+}
+
+/** A person's bubble. Their own can be edited in place; an edited one says so, with the time on hover. */
+function PersonMessage({
+  message,
+  names,
+  reactions,
+  onEdit,
+  children,
+}: {
+  message: Message;
+  names: Names;
+  reactions?: Reaction[];
+  onEdit?: (body: string) => void;
+  children?: ReactNode;
+}) {
+  const t = useT();
+  const relativeTime = useRelativeTime();
+  const [draft, setDraft] = useState<string | null>(null);
+  const mine = !!onEdit;
+  // A message with files may lose its text; one without keeps at least a word.
+  const canSave = draft !== null && (draft.trim().length > 0 || !!message.attachments?.length);
+  const save = () => {
+    if (!canSave) return;
+    if (draft.trim() !== message.body) onEdit?.(draft.trim());
+    setDraft(null);
+  };
+
   return (
     <div className="group flex flex-col items-end gap-1.5">
       {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? t("common.member")}</span>}
-      {message.body && (
-        <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
-          <Collapsible lines={10}>{message.body}</Collapsible>
+      {draft !== null ? (
+        <div className="flex w-full max-w-[85%] flex-col gap-2 rounded-2xl rounded-br-md border border-accent-line bg-bubble px-3.5 py-2.5">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setDraft(null);
+              else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                save();
+              }
+            }}
+            rows={Math.min(10, Math.max(2, draft.split("\n").length))}
+            aria-label={t("message.edit")}
+            className="w-full resize-y bg-transparent text-fg outline-none"
+            autoFocus
+          />
+          <div className="flex items-center justify-end gap-2 text-xs">
+            <span className="mr-auto text-subtle">{t("message.editHint")}</span>
+            <button type="button" onClick={() => setDraft(null)} className="rounded-md px-2 py-1 text-muted hover:bg-hover">
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={!canSave}
+              className="rounded-md bg-accent px-2.5 py-1 font-medium text-ground hover:bg-accent-hover disabled:opacity-50"
+            >
+              {t("message.editSave")}
+            </button>
+          </div>
         </div>
+      ) : (
+        message.body && (
+          <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-edge bg-bubble px-3.5 py-2.5 text-fg">
+            <Collapsible lines={10}>{message.body}</Collapsible>
+          </div>
+        )
       )}
       <div className="flex max-w-[85%] justify-end">
         <AttachmentList attachments={message.attachments} />
       </div>
+      {draft === null && (message.editedAt || mine) && (
+        <div className="flex items-center gap-1 text-xs text-subtle">
+          {mine && (
+            <button
+              type="button"
+              onClick={() => setDraft(message.body)}
+              aria-label={t("message.edit")}
+              title={t("message.edit")}
+              className="rounded-md p-1 opacity-0 transition-opacity hover:bg-hover hover:text-fg focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
+            >
+              <Pencil size={13} aria-hidden="true" />
+            </button>
+          )}
+          {message.editedAt && (
+            <time dateTime={message.editedAt} title={t("message.editedAt", { time: relativeTime(message.editedAt) })}>
+              {t("message.edited")}
+            </time>
+          )}
+        </div>
+      )}
       <Reactions reactions={reactions} />
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
     </div>

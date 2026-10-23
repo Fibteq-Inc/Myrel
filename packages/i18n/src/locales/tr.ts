@@ -160,6 +160,11 @@ export const tr: Catalog = {
 
   // Messages
   "message.copy": "Mesajı kopyala",
+  "message.edit": "Mesajı düzenle",
+  "message.edited": "düzenlendi",
+  "message.editedAt": "Düzenlendi: {time}",
+  "message.editSave": "Kaydet",
+  "message.editHint": "Enter kaydeder, Esc vazgeçer",
   "message.showMore": "Devamını göster",
   "message.showLess": "Daha az göster",
   "message.thinking": "Düşünüyor",

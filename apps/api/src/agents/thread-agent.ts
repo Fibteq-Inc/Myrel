@@ -73,7 +73,7 @@ import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
 import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, resumeNote, resumingMessage } from "./auto-resume";
-import { THREAD_AGENT_ID, SYSTEM_ID } from "./names";
+import { SEEN_EMOJI, THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
@@ -81,6 +81,7 @@ import type { TaskWithLog } from "./thread-tasks";
 import {
   type CoordinatorNote,
   decisionCard,
+  editedSince,
   type ReplyNeeds,
   type RoutineRun,
   renderQuestion,
@@ -462,6 +463,7 @@ export class ThreadAgent extends Agent<Env> {
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes WHERE id <= ${noteCut} ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
+    const lastSeenAt = this.getMeta("last_seen_at") ?? undefined;
     // Only the last few runs matter; older ones are history the thread already acted on.
     const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
       SELECT * FROM (SELECT * FROM routine_runs ORDER BY id DESC LIMIT 5) ORDER BY id`;
@@ -478,10 +480,18 @@ export class ThreadAgent extends Agent<Env> {
     this.sql`UPDATE routine_runs SET seen = 1`;
     this.sql`UPDATE github_events SET seen = 1`;
     this.setMeta("last_seen_seq", String(ctx.messages.at(-1)?.seq ?? lastSeenSeq));
+    this.setMeta("last_seen_at", new Date().toISOString());
+    // People see that the agent took in the message they changed.
+    for (const m of ctx.messages) {
+      if (m.authorKind === "user" && editedSince(m, lastSeenAt)) {
+        await project.addReaction({ messageId: m.id, emoji: SEEN_EMOJI, authorKind: "agent", authorId: THREAD_AGENT_ID });
+      }
+    }
     const promptInput = {
       ...ctx,
       brief: this.getMeta("brief") ?? "",
       lastSeenSeq,
+      lastSeenAt,
       notes,
       artifacts: await project.listArtifacts(),
       repos: await listProjectRepos(this.env.DB, projectId),

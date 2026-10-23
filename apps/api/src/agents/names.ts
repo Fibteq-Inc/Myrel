@@ -6,3 +6,5 @@ export const SYSTEM_ID = "system";
 export const ROUTINE_ID = "routine";
 /** Author of the project-chat line that opens a memory upkeep thread. */
 export const MEMORY_UPKEEP_ID = "memory-upkeep";
+/** The reaction an agent leaves on a message a person edited, once it has taken in the new text. */
+export const SEEN_EMOJI = "👀";
