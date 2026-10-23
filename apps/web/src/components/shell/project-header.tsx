@@ -1,4 +1,4 @@
-import type { SocketStatus } from "@myrel/client";
+import { type SocketStatus, workingCount } from "@myrel/client";
 import type { MessageKey, Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
@@ -66,7 +66,12 @@ export function ProjectHeader() {
     <header className="@container flex h-14 flex-none items-center gap-2 border-b border-line px-3 sm:gap-3 sm:px-4">
       <NavToggle />
       <div className="min-w-0 max-w-[240px] flex-initial">
-        <ProjectSwitcher current={project.id} name={project.name} memberCount={members.length} />
+        <ProjectSwitcher
+          current={project.id}
+          name={project.name}
+          memberCount={members.length}
+          working={workingCount(state)}
+        />
       </div>
       <div
         ref={tabs}
@@ -145,8 +150,18 @@ export function ProjectHeader() {
   );
 }
 
-function ProjectSwitcher({ current, name, memberCount }: { current: string; name: string; memberCount: number }) {
-  const { data: projects = [] } = useQuery(projectsQuery);
+function ProjectSwitcher({
+  current,
+  name,
+  memberCount,
+  working,
+}: {
+  current: string;
+  name: string;
+  memberCount: number;
+  /** The open project's working count, live from its socket; the list's is only as fresh as its last fetch. */
+  working: number;
+}) {
   const navigate = useNavigate();
   const openSettings = useOpenProjectSettings();
   const t = useT();
@@ -169,21 +184,14 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
       {(close) => (
         <>
           <MenuLabel>{t("projects.title")}</MenuLabel>
-          <div className="max-h-72 overflow-y-auto">
-            {projects.map((p) => (
-              <MenuItem
-                key={p.id}
-                icon={<ProjectBadge name={p.name} size={22} />}
-                onSelect={() => {
-                  close();
-                  void navigate({ to: "/projects/$projectId", params: { projectId: p.id }, search: viewSearch("chat") });
-                }}
-              >
-                <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                {p.id === current && <Check size={14} className="flex-none text-accent" aria-label={t("sidebar.current")} />}
-              </MenuItem>
-            ))}
-          </div>
+          <ProjectList
+            current={current}
+            working={working}
+            onSelect={(projectId) => {
+              close();
+              void navigate({ to: "/projects/$projectId", params: { projectId }, search: viewSearch("chat") });
+            }}
+          />
           <MenuSeparator />
           <MenuItem
             icon={<Settings size={15} />}
@@ -206,6 +214,38 @@ function ProjectSwitcher({ current, name, memberCount }: { current: string; name
         </>
       )}
     </Menu>
+  );
+}
+
+/**
+ * The switcher's projects, each with how many agents work in it. Mounted only while the menu is open,
+ * so it fetches fresh counts on opening and polls like the project list, without polling in the background.
+ */
+function ProjectList({ current, working, onSelect }: { current: string; working: number; onSelect: (projectId: string) => void }) {
+  const t = useT();
+  const { data: projects = [] } = useQuery({ ...projectsQuery, refetchOnMount: "always", refetchInterval: 15_000 });
+  return (
+    <div className="max-h-72 overflow-y-auto">
+      {projects.map((p) => (
+        <MenuItem key={p.id} icon={<ProjectBadge name={p.name} size={22} />} onSelect={() => onSelect(p.id)}>
+          <span className="min-w-0 flex-1 truncate">{p.name}</span>
+          <WorkingBadge count={p.id === current ? working : (p.activity?.working ?? 0)} />
+          {p.id === current && <Check size={14} className="flex-none text-accent" aria-label={t("sidebar.current")} />}
+        </MenuItem>
+      ))}
+    </div>
+  );
+}
+
+/** "2 working", small and quiet beside a project's name; nothing when no agent works there. */
+function WorkingBadge({ count }: { count: number }) {
+  const t = useT();
+  if (count <= 0) return null;
+  return (
+    <span className="flex flex-none items-center gap-1 whitespace-nowrap rounded-full bg-accent-soft px-1.5 py-px text-[11px] tabular-nums text-[#b4beff]">
+      <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent" aria-hidden="true" />
+      {t("sidebar.working", { count })}
+    </span>
   );
 }
 
