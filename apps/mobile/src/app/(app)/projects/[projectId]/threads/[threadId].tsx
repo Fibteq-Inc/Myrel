@@ -36,7 +36,10 @@ export default function ThreadScreen() {
     const replies = threadMessages(state, threadId);
     return root ? [root, ...replies] : replies;
   }, [state, thread, threadId]);
-  const onSend = useCallback((body: string) => send(body, threadId), [send, threadId]);
+  const onSend = useCallback(
+    (body: string, attachments?: string[]) => send(body, threadId, attachments),
+    [send, threadId],
+  );
 
   const live = thread?.status === "working" && !thread.resolved;
   const [planOpen, setPlanOpen] = useState(false);

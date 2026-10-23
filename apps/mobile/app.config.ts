@@ -39,6 +39,11 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-secure-store",
     ["expo-notifications", { color: "#8b9bff", icon: "./assets/notification-icon.png" }],
+    // Photos are only picked from the library, through the system picker: no camera or microphone.
+    [
+      "expo-image-picker",
+      { photosPermission: "Myrel attaches the photos you pick to your messages.", cameraPermission: false, microphonePermission: false },
+    ],
   ],
   experiments: { typedRoutes: true },
   // OTA updates reach every build with the same native fingerprint; a version bump alone keeps them flowing.
