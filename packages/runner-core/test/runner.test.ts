@@ -91,6 +91,8 @@ describe("opencode", () => {
   it("registers OpenAI-compatible models as a custom provider without the key", () => {
     const s = spec({ model: { kind: "openai", provider: "fireworks", id: "firerouter/opus", baseUrl: "https://api.fireworks.ai/inference/v1" } });
     expect(opencode.command(s)).toBe(`opencode run --format json --model 'myrel/firerouter/opus' "$MYREL_PROMPT"`);
+    // Titles use the task's model too, the only one Myrel's proxy lets through.
+    expect(opencodeConfig(s).small_model).toBe("myrel/firerouter/opus");
     const config = JSON.stringify(opencodeConfig(s));
     expect(config).toContain("{env:MYREL_MODEL_API_KEY}");
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
@@ -225,6 +227,8 @@ describe("codex", () => {
       'model_providers.myrel={ name = "Myrel (fireworks)", base_url = "https://myrel.test/api/agent-mcp/thr_1/model", env_key = "MYREL_MODEL_API_KEY", wire_api = "responses" }',
     );
     expect(args).toContain('model_provider="myrel"');
+    // Web search runs at the provider, which Myrel's proxy refuses.
+    expect(args).toContain('web_search="disabled"');
     expect(args[args.indexOf("-m") + 1]).toBe("accounts/fireworks/models/glm-5");
     expect(codex.command(cloud)).toMatch(/^printf '%s' "\$MYREL_PROMPT" \| codex exec --json .* -$/);
   });

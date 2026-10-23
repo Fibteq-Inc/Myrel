@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { modelCallAllowed, type Price, proxyModel, streamCostScanner } from "../src/llm";
+import { modelCallAllowed, type Price, proxyModel, responsesRefusal, streamCostScanner } from "../src/llm";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -37,6 +37,18 @@ describe("modelCallAllowed", () => {
 });
 
 describe("proxyModel", () => {
+  it("refuses an Anthropic call for another model too", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (u: string) => {
+      seen.push(u);
+      return Response.json({});
+    });
+    const req = new Request("https://myrel.test/api/agent-mcp/t/model/v1/messages", { method: "POST", body: JSON.stringify({ model: "claude-opus-x", messages: [] }) });
+    const out = await proxyModel(req, { url: "https://up.test/v1/messages", apiKey: "k", kind: "anthropic", model: "claude-sonnet-x" }, async () => {}, () => {});
+    expect(out.status).toBe(403);
+    expect(seen).toEqual([]);
+  });
+
   it("refuses an OpenAI-compatible call for another model without calling the provider", async () => {
     const seen: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
@@ -192,6 +204,29 @@ describe("proxyModel with the Responses API (Codex)", () => {
     expect(JSON.parse(seen[0]!.init.body as string)).toEqual(body);
     // 1,000 uncached at $3/M + 1,000 cached at $0.30/M + 100 output at $15/M
     expect(costs).toEqual([0.0048]);
+  });
+
+  it("refuses, without calling the provider, what it could not hold to the turn or price", async () => {
+    const codexTools = [
+      { type: "function", name: "exec_command" },
+      { type: "custom", name: "apply_patch" },
+      { type: "namespace", name: "multi_agent_v1", tools: [{ type: "function", name: "spawn" }] },
+    ];
+    expect(responsesRefusal(JSON.stringify({ model: "gpt-x", input: [], store: false, tools: codexTools }))).toBeNull();
+    for (const extra of [
+      { background: true },
+      { store: true },
+      { previous_response_id: "resp_1" },
+      { conversation: "conv_1" },
+      { tools: [...codexTools, { type: "web_search" }] },
+      { tools: [{ type: "code_interpreter", container: { type: "auto" } }] },
+      { tools: [{ type: "namespace", tools: [{ type: "file_search" }] }] },
+      { tools: [{ type: "mcp", server_url: "https://x.test" }] },
+    ]) {
+      const { res, seen } = run(Response.json({}), { model: "gpt-x", input: [], ...extra }, "openai", prices, url);
+      expect((await res).status, JSON.stringify(extra)).toBe(400);
+      expect(seen).toEqual([]);
+    }
   });
 
   it("prices a JSON response from its usage", async () => {

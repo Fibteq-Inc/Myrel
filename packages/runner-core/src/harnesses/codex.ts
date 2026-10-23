@@ -109,7 +109,9 @@ const toml = (s: string) => JSON.stringify(s);
 
 /** The `-c key=value` config overrides and the model for one run. */
 export function codexArgs(spec: TaskSpec): string[] {
-  const args: string[] = ["-c", "check_for_update_on_startup=false"];
+  // Web search would run at the provider, billed apart from the tokens Myrel's proxy prices, so
+  // the proxy refuses it (responsesRefusal); the agent searches from its shell instead.
+  const args: string[] = ["-c", "check_for_update_on_startup=false", "-c", 'web_search="disabled"'];
   const m = spec.model;
   if (m?.kind === "openai" && m.baseUrl) {
     const provider = `{ name = ${toml(`Myrel (${m.provider})`)}, base_url = ${toml(m.baseUrl)}, env_key = "MYREL_MODEL_API_KEY", wire_api = "responses" }`;

@@ -56,12 +56,15 @@ export async function proxyModel(
   if (target.cacheKey && target.kind === "openai") headers.set("x-session-affinity", target.cacheKey);
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const text = hasBody ? await req.text() : undefined;
-  // An OpenAI-compatible call names its model in the body: only the project's model is paid for here.
-  if (target.model && target.kind === "openai" && bodyModel(text) !== target.model) {
+  // A call names its model in the body: only the project's model is paid for here. The harness's
+  // settings keep it there; this holds for a call made around it with the turn's token too.
+  if (target.model && bodyModel(text) !== target.model) {
     return Response.json({ error: { message: `This turn can only use ${target.model}.` } }, { status: 403 });
   }
   // A Responses API stream ends with its usage anyway, and takes no stream_options.include_usage.
   const responses = target.kind === "openai" && /\/responses\/?$/.test(new URL(target.url).pathname);
+  const refused = responses ? responsesRefusal(text) : null;
+  if (refused) return Response.json({ error: { message: refused } }, { status: 400 });
   const sent = text !== undefined && target.kind === "openai" && !responses ? withStreamUsage(text) : text;
   const upstream = await fetch(target.url, { method: req.method, headers, body: sent });
   const out = new Headers();
@@ -126,6 +129,42 @@ export async function proxyModel(
     }),
   );
   return new Response(body, { status: upstream.status, headers: out });
+}
+
+/** Tool types the harness runs itself; the provider only returns the call. */
+const CLIENT_TOOLS = new Set(["function", "custom"]);
+
+/**
+ * Why a Responses API call may not go through, or null. Only a call whose whole cost shows in its
+ * own answer is let through, within the turn:
+ * - background: the provider keeps working after the call (and the turn) ended, unpriced here;
+ * - a tool the provider runs itself (web search, code interpreter, file search, image generation,
+ *   remote MCP): billed apart from the tokens this proxy prices;
+ * - stored state (store, previous_response_id, conversation): objects the shared key holds, not
+ *   tied to this project.
+ * Codex sends none of these (its web search is turned off, see the codex harness).
+ */
+export function responsesRefusal(body: string | undefined): string | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body ?? "") as Record<string, unknown>;
+  } catch {
+    return "The request body is not JSON.";
+  }
+  if (parsed.background === true) return "Background responses are not allowed here.";
+  if (parsed.store === true || parsed.previous_response_id != null || parsed.conversation != null) {
+    return "Stored responses are not allowed here: send the whole input with store set to false.";
+  }
+  const clientOnly = (tools: unknown): boolean =>
+    tools == null ||
+    (Array.isArray(tools) &&
+      tools.every((t) => {
+        const type = (t as { type?: unknown } | null)?.type;
+        // A namespace groups the harness's own tools.
+        return typeof type === "string" && (CLIENT_TOOLS.has(type) || (type === "namespace" && clientOnly((t as { tools?: unknown }).tools)));
+      }));
+  if (!clientOnly(parsed.tools)) return "Only tools the harness runs itself are allowed here, not ones the provider runs (web search, code interpreter and the like).";
+  return null;
 }
 
 function bodyModel(body: string | undefined): unknown {
