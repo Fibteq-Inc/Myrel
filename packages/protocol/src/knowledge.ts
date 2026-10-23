@@ -81,3 +81,26 @@ export const PutInstructionsInput = Instructions.pick({ text: true });
 /** What changed, so clients refetch only that list. */
 export const KnowledgeKind = z.enum(["files", "memory", "instructions"]);
 export type KnowledgeKind = z.infer<typeof KnowledgeKind>;
+
+/**
+ * Memory upkeep: a thread that checks the project's notes against the project now and then, started
+ * after enough threads finished. `auto` runs it only where it costs nothing extra: projects with a
+ * local folder, whose CLI does the work.
+ */
+export const MemoryUpkeepMode = z.enum(["auto", "on", "off"]);
+export type MemoryUpkeepMode = z.infer<typeof MemoryUpkeepMode>;
+
+export const MemoryUpkeepState = z.object({
+  mode: MemoryUpkeepMode,
+  /** Whether it runs on its own, given the mode and where the project's tasks run. */
+  active: z.boolean(),
+  lastRunAt: Timestamp.nullable(),
+  /** Threads finished since the last upkeep; it starts at `threadsNeeded`. */
+  threadsSince: z.number().int().nonnegative(),
+  threadsNeeded: z.number().int().positive(),
+  /** The upkeep thread still open, if any. */
+  threadId: z.string().nullable(),
+});
+export type MemoryUpkeepState = z.infer<typeof MemoryUpkeepState>;
+
+export const PutMemoryUpkeepInput = z.object({ mode: MemoryUpkeepMode });

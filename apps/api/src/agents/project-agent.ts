@@ -9,6 +9,9 @@ import {
   type CreateRoutineInput,
   createId,
   type MarkMemoryInput,
+  MEMORY_INDEX,
+  MemoryUpkeepMode,
+  type MemoryUpkeepState,
   type Message,
   type MessageRelay,
   type MessageStats,
@@ -31,7 +34,7 @@ import {
   type UpdateRoutineInput,
 } from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { canUseCoordinator } from "../extensions";
 import { projectProvider } from "../keys";
 import { runLoop } from "../llm";
@@ -50,7 +53,16 @@ import {
 } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
-import { COORDINATOR_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
+import {
+  UPKEEP_KEYS,
+  UPKEEP_THREADS,
+  UPKEEP_TITLE,
+  upkeepActive,
+  upkeepBrief,
+  upkeepDue,
+  upkeepNotice,
+} from "./memory-upkeep";
+import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
 import { answerLine, relayLine } from "./relay-line";
 import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
@@ -560,7 +572,10 @@ export class ProjectAgent extends Agent<Env> {
     this.syncActivity();
     // Every way a thread finishes passes here (its agent, a person, its pull requests merging), and
     // some post nothing the coordinator watches; threads waiting on it only hear of it from the coordinator.
-    if (!current.resolved && next.resolved && !next.closeReason) this.ctx.waitUntil(this.observeFinished(id));
+    if (!current.resolved && next.resolved && !next.closeReason) {
+      this.ctx.waitUntil(this.observeFinished(id));
+      this.ctx.waitUntil(this.countForUpkeep(id).catch((err) => console.error("memory upkeep check failed", err)));
+    }
     return next;
   }
 
@@ -1323,6 +1338,101 @@ export class ProjectAgent extends Agent<Env> {
 
   writeFileText(path: string, content: string, by: Author) {
     return this.knowledge.writeText(path, content, by);
+  }
+
+  // ---- Memory upkeep -----------------------------------------------------
+  // After enough threads finish, a thread checks the notes against the project (memory-upkeep.ts).
+
+  private upkeepMode(): MemoryUpkeepMode {
+    return MemoryUpkeepMode.catch("auto").parse(this.knowledge.getSetting(UPKEEP_KEYS.mode));
+  }
+
+  /** The upkeep thread, while it is still open. */
+  private openUpkeepThread(): Thread | null {
+    const id = this.knowledge.getSetting(UPKEEP_KEYS.threadId);
+    const thread = id ? this.getThread(id) : null;
+    return thread && !thread.resolved ? thread : null;
+  }
+
+  /** Tasks run on a local folder's CLI (not forced to the cloud): upkeep then costs no plan usage. */
+  private async runsLocally(): Promise<boolean> {
+    const [row] = await createDb(this.env.DB)
+      .select({ taskTarget: schema.projects.taskTarget })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, this.name));
+    if (row?.taskTarget === "cloud") return false;
+    return !!(await workspaceClis(this.env, this.name));
+  }
+
+  async memoryUpkeep(): Promise<MemoryUpkeepState> {
+    const mode = this.upkeepMode();
+    return {
+      mode,
+      active: upkeepActive(mode, await this.runsLocally()),
+      lastRunAt: this.knowledge.getSetting(UPKEEP_KEYS.lastRunAt),
+      threadsSince: Number(this.knowledge.getSetting(UPKEEP_KEYS.threadsSince) ?? 0),
+      threadsNeeded: UPKEEP_THREADS,
+      threadId: this.openUpkeepThread()?.id ?? null,
+    };
+  }
+
+  async setMemoryUpkeepMode(mode: MemoryUpkeepMode): Promise<MemoryUpkeepState> {
+    this.knowledge.setSetting(UPKEEP_KEYS.mode, mode);
+    this.emit({ type: "knowledge.changed", kind: "memory" });
+    return this.memoryUpkeep();
+  }
+
+  /** A thread finished: count it, and start upkeep once it is due. The upkeep thread itself does not count. */
+  private async countForUpkeep(threadId: string) {
+    if (threadId === this.knowledge.getSetting(UPKEEP_KEYS.threadId)) return;
+    const threadsSince = Number(this.knowledge.getSetting(UPKEEP_KEYS.threadsSince) ?? 0) + 1;
+    this.knowledge.setSetting(UPKEEP_KEYS.threadsSince, String(threadsSince));
+    const lastRunAt = this.knowledge.getSetting(UPKEEP_KEYS.lastRunAt);
+    if (!upkeepDue({ threadsSince, lastRunAt, now: new Date() })) return;
+    if (this.openUpkeepThread() || !this.hasNotes()) return;
+    if (!upkeepActive(this.upkeepMode(), await this.runsLocally())) return;
+    // A local folder's owner runs it on their own CLI; otherwise it works for the project's owner.
+    const actor = (await workspaceClis(this.env, this.name))?.ownerId ?? (await this.projectOwner());
+    await this.startUpkeep(actor, false);
+  }
+
+  /** "Check now" from the Memory tab: works for whoever asked. */
+  async runMemoryUpkeep(userId: string): Promise<{ thread: Thread } | { error: "running" | "no_notes" }> {
+    const open = this.openUpkeepThread();
+    if (open) return { error: "running" };
+    if (!this.hasNotes()) return { error: "no_notes" };
+    return { thread: await this.startUpkeep(userId, true) };
+  }
+
+  private hasNotes(): boolean {
+    return this.knowledge.listMemory().some((m) => m.name !== MEMORY_INDEX);
+  }
+
+  private async projectOwner(): Promise<string | null> {
+    const [row] = await createDb(this.env.DB)
+      .select({ userId: schema.projectMembers.userId })
+      .from(schema.projectMembers)
+      .where(and(eq(schema.projectMembers.projectId, this.name), eq(schema.projectMembers.role, "owner")))
+      .limit(1);
+    return row?.userId ?? null;
+  }
+
+  /** Opens the upkeep thread under a project-chat line, the way the coordinator opens one for an ask. */
+  private async startUpkeep(actor: string | null, manual: boolean): Promise<Thread> {
+    const threadsSince = Number(this.knowledge.getSetting(UPKEEP_KEYS.threadsSince) ?? 0);
+    const notes = this.knowledge.listMemory().filter((m) => m.name !== MEMORY_INDEX).length;
+    const root = this.sendMessage({ threadId: null, authorKind: "system", authorId: MEMORY_UPKEEP_ID, body: upkeepNotice(threadsSince, manual) });
+    const brief = upkeepBrief(notes);
+    const thread = this.createThread(root.id, UPKEEP_TITLE);
+    this.knowledge.setSetting(UPKEEP_KEYS.threadId, thread.id);
+    this.knowledge.setSetting(UPKEEP_KEYS.lastRunAt, new Date().toISOString());
+    this.knowledge.setSetting(UPKEEP_KEYS.threadsSince, "0");
+    const relay: MessageRelay = { kind: "brief", threadId: thread.id, note: brief };
+    this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: relayLine("brief", brief), relay });
+    const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
+    await agent.start({ projectId: this.name, threadId: thread.id, brief, actor });
+    this.emit({ type: "knowledge.changed", kind: "memory" });
+    return thread;
   }
 
   private knowledgeHost(by: Author): KnowledgeHost {

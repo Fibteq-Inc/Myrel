@@ -31,6 +31,18 @@ When Myrel finds a note that no longer matches the project and can't tell what i
 
 Myrel only deletes a note you agreed to remove. When a note changes, its previous version is kept: open the note and expand **Previous version** to see it, or choose **Bring this version back** and **Save** to undo the change.
 
+### Memory upkeep
+
+Notes go out of date as the project moves on. With **Memory upkeep**, Myrel checks them against the project now and then: once a number of threads have finished, and at most once a week, it opens a **Memory upkeep** thread. There it fixes notes that are plainly out of date, marks the ones it can't confirm, and asks you before deleting any.
+
+At the top of the memory list, owners and admins pick how it runs:
+
+- **Automatic**: on when tasks run on a CLI on your computer, off when they run in the cloud, so it never uses your plan by itself.
+- **On**: always, including in the cloud.
+- **Off**: never on its own.
+
+**Check now** starts a check right away.
+
 ## Files
 
 Everything uploaded to the project, and the files Myrel creates for you.

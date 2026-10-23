@@ -6,6 +6,7 @@ import {
   normalizeFilePath,
   PutInstructionsInput,
   PutMemoryInput,
+  PutMemoryUpkeepInput,
 } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import type { Context } from "hono";
@@ -25,6 +26,14 @@ const member = createMiddleware<AppEnv>(async (c, next) => {
   await next();
 });
 
+/** Owners and admins only: changing how the project runs. */
+const manager = createMiddleware<AppEnv>(async (c, next) => {
+  const project = await findMembership(c.env, c.req.param("id")!, c.get("user").id);
+  if (!project) return c.json({ error: "not_found" }, 404);
+  if (project.role !== "owner" && project.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  await next();
+});
+
 /**
  * Project instructions, memory and files. Mounted at /projects next to projectRoutes,
  * whose requireUser middleware runs first; every route here also requires membership.
@@ -40,6 +49,17 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   })
 
   // ---- Memory ----
+  .get("/:id/memory-upkeep", member, async (c) => c.json({ upkeep: await (await agent(c)).memoryUpkeep() }))
+  .put("/:id/memory-upkeep", manager, async (c) => {
+    const input = PutMemoryUpkeepInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    return c.json({ upkeep: await (await agent(c)).setMemoryUpkeepMode(input.data.mode) });
+  })
+  .post("/:id/memory-upkeep/run", manager, async (c) => {
+    const result = await (await agent(c)).runMemoryUpkeep(c.get("user").id);
+    if ("error" in result) return c.json({ error: result.error }, 409);
+    return c.json({ thread: result.thread }, 201);
+  })
   .get("/:id/memory", member, async (c) => c.json({ memory: await (await agent(c)).listMemory() }))
   .put("/:id/memory/:name", member, async (c) => {
     const name = MemoryName.safeParse(c.req.param("name"));
