@@ -5,6 +5,7 @@ import {
   type RoutineTarget,
   TimeZone,
   Timestamp,
+  type UpdateRoutineInput,
 } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
@@ -18,6 +19,8 @@ export type RoutineHost = {
     target: RoutineTarget;
     schedule: RoutineSchedule;
   }): Promise<Routine>;
+  /** Changes the given fields; a new schedule may switch between cron and once. */
+  updateRoutine(id: string, patch: UpdateRoutineInput): Promise<Routine | null>;
   setPaused(id: string, paused: boolean): Promise<Routine | null>;
   deleteRoutine(id: string): Promise<boolean>;
   defaultTimezone: string;
@@ -25,10 +28,12 @@ export type RoutineHost = {
   threadId: string | null;
 };
 
-export const ROUTINE_GUIDE = `Routines are scheduled wake-ups. Use create_routine when someone asks for something recurring ("every morning", "each Monday") or for later ("tomorrow at 10", "in two hours"). Pass a five-field cron with an IANA time zone for repeats, or an ISO time for a single run. Use the time zone the person mentioned or implied; otherwise the default. When a routine runs, its prompt reaches its target as a new task. Tell the person in one line what you scheduled and when it first runs.`;
+export const ROUTINE_GUIDE = `Routines are scheduled wake-ups. Use create_routine when someone asks for something recurring ("every morning", "each Monday") or for later ("tomorrow at 10", "in two hours"). Pass a five-field cron with an IANA time zone for repeats, or an ISO time for a single run. Use the time zone the person mentioned or implied; otherwise the default. When a routine runs, its prompt reaches its target as a new task. Tell the person in one line what you scheduled and when it first runs. To change one, use update_routine rather than deleting and recreating it. Once the work a routine waking your own thread was checking on is done, delete it yourself; delete other routines only when a person asks.`;
 
 export function routineTools(host: RoutineHost): Tool[] {
   const targetChoices = host.threadId ? (["this_thread", "project_chat"] as const) : (["project_chat"] as const);
+  const targetFor = (target: string): RoutineTarget =>
+    host.threadId && target === "this_thread" ? { kind: "thread", threadId: host.threadId } : { kind: "coordinator" };
   return [
     tool({
       name: "create_routine",
@@ -50,12 +55,41 @@ export function routineTools(host: RoutineHost): Tool[] {
         const schedule: RoutineSchedule = cron
           ? { kind: "cron", cron, timezone: timezone ?? host.defaultTimezone }
           : { kind: "once", at: at! };
-        const routineTarget: RoutineTarget =
-          host.threadId && (target ?? "this_thread") === "this_thread"
-            ? { kind: "thread", threadId: host.threadId }
-            : { kind: "coordinator" };
-        const r = await host.createRoutine({ name, prompt, target: routineTarget, schedule });
+        const r = await host.createRoutine({ name, prompt, target: targetFor(target ?? "this_thread"), schedule });
         return `Created routine ${r.id}. Next run: ${r.nextRunAt ?? "none"}.`;
+      },
+    }),
+    tool({
+      name: "update_routine",
+      description:
+        "Change a routine: its name, prompt, target or schedule. Pass only what changes. A new cron or at replaces the schedule, so a repeating routine can become a one-off and back; the next run follows the new schedule.",
+      input: z.object({
+        routine_id: z.string(),
+        name: z.string().min(1).max(120).optional(),
+        prompt: z.string().min(1).max(8000).optional(),
+        cron: CronExpression.optional().describe("New five-field cron; makes the routine repeating."),
+        timezone: TimeZone.optional().describe("IANA time zone for the cron; alone, it moves the current cron."),
+        at: Timestamp.optional().describe("New ISO-8601 time; makes the routine a one-off."),
+        target: z.enum(targetChoices).optional(),
+      }),
+      run: async ({ routine_id, name, prompt, cron, timezone, at, target }) => {
+        if (cron && at) throw new Error("Give cron (repeating) or at (one-off), not both.");
+        const current = (await host.listRoutines()).find((r) => r.id === routine_id);
+        if (!current) throw new Error(`No routine ${routine_id}.`);
+        const patch: UpdateRoutineInput = {};
+        if (name !== undefined) patch.name = name;
+        if (prompt !== undefined) patch.prompt = prompt;
+        if (at) patch.schedule = { kind: "once", at };
+        else if (cron || timezone) {
+          const base = current.schedule.kind === "cron" ? current.schedule : null;
+          const expr = cron ?? base?.cron;
+          if (!expr) throw new Error("This routine runs once; give a cron to make it repeating.");
+          patch.schedule = { kind: "cron", cron: expr, timezone: timezone ?? base?.timezone ?? host.defaultTimezone };
+        }
+        if (target) patch.target = targetFor(target);
+        const r = await host.updateRoutine(routine_id, patch);
+        if (!r) throw new Error(`No routine ${routine_id}.`);
+        return `Updated. ${renderRoutine(r).slice(2)}`;
       },
     }),
     tool({
@@ -79,7 +113,8 @@ export function routineTools(host: RoutineHost): Tool[] {
     }),
     tool({
       name: "delete_routine",
-      description: "Delete a routine for good. Only when a person asked for it.",
+      description:
+        "Delete a routine for good. Delete one that wakes your own thread yourself once the work it checks on is done; any other only when a person asked for it.",
       input: z.object({ routine_id: z.string() }),
       run: async ({ routine_id }) => {
         if (!(await host.deleteRoutine(routine_id))) throw new Error(`No routine ${routine_id}.`);

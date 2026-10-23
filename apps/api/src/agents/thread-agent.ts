@@ -1346,6 +1346,9 @@ export class ThreadAgent extends Agent<Env> {
         listRoutines: () => project.listRoutines(),
         // A routine the agent sets up works for the person this turn works for.
         createRoutine: (input: Parameters<typeof project.createRoutine>[0]) => project.createRoutine(input, this.getMeta("requester") || "agent"),
+        // A prompt or target the agent rewrites works for the person this turn works for, like a new routine.
+        updateRoutine: (id: string, patch: Parameters<typeof project.updateRoutine>[1]) =>
+          project.updateRoutine(id, patch, this.getMeta("requester") || "agent"),
         setPaused: (id: string, paused: boolean) => project.updateRoutine(id, { paused }),
         deleteRoutine: (id: string) => project.deleteRoutine(id),
         defaultTimezone: turn()?.timezone ?? "UTC",

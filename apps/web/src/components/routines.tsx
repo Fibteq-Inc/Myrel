@@ -1,8 +1,8 @@
 import type { Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import type { Routine, RoutineScheduleInput, Thread } from "@myrel/protocol";
+import type { Routine, RoutineScheduleInput, Thread, UpdateRoutineInputRaw } from "@myrel/protocol";
 import { nextCronRun } from "@myrel/protocol";
-import { AlarmClock, Pause, Play, Plus, Trash2, X, Zap } from "lucide-react";
+import { AlarmClock, Pause, Pencil, Play, Plus, Trash2, X, Zap } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
@@ -34,7 +34,7 @@ export function RoutinesButton({ onClick, count, className }: { onClick: () => v
   );
 }
 
-/** Lists, creates, pauses, runs and deletes a project's routines. Live state comes from the project socket. */
+/** Lists, creates, edits, pauses, runs and deletes a project's routines. Live state comes from the project socket. */
 export function RoutinesPanel({
   projectId,
   routines,
@@ -49,6 +49,8 @@ export function RoutinesPanel({
   const t = useT();
   const format = useFormat();
   const [creating, setCreating] = useState(routines.length === 0);
+  // The routine whose card is open as an edit form, in place of its card.
+  const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const titles = useMemo(() => Object.fromEntries(threads.map((t) => [t.id, t.title])), [threads]);
 
@@ -75,7 +77,13 @@ export function RoutinesPanel({
           <AlarmClock size={17} className="text-muted" aria-hidden="true" />
           <h2 className="flex-1 text-[15px] font-semibold">{t("routines.title")}</h2>
           {!creating && (
-            <GhostButton type="button" onClick={() => setCreating(true)}>
+            <GhostButton
+              type="button"
+              onClick={() => {
+                setEditing(null);
+                setCreating(true);
+              }}
+            >
               <Plus size={14} aria-hidden="true" />
               {t("routines.new")}
             </GhostButton>
@@ -91,7 +99,7 @@ export function RoutinesPanel({
             <RoutineForm
               threads={threads}
               onCancel={routines.length ? () => setCreating(false) : undefined}
-              onCreate={async (input) => {
+              onSave={async (input) => {
                 await api.createRoutine(projectId, input);
                 setCreating(false);
               }}
@@ -99,7 +107,21 @@ export function RoutinesPanel({
           )}
           {error && <p className="px-4 pt-3 text-xs text-bad">{error}</p>}
           <ul className="space-y-2 p-4">
-            {routines.map((r) => (
+            {routines.map((r) =>
+              editing === r.id ? (
+                <li key={r.id}>
+                  <RoutineForm
+                    routine={r}
+                    threads={threads}
+                    className="space-y-3 rounded-xl border border-edge bg-ground p-4"
+                    onCancel={() => setEditing(null)}
+                    onSave={async (_, patch) => {
+                      if (Object.keys(patch).length) await api.updateRoutine(projectId, r.id, patch);
+                      setEditing(null);
+                    }}
+                  />
+                </li>
+              ) : (
               <li key={r.id} className="rounded-xl border border-line bg-raised p-3.5">
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
@@ -113,6 +135,18 @@ export function RoutinesPanel({
                         : t("routines.inChat")}
                     </p>
                   </div>
+                  <IconButton
+                    type="button"
+                    className="size-7"
+                    title={t("routines.edit")}
+                    aria-label={`${t("routines.edit")}: ${r.name}`}
+                    onClick={() => {
+                      setCreating(false);
+                      setEditing(r.id);
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </IconButton>
                   <IconButton
                     type="button"
                     className="size-7"
@@ -154,7 +188,8 @@ export function RoutinesPanel({
                   {r.lastRunAt && ` · ${t("routines.lastRan", { relative: format.relative(r.lastRunAt) })}`}
                 </p>
               </li>
-            ))}
+              ),
+            )}
           </ul>
         </div>
       </aside>
@@ -165,48 +200,76 @@ export function RoutinesPanel({
 
 type Repeat = "daily" | "weekdays" | "weekly" | "hourly" | "custom" | "once";
 
+type RoutineDraft = {
+  name: string;
+  prompt: string;
+  target: Routine["target"];
+  schedule: RoutineScheduleInput;
+};
+
+/**
+ * Creates a routine, or edits one when `routine` is given: its fields start from the routine's values
+ * and saving sends only what changed (a new schedule may switch between repeating and once).
+ */
 function RoutineForm({
+  routine,
   threads,
-  onCreate,
+  onSave,
   onCancel,
+  className = "m-4 space-y-3 rounded-xl border border-edge bg-ground p-4",
 }: {
+  routine?: Routine;
   threads: Thread[];
-  onCreate: (input: {
-    name: string;
-    prompt: string;
-    target: Routine["target"];
-    schedule: RoutineScheduleInput;
-  }) => Promise<void>;
+  /** draft: every field, for creating. patch: only the fields that differ from `routine`, for an edit. */
+  onSave: (draft: RoutineDraft, patch: UpdateRoutineInputRaw) => Promise<void>;
   onCancel?: () => void;
+  className?: string;
 }) {
   const t = useT();
   const format = useFormat();
-  const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [repeat, setRepeat] = useState<Repeat>("weekdays");
-  const [time, setTime] = useState("09:00");
-  const [weekday, setWeekday] = useState(1);
-  const [cron, setCron] = useState("0 9 * * 1-5");
-  const [at, setAt] = useState("");
-  const [target, setTarget] = useState("");
+  const [initial] = useState(() => scheduleFields(routine?.schedule));
+  const [name, setName] = useState(routine?.name ?? "");
+  const [prompt, setPrompt] = useState(routine?.prompt ?? "");
+  const [repeat, setRepeat] = useState<Repeat>(initial.repeat);
+  const [time, setTime] = useState(initial.time);
+  const [weekday, setWeekday] = useState(initial.weekday);
+  const [cron, setCron] = useState(initial.cron);
+  const [at, setAt] = useState(initial.at);
+  const [target, setTarget] = useState(routine?.target.kind === "thread" ? routine.target.threadId : "");
+  // An edit keeps its schedule (and time zone) until someone touches the schedule fields.
+  const [scheduleTouched, setScheduleTouched] = useState(!routine);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const touch = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setScheduleTouched(true);
+  };
 
-  const schedule = buildSchedule({ repeat, time, weekday, cron, at });
-  const preview = previewNext(schedule);
+  const schedule = scheduleTouched ? buildSchedule({ repeat, time, weekday, cron, at, timezone: initial.timezone }) : null;
+  const preview = scheduleTouched ? previewNext(schedule) : routine!.nextRunAt;
+  // The routine targets a thread that is gone: keep it selectable instead of silently switching.
+  const missingThread = target && !threads.some((th) => th.id === target);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!schedule) return setError(t("routines.pickTime"));
+    if (scheduleTouched && !schedule) return setError(t("routines.pickTime"));
+    const draft: RoutineDraft = {
+      name: name.trim(),
+      prompt: prompt.trim(),
+      target: target ? { kind: "thread", threadId: target } : { kind: "coordinator" },
+      schedule: schedule ?? routine!.schedule,
+    };
     setBusy(true);
     setError(null);
     try {
-      await onCreate({
-        name: name.trim(),
-        prompt: prompt.trim(),
-        target: target ? { kind: "thread", threadId: target } : { kind: "coordinator" },
-        schedule,
-      });
+      const patch: UpdateRoutineInputRaw = {};
+      if (routine) {
+        if (draft.name !== routine.name) patch.name = draft.name;
+        if (draft.prompt !== routine.prompt) patch.prompt = draft.prompt;
+        if (JSON.stringify(draft.target) !== JSON.stringify(routine.target)) patch.target = draft.target;
+        if (schedule && JSON.stringify(schedule) !== JSON.stringify(routine.schedule)) patch.schedule = schedule;
+      }
+      await onSave(draft, patch);
     } catch (err) {
       setError(errorMessage(err, t));
     } finally {
@@ -216,7 +279,7 @@ function RoutineForm({
 
   const select = "h-9 rounded-lg border border-edge bg-raised px-2.5 text-sm text-fg outline-none focus:border-accent";
   return (
-    <form onSubmit={submit} className="m-4 space-y-3 rounded-xl border border-edge bg-ground p-4">
+    <form onSubmit={submit} className={className} aria-label={routine ? t("routines.editTitle", { name: routine.name }) : undefined}>
       <Input
         placeholder={t("routines.namePlaceholder")}
         value={name}
@@ -238,7 +301,7 @@ function RoutineForm({
           aria-label={t("routines.repeat")}
           className="w-auto"
           value={repeat}
-          onChange={(e) => setRepeat(e.target.value as Repeat)}
+          onChange={(e) => touch(setRepeat)(e.target.value as Repeat)}
         >
           <option value="weekdays">{t("routines.repeatWeekdays")}</option>
           <option value="daily">{t("routines.repeatDaily")}</option>
@@ -252,7 +315,7 @@ function RoutineForm({
             aria-label={t("routines.day")}
             className="w-auto"
             value={weekday}
-            onChange={(e) => setWeekday(Number(e.target.value))}
+            onChange={(e) => touch(setWeekday)(Number(e.target.value))}
           >
             {[1, 2, 3, 4, 5, 6, 0].map((d) => (
               <option key={d} value={d}>
@@ -267,7 +330,7 @@ function RoutineForm({
             type="time"
             className={select}
             value={time}
-            onChange={(e) => setTime(e.target.value)}
+            onChange={(e) => touch(setTime)(e.target.value)}
             required
           />
         )}
@@ -277,7 +340,7 @@ function RoutineForm({
             type="datetime-local"
             className={select}
             value={at}
-            onChange={(e) => setAt(e.target.value)}
+            onChange={(e) => touch(setAt)(e.target.value)}
             required
           />
         )}
@@ -286,7 +349,7 @@ function RoutineForm({
             aria-label={t("routines.cron")}
             className="w-44 font-mono"
             value={cron}
-            onChange={(e) => setCron(e.target.value)}
+            onChange={(e) => touch(setCron)(e.target.value)}
           />
         )}
       </div>
@@ -296,6 +359,7 @@ function RoutineForm({
         onChange={(e) => setTarget(e.target.value)}
       >
         <option value="">{t("routines.targetChat")}</option>
+        {missingThread && <option value={target}>{t("routines.targetThread", { title: t("routines.aThread") })}</option>}
         {threads.map((thread) => (
           <option key={thread.id} value={thread.id}>
             {t("routines.targetThread", { title: thread.title })}
@@ -303,7 +367,15 @@ function RoutineForm({
         ))}
       </Select>
       <p className="text-[11px] text-subtle">
-        {preview ? t("routines.firstRun", { date: format.dateTime(preview), zone: localZone }) : t("routines.never")}
+        {routine && !scheduleTouched
+          ? routine.paused
+            ? t("routines.paused")
+            : preview
+              ? t("routines.nextRun", { date: format.dateTime(preview), relative: format.relative(preview) })
+              : t("routines.finished")
+          : preview
+            ? t(routine ? "routines.nextRunZone" : "routines.firstRun", { date: format.dateTime(preview), zone: initial.timezone })
+            : t("routines.never")}
       </p>
       {error && <p className="text-xs text-bad">{error}</p>}
       <div className="flex justify-end gap-2">
@@ -312,12 +384,45 @@ function RoutineForm({
             {t("routines.cancel")}
           </GhostButton>
         )}
-        <Button type="submit" disabled={busy || !preview}>
-          {t("routines.create")}
+        <Button type="submit" disabled={busy || (scheduleTouched && !preview)}>
+          {routine ? t("routines.save") : t("routines.create")}
         </Button>
       </div>
     </form>
   );
+}
+
+/** The form fields a schedule maps to; presets when the cron is one of them, else the raw cron. */
+function scheduleFields(s: Routine["schedule"] | undefined): {
+  repeat: Repeat;
+  time: string;
+  weekday: number;
+  cron: string;
+  at: string;
+  timezone: string;
+} {
+  const fields = { repeat: "weekdays" as Repeat, time: "09:00", weekday: 1, cron: "0 9 * * 1-5", at: "", timezone: localZone };
+  if (!s) return fields;
+  if (s.kind === "once") return { ...fields, repeat: "once", at: toLocalInput(s.at) };
+  fields.timezone = s.timezone;
+  fields.cron = s.cron;
+  const [min, hour, dom, mon, dow] = s.cron.split(/\s+/);
+  if (s.cron === "0 * * * *") return { ...fields, repeat: "hourly" };
+  const simple = /^\d+$/.test(min!) && /^\d+$/.test(hour!) && dom === "*" && mon === "*";
+  if (!simple) return { ...fields, repeat: "custom" };
+  const time = `${hour!.padStart(2, "0")}:${min!.padStart(2, "0")}`;
+  if (dow === "*") return { ...fields, repeat: "daily", time };
+  if (dow === "1-5") return { ...fields, repeat: "weekdays", time };
+  if (/^[0-7]$/.test(dow!)) return { ...fields, repeat: "weekly", time, weekday: Number(dow) % 7 };
+  return { ...fields, repeat: "custom" };
+}
+
+/** An ISO time as a datetime-local value (this device's wall clock, to the minute). */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function buildSchedule(f: {
@@ -326,10 +431,11 @@ function buildSchedule(f: {
   weekday: number;
   cron: string;
   at: string;
+  timezone: string;
 }): RoutineScheduleInput | null {
   const [h, m] = f.time.split(":").map(Number);
   const hm = Number.isInteger(h) && Number.isInteger(m) ? `${m} ${h}` : null;
-  const cron = (expr: string | null) => (expr ? { kind: "cron" as const, cron: expr, timezone: localZone } : null);
+  const cron = (expr: string | null) => (expr ? { kind: "cron" as const, cron: expr, timezone: f.timezone } : null);
   switch (f.repeat) {
     case "daily":
       return cron(hm && `${hm} * * *`);

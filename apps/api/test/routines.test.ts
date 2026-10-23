@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { routineTools } from "../src/agents/routine-tools";
 import { agentProject, modelAgent } from "./fake-agent";
 import { emails as sentEmails, type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
@@ -133,6 +134,95 @@ describe("routines", () => {
     expect((await api(`${path}/${routine.id}`, { method: "DELETE", token })).status).toBe(200);
     expect((await api(`${path}/${routine.id}`, { method: "DELETE", token })).status).toBe(404);
     await until(() => events.some((e) => e.type === "routine.deleted" && e.routineId === routine.id), "delete event");
+    ws.close();
+  });
+
+  it("edits a routine, switching between repeating and once, and re-arms it", async () => {
+    const { token, project, ws } = await setup();
+    const path = `/api/projects/${project.id}/routines`;
+    const { routine } = await json<{ routine: Routine }>(
+      api(path, {
+        method: "POST",
+        token,
+        body: JSON.stringify({ name: "Digest", prompt: "Summarize.", schedule: { kind: "cron", cron: "0 9 * * *", timezone: "UTC" } }),
+      }),
+    );
+    const patch = (body: unknown) => api(`${path}/${routine.id}`, { method: "PATCH", token, body: JSON.stringify(body) });
+
+    // Repeating -> once: the next run is the new one-off time.
+    const at = new Date(Date.now() + 3 * 3600_000).toISOString();
+    const once = await json<{ routine: Routine }>(
+      patch({ name: "Reminder", prompt: "Remind me.", schedule: { kind: "once", at } }),
+    );
+    expect(once.routine).toMatchObject({ name: "Reminder", prompt: "Remind me.", schedule: { kind: "once", at }, nextRunAt: at });
+
+    // A new time in the past is refused and leaves the routine as it was.
+    expect((await patch({ schedule: { kind: "once", at: "2020-01-01T00:00:00Z" } })).status).toBe(400);
+    expect((await patch({ schedule: { kind: "cron", cron: "0 0 31 2 *" } })).status).toBe(400);
+    expect((await json<{ routines: Routine[] }>(api(path, { token }))).routines[0]).toMatchObject({ nextRunAt: at });
+
+    // Once -> repeating: the cron's next match, in its time zone.
+    const daily = await json<{ routine: Routine }>(
+      patch({ schedule: { kind: "cron", cron: "30 8 * * *", timezone: "Europe/Istanbul" } }),
+    );
+    expect(daily.routine.schedule).toEqual({ kind: "cron", cron: "30 8 * * *", timezone: "Europe/Istanbul" });
+    const next = new Date(daily.routine.nextRunAt!);
+    expect([next.getUTCHours(), next.getUTCMinutes()]).toEqual([5, 30]);
+    expect(next.getTime()).toBeGreaterThan(Date.now());
+
+    // The target can move to a thread, but not to one that does not exist.
+    expect((await patch({ target: { kind: "thread", threadId: "thr_00000000000000000000000000" } })).status).toBe(400);
+    ws.close();
+  });
+
+  it("lets an agent update a routine with update_routine, switching its schedule kind", async () => {
+    const { agent, ws } = await setup();
+    ws.close();
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "u1", body: "check later" });
+    const thread = await agent.createThread(root.id, "Checks");
+    const tools = routineTools({
+      listRoutines: () => agent.listRoutines(),
+      createRoutine: (input) => agent.createRoutine(input, "agent"),
+      updateRoutine: (id, patch) => agent.updateRoutine(id, patch, "agent"),
+      setPaused: (id, paused) => agent.updateRoutine(id, { paused }),
+      deleteRoutine: (id) => agent.deleteRoutine(id),
+      defaultTimezone: "UTC",
+      threadId: thread.id,
+    });
+    const run = (name: string, input: unknown) => {
+      const t = tools.find((x) => x.name === name)!;
+      return t.run(t.input.parse(input));
+    };
+    await run("create_routine", { name: "Check CI", prompt: "Look at CI.", cron: "*/10 * * * *" });
+    const [routine] = await agent.listRoutines();
+    expect(routine!.target).toEqual({ kind: "thread", threadId: thread.id });
+
+    const at = new Date(Date.now() + 50 * 60_000).toISOString();
+    await run("update_routine", { routine_id: routine!.id, prompt: "Look at CI once more.", at });
+    expect(await agent.getRoutine(routine!.id)).toMatchObject({ prompt: "Look at CI once more.", schedule: { kind: "once", at }, nextRunAt: at });
+    // A time zone alone needs a cron to move; a cron makes it repeating again, in that zone.
+    await expect(run("update_routine", { routine_id: routine!.id, timezone: "Europe/Istanbul" })).rejects.toThrow(/runs once/);
+    await run("update_routine", { routine_id: routine!.id, cron: "0 9 * * *", timezone: "Europe/Istanbul", target: "project_chat" });
+    expect(await agent.getRoutine(routine!.id)).toMatchObject({
+      schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Europe/Istanbul" },
+      target: { kind: "coordinator" },
+    });
+    await run("update_routine", { routine_id: routine!.id, timezone: "UTC" });
+    expect((await agent.getRoutine(routine!.id))!.schedule).toEqual({ kind: "cron", cron: "0 9 * * *", timezone: "UTC" });
+    await expect(run("update_routine", { routine_id: "rtn_00000000000000000000000000", name: "x" })).rejects.toThrow(/No routine/);
+  });
+
+  it("finishes a paused one-off routine whose time passed instead of firing it late", async () => {
+    const { agent, ws } = await setup();
+    const routine = await agent.createRoutine(
+      { name: "Soon", prompt: "Ping.", target: { kind: "coordinator" }, schedule: { kind: "once", at: new Date(Date.now() + 200).toISOString() } },
+      "agent",
+    );
+    await agent.updateRoutine(routine.id, { paused: true });
+    await new Promise((r) => setTimeout(r, 300));
+    // Renaming keeps the (now past) schedule, and resuming leaves it finished.
+    expect(await agent.updateRoutine(routine.id, { name: "Late" })).toMatchObject({ name: "Late", nextRunAt: null });
+    expect(await agent.updateRoutine(routine.id, { paused: false })).toMatchObject({ paused: false, nextRunAt: null, runCount: 0 });
     ws.close();
   });
 
