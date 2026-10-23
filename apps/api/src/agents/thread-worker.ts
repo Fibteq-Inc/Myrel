@@ -26,6 +26,11 @@ export type ThreadHost = {
   /** It set a plan this turn. */
   planned(): boolean;
   requestCoordinator(kind: "permission" | "routing" | "handoff", reason: string): Promise<void>;
+  /**
+   * Puts a choice card to people: straight away when askPerson, otherwise to the coordinator first,
+   * which answers from what the project already knows or passes the card on. Says where it went.
+   */
+  askDecision(input: { decision: Decision; context?: string; askPerson: boolean }): Promise<"person" | "coordinator">;
   /** Marks the thread finished, or says why it cannot be yet. */
   resolve(): Promise<string | null>;
   /** Follows a pull request on a connected repository; says what happened. */
@@ -127,6 +132,19 @@ function renderPullRequest(pr: PullRequest): string {
   return `- ${pr.repo}#${pr.number} "${pr.title}" ${pr.url}: ${pr.draft && pr.state === "open" ? "draft" : pr.state}, ${ci}${review}`;
 }
 
+/** The message body of a choice card: its context, then the card. */
+export function decisionCard(decision: Decision, context?: string): string {
+  return [context, formatDecision(decision)].filter(Boolean).join("\n\n");
+}
+
+/** A choice card as plain text, for the coordinator to read. */
+export function renderQuestion(decision: Decision, context?: string): string {
+  const options = decision.options.map(
+    (o, i) => `  ${i + 1}. ${o.label}${o.consequence ? `: ${o.consequence}` : ""}${i === decision.recommended ? " (recommended)" : ""}`,
+  );
+  return [decision.question, ...options, context ? `  Context: ${context}` : ""].filter(Boolean).join("\n");
+}
+
 /** A reply past this many characters or lines should have been an artifact or a file. */
 const LONG_REPLY_CHARS = 1500;
 const LONG_REPLY_LINES = 15;
@@ -185,11 +203,21 @@ export function threadTools(host: ThreadHost): Tool[] {
     tool({
       name: "ask_decision",
       description:
-        "Ask the person to choose, shown as a card with buttons. Options: 2 to 4, each a 1-2 word label and a one-sentence consequence. Mark one as recommended (0-based index).",
-      input: Decision.extend({ context: z.string().max(1200).optional() }),
-      run: async ({ context, ...decision }) => {
-        await host.reply([context, formatDecision(decision)].filter(Boolean).join("\n\n"), "decision");
-        return "Asked. The person's choice will arrive as their next message.";
+        "Ask the person to choose, shown as a card with buttons. Options: 2 to 4, each a 1-2 word label and a one-sentence consequence. Mark one as recommended (0-based index). The coordinator sees it first and answers it when the project's memory, instructions or an earlier decision already settle it; otherwise the card goes to the person.",
+      input: Decision.extend({
+        context: z.string().max(1200).optional(),
+        ask_person: z
+          .boolean()
+          .optional()
+          .describe(
+            "Skip the coordinator: only the person can answer (they asked to be asked, it approves something that cannot be undone, or it is about taste or work they must look at).",
+          ),
+      }),
+      run: async ({ context, ask_person, ...decision }) => {
+        const to = await host.askDecision({ decision, context, askPerson: ask_person ?? false });
+        return to === "person"
+          ? "Asked. The person's choice will arrive as their next message."
+          : "Sent to the coordinator first. Its answer, or the person's choice if it passes the card on, arrives in a later turn. Carry on with the recommended option if you can; otherwise end your turn.";
       },
     }),
     tool({

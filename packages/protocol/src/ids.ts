@@ -15,6 +15,7 @@ export const ID_PREFIXES = {
   connector: "mcp",
   skill: "skl",
   suggestion: "sug",
+  question: "qst",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

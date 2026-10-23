@@ -15,5 +15,18 @@ export function relayLine(kind: RelayKind, note: string, fromTitle?: string): st
       return tr ? "Koordinatör yanıtladı." : "The coordinator answered.";
     case "relay":
       return tr ? `"${fromTitle}" thread'inden bir not geldi.` : `A note came from the "${fromTitle}" thread.`;
+    case "answer":
+      return tr ? "Koordinatör ajanın sorusunu cevapladı." : "The coordinator answered the agent's question.";
   }
+}
+
+/**
+ * The line for a question the coordinator answered for the person: the answer and where it came
+ * from stay in sight, so people can disagree without opening the note.
+ */
+export function answerLine(answer: string, source: string, question: string): string {
+  const tr = /[çğıöşüÇĞİÖŞÜ]/.test(`${answer} ${source} ${question}`);
+  return tr
+    ? `Koordinatör ajanın sorusunu cevapladı: **${answer}** (kaynak: ${source})`
+    : `The coordinator answered the agent's question: **${answer}** (source: ${source})`;
 }

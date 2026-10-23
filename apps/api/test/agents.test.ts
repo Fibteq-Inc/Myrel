@@ -365,6 +365,78 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("sends a thread agent's choice card to the coordinator first, which answers it or passes it to the person", async () => {
+    const questions: string[] = [];
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      if (req.prompt.includes("## Questions from thread agents")) {
+        questions.push(req.prompt);
+        const id = /Question \[(qst_[0-9A-Z]{26})\]/.exec(req.prompt)![1];
+        if (req.prompt.includes("Open a PR?")) {
+          return { text: "", toolCalls: [call("answer_question", { question_id: id, answer: "PR aç", source: "proje talimatı" })] };
+        }
+        if (req.prompt.includes("Which color?")) {
+          return { text: "", toolCalls: [call("ask_person", { question_id: id, note: "Renkler için daha önce verilmiş bir karar yok." })] };
+        }
+        return { text: "", toolCalls: [] }; // leaves it alone
+      }
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Button", instructions: "Fix the button.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const options = [{ label: "Yes", consequence: "" }, { label: "No", consequence: "" }];
+    const answers: string[] = [];
+    const play: Play = async (turn, index) => {
+      const ask = async (question: string, extra: object = {}) =>
+        answers.push((await turn.call("ask_decision", { question, options, recommended: 0, ...extra })).text);
+      if (index === 0) await ask("Open a PR?");
+      else if (index === 1) {
+        expect(turn.prompt).toContain('The coordinator answered your question "Open a PR?"');
+        await ask("Which color?");
+      } else if (index === 2) await ask("Ship it?");
+      else await ask("Delete the branch?", { ask_person: true });
+    };
+
+    const { ws, agent, turns } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "fix the button" }));
+    const thread: Thread = await until(async () => (await agent.listThreads())[0], "thread");
+    const messages = async () => ((await agent.getThreadContext(thread.id))?.messages ?? []) as Message[];
+    const card = (question: string) => async () => (await messages()).find((m) => m.body.includes(`"question": "${question}"`)) ?? null;
+
+    // Answered by the coordinator: a line people can read and open, the agent carries on, and no card.
+    const colorCard = await until(card("Which color?"), "the color card passed on");
+    const answered = (await messages()).find((m) => m.relay?.kind === "answer");
+    expect(answered).toMatchObject({
+      authorId: "coordinator",
+      body: "Koordinatör ajanın sorusunu cevapladı: **PR aç** (kaynak: proje talimatı)",
+      relay: { threadId: thread.id },
+    });
+    expect(answered!.relay!.note).toContain("Open a PR?");
+    expect(await card("Open a PR?")()).toBeNull();
+    expect(questions[0]).toContain("Open a PR?\n");
+    expect(questions[0]).toContain("1. Yes (recommended)");
+    expect(answers[0]).toContain("Sent to the coordinator first");
+
+    // Passed on: the card with the coordinator's line above it, and the thread waits on the person.
+    expect(colorCard.authorId).toBe("thread-agent");
+    expect(colorCard.body.startsWith("Renkler için daha önce verilmiş bir karar yok.\n\n```decision")).toBe(true);
+    await until(async () => ((await agent.getThread(thread.id))?.status === "review_ready" ? true : null), "waiting on the person");
+
+    // Left alone by the coordinator: the card still reaches the person when its turn ends.
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "Blue" }));
+    const shipCard = await until(card("Ship it?"), "the card the coordinator skipped");
+    expect(shipCard.body.startsWith("```decision")).toBe(true);
+
+    // Only the person can answer: straight to them, without the coordinator.
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "go" }));
+    await until(card("Delete the branch?"), "the card for the person");
+    expect(answers[3]).toContain("The person's choice will arrive");
+    expect(questions.some((q) => q.includes("Delete the branch?"))).toBe(false);
+    expect(turns).toHaveLength(4);
+    ws.close();
+  }, 20_000);
+
   it("keeps a thread waiting on the person after it presented work for their feedback", async () => {
     setFakeModel((req) => {
       if (req.turns > 1) return { text: "", toolCalls: [] };
@@ -538,11 +610,11 @@ describe("coordinator and thread agent", () => {
     // The first turn dies the way a restart or a failed lookup does: thrown out of the queue callback.
     let failures = 0;
     await runInDurableObject(agent as unknown as DurableObjectStub, (instance) => {
-      const self = instance as unknown as { runCoordinatorTurn: (inbox: unknown[]) => Promise<void> };
+      const self = instance as unknown as { runCoordinatorTurn: (...args: unknown[]) => Promise<void> };
       const real = self.runCoordinatorTurn.bind(instance);
-      self.runCoordinatorTurn = async (inbox) => {
+      self.runCoordinatorTurn = async (...args) => {
         if (failures++ === 0) throw new Error("object restarted");
-        return real(inbox);
+        return real(...args);
       };
     });
     ws.send(JSON.stringify({ type: "message.send", body: "links do not open on mobile" }));

@@ -11,6 +11,7 @@ import {
   formatPlan,
   formatPlanUpdate,
   type PlanUpdate,
+  type Message,
   type MessageStats,
   type SkillBundle,
   type Task,
@@ -76,7 +77,15 @@ import type { ThreadWake } from "./project-agent";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
 import type { TaskWithLog } from "./thread-tasks";
-import { type CoordinatorNote, type ReplyNeeds, type RoutineRun, threadPrompt, threadTools } from "./thread-worker";
+import {
+  type CoordinatorNote,
+  decisionCard,
+  type ReplyNeeds,
+  type RoutineRun,
+  renderQuestion,
+  threadPrompt,
+  threadTools,
+} from "./thread-worker";
 
 const BY: Author = { kind: "agent", id: THREAD_AGENT_ID };
 
@@ -118,6 +127,8 @@ type AgentTurn = {
   lastReply?: string;
   needs: ReplyNeeds | null;
   asked: boolean;
+  /** It put a choice card to the coordinator first (see PendingQuestion). */
+  questioned?: boolean;
   resolved: boolean;
   timezone: string;
   /** The language of the person's latest message, for cards Myrel posts on the agent's behalf. */
@@ -154,6 +165,11 @@ const AGENT_TURN_SEC = 3600;
  * is ended for it (some models keep calling tools after their last reply).
  */
 const FINISH_AFTER_REPLY_SEC = 60;
+/** How long a choice card waits on the coordinator before it goes to the person anyway. */
+const QUESTION_TIMEOUT_SEC = 120;
+
+/** A choice card the agent asked that waits on the coordinator: answered there, or passed on to people. */
+type PendingQuestion = { id: string; card: string; question: string };
 
 type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null };
 
@@ -318,12 +334,61 @@ export class ThreadAgent extends Agent<Env> {
     await project.notifyThread(threadId, "done", body);
   }
 
+  /** The choice card waiting on the coordinator, taken off the wait when its id matches. */
+  private takeQuestion(id: string): PendingQuestion | null {
+    const raw = this.getMeta("pending_question");
+    const q = raw ? (JSON.parse(raw) as PendingQuestion) : null;
+    if (q?.id !== id) return null;
+    this.deleteMeta("pending_question");
+    return q;
+  }
+
+  /**
+   * The coordinator answered the agent's choice card itself, so the card never reaches people.
+   * Returns the question, or null when the card was already answered or passed on. Callable over RPC.
+   */
+  async answeredQuestion(id: string): Promise<{ question: string } | null> {
+    const q = this.takeQuestion(id);
+    return q && { question: q.question };
+  }
+
+  /**
+   * The choice card goes to people after all: the coordinator passed it on (with an optional line of
+   * what it knows), its turn failed, or it took too long. Returns false when the card was already
+   * answered or passed on. Callable over RPC.
+   */
+  async escalateQuestion(id: string, note?: string): Promise<boolean> {
+    const q = this.takeQuestion(id);
+    if (!q) return false;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const body = note?.trim() ? `${note.trim()}\n\n${q.card}` : q.card;
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    if (this.runningTask() && turn) {
+      // A turn still running says it when it ends, so the thread does not read "working" over the card.
+      this.setMeta("agent_turn", JSON.stringify({ ...turn, needs: louder("decision", turn.needs), lastReply: q.question }));
+    } else {
+      await project.updateThread(threadId, { status: "review_ready" });
+      await project.notifyThread(threadId, "decision", q.question);
+    }
+    return true;
+  }
+
+  /** Schedule callback: a choice card still waiting on the coordinator goes to the person. */
+  async questionTimeout(payload: { id: string }): Promise<void> {
+    if (this.getMeta("closed")) return;
+    await this.escalateQuestion(payload.id);
+  }
+
   /**
    * The thread was closed as opened by mistake (ProjectAgent.closeThread). Its running turn stops
    * and what that turn would still have said or set is dropped. Callable over RPC.
    */
   async close(): Promise<void> {
     this.setMeta("closed", "1");
+    this.deleteMeta("pending_question");
     this.setMeta("dirty", "0");
     await this.cancelRunningTask();
   }
@@ -701,11 +766,13 @@ export class ThreadAgent extends Agent<Env> {
       await project.setMessageStats(last.id, this.runStats(row, last.from).stats);
     }
     const resolved = turn?.resolved ?? false;
-    const asked = turn?.asked ?? false;
+    // Read right before the update: a choice card the coordinator passed on meanwhile is the person's now.
+    const asked = (turn?.asked ?? false) || (!!turn?.questioned && !!this.getMeta("pending_question"));
     const failed = row.status === "failed" && !replied;
     await project.updateThread(threadId, {
-      // A question to the coordinator is answered by the coordinator, so the thread is not waiting on a person.
-      status: resolved ? "done" : asked ? "working" : failed ? "failed" : "review_ready",
+      // A question to the coordinator is answered by the coordinator, so the thread is not waiting on a
+      // person, unless something it asked or showed people this turn is.
+      status: resolved ? "done" : asked && !turn?.needs ? "working" : failed ? "failed" : "review_ready",
       resolved,
     });
     const kind = failed ? "failed" : resolved ? "done" : ((turn?.needs === "review" ? "ready" : turn?.needs) ?? ((replied || lastText) && !asked ? "ready" : null));
@@ -1137,39 +1204,60 @@ export class ThreadAgent extends Agent<Env> {
     // which makes it this agent's (opened with gh, say); an older one may not be this thread's.
     const track = (url: string, credit?: PullCredit) => trackPullRequest(this.env, projectId, threadId, url, credit);
     const local = this.runningTask()?.backend === "local";
+    const reply = async (text: string, needs?: ReplyNeeds, files?: string[]): Promise<Message> => {
+      // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
+      const attachments = files?.length ? await project.attachmentsFor(files) : [];
+      const t = turn();
+      const row = this.runningTask();
+      const counted = row ? this.runStats(row, t.mark) : null;
+      save({ pending: [], replied: true, lastReply: text, needs: louder(needs, t.needs), ...(counted && { mark: counted.mark }) });
+      const m = await project.sendMessage({
+        threadId,
+        authorKind: "agent",
+        authorId: THREAD_AGENT_ID,
+        body: text,
+        attachments,
+        artifacts: t.pending,
+        ...(counted && { stats: counted.stats }),
+      });
+      if (counted) save({ lastReplyStats: { id: m.id, from: counted.from } });
+      if (t.planDone && row?.backend === "sandbox") {
+        const at = Date.now();
+        save({ doneReplyAt: at });
+        await this.schedule(FINISH_AFTER_REPLY_SEC, "finishAfterReply", { taskId: row.id, at });
+      }
+      // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
+      if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      // A pull request it links to is followed even when it forgot track_pull_request.
+      const urls = pullRequestUrls(text);
+      const started = this.runningTask()?.created_at;
+      const credit = urls.length && started ? { ...(await this.pullCredit()), since: new Date(Date.parse(started) - 60_000).toISOString() } : undefined;
+      for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
+      return m;
+    };
     return [
       ...(local ? [this.approveAccessTool()] : []),
       ...threadTools({
-        reply: async (text, needs, files) => {
-          // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
-          const attachments = files?.length ? await project.attachmentsFor(files) : [];
-          const t = turn();
-          const row = this.runningTask();
-          const counted = row ? this.runStats(row, t.mark) : null;
-          save({ pending: [], replied: true, lastReply: text, needs: louder(needs, t.needs), ...(counted && { mark: counted.mark }) });
-          const m = await project.sendMessage({
-            threadId,
-            authorKind: "agent",
-            authorId: THREAD_AGENT_ID,
-            body: text,
-            attachments,
-            artifacts: t.pending,
-            ...(counted && { stats: counted.stats }),
-          });
-          if (counted) save({ lastReplyStats: { id: m.id, from: counted.from } });
-          if (t.planDone && row?.backend === "sandbox") {
-            const at = Date.now();
-            save({ doneReplyAt: at });
-            await this.schedule(FINISH_AFTER_REPLY_SEC, "finishAfterReply", { taskId: row.id, at });
+        reply,
+        askDecision: async ({ decision, context, askPerson }) => {
+          const card = decisionCard(decision, context);
+          // One card waits on the coordinator at a time; another one goes straight to the person.
+          if (askPerson || this.getMeta("pending_question")) {
+            await reply(card, "decision");
+            return "person";
           }
-          // Its own reply is not news next turn, unless someone wrote in between (then that stays NEW).
-          if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
-          // A pull request it links to is followed even when it forgot track_pull_request.
-          const urls = pullRequestUrls(text);
-          const started = this.runningTask()?.created_at;
-          const credit = urls.length && started ? { ...(await this.pullCredit()), since: new Date(Date.parse(started) - 60_000).toISOString() } : undefined;
-          for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
-          return m;
+          const id = createId("question");
+          this.setMeta("pending_question", JSON.stringify({ id, card, question: decision.question } satisfies PendingQuestion));
+          save({ questioned: true });
+          // Whatever happens to the coordinator's turn, the card reaches the person in the end.
+          await this.schedule(QUESTION_TIMEOUT_SEC, "questionTimeout", { id });
+          try {
+            await project.askCoordinator(threadId, { questionId: id, question: renderQuestion(decision, context) });
+          } catch (err) {
+            console.warn("asking the coordinator failed; asking the person", err);
+            await this.escalateQuestion(id);
+          }
+          return "coordinator";
         },
         publishArtifact: async (input) => {
           const result = await project.publishArtifact({ ...input, threadId });
@@ -1199,7 +1287,7 @@ export class ThreadAgent extends Agent<Env> {
         // and their answer wakes it, instead of reading as finished.
         resolve: async () => {
           const t = turn();
-          if (t.needs || t.published) {
+          if (t.needs || t.published || t.questioned) {
             return "Not resolved: this turn asked the person something or presented work for their feedback, so the thread waits on their answer. End your turn without resolving; it shows as waiting for them.";
           }
           save({ resolved: true });
