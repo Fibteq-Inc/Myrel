@@ -13,6 +13,7 @@ On your computer, tasks run through a coding CLI you already have.
 | OpenCode | `opencode` | No | Doesn't run shell commands below **Full access** |
 | Hermes Agent | `hermes` | No | Needs `hermes pm install --extra acp` once |
 | Cursor CLI | `cursor-agent` | No | Below **Full access**, commands run in Cursor's sandbox, without network |
+| Muse Code | `muse` | No | Below **Full access**, it writes only in the project's main folder |
 
 Install the CLI and sign in to it before you pair the computer. CLIs that can't ask mid-task stay inside the project's folders, so add any folder they need under **Also allowed** ([Folders](/computer/folders/)).
 

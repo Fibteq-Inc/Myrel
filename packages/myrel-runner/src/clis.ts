@@ -28,7 +28,7 @@ export type ParseState = {
   counted?: Set<string>;
   /** The subscription limits the CLI reported in its output (Claude Code's rate_limit_event). */
   limits?: CliLimits;
-  /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI). */
+  /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI, Muse Code). */
   draft?: string;
   draftStep?: unknown;
   /** The ACP conversation of this run, for CLIs that speak ACP (see CliAdapter.acp). */
@@ -47,13 +47,15 @@ export type CliAdapter = {
    * the CLI may work in besides its current one. asks: Claude Code sends permission prompts to
    * Myrel's approve_access tool, which asks the person (see AgentMcp.asks).
    */
-  args(opts: { access: Access; resume?: string; extra?: string[]; dirs?: string[]; asks?: boolean }): string[];
+  args(opts: { access: Access; resume?: string; extra?: string[]; dirs?: string[]; asks?: boolean; promptFile?: string }): string[];
   /**
    * Connects the CLI to the thread's MCP endpoint for a run as the thread's agent, so it talks
    * to people through Myrel's tools without asking for permission. `dir` is a private folder
    * for config files, deleted after the run.
    */
   agent(mcp: AgentMcp): Promise<{ args: string[]; env?: Record<string, string>; mcpServers?: AcpMcpServer[] }>;
+  /** For a CLI that does not read stdin: the prompt goes in a private file, passed to args() as promptFile. */
+  promptFile?: boolean;
   /** What goes on stdin for this prompt, when the CLI does not take it as plain text. */
   input?(prompt: string, access: Access): string;
   /** Feeds one line of stdout; updates `state` in place. */
@@ -615,7 +617,113 @@ export async function cursorConfig(dir: string, allow: string[], own = cursorCon
   return dir;
 }
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor };
+/**
+ * What Muse Code may do at each access level. With approval "never" nothing waits for an answer: MCP tools
+ * run, and below full its sandbox keeps writes in the workspace (and /tmp) while the run goes on.
+ */
+const MUSE_ACCESS: Record<Access, string[]> = {
+  // Its read-only profile waits forever on a command's approval, so read takes the write and shell tools away.
+  read: ["--approval-mode", "never", "--disable-write", "--disable-shell"],
+  // Trust loads the folder's own rules and skills (AGENTS.md); it is not saved.
+  edit: ["--approval-mode", "never", "--trust-workspace"],
+  auto: ["--approval-mode", "never", "--trust-workspace"],
+  full: ["--yolo"],
+};
+
+/** Env var that carries the Authorization header for Muse Code, which takes a secret only as a whole `${VAR}`. */
+const MUSE_AUTH_VAR = "MYREL_MCP_AUTH";
+
+const muse: CliAdapter = {
+  id: "muse",
+  bin: "muse",
+  // `muse exec` does not read stdin; the prompt comes in a file.
+  promptFile: true,
+  args: ({ access, resume, extra = [], promptFile }) => [
+    "exec",
+    "--json",
+    ...MUSE_ACCESS[access],
+    ...(resume ? ["--session-id", resume] : []),
+    ...extra,
+    ...(promptFile ? ["--prompt-file", quotePath(promptFile)] : []),
+  ],
+  // Servers for one run as -c overrides: nothing goes into the person's settings.json. Secrets stay in the
+  // environment, since -c takes them only as a whole `${VAR}`.
+  async agent({ url, token, connectors = [] }) {
+    const env: Record<string, string> = { [MUSE_AUTH_VAR]: `Bearer ${token}` };
+    const headers = { Authorization: `\${${MUSE_AUTH_VAR}}` };
+    // Its HTTP servers have no `type`: one with a type is refused as an unknown setting.
+    const servers: Array<[string, unknown]> = [[MYREL_MCP_SERVER, { url, headers }]];
+    for (const [i, c] of connectors.entries()) {
+      if (c.transport === "http") {
+        servers.push([c.name, { url: c.url, headers }]);
+        continue;
+      }
+      const vars = Object.entries(c.env).map(([key, value], j) => {
+        const name = `MYREL_MCP_${i}_${j}`;
+        env[name] = value;
+        return [key, `\${${name}}`];
+      });
+      servers.push([c.name, { command: c.command, args: c.args, env: Object.fromEntries(vars) }]);
+    }
+    // The whole mcpServers map cannot be set at once, only one server at a time.
+    return { args: servers.flatMap(([name, server]) => ["-c", `mcpServers.${name}=${JSON.stringify(server)}`]), env };
+  },
+  line(line, state) {
+    const event = parseJson(line);
+    if (!event) return;
+    const stream = event.stream as { kind?: unknown; id?: unknown } | undefined;
+    if (stream?.kind === "session" && typeof stream.id === "string" && stream.id) state.sessionId = stream.id;
+    const p = (event.payload ?? {}) as Record<string, unknown>;
+    switch (event.payload_type) {
+      case "run.model.configured":
+        if (typeof p.model_id === "string") state.model = p.model_id;
+        break;
+      case "task.lifecycle.proposed": {
+        // A tool call starts; the answer so far was said before it.
+        const kind = (p.event as { task_kind?: unknown } | undefined)?.task_kind;
+        if (typeof kind === "string" && kind.startsWith("tool.")) {
+          state.progress = describeTool(kind.slice("tool.".length), undefined);
+          state.draft = undefined;
+        }
+        break;
+      }
+      case "tool.result": {
+        // Only the result says what a command or edit was about.
+        const tool = (p.correlation_facts as { tool_name?: unknown } | undefined)?.tool_name;
+        const edit = p.edit_facts as { path?: unknown } | undefined;
+        const command = typeof p.text === "string" && p.text.startsWith("{") ? (parseArgs(p.text) as { command?: unknown } | undefined)?.command : undefined;
+        if (typeof command === "string") state.progress = clip(`$ ${unwrapShell(command)}`);
+        else if (typeof tool === "string") state.progress = describeTool(tool, edit);
+        break;
+      }
+      case "run.output.delta":
+        if (typeof p.text === "string") {
+          state.draft = (state.draft ?? "") + p.text;
+          if (state.draft.trim()) state.progress = clip(state.draft);
+        }
+        break;
+      case "run.usage": {
+        // The run's totals per model; input already holds the cached tokens.
+        const models = Array.isArray(p.models) ? (p.models as Array<Record<string, unknown>>) : [];
+        const input = models.reduce((n, m) => n + count(m.input_tokens), 0);
+        const output = models.reduce((n, m) => n + count(m.output_tokens), 0);
+        if (input || output) state.usage = { inputTokens: input, outputTokens: output };
+        break;
+      }
+      default:
+        if (typeof event.payload_type === "string" && event.payload_type.startsWith("run.terminal.")) {
+          state.failed = p.terminal !== "completed";
+          const text = typeof p.text === "string" ? p.text : "";
+          const reason = typeof p.reason === "string" ? p.reason : "";
+          state.result = state.failed ? text || reason || `Muse Code stopped (${String(p.terminal ?? "failed")}).` : text || state.draft || "";
+        }
+    }
+  },
+  // Other tools are called muse too.
+  isMine: (version) => version.startsWith("Muse Code"),
+};
+
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor, muse };
 
 /** The first line `<bin> --version` prints, or null when it does not run. */
 function cliVersion(bin: string): Promise<string | null> {

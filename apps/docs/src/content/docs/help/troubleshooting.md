@@ -13,7 +13,7 @@ Check your spam folder, then choose **Send again** in the banner at the top. Unt
 - If you started it in a terminal, it stops when you close the terminal. Install it as a background service: `npx myrel-runner service install`.
 - In the desktop app, open **Devices** → **This computer** and choose **Start**.
 
-### "No Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent or Cursor CLI found"
+### "No Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI or Muse Code found"
 
 The runner didn't find a supported CLI. Install one, sign in to it in a terminal, and restart the runner. See [Choose a coding CLI](/computer/clis/).
 

@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
@@ -13,7 +13,7 @@ type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
 
 /** The CLIs whose sessions a thread's next turn continues. */
-const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "hermes", "cursor"]);
+const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "hermes", "cursor", "muse"]);
 /** Results are cut to fit the protocol's limit. */
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
@@ -157,7 +157,14 @@ export class TaskRunner {
     const config = this.opts.config();
     const log = this.opts.log ?? (() => {});
     const { cwd, adapter, agent, dirs, skills, where, cleanup } = run;
-    const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: run.asks });
+    // The prompt lists the skills; only the runner knows where they are on this computer.
+    const text = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
+    const input = adapter.input ? adapter.input(text, config.access) : text;
+    // A CLI that reads the prompt only from a file gets a private one, deleted when the run ends.
+    const promptDir = adapter.promptFile ? await mkdtemp(join(tmpdir(), "myrel-prompt-")) : undefined;
+    const promptFile = promptDir ? join(promptDir, "prompt.md") : undefined;
+    if (promptFile) await writeFile(promptFile, input, { mode: 0o600 });
+    const args = adapter.args({ access: config.access, resume, extra: agent.args, dirs, asks: run.asks, promptFile });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: childEnv(agent.env),
@@ -165,6 +172,11 @@ export class TaskRunner {
       // Windows CLIs are .cmd shims. Only fixed flags are on the command line; the prompt goes on stdin.
       shell: process.platform === "win32",
     });
+    if (promptDir) {
+      const removePrompt = () => void rm(promptDir, { recursive: true, force: true }).catch(() => {});
+      child.once("close", removePrompt);
+      child.once("error", removePrompt);
+    }
     this.running.set(task.taskId, child);
     this.opts.onChange?.(this.runningIds());
 
@@ -219,15 +231,12 @@ export class TaskRunner {
       if (stderr.length < 20_000) stderr += chunk;
     });
     child.stdin!.on("error", () => {}); // the CLI may exit before reading all of stdin
-    // The prompt lists the skills; only the runner knows where they are on this computer.
-    const text = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
-    const input = adapter.input ? adapter.input(text, config.access) : text;
     if (adapter.acp) {
       // An ACP agent gets the prompt in a session; the turn ends its stdin once the prompt is answered.
       const io = { write: (line: string) => void child.stdin!.write(line), end: () => child.stdin!.end() };
       state.acp = new AcpTurn(io, { cwd, prompt: input, mcpServers: agent.mcpServers ?? [], resume, ...adapter.acp(config.access) }, state);
       state.acp.start();
-    } else child.stdin!.end(input);
+    } else child.stdin!.end(promptFile ? "" : input);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
 
