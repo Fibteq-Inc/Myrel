@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
+import { routineTools } from "../src/agents/routine-tools";
 import { agentProject, modelAgent } from "./fake-agent";
 import { emails as sentEmails, type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
@@ -172,6 +173,43 @@ describe("routines", () => {
     // The target can move to a thread, but not to one that does not exist.
     expect((await patch({ target: { kind: "thread", threadId: "thr_00000000000000000000000000" } })).status).toBe(400);
     ws.close();
+  });
+
+  it("lets an agent update a routine with update_routine, switching its schedule kind", async () => {
+    const { agent, ws } = await setup();
+    ws.close();
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "u1", body: "check later" });
+    const thread = await agent.createThread(root.id, "Checks");
+    const tools = routineTools({
+      listRoutines: () => agent.listRoutines(),
+      createRoutine: (input) => agent.createRoutine(input, "agent"),
+      updateRoutine: (id, patch) => agent.updateRoutine(id, patch, "agent"),
+      setPaused: (id, paused) => agent.updateRoutine(id, { paused }),
+      deleteRoutine: (id) => agent.deleteRoutine(id),
+      defaultTimezone: "UTC",
+      threadId: thread.id,
+    });
+    const run = (name: string, input: unknown) => {
+      const t = tools.find((x) => x.name === name)!;
+      return t.run(t.input.parse(input));
+    };
+    await run("create_routine", { name: "Check CI", prompt: "Look at CI.", cron: "*/10 * * * *" });
+    const [routine] = await agent.listRoutines();
+    expect(routine!.target).toEqual({ kind: "thread", threadId: thread.id });
+
+    const at = new Date(Date.now() + 50 * 60_000).toISOString();
+    await run("update_routine", { routine_id: routine!.id, prompt: "Look at CI once more.", at });
+    expect(await agent.getRoutine(routine!.id)).toMatchObject({ prompt: "Look at CI once more.", schedule: { kind: "once", at }, nextRunAt: at });
+    // A time zone alone needs a cron to move; a cron makes it repeating again, in that zone.
+    await expect(run("update_routine", { routine_id: routine!.id, timezone: "Europe/Istanbul" })).rejects.toThrow(/runs once/);
+    await run("update_routine", { routine_id: routine!.id, cron: "0 9 * * *", timezone: "Europe/Istanbul", target: "project_chat" });
+    expect(await agent.getRoutine(routine!.id)).toMatchObject({
+      schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Europe/Istanbul" },
+      target: { kind: "coordinator" },
+    });
+    await run("update_routine", { routine_id: routine!.id, timezone: "UTC" });
+    expect((await agent.getRoutine(routine!.id))!.schedule).toEqual({ kind: "cron", cron: "0 9 * * *", timezone: "UTC" });
+    await expect(run("update_routine", { routine_id: "rtn_00000000000000000000000000", name: "x" })).rejects.toThrow(/No routine/);
   });
 
   it("finishes a paused one-off routine whose time passed instead of firing it late", async () => {

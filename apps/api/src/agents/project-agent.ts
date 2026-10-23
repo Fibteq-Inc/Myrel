@@ -818,6 +818,8 @@ export class ProjectAgent extends Agent<Env> {
     return {
       listRoutines: () => this.listRoutines(),
       createRoutine: (input) => this.createRoutine(input, "agent"),
+      // A prompt or target the coordinator rewrites is the agent's from then on, not a member's.
+      updateRoutine: (id, patch) => this.updateRoutine(id, patch, "agent"),
       setPaused: (id, paused) => this.updateRoutine(id, { paused }),
       deleteRoutine: (id) => this.deleteRoutine(id),
       defaultTimezone: this.defaultTimezone(),
