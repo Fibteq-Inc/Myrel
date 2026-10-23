@@ -114,6 +114,7 @@ export const tr: Catalog = {
   "chat.membersLabel": { other: "{count} üye" },
   "chat.earlier": { other: "Önceki {count} mesajı göster" },
   "chat.loading": "Mesajlar yükleniyor",
+  "chat.toEnd": "En alta in",
   "chat.placeholder": "Myrel'e bir görev ver",
   "chat.emptyTitle": "Myrel ne üzerinde çalışsın?",
   "chat.emptyBody":
