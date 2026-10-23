@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import { MAX_MESSAGE_LENGTH, type ProjectFile } from "@myrel/protocol";
+import { isLongPaste, MAX_MESSAGE_LENGTH, type ProjectFile } from "@myrel/protocol";
 import { ArrowUp, Paperclip } from "lucide-react";
 import {
   type FormEvent,
@@ -22,14 +22,6 @@ export type ComposerHandle = {
   /** Replaces the draft with `text`, focuses the box and selects `select` (start, end). */
   fill: (text: string, select?: [number, number]) => void;
 };
-
-/** A paste this long becomes a .txt attachment instead of filling the message. */
-const LONG_PASTE_CHARS = 4000;
-const LONG_PASTE_LINES = 80;
-
-function isLongPaste(text: string): boolean {
-  return text.length > LONG_PASTE_CHARS || text.split("\n").length > LONG_PASTE_LINES;
-}
 
 /**
  * The message box: grows with the text, Enter sends, Shift+Enter breaks the

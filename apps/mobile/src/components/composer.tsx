@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import type { ProjectFile } from "@myrel/protocol";
+import { MAX_MESSAGE_LENGTH, type ProjectFile, takeLongPaste } from "@myrel/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CircleAlert, Paperclip, X } from "lucide-react-native";
 import { type ComponentRef, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
@@ -12,7 +12,8 @@ import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors, useTheme } from "../theme";
 import { errorMessage, Spinner } from "./ui";
 
-type Pending = { id: number; name: string; file?: ProjectFile; error?: string };
+/** `text` is set for a long paste that was turned into a file, so it can go back into the message. */
+type Pending = { id: number; name: string; file?: ProjectFile; error?: string; text?: string };
 
 /** Lets a parent put text in the box, e.g. an example task picked from an empty chat. */
 export type ComposerHandle = {
@@ -23,7 +24,8 @@ type Picked = { name: string; blob: Blob };
 
 /**
  * Message box pinned to the bottom of a conversation. The paperclip attaches photos or files:
- * they upload right away and are sent by path, like the web's composer.
+ * they upload right away and are sent by path, like the web's composer. A long text paste is
+ * attached the same way as a .txt file, with a way to put it back into the message.
  */
 export function Composer({
   placeholder,
@@ -70,10 +72,10 @@ export function Composer({
     input.current?.setSelection(start, end);
   }, [body]);
 
-  function attach(files: Picked[]) {
+  function attach(files: Picked[], text?: string) {
     for (const f of files) {
       const id = nextId.current++;
-      setPending((list) => [...list, { id, name: f.name }]);
+      setPending((list) => [...list, { id, name: f.name, text }]);
       api.upload(projectId, f.name, f.blob).then(
         (file) => {
           setPending((list) => list.map((p) => (p.id === id ? { ...p, file } : p)));
@@ -82,6 +84,22 @@ export function Composer({
         (err) => setPending((list) => list.map((p) => (p.id === id ? { ...p, error: errorMessage(err, t("common.error")) } : p))),
       );
     }
+  }
+
+  // React Native has no paste event: a long paste shows up as one big change of the text.
+  function onChangeText(next: string) {
+    const paste = takeLongPaste(body, next);
+    if (!paste) return setBody(next);
+    setBody(paste.rest);
+    const time = new Date().toTimeString().slice(0, 8).replaceAll(":", "-");
+    const name = t("composer.pastedFileName", { time });
+    attach([{ name, blob: new Blob([paste.pasted], { type: "text/plain" }) }], paste.pasted);
+  }
+
+  /** Puts a pasted file's text back into the message (the uploaded copy stays in the project files). */
+  function inline(item: Pending) {
+    setPending((list) => list.filter((p) => p.id !== item.id));
+    setBody((b) => (b ? `${b}\n${item.text}` : item.text!));
   }
 
   function pick(from: "photos" | "files") {
@@ -120,6 +138,11 @@ export function Composer({
               <Text style={styles.chipName} numberOfLines={1}>
                 {p.error ?? p.name}
               </Text>
+              {p.text !== undefined && body.length + p.text.length <= MAX_MESSAGE_LENGTH && (
+                <Pressable accessibilityRole="button" hitSlop={8} onPress={() => inline(p)}>
+                  <Text style={styles.chipAction}>{t("composer.insertAsText")}</Text>
+                </Pressable>
+              )}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t("files.remove", { name: p.name })}
@@ -146,7 +169,7 @@ export function Composer({
         <TextInput
           ref={input}
           value={body}
-          onChangeText={setBody}
+          onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor={colors.subtle}
           keyboardAppearance={theme}
@@ -188,7 +211,7 @@ const useStyles = makeStyles((colors) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      maxWidth: 220,
+      maxWidth: 300,
       borderRadius: radius.sm,
       borderWidth: 1,
       borderColor: colors.edge,
@@ -197,6 +220,7 @@ const useStyles = makeStyles((colors) =>
       paddingVertical: 6,
     },
     chipName: { color: colors.body, fontSize: 13, flexShrink: 1 },
+    chipAction: { color: colors.accent, fontSize: 12, fontWeight: "600" },
     attach: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
     input: { flex: 1, maxHeight: 140, minHeight: 36, color: colors.fg, fontSize: 16, paddingTop: 8, paddingBottom: 8 },
     send: {

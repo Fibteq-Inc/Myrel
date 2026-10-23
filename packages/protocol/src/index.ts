@@ -19,3 +19,4 @@ export * from "./connectors";
 export * from "./skills";
 export * from "./connector-suggestion";
 export * from "./shell";
+export * from "./paste";
