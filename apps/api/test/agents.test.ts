@@ -466,6 +466,8 @@ describe("coordinator and thread agent", () => {
     // Only the person can answer: straight to them, without the coordinator.
     ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "go" }));
     await until(card("Delete the branch?"), "the card for the person");
+    // The card is posted before the tool's answer gets back to the agent.
+    await until(() => answers.length === 4 || null, "the agent's answer");
     expect(answers[3]).toContain("The person's choice will arrive");
     expect(questions.some((q) => q.includes("Delete the branch?"))).toBe(false);
     expect(turns).toHaveLength(4);
