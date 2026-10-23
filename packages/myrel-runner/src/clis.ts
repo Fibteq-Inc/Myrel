@@ -437,9 +437,9 @@ const opencode: CliAdapter = {
   },
 };
 
-/** `opencode --version` prints "1.19.4"; opencode 2 prints "opencode v2.0.28". */
+/** `opencode --version` prints "1.19.4"; opencode 2 prints "opencode v2.0.28": the first number is the major. */
 export function opencodeServerArgs(version: string | null): string[] {
-  const major = Number(/(\d+)\.\d+/.exec(version ?? "")?.[1] ?? 0);
+  const major = Number(/\d+/.exec(version ?? "")?.[0] ?? 0);
   return major >= 2 ? ["--standalone"] : [];
 }
 
