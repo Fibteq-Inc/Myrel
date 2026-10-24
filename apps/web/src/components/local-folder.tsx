@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, Cloud, Folder, FolderPlus, Laptop } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, runnersQuery, workspaceQuery } from "../lib/api";
+import { api, runnersQuery, workspaceQuery, workspacesQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton } from "../lib/ui";
 import { FolderPicker, folderPickerBlocker } from "./folder-picker";
 import { OnlineDot, RunnerIcon } from "./runners";
@@ -13,6 +13,7 @@ import { OnlineDot, RunnerIcon } from "./runners";
 export function WorkspaceButton({ project }: { project: Project }) {
   const t = useT();
   const { data: workspace, isPending } = useQuery(workspaceQuery(project.id));
+  const { data: workspaces = [] } = useQuery({ ...workspacesQuery(project.id), enabled: !!workspace });
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -52,6 +53,11 @@ export function WorkspaceButton({ project }: { project: Project }) {
             <OnlineDot online={workspace.online} />
             <Folder size={14} className="flex-none text-muted" aria-hidden="true" />
             <span className="truncate">{folderName(workspace.path)}</span>
+            {workspaces.length > 1 && (
+              <span className="flex-none text-xs text-subtle" title={t("localFolder.computers", { count: workspaces.length })}>
+                +{workspaces.length - 1}
+              </span>
+            )}
             <span className="sr-only">{workspace.online ? t("localFolder.connected") : t("localFolder.computerOffline")}</span>
           </>
         ) : (
@@ -71,7 +77,13 @@ export function WorkspaceButton({ project }: { project: Project }) {
           {canEdit ? (
             <WorkspaceForm project={project} workspace={workspace ?? null} onDone={() => setOpen(false)} />
           ) : (
-            workspace && <WorkspaceSummary workspace={workspace} />
+            workspace && (
+              <div className="flex flex-col gap-4">
+                {(workspaces.length ? workspaces : [workspace]).map((w) => (
+                  <WorkspaceSummary key={w.runnerId} workspace={w} several={workspaces.length > 1} />
+                ))}
+              </div>
+            )
           )}
         </div>
       )}
@@ -79,7 +91,7 @@ export function WorkspaceButton({ project }: { project: Project }) {
   );
 }
 
-function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
+function WorkspaceSummary({ workspace, several = false }: { workspace: ProjectWorkspace; several?: boolean }) {
   const t = useT();
   return (
     <div className="flex flex-col gap-1.5 text-[13px]">
@@ -92,6 +104,7 @@ function WorkspaceSummary({ workspace }: { workspace: ProjectWorkspace }) {
       <span className="flex items-center gap-1.5 text-subtle">
         <OnlineDot online={workspace.online} />
         {workspace.runnerName} · {CLI_NAMES[workspace.cli] ?? workspace.cli} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
+        {several && workspace.isDefault && ` · ${t("localFolder.default")}`}
       </span>
     </div>
   );
@@ -109,6 +122,7 @@ export function WorkspaceForm({
   const t = useT();
   const queryClient = useQueryClient();
   const { data: runners = [], isPending } = useQuery(runnersQuery);
+  const { data: workspaces = [] } = useQuery(workspacesQuery(project.id));
   const [runnerId, setRunnerId] = useState(workspace?.runnerId ?? "");
   const [pickedPath, setPath] = useState(workspace?.path ?? "");
   const [pickedCli, setCli] = useState<CliId | "">(workspace?.cli ?? "");
@@ -118,16 +132,26 @@ export function WorkspaceForm({
   const runner = runners.find((r) => r.id === runnerId) ?? runners[0];
   const path = runner?.folders.some((f) => f.path === pickedPath) ? pickedPath : (runner?.folders[0]?.path ?? "");
   const cli = runner?.clis.some((c) => c.id === pickedCli) ? pickedCli : (runner?.clis[0]?.id ?? "");
+  // This computer's local folder in the project, when it has one: the form changes that one.
+  const inProject = workspaces.find((w) => w.runnerId === runner?.id);
+  const pickRunner = (id: string) => {
+    const w = workspaces.find((x) => x.runnerId === id);
+    setRunnerId(id);
+    setPath(w?.path ?? "");
+    setCli(w?.cli ?? "");
+  };
 
-  const done = (next: ProjectWorkspace | null) => {
-    queryClient.setQueryData(workspaceQuery(project.id).queryKey, next);
+  const done = () => {
+    void queryClient.invalidateQueries({ queryKey: workspaceQuery(project.id).queryKey });
     onDone();
   };
+  // A computer's folder goes next to the project's others; the first one is the default.
   const save = useMutation({
-    mutationFn: () => api.setWorkspace(project.id, { runnerId: runner!.id, path, cli: cli as CliId }),
+    mutationFn: () => api.setWorkspace(project.id, { runnerId: runner!.id, path, cli: cli as CliId, add: true }),
     onSuccess: done,
   });
-  const clear = useMutation({ mutationFn: () => api.clearWorkspace(project.id), onSuccess: () => done(null) });
+  const clear = useMutation({ mutationFn: () => api.clearWorkspace(project.id, runner!.id), onSuccess: done });
+  const makeDefault = useMutation({ mutationFn: () => api.setDefaultWorkspace(project.id, runner!.id), onSuccess: done });
 
   const [offlineBefore, offlineAfter = ""] = t("localFolder.runnerOffline", { computer: runner?.name ?? "" }).split(
     "{command}",
@@ -157,15 +181,17 @@ export function WorkspaceForm({
       <div>
         <h3 className="font-semibold">{t("localFolder.title")}</h3>
         <p className="mt-1 text-subtle">{workspace ? t("localFolder.intro") : t("localFolder.introCloud")}</p>
+        {workspaces.length > 1 && <p className="mt-1 text-subtle">{t("localFolder.severalHint")}</p>}
       </div>
 
       {runners.length > 1 && (
         <Field label={t("localFolder.computer")}>
           <div className="flex flex-col gap-1">
             {runners.map((r) => (
-              <Choice key={r.id} checked={r.id === runner.id} onChange={() => setRunnerId(r.id)} name="runner">
+              <Choice key={r.id} checked={r.id === runner.id} onChange={() => pickRunner(r.id)} name="runner">
                 <RunnerIcon runner={r} size={14} />
                 <span className="truncate">{r.name}</span>
+                <WorkspaceBadge workspace={workspaces.find((w) => w.runnerId === r.id)} several={workspaces.length > 1} />
                 <OnlineDot online={r.online} className="ml-auto" />
               </Choice>
             ))}
@@ -255,19 +281,37 @@ export function WorkspaceForm({
           </span>
         </p>
       )}
-      {(save.error || clear.error) && <p className="text-bad">{errorMessage(save.error ?? clear.error, t)}</p>}
+      {(save.error || clear.error || makeDefault.error) && (
+        <p className="text-bad">{errorMessage(save.error ?? clear.error ?? makeDefault.error, t)}</p>
+      )}
 
-      <div className="flex items-center gap-2">
-        {workspace && (
+      <div className="flex flex-wrap items-center gap-2">
+        {inProject && (
           <GhostButton type="button" onClick={() => clear.mutate()} disabled={clear.isPending}>
             {t("localFolder.disconnect")}
           </GhostButton>
         )}
+        {inProject && !inProject.isDefault && (
+          <GhostButton type="button" onClick={() => makeDefault.mutate()} disabled={makeDefault.isPending}>
+            {t("localFolder.makeDefault")}
+          </GhostButton>
+        )}
         <Button type="submit" className="ml-auto" disabled={!path || !cli || save.isPending}>
-          {workspace ? t("localFolder.save") : t("localFolder.useFolder")}
+          {inProject ? t("localFolder.save") : workspace ? t("localFolder.addComputer") : t("localFolder.useFolder")}
         </Button>
       </div>
     </form>
+  );
+}
+
+/** Whether a computer already works for the project, and as its default. */
+function WorkspaceBadge({ workspace, several }: { workspace?: ProjectWorkspace; several: boolean }) {
+  const t = useT();
+  if (!workspace) return null;
+  return (
+    <span className="flex-none rounded-md bg-hover px-1.5 py-0.5 text-[11px] text-muted">
+      {several && workspace.isDefault ? t("localFolder.default") : t("localFolder.inProject")}
+    </span>
   );
 }
 

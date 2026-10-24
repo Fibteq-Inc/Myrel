@@ -45,6 +45,7 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
   closeReason: null,
   duplicateOf: null,
   cli: null,
+  runner: null,
   model: null,
   seenSeq: null,
   label: null,

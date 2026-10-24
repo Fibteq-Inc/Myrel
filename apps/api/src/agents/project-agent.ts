@@ -31,6 +31,7 @@ import {
   SYNC_PAGE_SIZE,
   type Thread,
   type ThreadCli,
+  type ThreadRunner,
   type ThreadModel,
   type ThreadCloseReason,
   type ThreadStatus,
@@ -113,6 +114,8 @@ type ThreadRow = {
   cli: string | null;
   /** JSON ThreadModel, or null. */
   model: string | null;
+  /** JSON ThreadRunner, or null. */
+  runner: string | null;
   seen_seq: number | null;
   created_at: string;
   updated_at: string;
@@ -144,7 +147,7 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
 };
 
 export type ThreadPatch = Partial<
-  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "model" | "seenSeq">
+  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "runner" | "model" | "seenSeq">
 >;
 
 /** What a thread agent reads at the start of each turn. */
@@ -259,6 +262,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!threadColumns.some((c) => c.name === "model")) this.sql`ALTER TABLE threads ADD COLUMN model TEXT`;
     // Added with showing people's messages the agent has not taken in yet.
     if (!threadColumns.some((c) => c.name === "seen_seq")) this.sql`ALTER TABLE threads ADD COLUMN seen_seq INTEGER`;
+    // Added with projects on several computers.
+    if (!threadColumns.some((c) => c.name === "runner")) this.sql`ALTER TABLE threads ADD COLUMN runner TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -398,7 +403,7 @@ export class ProjectAgent extends Agent<Env> {
           this.updateThread(thread.id, { cli: null });
           return;
         }
-        const [cli] = await this.offeredClis(userId, [event.cli]);
+        const [cli] = await this.offeredClis(userId, [event.cli], false, thread.runner?.id);
         if (!cli) {
           return send(connection, {
             type: "error",
@@ -409,6 +414,25 @@ export class ProjectAgent extends Agent<Env> {
         this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null } });
         return;
       }
+      case "thread.runner": {
+        const thread = this.getThread(event.threadId);
+        if (!thread) return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
+        if (event.runnerId === null) {
+          this.updateThread(thread.id, { runner: null });
+          return;
+        }
+        // Like the CLI: a turn runs on a computer as its owner, so only they send a thread there.
+        const computer = await workspaceClis(this.env, this.name, { runnerId: event.runnerId });
+        if (computer?.ownerId !== userId) {
+          return send(connection, {
+            type: "error",
+            code: "no_runner",
+            message: "A thread can work only on one of this project's computers, and only the person whose computer it is can send it there.",
+          });
+        }
+        this.updateThread(thread.id, { runner: { id: event.runnerId, by: "person" } });
+        return;
+      }
       case "thread.model": {
         const thread = this.getThread(event.threadId);
         if (!thread) return send(connection, { type: "error", code: "no_thread", message: "Thread not found" });
@@ -417,7 +441,7 @@ export class ProjectAgent extends Agent<Env> {
           return;
         }
         // The same people as for the CLI: the model runs on that computer, with its owner's login.
-        const [cli] = await this.offeredClis(userId, [event.cli], true);
+        const [cli] = await this.offeredClis(userId, [event.cli], true, thread.runner?.id);
         if (!cli) {
           return send(connection, {
             type: "error",
@@ -589,9 +613,10 @@ export class ProjectAgent extends Agent<Env> {
    * then any member picks among the cloud CLIs (CloudCli), which run in the thread's sandbox with
    * the project's model. Otherwise only the computer's owner picks, among the CLIs installed there.
    * `localOnly`: a pick that only means something on the computer (its model and effort).
+   * `runnerId`: the computer the thread was set to; else the person's own among the project's, if any.
    */
-  private async offeredClis(userId: string, wanted: CliId[], localOnly = false): Promise<CliId[]> {
-    const computer = await workspaceClis(this.env, this.name);
+  private async offeredClis(userId: string, wanted: CliId[], localOnly = false, runnerId?: string): Promise<CliId[]> {
+    const computer = await workspaceClis(this.env, this.name, runnerId ? { runnerId } : { ownerId: userId });
     if (!localOnly) {
       const [row] = await createDb(this.env.DB).select({ taskTarget: schema.projects.taskTarget }).from(schema.projects).where(eq(schema.projects.id, this.name));
       const target = TaskTarget.catch("auto").parse(row?.taskTarget);
@@ -643,7 +668,7 @@ export class ProjectAgent extends Agent<Env> {
     }
     this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
       resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
-      label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null},
+      label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null}, runner = ${next.runner ? JSON.stringify(next.runner) : null},
       model = ${next.model ? JSON.stringify(next.model) : null}, seen_seq = ${next.seenSeq}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
     this.emit({ type: "thread.updated", thread: next });
     this.syncActivity();
@@ -1667,6 +1692,7 @@ export class ProjectAgent extends Agent<Env> {
       duplicateOf: r.duplicate_of ?? null,
       label: r.label,
       cli: r.cli ? (JSON.parse(r.cli) as ThreadCli) : null,
+      runner: r.runner ? (JSON.parse(r.runner) as ThreadRunner) : null,
       model: r.model ? (JSON.parse(r.model) as ThreadModel) : null,
       seenSeq: r.seen_seq ?? null,
       createdAt: r.created_at,

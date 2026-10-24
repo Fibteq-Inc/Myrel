@@ -58,6 +58,9 @@ export const runnersQuery = queryOptions({ queryKey: ["runners"], queryFn: () =>
 export const runnerListQuery = queryOptions({ queryKey: ["runners", "list"], queryFn: () => api.runnerList() });
 export const workspaceQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id, "workspace"], queryFn: () => api.getWorkspace(id) });
+/** Every local folder of the project, one per computer, the default first. Refreshed with workspaceQuery. */
+export const workspacesQuery = (id: string) =>
+  queryOptions({ queryKey: ["projects", id, "workspace", "all"], queryFn: () => api.getWorkspaces(id) });
 /** What the current server allows (e.g. whether new accounts can be created). */
 export const serverInfoQuery = queryOptions({
   queryKey: ["server-info", server],

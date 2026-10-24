@@ -6,7 +6,14 @@ import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
-import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, usePickableClis } from "../../../../../components/cli-picker";
+import {
+  ThreadCliNote,
+  ThreadCliPicker,
+  ThreadModelPicker,
+  ThreadRunnerPicker,
+  useOwnWorkspaces,
+  usePickableClis,
+} from "../../../../../components/cli-picker";
 import { Conversation } from "../../../../../components/conversation";
 import { Tabs } from "../../../../../components/project/tabs";
 import { WorkspaceFilesTab } from "../../../../../components/thread/files";
@@ -110,7 +117,8 @@ export default function ThreadScreen() {
         {thread && <ThreadCliNote thread={thread} />}
       </>
     ) : null;
-  const pickable = usePickableClis(projectId);
+  const pickable = usePickableClis(projectId, thread?.runner?.id);
+  const ownWorkspaces = useOwnWorkspaces(projectId);
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
   const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
   const plan =
@@ -177,6 +185,9 @@ export default function ThreadScreen() {
             pickable &&
             thread && (
               <>
+                {!pickable.cloud && ownWorkspaces.length > 1 && (
+                  <ThreadRunnerPicker workspaces={ownWorkspaces} thread={thread} onChange={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })} />
+                )}
                 <ThreadCliPicker pickable={pickable} thread={thread} onChange={(cli) => emit({ type: "thread.cli", threadId, cli })} />
                 <ThreadModelPicker pickable={pickable} thread={thread} onChange={(pick) => emit({ type: "thread.model", threadId, ...pick })} />
               </>

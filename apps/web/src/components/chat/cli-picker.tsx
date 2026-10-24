@@ -1,10 +1,21 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type Project, type RunnerCli, type Thread } from "@myrel/protocol";
+import {
+  CLI_NAMES,
+  type CliId,
+  type CliModelDefaults,
+  CloudCli,
+  EFFORT_LEVELS,
+  effortsFor,
+  type Project,
+  type ProjectWorkspace,
+  type RunnerCli,
+  type Thread,
+} from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react";
+import { Brain, Check, ChevronDown, Laptop, Sparkles, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
-import { projectSettingsQuery, runnersQuery, workspaceQuery } from "../../lib/api";
+import { projectSettingsQuery, runnersQuery, workspaceQuery, workspacesQuery } from "../../lib/api";
 import { cn } from "../../lib/ui";
 import { Menu, MenuLabel, MenuSeparator } from "../ui/menu";
 
@@ -23,11 +34,26 @@ export type PickableClis = { clis: RunnerCli[]; folderCli: CliId; defaults: CliM
 
 const CLOUD_CLIS: RunnerCli[] = CloudCli.options.map((id) => ({ id, version: null }));
 
-export function usePickableClis(project: Project): PickableClis | null {
-  const { data: workspace, isPending } = useQuery(workspaceQuery(project.id));
+/**
+ * The project's local folders on the signed-in person's own computers (only those are listed in
+ * runnersQuery), the default first. A thread of theirs works on one of these.
+ */
+export function useOwnWorkspaces(project: Project): ProjectWorkspace[] {
+  const { data: workspace } = useQuery(workspaceQuery(project.id));
+  const { data: workspaces = [] } = useQuery({ ...workspacesQuery(project.id), enabled: !!workspace });
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
+  return workspaces.filter((w) => runners?.some((r) => r.id === w.runnerId));
+}
+
+/** `runnerId`: the computer the thread works on, when it was set to or started on one. */
+export function usePickableClis(project: Project, runnerId?: string | null): PickableClis | null {
+  const { data: default_, isPending } = useQuery(workspaceQuery(project.id));
+  const { data: runners } = useQuery({ ...runnersQuery, enabled: !!default_ });
   const { data: settings } = useQuery(projectSettingsQuery(project.id));
+  const own = useOwnWorkspaces(project);
   if (isPending || !settings) return null;
+  // The thread's computer, else the person's own (the default first), as the server picks it.
+  const workspace = own.find((w) => w.runnerId === runnerId) ?? own[0] ?? default_;
   // Only your own computers are listed, so finding it means it is yours.
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
   const cloud = settings.taskTarget === "cloud" || !workspace || (settings.taskTarget === "auto" && runners !== undefined && !runner);
@@ -143,6 +169,73 @@ export function ThreadCliPicker({
             {t("cliPicker.threadHint")}
             {pickable.cloud && ` ${t("cliPicker.cloudHint")}`}
           </p>
+        </>
+      )}
+    </Menu>
+  );
+}
+
+/**
+ * Composer control in a thread, when the person has the project on several of their computers: the
+ * one it works on from its next turn. None picked: the computer it started on, else the default.
+ */
+export function ThreadRunnerPicker({
+  workspaces,
+  thread,
+  onChange,
+}: {
+  workspaces: ProjectWorkspace[];
+  thread: Thread;
+  onChange: (runnerId: string | null) => void;
+}) {
+  const t = useT();
+  const picked = thread.runner?.by === "person" ? thread.runner.id : null;
+  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0]!;
+  return (
+    <Menu
+      label={t("runnerPicker.title")}
+      side="top"
+      trigger={
+        <>
+          <Laptop size={14} className={cn("flex-none", picked && "text-accent")} aria-hidden="true" />
+          <span className={cn("truncate", picked && "text-fg")}>{current.runnerName}</span>
+          <ChevronDown size={12} className="flex-none text-subtle" aria-hidden="true" />
+        </>
+      }
+      className={triggerClass}
+      panelClassName="w-72"
+    >
+      {(close) => (
+        <>
+          <MenuLabel>{t("runnerPicker.title")}</MenuLabel>
+          <Option
+            role="menuitemradio"
+            checked={!picked}
+            onSelect={() => {
+              if (picked) onChange(null);
+              close();
+            }}
+            title={
+              thread.runner && thread.runner.by === "auto"
+                ? t("runnerPicker.started", { computer: current.runnerName })
+                : t("cliPicker.default", { cli: workspaces[0]!.runnerName })
+            }
+          />
+          <MenuSeparator />
+          {workspaces.map((w) => (
+            <Option
+              key={w.runnerId}
+              role="menuitemradio"
+              checked={picked === w.runnerId}
+              onSelect={() => {
+                if (picked !== w.runnerId) onChange(w.runnerId);
+                close();
+              }}
+              title={w.runnerName}
+              note={w.online ? undefined : t("localFolder.offline")}
+            />
+          ))}
+          <p className="px-2.5 pb-1.5 pt-2 text-xs leading-relaxed text-subtle">{t("runnerPicker.hint")}</p>
         </>
       )}
     </Menu>

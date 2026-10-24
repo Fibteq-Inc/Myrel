@@ -22,7 +22,7 @@ import {
   Thinking,
   useHistoryWindow,
 } from "../chat";
-import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, usePickableClis } from "../chat/cli-picker";
+import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, ThreadRunnerPicker, useOwnWorkspaces, usePickableClis } from "../chat/cli-picker";
 import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
@@ -337,7 +337,8 @@ function Conversation({
   const t = useT();
   const { project, names, state, send, emit } = useProjectContext();
   const thread = state.threads[threadId]!;
-  const pickable = usePickableClis(project);
+  const pickable = usePickableClis(project, thread.runner?.id);
+  const ownWorkspaces = useOwnWorkspaces(project);
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
   const history = useHistoryWindow(messages);
@@ -452,6 +453,13 @@ function Conversation({
           tools={
             pickable && (
               <>
+                {!pickable.cloud && ownWorkspaces.length > 1 && (
+                  <ThreadRunnerPicker
+                    workspaces={ownWorkspaces}
+                    thread={thread}
+                    onChange={(runnerId) => emit({ type: "thread.runner", threadId: thread.id, runnerId })}
+                  />
+                )}
                 <ThreadCliPicker
                   pickable={pickable}
                   thread={thread}
