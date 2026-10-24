@@ -12,6 +12,7 @@ import {
   formatPlan,
   formatPlanUpdate,
   type PlanUpdate,
+  type ProjectWorkspace,
   type MarkMemoryInput,
   type Message,
   type MessageStats,
@@ -628,7 +629,7 @@ export class ThreadAgent extends Agent<Env> {
           ...(skills.length && { skills: { path: `${mcpPath}/skills` } }),
           ...(resume && { resume }),
         };
-        const installed = (await workspaceClis(this.env, projectId))?.clis.find((c) => c.id === workspace.cli);
+        const installed = (await workspaceClis(this.env, projectId, { runnerId: workspace.runnerId }))?.clis.find((c) => c.id === workspace.cli);
         const model = resolveTaskModel(workspace.cli, input.threadModel, await projectCliModels(this.env, projectId), installed);
         const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model });
         const unavailable = backend.unavailable(spec);
@@ -1006,8 +1007,7 @@ export class ThreadAgent extends Agent<Env> {
           return allowAnswer(input);
         }
         // Folders the person allowed this turn, or added to the project since it started.
-        const { projectId } = this.ids();
-        const workspace = await getWorkspace(this.env, projectId);
+        const workspace = await this.runningWorkspace();
         const allowed = () => [
           ...(JSON.parse(this.getMeta("access_grants") ?? "[]") as string[]),
           ...(workspace ? [workspace.path, ...workspace.folders] : []),
@@ -1073,7 +1073,7 @@ export class ThreadAgent extends Agent<Env> {
     const { projectId } = this.ids();
     // The folders are on someone's own computer: only they answer for it. Anyone else's
     // "yes" is an ordinary message.
-    const workspace = await getWorkspace(this.env, projectId);
+    const workspace = await this.runningWorkspace();
     if (!workspace || !reason.authorId || !(await ownsComputer(this.env, workspace.runnerId, reason.authorId))) return false;
     const given = answer;
     const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
@@ -1153,9 +1153,9 @@ export class ThreadAgent extends Agent<Env> {
     return true;
   }
 
-  /** Shares the folder on the project's computer and adds it to the project's folders. */
+  /** Shares the folder on the computer the run is on and adds it to the project's folders there. */
   private async addProjectFolder(projectId: string, folder: string): Promise<boolean> {
-    const workspace = await getWorkspace(this.env, projectId);
+    const workspace = await this.runningWorkspace();
     if (!workspace) return false;
     const runner = await getAgentByName(this.env.RUNNER_AGENT, workspace.runnerId);
     const shared = await runner.setShared(folder, true);
@@ -1165,7 +1165,7 @@ export class ThreadAgent extends Agent<Env> {
     }
     // The runner keeps the folder's real path; that is the one it accepts later.
     const path = shared.folders.find((f) => f.path === folder)?.path ?? shared.folders.at(-1)?.path ?? folder;
-    return setWorkspaceFolder(this.env, projectId, path, true);
+    return setWorkspaceFolder(this.env, projectId, path, true, workspace.runnerId);
   }
 
   private accessRequests(): AccessRequest[] {
@@ -1900,6 +1900,13 @@ export class ThreadAgent extends Agent<Env> {
   private runningTask(): TaskRow | null {
     const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running' LIMIT 1`;
     return row ?? null;
+  }
+
+  /** The project's local folder on the computer the running task is on (the default one for a task from before). */
+  private async runningWorkspace(): Promise<ProjectWorkspace | null> {
+    const row = this.runningTask();
+    const runnerId = row?.backend === "local" ? (JSON.parse(row.spec) as StoredSpec).runnerId : undefined;
+    return getWorkspace(this.env, this.ids().projectId, { runnerId });
   }
 
   /**

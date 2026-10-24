@@ -391,12 +391,15 @@ export const runnerPairings = sqliteTable("runner_pairings", {
   createdAt: timestamps.createdAt,
 });
 
-/** The local folder (on one of the owner's runners) a project works in. One per project. */
+/**
+ * The local folders a project works in, at most one per computer (runner). The default one takes the
+ * project's local work unless a thread was set to another; without a default, the oldest does.
+ */
 export const projectWorkspaces = sqliteTable(
   "project_workspaces",
   {
     projectId: text("project_id")
-      .primaryKey()
+      .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     runnerId: text("runner_id")
       .notNull()
@@ -409,9 +412,10 @@ export const projectWorkspaces = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     ...timestamps,
   },
-  (t) => [index("project_workspaces_runner_id_idx").on(t.runnerId)],
+  (t) => [primaryKey({ columns: [t.projectId, t.runnerId] }), index("project_workspaces_runner_id_idx").on(t.runnerId)],
 );
 
 // --- Notifications ---

@@ -1,7 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import { type CliId, MAX_WORKSPACE_FOLDERS, type ProjectWorkspace, type Runner, type RunnerCli, type RunnerFeature, RunnerInfo } from "@myrel/protocol";
 import { getAgentByName } from "agents";
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 const { runners, projectWorkspaces } = schema;
 
@@ -92,21 +92,21 @@ export async function latestRunnerVersion(now = Date.now()): Promise<string | nu
   return version;
 }
 
-/** The project's local folder, with whether its computer is connected right now. */
-export async function getWorkspace(env: Env, projectId: string): Promise<ProjectWorkspace | null> {
-  const [row] = await createDb(env.DB)
-    .select({
-      runnerId: projectWorkspaces.runnerId,
-      runnerName: runners.name,
-      path: projectWorkspaces.path,
-      folders: projectWorkspaces.folders,
-      cli: projectWorkspaces.cli,
-    })
-    .from(projectWorkspaces)
-    .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
-    .where(eq(projectWorkspaces.projectId, projectId))
-    .limit(1);
-  if (!row) return null;
+/** Which of a project's local folders: one computer's, or the one to use for a person's work. */
+export type WorkspacePick = { runnerId?: string; ownerId?: string | null };
+
+const workspaceColumns = {
+  runnerId: projectWorkspaces.runnerId,
+  runnerName: runners.name,
+  path: projectWorkspaces.path,
+  folders: projectWorkspaces.folders,
+  cli: projectWorkspaces.cli,
+  isDefault: projectWorkspaces.isDefault,
+};
+
+type WorkspaceRow = { runnerId: string; runnerName: string; path: string; folders: string; cli: string; isDefault: boolean };
+
+async function toWorkspace(env: Env, projectId: string, row: WorkspaceRow): Promise<ProjectWorkspace> {
   return {
     projectId,
     ...row,
@@ -117,15 +117,59 @@ export async function getWorkspace(env: Env, projectId: string): Promise<Project
 }
 
 /**
- * The CLIs installed on the computer of the project's local folder, as it last reported them (with
- * their limits), and whose computer it is. Null without a local folder.
+ * One of the project's local folders, with whether its computer is connected right now: the one on
+ * `runnerId`, else the default (the oldest when none is marked). With `ownerId`, a computer of theirs
+ * comes first, so a person's work goes to their own computer when the project has one.
  */
-export async function workspaceClis(env: Env, projectId: string): Promise<{ ownerId: string; clis: RunnerCli[] } | null> {
+export async function getWorkspace(env: Env, projectId: string, pick: WorkspacePick = {}): Promise<ProjectWorkspace | null> {
+  const where = pick.runnerId
+    ? and(eq(projectWorkspaces.projectId, projectId), eq(projectWorkspaces.runnerId, pick.runnerId))
+    : eq(projectWorkspaces.projectId, projectId);
+  const [row] = await createDb(env.DB)
+    .select(workspaceColumns)
+    .from(projectWorkspaces)
+    .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
+    .where(where)
+    .orderBy(
+      ...(pick.ownerId ? [desc(sql`${runners.userId} = ${pick.ownerId}`)] : []),
+      desc(projectWorkspaces.isDefault),
+      asc(projectWorkspaces.createdAt),
+    )
+    .limit(1);
+  return row ? toWorkspace(env, projectId, row) : null;
+}
+
+/** Every local folder of the project, one per computer, the default first. */
+export async function listWorkspaces(env: Env, projectId: string): Promise<ProjectWorkspace[]> {
+  const rows = await createDb(env.DB)
+    .select(workspaceColumns)
+    .from(projectWorkspaces)
+    .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
+    .where(eq(projectWorkspaces.projectId, projectId))
+    .orderBy(desc(projectWorkspaces.isDefault), asc(projectWorkspaces.createdAt));
+  const all = await Promise.all(rows.map((r) => toWorkspace(env, projectId, r)));
+  // Only one reads as the default, also when none is marked.
+  return all.map((w, i) => ({ ...w, isDefault: i === 0 }));
+}
+
+/**
+ * The CLIs installed on the computer of one of the project's local folders (as `getWorkspace` picks
+ * it), as it last reported them (with their limits), and whose computer it is. Null without one.
+ */
+export async function workspaceClis(env: Env, projectId: string, pick: WorkspacePick = {}): Promise<{ ownerId: string; clis: RunnerCli[] } | null> {
+  const where = pick.runnerId
+    ? and(eq(projectWorkspaces.projectId, projectId), eq(projectWorkspaces.runnerId, pick.runnerId))
+    : eq(projectWorkspaces.projectId, projectId);
   const [row] = await createDb(env.DB)
     .select({ ownerId: runners.userId, info: runners.info })
     .from(projectWorkspaces)
     .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
-    .where(eq(projectWorkspaces.projectId, projectId))
+    .where(where)
+    .orderBy(
+      ...(pick.ownerId ? [desc(sql`${runners.userId} = ${pick.ownerId}`)] : []),
+      desc(projectWorkspaces.isDefault),
+      asc(projectWorkspaces.createdAt),
+    )
     .limit(1);
   return row ? { ownerId: row.ownerId, clis: parseInfo(row.info)?.clis ?? [] } : null;
 }
@@ -141,22 +185,21 @@ export function parseFolders(raw: string): string[] {
 }
 
 /**
- * Adds a folder to the project's other folders, or takes one out. The main folder is never one
- * of them. Returns false when the project has no local folder. Callable from routes and agents.
+ * Adds a folder to the other folders of the project's local folder on `runnerId` (default: the default
+ * one), or takes one out. The main folder is never one of them. Returns false when there is no such
+ * local folder. Callable from routes and agents.
  */
-export async function setWorkspaceFolder(env: Env, projectId: string, path: string, add: boolean): Promise<boolean> {
+export async function setWorkspaceFolder(env: Env, projectId: string, path: string, add: boolean, runnerId?: string): Promise<boolean> {
   const db = createDb(env.DB);
-  const [row] = await db
-    .select({ path: projectWorkspaces.path, folders: projectWorkspaces.folders })
-    .from(projectWorkspaces)
-    .where(eq(projectWorkspaces.projectId, projectId));
-  if (!row) return false;
+  const workspace = await getWorkspace(env, projectId, { runnerId });
+  if (!workspace) return false;
+  const row = { path: workspace.path, folders: JSON.stringify(workspace.folders) };
   const others = parseFolders(row.folders).filter((f) => f !== path);
   const folders = add && path !== row.path ? [...others, path].slice(-MAX_WORKSPACE_FOLDERS) : others;
   await db
     .update(projectWorkspaces)
     .set({ folders: JSON.stringify(folders), updatedAt: new Date() })
-    .where(eq(projectWorkspaces.projectId, projectId));
+    .where(and(eq(projectWorkspaces.projectId, projectId), eq(projectWorkspaces.runnerId, workspace.runnerId)));
   await notifyProject(env, projectId);
   return true;
 }

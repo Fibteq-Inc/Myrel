@@ -104,7 +104,9 @@ export type TaskPlace =
 /**
  * Where the project's next task runs, by its task target setting: on the
  * person's computer when the project has a local folder there and the
- * computer is online (auto), or always one place (local, cloud).
+ * computer is online (auto), or always one place (local, cloud). With local
+ * folders on several of their computers, the project's default one if it is
+ * theirs, else their oldest.
  *
  * Only for the computer's owner (`requester`, the person the thread works for): a turn runs
  * there as its owner, with their CLI, login and files, so another member of the project, or a
@@ -121,7 +123,8 @@ export async function taskPlace(env: Env, projectId: string, requester: string |
     .where(eq(schema.projects.id, projectId));
   const target = TaskTarget.catch("auto").parse(row?.taskTarget);
   if (target === "cloud") return { kind: "cloud" };
-  const workspace = await getWorkspace(env, projectId);
+  // The requester's own computer when the project has a local folder on one, the default first.
+  const workspace = await getWorkspace(env, projectId, { ownerId: requester });
   const own = workspace && requester ? await ownsComputer(env, workspace.runnerId, requester) : false;
   if (workspace && !own) {
     if (target === "auto") return { kind: "cloud" };
@@ -132,7 +135,7 @@ export async function taskPlace(env: Env, projectId: string, requester: string |
   }
   if (workspace && cli) {
     const id = CliId.safeParse(cli);
-    const installed = id.success && (await workspaceClis(env, projectId))?.clis.some((c) => c.id === id.data);
+    const installed = id.success && (await workspaceClis(env, projectId, { runnerId: workspace.runnerId }))?.clis.some((c) => c.id === id.data);
     if (!installed) {
       const name = id.success ? CLI_NAMES[id.data] : cli;
       return {
