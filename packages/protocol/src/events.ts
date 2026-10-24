@@ -3,7 +3,7 @@ import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
-import { CliId } from "./runner";
+import { CliId, RunnerId } from "./runner";
 import { MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
@@ -44,6 +44,15 @@ export const ClientEvent = z.discriminatedUnion("type", [
     type: z.literal("thread.cli"),
     threadId: ThreadId,
     cli: CliId.nullable(),
+  }),
+  /**
+   * The owner of one of the project's computers sets a thread to work there from its next turn;
+   * null: the project's default computer again.
+   */
+  z.object({
+    type: z.literal("thread.runner"),
+    threadId: ThreadId,
+    runnerId: RunnerId.nullable(),
   }),
   /**
    * Someone who can pick the thread's CLI picks its model and effort for that CLI; null for both:

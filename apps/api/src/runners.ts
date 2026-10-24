@@ -139,17 +139,17 @@ export async function getWorkspace(env: Env, projectId: string, pick: WorkspaceP
   return row ? toWorkspace(env, projectId, row) : null;
 }
 
-/** Every local folder of the project, one per computer, the default first. */
-export async function listWorkspaces(env: Env, projectId: string): Promise<ProjectWorkspace[]> {
+/** Every local folder of the project, one per computer, the default first; with `ownerId`, only on their computers. */
+export async function listWorkspaces(env: Env, projectId: string, ownerId?: string): Promise<ProjectWorkspace[]> {
   const rows = await createDb(env.DB)
     .select(workspaceColumns)
     .from(projectWorkspaces)
     .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
-    .where(eq(projectWorkspaces.projectId, projectId))
+    .where(and(eq(projectWorkspaces.projectId, projectId), ownerId ? eq(runners.userId, ownerId) : undefined))
     .orderBy(desc(projectWorkspaces.isDefault), asc(projectWorkspaces.createdAt));
   const all = await Promise.all(rows.map((r) => toWorkspace(env, projectId, r)));
   // Only one reads as the default, also when none is marked.
-  return all.map((w, i) => ({ ...w, isDefault: i === 0 }));
+  return ownerId ? all : all.map((w, i) => ({ ...w, isDefault: i === 0 }));
 }
 
 /**

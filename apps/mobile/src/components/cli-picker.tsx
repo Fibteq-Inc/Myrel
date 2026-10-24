@@ -1,8 +1,8 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Check, ChevronDown, Sparkles, SquareTerminal } from "lucide-react-native";
+import { Brain, Check, ChevronDown, Laptop, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,15 +25,35 @@ export function cliName(id: string): string {
  * otherwise the cloud CLIs, with the project's "CLI in the cloud" as the default. Null when there
  * is nothing to pick.
  */
-export function usePickableClis(projectId: string): Pickable | null {
+/**
+ * The project's local folders on the signed-in person's own computers (only those are listed by
+ * listRunners), the default first. A thread of theirs works on one of these.
+ */
+export function useOwnWorkspaces(projectId: string): ProjectWorkspace[] {
   const { api, server } = useSession();
-  const { data: workspace, isPending } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: workspaces = [] } = useQuery({
+    queryKey: [...workspaceQueryKey(server, projectId), "all"],
+    queryFn: () => api.getWorkspaces(projectId),
+    enabled: !!workspace,
+  });
   const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
+  return workspaces.filter((w) => runners?.some((r) => r.id === w.runnerId));
+}
+
+/** `runnerId`: the computer the thread works on, when it was set to or started on one. */
+export function usePickableClis(projectId: string, runnerId?: string | null): Pickable | null {
+  const { api, server } = useSession();
+  const { data: default_, isPending } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!default_ });
   const { data: settings } = useQuery({
     queryKey: ["project-settings", server, projectId],
     queryFn: () => api.getProjectSettings(projectId),
   });
+  const own = useOwnWorkspaces(projectId);
   if (isPending || !settings) return null;
+  // The thread's computer, else the person's own (the default first), as the server picks it.
+  const workspace = own.find((w) => w.runnerId === runnerId) ?? own[0] ?? default_;
   // Only your own computers are listed, so finding it means it is yours.
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
   const cloud = settings.taskTarget === "cloud" || !workspace || (settings.taskTarget === "auto" && runners !== undefined && !runner);
@@ -84,6 +104,53 @@ export function ThreadCliPicker({ pickable, thread, onChange }: { pickable: Pick
         <Option kind="radio" checked={!current} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => pick(null)} />
         {pickable.clis.map((c) => (
           <Option key={c.id} kind="radio" checked={current === c.id} title={cliName(c.id)} note={limitNote(c, t)} onPress={() => pick(c.id)} />
+        ))}
+      </Sheet>
+    </>
+  );
+}
+
+/** Thread, with the project on several of the person's computers: the one it works on from its next turn. */
+export function ThreadRunnerPicker({
+  workspaces,
+  thread,
+  onChange,
+}: {
+  workspaces: ProjectWorkspace[];
+  thread: Thread;
+  onChange: (runnerId: string | null) => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const picked = thread.runner?.by === "person" ? thread.runner.id : null;
+  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0]!;
+  const pick = (runnerId: string | null) => {
+    if (runnerId !== picked) onChange(runnerId);
+    setOpen(false);
+  };
+  return (
+    <>
+      <Chip label={current.runnerName} active={!!picked} several={false} computer title={t("runnerPicker.title")} onPress={() => setOpen(true)} />
+      <Sheet open={open} onClose={() => setOpen(false)} title={t("runnerPicker.title")} hint={t("runnerPicker.hint")}>
+        <Option
+          kind="radio"
+          checked={!picked}
+          title={
+            thread.runner?.by === "auto"
+              ? t("runnerPicker.started", { computer: current.runnerName })
+              : t("cliPicker.default", { cli: workspaces[0]!.runnerName })
+          }
+          onPress={() => pick(null)}
+        />
+        {workspaces.map((w) => (
+          <Option
+            key={w.runnerId}
+            kind="radio"
+            checked={picked === w.runnerId}
+            title={w.runnerName}
+            note={w.online ? undefined : t("localFolder.offline")}
+            onPress={() => pick(w.runnerId)}
+          />
         ))}
       </Sheet>
     </>
@@ -209,6 +276,7 @@ function Chip({
   active,
   several,
   model,
+  computer,
   title,
   onPress,
 }: {
@@ -216,6 +284,7 @@ function Chip({
   active: boolean;
   several: boolean;
   model?: boolean;
+  computer?: boolean;
   title: string;
   onPress: () => void;
 }) {
@@ -233,6 +302,8 @@ function Chip({
         <Sparkles size={14} color={colors.accent} />
       ) : model ? (
         <Brain size={14} color={active ? colors.accent : colors.muted} />
+      ) : computer ? (
+        <Laptop size={14} color={active ? colors.accent : colors.muted} />
       ) : (
         <SquareTerminal size={14} color={active ? colors.accent : colors.muted} />
       )}

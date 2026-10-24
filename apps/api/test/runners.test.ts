@@ -214,6 +214,56 @@ describe("local workspace", () => {
     sideB.ws.close();
   });
 
+  it("sends a thread to the computer picked for it, keeps it there, and moves on when the default is offline", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const a = await pair(user);
+    const b = await pair(user);
+    const sideA = await connectRunner(a.token, ["cancel", "agent"]);
+    const sideB = await connectRunner(b.token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user)).filter((r) => r.online && r.folders.length).length === 2, "both hellos");
+    const project = await createProject(user);
+    const path = "/Users/ismail/code/myrel";
+    for (const [r, add] of [[a, false], [b, true]] as const) {
+      await api(`/api/projects/${project.id}/workspace`, { method: "PUT", token: user, body: JSON.stringify({ runnerId: r.runner.id, path, cli: "claude", add }) });
+    }
+    const chat = await openChat(project.id, user);
+    const errors: string[] = [];
+    chat.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data as string) as { type: string; code?: string };
+      if (event.type === "error") errors.push(event.code!);
+    });
+    const starts = (side: { frames: ServerToRunner[] }) =>
+      side.frames.filter((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start");
+
+    // The first turn runs on the default computer, and the thread stays with it.
+    const { projectAgent, threadAgent, thread, author } = await startThread(project.id, user);
+    const first = await until(() => starts(sideA)[0], "task.start on the default computer");
+    expect((await projectAgent.getThread(thread.id))?.runner).toEqual({ id: a.runner.id, by: "auto" });
+    sideA.send({ type: "task.done", taskId: first.taskId, ok: true, result: "Done." });
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "done", "first turn done");
+
+    // Someone else's computer is not one to pick; one of the project's that is theirs is.
+    const stranger = await pair(await signUp());
+    chat.send(JSON.stringify({ type: "thread.runner", threadId: thread.id, runnerId: stranger.runner.id }));
+    await until(() => errors.includes("no_runner"), "refusal");
+    chat.send(JSON.stringify({ type: "thread.runner", threadId: thread.id, runnerId: b.runner.id }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.runner?.id === b.runner.id, "the pick");
+    const next = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "again" });
+    await threadAgent.wake({ kind: "message", messageId: next.id });
+    await until(() => starts(sideB)[0], "task.start on the picked computer");
+    expect(starts(sideA)).toHaveLength(1);
+    expect((await projectAgent.getThread(thread.id))?.runner).toEqual({ id: b.runner.id, by: "person" });
+
+    // With the default offline, a new thread goes to the person's other computer in the project.
+    sideA.ws.close();
+    await until(async () => !(await listRunners(user)).find((r) => r.id === a.runner.id)?.online, "default offline");
+    const other = await startThread(project.id, user);
+    await until(() => starts(sideB)[1], "task.start on the other computer");
+    expect((await other.projectAgent.getThread(other.thread.id))?.runner).toEqual({ id: b.runner.id, by: "auto" });
+    chat.close();
+    sideB.ws.close();
+  });
+
   it("browses and shares the computer's folders from the web app", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

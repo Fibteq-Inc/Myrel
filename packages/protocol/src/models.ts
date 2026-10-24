@@ -167,6 +167,17 @@ export const ThreadModel = z.object({
 });
 export type ThreadModel = z.infer<typeof ThreadModel>;
 
+/**
+ * The computer a thread works on, among the project's local folders. by: "person" (its owner picked
+ * it; the thread waits for it) or "auto" (the thread's first local turn ran there, so its CLI session
+ * and uncommitted work are there: it stays unless the computer leaves the project).
+ */
+export const ThreadRunner = z.object({
+  id: z.string().max(60),
+  by: z.enum(["person", "auto"]),
+});
+export type ThreadRunner = z.infer<typeof ThreadRunner>;
+
 export const ThreadCloseReason = z.enum(["duplicate", "misrouted", "cancelled"]);
 export type ThreadCloseReason = z.infer<typeof ThreadCloseReason>;
 
@@ -191,6 +202,8 @@ export const Thread = z.object({
   label: z.string().nullable(),
   /** The CLI it runs with on the person's computer; null: the project folder's (and from older servers). */
   cli: ThreadCli.nullable().default(null),
+  /** The computer it works on; null: the project's default one (and from older servers). */
+  runner: ThreadRunner.nullable().default(null),
   /** The model and effort picked for this thread; null: the project's defaults (and from older servers). */
   model: ThreadModel.nullable().default(null),
   /**

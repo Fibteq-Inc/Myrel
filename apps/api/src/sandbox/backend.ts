@@ -1,11 +1,11 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskModel, TaskTarget } from "@myrel/protocol";
+import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskModel, TaskTarget, type ThreadRunner } from "@myrel/protocol";
 import { claudeModel, type ModelConfig, type RunnerBackend, type TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { githubConfigured, installationToken } from "../github/app";
 import { listProjectRepos, repoWritable } from "../github/store";
-import { getWorkspace, workspaceClis } from "../runners";
+import { getWorkspace, listWorkspaces, workspaceClis } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts), for a task that works for `principal`. */
 export function sandboxBackend(env: Env, threadId: string, principal = ""): RunnerBackend {
@@ -115,17 +115,45 @@ export type TaskPlace =
  * `cli`: the CLI the thread was set to run with instead of the folder's. Picked on purpose, so the
  * turn waits for the computer rather than quietly moving to the cloud, and says so when that CLI
  * is gone from it.
+ *
+ * `runner`: the computer the thread was set to (it waits for that one) or first ran on (it stays
+ * there: its CLI session and uncommitted work are there). Without one, when the project's computer
+ * for the person is offline, another of theirs in the project that is online (and has the CLI) does.
  */
-export async function taskPlace(env: Env, projectId: string, requester: string | null, cli?: string | null): Promise<TaskPlace> {
+export async function taskPlace(
+  env: Env,
+  projectId: string,
+  requester: string | null,
+  cli?: string | null,
+  runner?: ThreadRunner | null,
+): Promise<TaskPlace> {
   const [row] = await createDb(env.DB)
     .select({ taskTarget: schema.projects.taskTarget })
     .from(schema.projects)
     .where(eq(schema.projects.id, projectId));
   const target = TaskTarget.catch("auto").parse(row?.taskTarget);
   if (target === "cloud") return { kind: "cloud" };
-  // The requester's own computer when the project has a local folder on one, the default first.
-  const workspace = await getWorkspace(env, projectId, { ownerId: requester });
+  const kept = runner ? await getWorkspace(env, projectId, { runnerId: runner.id }) : null;
+  if (runner?.by === "person" && !kept) {
+    return {
+      kind: "error",
+      message: "The computer this thread was set to work on is no longer one of this project's. Pick another for it from its message box, then write here again.",
+    };
+  }
+  // Else the requester's own computer when the project has a local folder on one, the default first.
+  let workspace = kept ?? (await getWorkspace(env, projectId, { ownerId: requester }));
   const own = workspace && requester ? await ownsComputer(env, workspace.runnerId, requester) : false;
+  if (workspace && own && !kept && !workspace.online) {
+    const wanted = cli ?? null;
+    for (const other of await listWorkspaces(env, projectId, requester!)) {
+      if (!other.online || other.runnerId === workspace.runnerId) continue;
+      const clis = (await workspaceClis(env, projectId, { runnerId: other.runnerId }))?.clis ?? [];
+      if (wanted ? clis.some((c) => c.id === wanted) : CliId.safeParse(other.cli).success) {
+        workspace = other;
+        break;
+      }
+    }
+  }
   if (workspace && !own) {
     if (target === "auto") return { kind: "cloud" };
     return {

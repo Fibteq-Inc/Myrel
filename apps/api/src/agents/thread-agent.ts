@@ -460,7 +460,7 @@ export class ThreadAgent extends Agent<Env> {
         : // Someone who has left the project since writing here gets no more turns.
           await member(lastWriter ?? (this.getMeta("start_actor") || null));
     this.setMeta("requester", requester ?? "");
-    const place = await taskPlace(this.env, projectId, requester, ctx.thread.cli?.id);
+    const place = await taskPlace(this.env, projectId, requester, ctx.thread.cli?.id, ctx.thread.runner);
     if (place.kind === "error") return this.cannotWork(place.message);
     // The container takes the longest to be ready, so it starts while the turn is put together.
     if (place.kind === "cloud" && this.env.SANDBOX && (await canUseSandbox(this.env, projectId)).ok) {
@@ -529,6 +529,7 @@ export class ThreadAgent extends Agent<Env> {
       attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
       threadModel: ctx.thread.model,
       threadCli: ctx.thread.cli?.id ?? null,
+      threadRunner: ctx.thread.runner?.id ?? null,
     });
   }
 
@@ -558,6 +559,8 @@ export class ThreadAgent extends Agent<Env> {
     requester: string | null;
     /** The model and effort picked for the thread, if any (see resolveTaskModel). */
     threadModel: ThreadModel | null;
+    /** The computer the thread was set to or first ran on, if any. */
+    threadRunner?: string | null;
     /** The CLI picked for the thread, if any: in the cloud, one of CloudCli replaces the project's. */
     threadCli: string | null;
   }) {
@@ -638,6 +641,8 @@ export class ThreadAgent extends Agent<Env> {
         const run = { ...spec, title: CLI_NAMES[workspace.cli] };
         await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
+        // Its CLI session and uncommitted work are on this computer now: later turns stay here.
+        if (input.threadRunner !== workspace.runnerId) await project.updateThread(threadId, { runner: { id: workspace.runnerId, by: "auto" } });
       } else {
         // The sandbox costs the service and holds the project's tokens: not for an address nobody has shown is theirs.
         if (input.requester && !(await userVerified(this.env, input.requester))) throw new Error(UNVERIFIED_MESSAGE);
