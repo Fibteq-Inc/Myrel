@@ -48,12 +48,13 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
       >
         <RuntimeIcon size={12} color={colors.subtle} />
         <Text style={styles.text} numberOfLines={1}>
-          {t(local ? "stats.local" : "stats.cloud")} · {parts.join(" · ")}
+          {stats.computer ?? t(local ? "stats.local" : "stats.cloud")} · {parts.join(" · ")}
         </Text>
       </Pressable>
       {open && (
         <View style={styles.box}>
           {task && <Row label={t("stats.task")} value={task.title} />}
+          {!!stats.computer && <Row label={t("stats.computer")} value={stats.computer} />}
           {stats.harness && <Row label={t("stats.harness")} value={harnessName(stats.harness)} />}
           {!!stats.model && <Row label={t("stats.model")} value={modelName(stats.model)} mono />}
           <Row label={t("stats.time")} value={formatDuration(stats.durationMs, t, locale)} />

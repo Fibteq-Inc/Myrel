@@ -129,7 +129,7 @@ type TaskRow = {
  * A run's spec as stored. Runs on the person's computer name their CLI (claude, codex…) as the harness.
  * agent: the run was one turn of the thread's agent. Older runs were tasks Myrel's own loop handed out.
  */
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; agent?: boolean };
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean };
 
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
 type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
@@ -635,7 +635,7 @@ export class ThreadAgent extends Agent<Env> {
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
         const run = { ...spec, title: CLI_NAMES[workspace.cli] };
-        await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId }), backend.id, () => backend.start(run, {}), language);
+        await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
       } else {
         // The sandbox costs the service and holds the project's tokens: not for an address nobody has shown is theirs.
@@ -1494,6 +1494,7 @@ export class ThreadAgent extends Agent<Env> {
       // A person's own CLI runs on their own account, so Myrel puts no price on it.
       costMicros: runtime === "local" ? null : taskCostMicros(this.env, model || null, { inputTokens, outputTokens, costUsd }),
       runtime,
+      ...(runtime === "local" && spec.computer && { computer: spec.computer }),
       harness: spec.harness,
     };
     return { stats, from: start, mark };

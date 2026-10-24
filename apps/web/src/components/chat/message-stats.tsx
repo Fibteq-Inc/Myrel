@@ -50,9 +50,14 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
         onClick={() => setOpen((o) => !o)}
         className="-mx-1.5 flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md px-1.5 py-0.5 text-left tabular-nums hover:bg-hover hover:text-muted"
       >
-        <span className="flex items-center gap-1" title={t(stats.runtime === "local" ? "stats.localHint" : "stats.cloudHint")}>
-          <RuntimeIcon size={12} aria-hidden="true" />
-          {where(stats.runtime)}
+        <span
+          className="flex min-w-0 items-center gap-1"
+          title={
+            stats.computer ? t("stats.localOn", { computer: stats.computer }) : t(stats.runtime === "local" ? "stats.localHint" : "stats.cloudHint")
+          }
+        >
+          <RuntimeIcon size={12} aria-hidden="true" className="flex-none" />
+          <span className="max-w-[18ch] truncate">{stats.computer ?? where(stats.runtime)}</span>
         </span>
         {model && (
           <>
@@ -103,6 +108,7 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
               <hr className="col-span-2 my-1 border-line" />
             </>
           )}
+          {stats.computer && <Row label={t("stats.computer")} value={stats.computer} />}
           {stats.harness && <Row label={t("stats.harness")} value={harnessName(stats.harness)} />}
           {stats.model && <Row label={t("stats.model")} value={modelName(stats.model)} mono />}
           <Row label={t("stats.time")} value={dur(stats.durationMs)} />

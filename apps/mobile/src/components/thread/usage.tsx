@@ -48,10 +48,10 @@ export function ThreadUsageTab({ messages }: { messages: Message[] }) {
     const st = m.stats;
     const model = modelName(st.task?.model ?? st.model);
     const harness = st.task?.harness ?? st.harness;
-    const key = `${st.runtime}/${harness ?? ""}/${model}`;
+    const key = `${st.runtime}/${st.computer ?? ""}/${harness ?? ""}/${model}`;
     const group = groups.get(key) ?? {
       label: model || (harness ? harnessName(harness) : t("stats.unpriced")),
-      sub: [t(st.runtime === "local" ? "stats.local" : "stats.cloud"), model && harness ? harnessName(harness) : null]
+      sub: [st.computer ?? t(st.runtime === "local" ? "stats.local" : "stats.cloud"), model && harness ? harnessName(harness) : null]
         .filter(Boolean)
         .join(" · "),
       usage: ZERO,

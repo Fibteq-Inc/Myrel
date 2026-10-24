@@ -67,6 +67,8 @@ export const MessageStats = z.object({
   costMicros: Count.nullable(),
   /** Where the work behind the message ran. */
   runtime: Runtime,
+  /** The name of the person's computer it ran on, for local work. */
+  computer: z.string().optional(),
   /**
    * The harness that wrote the message, for a thread's agent ("opencode", or the person's CLI such as
    * "claude"). Its model is empty when the CLI did not say which one it used.

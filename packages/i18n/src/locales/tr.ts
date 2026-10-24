@@ -190,6 +190,8 @@ export const tr: Catalog = {
   "stats.local": "Bilgisayarın",
   "stats.cloudHint": "Myrel sunucularında çalıştı",
   "stats.localHint": "Bilgisayarında myrel-runner ile çalıştı",
+  "stats.localOn": "{computer} üzerinde myrel-runner ile çalıştı",
+  "stats.computer": "Bilgisayar",
   "stats.tokens": "{tokens} token",
   "stats.model": "Model",
   "stats.time": "Süre",
