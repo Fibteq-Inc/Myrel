@@ -6,6 +6,7 @@ import {
   costMicros,
   createProvider,
   DEFAULT_PRICES,
+  messagesBaseUrl,
   metered,
   type ModelProvider,
   parsePrices,
@@ -344,6 +345,17 @@ describe("readsImages", () => {
     expect(readsImages("openai", "firerouter/opus")).toBe(false);
     expect(readsImages("openai", "auto")).toBe(false);
     expect(readsImages("openai", "accounts/fireworks/models/deepseek-v4p1-flash-1017")).toBe(true);
+  });
+
+  it("marks Fireworks models as reachable over Anthropic's Messages API, only at Fireworks' own address", () => {
+    const fireworks = taskModel({ LLM_PROVIDER: "fireworks", FIREWORKS_API_KEY: "k" } as never);
+    expect(fireworks.ok && fireworks.model.messages).toBe(true);
+    expect(fireworks.ok && messagesBaseUrl(fireworks.model)).toBe("https://api.fireworks.ai/inference");
+    const gateway = taskModel({ LLM_PROVIDER: "fireworks", FIREWORKS_API_KEY: "k", LLM_BASE_URL: "https://gw.test/v1" } as never);
+    expect(gateway.ok && gateway.model.messages).toBeUndefined();
+    const openai = taskModel({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "k" } as never);
+    expect(openai.ok && openai.model.messages).toBeUndefined();
+    expect(openai.ok && messagesBaseUrl(openai.model)).toBeNull();
   });
 
   it("lets RUNNER_IMAGES decide for the harness's model", () => {

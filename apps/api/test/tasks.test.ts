@@ -96,10 +96,10 @@ describe("the cloud agent", () => {
     const codex = await run("codex");
     expect(codex.task).toMatchObject({ title: "Codex", harness: "codex", backend: "sandbox" });
     expect(codex.spec.prompt).toContain("You run as Codex in this thread's own Linux sandbox");
-    // Claude Code needs a Claude model: the turn runs with OpenCode and says so.
+    // Fireworks serves its models over Anthropic's Messages API too: Claude Code takes it as well.
     const claude = await run("claude");
-    expect(claude.task).toMatchObject({ title: "OpenCode", harness: "opencode" });
-    expect(claude.task.log.map((l) => l.text).join("\n")).toContain("needs a Claude model");
+    expect(claude.task).toMatchObject({ title: "Claude Code", harness: "claude-code" });
+    expect(claude.spec.model).toMatchObject({ provider: "fireworks", messages: true });
   });
 
   it("runs the thread's agent as OpenCode in its sandbox, connected to the thread's MCP endpoint", async () => {

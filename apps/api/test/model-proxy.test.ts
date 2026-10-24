@@ -76,7 +76,8 @@ describe("proxyModel", () => {
     expect(costs).toEqual([0.002]);
   });
 
-  it("sends the turn's cache key to an OpenAI-compatible provider as session affinity", async () => {
+  // The route passes the key for providers that cache per replica (not Anthropic's own API).
+  it("sends the turn's cache key as session affinity when it is given one", async () => {
     const seen: RequestInit[] = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
       seen.push(init);
@@ -85,7 +86,7 @@ describe("proxyModel", () => {
     const req = () => new Request("https://myrel.test/m", { method: "POST", body: "{}" });
     const target = { url: "https://up.test/v1/chat/completions", apiKey: "k", cacheKey: "thr_1" };
     await proxyModel(req(), { ...target, kind: "openai" }, async () => {}, () => {});
-    await proxyModel(req(), { ...target, kind: "anthropic" }, async () => {}, () => {});
+    await proxyModel(req(), { ...target, cacheKey: undefined, kind: "anthropic" }, async () => {}, () => {});
     expect(new Headers(seen[0]!.headers).get("x-session-affinity")).toBe("thr_1");
     expect(new Headers(seen[1]!.headers).get("x-session-affinity")).toBeNull();
   });
@@ -126,6 +127,20 @@ describe("proxyModel", () => {
     expect(JSON.parse(seen[0]!.init.body as string)).toEqual({ model: "claude", stream: false });
     // 1,000 uncached at $3/M + 1,000 cached at $0.30/M + 100 output at $15/M; never the header's figure
     expect(costs).toEqual([0.0048]);
+  });
+
+  it("keeps a Messages call to Fireworks on the turn's replica, with the key as x-api-key", async () => {
+    const seen: RequestInit[] = [];
+    vi.stubGlobal("fetch", async (_u: string, init: RequestInit) => {
+      seen.push(init);
+      return Response.json({ model: "kimi-k3", usage: { input_tokens: 1, output_tokens: 1 } });
+    });
+    const req = new Request("https://myrel.test/api/agent-mcp/t/model/v1/messages", { method: "POST", body: JSON.stringify({ model: "auto", messages: [] }) });
+    const target = { url: "https://api.fireworks.ai/inference/v1/messages", apiKey: "fw", kind: "anthropic" as const, model: "auto", cacheKey: "thr_1" };
+    expect((await proxyModel(req, target, async () => {}, () => {})).status).toBe(200);
+    const headers = new Headers(seen[0]!.headers);
+    expect(headers.get("x-api-key")).toBe("fw");
+    expect(headers.get("x-session-affinity")).toBe("thr_1");
   });
 
   it("prices an Anthropic stream from message_start and message_delta", async () => {

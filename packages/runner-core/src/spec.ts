@@ -22,6 +22,11 @@ export const ModelConfig = z.object({
   baseUrl: z.string().url().optional(),
   /** The model reads images, so the harness may show it screenshots and photos. */
   images: z.boolean().optional(),
+  /**
+   * An OpenAI-compatible model whose provider also speaks Anthropic's Messages API (Fireworks), so
+   * Claude Code can run with it through Myrel's proxy.
+   */
+  messages: z.boolean().optional(),
 });
 export type ModelConfig = z.infer<typeof ModelConfig>;
 

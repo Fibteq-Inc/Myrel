@@ -12,7 +12,7 @@ export * from "./script";
 export * from "./spec";
 export * from "./state";
 export { claudeCode, codex, opencode, shell };
-export { claudeMcpConfig } from "./harnesses/claude-code";
+export { claudeMcpConfig, claudeModel } from "./harnesses/claude-code";
 export { codexArgs } from "./harnesses/codex";
 export { opencodeConfig, opencodeModel, PLAN_PLUGIN } from "./harnesses/opencode";
 

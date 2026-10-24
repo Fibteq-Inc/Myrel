@@ -178,6 +178,16 @@ describe("claude code in the sandbox", () => {
     expect(claudeCode.command(cloud)).toContain('ANTHROPIC_API_KEY="$MYREL_MODEL_API_KEY" claude -p');
   });
 
+  it("runs with a Fireworks model over its Anthropic-compatible API, MCP tool search kept on", () => {
+    const fw = spec({ model: { kind: "openai", provider: "fireworks", id: "auto", baseUrl: "https://myrel.test/api/agent-mcp/thr_1/model", messages: true } });
+    expect(claudeCode.command(fw)).toContain(`ANTHROPIC_API_KEY="$MYREL_MODEL_API_KEY" claude -p`);
+    expect(claudeCode.command(fw)).toContain("--model 'auto'");
+    expect(claudeCode.env(fw)).toMatchObject({ ANTHROPIC_BASE_URL: "https://myrel.test/api/agent-mcp/thr_1/model", ANTHROPIC_DEFAULT_HAIKU_MODEL: "auto", ENABLE_TOOL_SEARCH: "true" });
+    // An OpenAI-compatible model whose provider does not speak that API: no cloud model for Claude Code.
+    const openai = spec({ model: { kind: "openai", provider: "openai", id: "gpt-x", baseUrl: "https://myrel.test/m" } });
+    expect(claudeCode.env(openai).ANTHROPIC_BASE_URL).toBeUndefined();
+  });
+
   it("writes its MCP config with the secrets filled in only where they belong, and removes it after the run", () => {
     expect(claudeMcpConfig(cloud)).toMatchObject({ mcpServers: { myrel: { type: "http", headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" } } } });
     const home = mkdtempSync(join(tmpdir(), "myrel-claude-"));
