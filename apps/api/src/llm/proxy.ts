@@ -53,7 +53,7 @@ export async function proxyModel(
     const v = req.headers.get(name);
     if (v) headers.set(name, v);
   }
-  if (target.cacheKey && target.kind === "openai") headers.set("x-session-affinity", target.cacheKey);
+  if (target.cacheKey) headers.set("x-session-affinity", target.cacheKey);
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const text = hasBody ? await req.text() : undefined;
   // A call names its model in the body: only the project's model is paid for here. The harness's

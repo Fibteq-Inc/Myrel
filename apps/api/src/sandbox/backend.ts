@@ -1,6 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskModel, TaskTarget, type ThreadRunner } from "@myrel/protocol";
-import type { ModelConfig, RunnerBackend, TaskSpec } from "@myrel/runner-core";
+import { claudeModel, type ModelConfig, type RunnerBackend, type TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { githubConfigured, installationToken } from "../github/app";
@@ -80,10 +80,14 @@ export async function projectCloudCli(env: Env, projectId: string): Promise<Clou
  * takes any model. Claude Code speaks only Anthropic's API, Codex only OpenAI's Responses API.
  * `note` says why the asked-for CLI was not used.
  */
-export function cloudHarness(cli: CloudCli, model: Pick<ModelConfig, "kind">): { id: "opencode" | "claude-code" | "codex"; title: string; note?: string } {
+export function cloudHarness(cli: CloudCli, model: Pick<ModelConfig, "kind" | "messages">): { id: "opencode" | "claude-code" | "codex"; title: string; note?: string } {
   if (cli === "claude") {
-    if (model.kind === "anthropic") return { id: "claude-code", title: "Claude Code" };
-    return { id: "opencode", title: "OpenCode", note: "This project runs cloud turns with Claude Code, which needs a Claude model; its model is not one, so this turn runs with OpenCode." };
+    if (claudeModel(model)) return { id: "claude-code", title: "Claude Code" };
+    return {
+      id: "opencode",
+      title: "OpenCode",
+      note: "This project runs cloud turns with Claude Code, which speaks Anthropic's API: a Claude model, or a provider that serves that API too (Fireworks). This model's provider does not, so this turn runs with OpenCode.",
+    };
   }
   if (cli === "codex") {
     if (model.kind === "openai") return { id: "codex", title: "Codex" };

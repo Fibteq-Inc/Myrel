@@ -18,6 +18,8 @@ type ProviderDef = {
   keyVar: keyof LlmEnv;
   /** Path segment under an AI Gateway URL, or null when the gateway has no built-in route for it. */
   gatewaySlug: string | null;
+  /** An OpenAI-compatible provider's Anthropic Messages API base (`/v1/messages` under it), for Claude Code. */
+  messagesBaseUrl?: string;
 };
 
 /**
@@ -34,6 +36,9 @@ export const PROVIDERS = {
     defaultModel: "auto",
     keyVar: "FIREWORKS_API_KEY",
     gatewaySlug: null,
+    // Fireworks serves its models over Anthropic's Messages API too, for Claude Code:
+    // https://docs.fireworks.ai/tools-sdks/anthropic-compatibility
+    messagesBaseUrl: "https://api.fireworks.ai/inference",
   },
   anthropic: {
     kind: "anthropic",
@@ -140,7 +145,18 @@ export function taskModel(
   const { id, def, apiKey, baseUrl, model } = r.value;
   const modelId = env.RUNNER_MODEL || model;
   const images = env.RUNNER_IMAGES === "true" ? true : env.RUNNER_IMAGES === "false" ? false : readsImages(def.kind, modelId);
-  return { ok: true, model: { kind: def.kind, provider: id, id: modelId, baseUrl, images }, apiKey };
+  // Only at the provider's own address: a gateway or LLM_BASE_URL in front of it may not pass Messages calls on.
+  const messages = def.kind === "openai" && !!def.messagesBaseUrl && baseUrl === def.baseUrl;
+  return { ok: true, model: { kind: def.kind, provider: id, id: modelId, baseUrl, images, ...(messages && { messages }) }, apiKey };
+}
+
+/**
+ * Where a harness's Anthropic Messages call goes for an OpenAI-compatible model whose provider also
+ * speaks that API (see ModelConfig.messages), or null.
+ */
+export function messagesBaseUrl(model: Pick<ModelConfig, "kind" | "provider" | "messages">): string | null {
+  if (model.kind !== "openai" || !model.messages) return null;
+  return (PROVIDERS as Record<string, ProviderDef>)[model.provider]?.messagesBaseUrl ?? null;
 }
 
 /**

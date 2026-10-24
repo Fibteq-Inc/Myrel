@@ -28,7 +28,7 @@ import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
-import { DEFAULT_PRICES, modelCallAllowed, parsePrices, proxyModel } from "./llm";
+import { DEFAULT_PRICES, messagesBaseUrl, modelCallAllowed, parsePrices, proxyModel } from "./llm";
 
 export { ProjectAgent } from "./agents/project-agent";
 export { RunnerAgent } from "./agents/runner-agent";
@@ -104,17 +104,26 @@ const app = new Hono<AppEnv>()
     const model = await projectTaskModel(c.env, caller.projectId);
     if (!model.ok || !model.model.baseUrl) return c.json({ error: { message: model.ok ? "The project's model has no address" : model.reason } }, 502);
     const rest = new URL(c.req.url).pathname.split("/model/").slice(1).join("/model/");
-    if (!modelCallAllowed(model.model.kind, c.req.method, rest)) return c.json({ error: { message: "Only model calls go through here." } }, 403);
-    const url = `${model.model.baseUrl.replace(/\/+$/, "")}/${rest}`;
+    // Claude Code speaks Anthropic's Messages API: an OpenAI-compatible provider that serves it too
+    // (Fireworks) takes those calls at its own Messages address, with the same key and model.
+    const messages = rest.startsWith("v1/messages") ? messagesBaseUrl(model.model) : null;
+    const kind = messages ? "anthropic" : model.model.kind;
+    if (!modelCallAllowed(kind, c.req.method, rest)) return c.json({ error: { message: "Only model calls go through here." } }, 403);
+    // Fireworks has no token counting there; Claude Code estimates instead.
+    if (messages && rest === "v1/messages/count_tokens") {
+      return c.json({ type: "error", error: { type: "not_found_error", message: "Token counting is not available for this model." } }, 404);
+    }
+    const url = `${(messages ?? model.model.baseUrl).replace(/\/+$/, "")}/${rest}`;
     return proxyModel(
       c.req.raw,
       {
         url,
         apiKey: model.apiKey,
-        kind: model.model.kind,
+        kind,
         model: model.model.id,
         prices: { ...DEFAULT_PRICES, ...parsePrices(c.env.LLM_PRICES) },
-        cacheKey: threadId.data,
+        // Fireworks caches prompts per replica, Messages calls included (see ChatRequest.cacheKey).
+        ...(model.model.kind === "openai" && { cacheKey: threadId.data }),
       },
       (usd) => thread.modelCost(caller.taskId, usd),
       (p) => c.executionCtx.waitUntil(p),

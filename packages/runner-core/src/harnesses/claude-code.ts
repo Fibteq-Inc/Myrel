@@ -1,5 +1,5 @@
 import { type Harness, jsonLine, log, num, obj, shellQuote, str, todoStatus } from "../harness";
-import type { RunnerEvent, TaskSpec } from "../spec";
+import type { ModelConfig, RunnerEvent, TaskSpec } from "../spec";
 
 /** Where the task writes Claude Code's MCP config, with the tokens filled in ($HOME is the task's own home). */
 const MCP_FILE = "$HOME/.cache/myrel/claude-mcp.json";
@@ -13,7 +13,8 @@ const FILL_ENV = `.mcpServers |= map_values(
   | (if .env then .env |= map_values(gsub("[{]env:(?<n>[A-Z_][A-Z0-9_]*)[}]"; $ENV[.n] // "")) else . end))`;
 
 /**
- * Claude Code (`claude -p --output-format stream-json`). Claude models only.
+ * Claude Code (`claude -p --output-format stream-json`). It speaks Anthropic's Messages API: Claude
+ * models, and others whose provider serves that API too (Fireworks, see ModelConfig.messages).
  * In the cloud it reaches the model through Myrel (ANTHROPIC_BASE_URL) with the turn's token as its
  * key, so no real key enters the sandbox; without a model it uses the CLI's own login.
  */
@@ -22,7 +23,7 @@ export const claudeCode: Harness = {
   label: "Claude Code",
 
   command(spec) {
-    const cloud = spec.model?.kind === "anthropic";
+    const cloud = claudeModel(spec.model);
     const claude = [
       cloud ? 'ANTHROPIC_API_KEY="$MYREL_MODEL_API_KEY"' : "",
       "claude -p --output-format stream-json --verbose --dangerously-skip-permissions",
@@ -47,11 +48,13 @@ export const claudeCode: Harness = {
     const env: Record<string, string> = {};
     if (spec.mcp) Object.assign(env, { MYREL_CLAUDE_MCP: JSON.stringify(claudeMcpConfig(spec)), MYREL_CLAUDE_MCP_FILL: FILL_ENV });
     // Only when the task carries a model: otherwise the local CLI's own login is used.
-    if (spec.model?.kind !== "anthropic") return env;
-    const id = spec.model.id;
+    if (!claudeModel(spec.model)) return env;
+    const id = spec.model!.id;
     return {
       ...env,
-      ...(spec.model.baseUrl ? { ANTHROPIC_BASE_URL: spec.model.baseUrl } : {}),
+      ...(spec.model!.baseUrl ? { ANTHROPIC_BASE_URL: spec.model!.baseUrl } : {}),
+      // Claude Code turns MCP tool search off when the address is not Anthropic's; Fireworks serves it.
+      ...(spec.model!.kind !== "anthropic" && { ENABLE_TOOL_SEARCH: "true" }),
       // Every call Claude Code makes on its own (titles, subagents) uses the task's model too, the
       // one the proxy prices and the project pays for.
       ANTHROPIC_DEFAULT_HAIKU_MODEL: id,
@@ -130,4 +133,9 @@ export function claudeMcpConfig(spec: TaskSpec): Record<string, unknown> {
           };
   }
   return { mcpServers: servers };
+}
+
+/** Whether the task's model is one Claude Code can run with (see the harness). */
+export function claudeModel(model: Pick<ModelConfig, "kind" | "messages"> | undefined): boolean {
+  return model?.kind === "anthropic" || model?.messages === true;
 }
