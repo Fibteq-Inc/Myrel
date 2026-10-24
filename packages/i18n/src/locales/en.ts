@@ -193,6 +193,8 @@ export const en = {
   "stats.local": "Your computer",
   "stats.cloudHint": "Ran on Myrel's servers",
   "stats.localHint": "Ran on your computer with myrel-runner",
+  "stats.localOn": "Ran on {computer} with myrel-runner",
+  "stats.computer": "Computer",
   "stats.tokens": "{tokens} tokens",
   "stats.model": "Model",
   "stats.time": "Time",
