@@ -457,6 +457,8 @@ export const ProjectWorkspace = z.object({
   folders: z.array(z.string()).default([]),
   cli: CliId,
   online: z.boolean(),
+  /** The project's default computer: local work goes here unless a thread was set to another. */
+  isDefault: z.boolean().default(true),
 });
 export type ProjectWorkspace = z.infer<typeof ProjectWorkspace>;
 
@@ -468,12 +470,25 @@ export const SetWorkspaceInput = z.object({
   runnerId: RunnerId,
   path: z.string().min(1).max(1024),
   cli: CliId,
+  /**
+   * Adds this computer's folder to the project next to its others (or changes it), instead of making
+   * it the project's only local folder. The first one becomes the default.
+   */
+  add: z.boolean().optional(),
 });
 export type SetWorkspaceInput = z.infer<typeof SetWorkspaceInput>;
 
 /** Adds one of the computer's shared folders to the project's other folders. */
-export const WorkspaceFolderInput = z.object({ path: z.string().min(1).max(1024) });
+export const WorkspaceFolderInput = z.object({
+  path: z.string().min(1).max(1024),
+  /** The computer whose local folder it goes with; the project's default one when left out. */
+  runnerId: RunnerId.optional(),
+});
 export type WorkspaceFolderInput = z.infer<typeof WorkspaceFolderInput>;
+
+/** Makes one of the project's computers its default. */
+export const WorkspaceDefaultInput = z.object({ runnerId: RunnerId });
+export type WorkspaceDefaultInput = z.infer<typeof WorkspaceDefaultInput>;
 
 /** How many other folders a project can have besides its main one. */
 export const MAX_WORKSPACE_FOLDERS = 20;

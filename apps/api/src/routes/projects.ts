@@ -14,13 +14,14 @@ import {
   UpdateMemberInput,
   MAX_WORKSPACE_FOLDERS,
   SetWorkspaceInput,
+  WorkspaceDefaultInput,
   WorkspaceFolderInput,
   CloudCli,
   TaskTarget,
   UpdateProjectSettingsInput,
 } from "@myrel/protocol";
 import { getAgentByName } from "agents";
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
@@ -29,7 +30,7 @@ import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRep
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
-import { getWorkspace, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
+import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
 import { parseCliModels } from "../task-model";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
@@ -380,11 +381,12 @@ export const projectRoutes = new Hono<AppEnv>()
     const done = await agent.interrupt();
     return done.ok ? c.json({ ok: true }) : c.json({ error: "cannot_interrupt", message: done.error }, 409);
   })
-  // The local folder this project works in, on one of the user's computers.
+  // The local folders this project works in, one per computer; `workspace` is the default one.
   .get("/:id/workspace", async (c) => {
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
-    return c.json({ workspace: await getWorkspace(c.env, id) });
+    const workspaces = await listWorkspaces(c.env, id);
+    return c.json({ workspace: workspaces[0] ?? null, workspaces });
   })
   // A file in the project's local folders (or a thread's worktree of them), e.g. one an agent's
   // message links to. Read from the computer, so only by the person whose computer it is.
@@ -397,7 +399,8 @@ export const projectRoutes = new Hono<AppEnv>()
     if (threadId ? !(await findThread(c.env, id, threadId, userId)) : !(await findMembership(c.env, id, userId))) {
       return c.json({ error: "not_found" }, 404);
     }
-    const workspace = await getWorkspace(c.env, id);
+    // The viewer's own computer: only its owner can read from one.
+    const workspace = await getWorkspace(c.env, id, { runnerId: c.req.query("runner") || undefined, ownerId: userId });
     if (!workspace) return c.json({ error: "not_found", message: "This project has no local folder." }, 404);
     const [runner] = await createDb(c.env.DB).select({ userId: runners.userId }).from(runners).where(eq(runners.id, workspace.runnerId));
     if (runner?.userId !== userId) {
@@ -439,16 +442,47 @@ export const projectRoutes = new Hono<AppEnv>()
     }
 
     const now = new Date();
-    const values = { ...input.data, updatedAt: now };
+    const { add, ...data } = input.data;
+    const values = { ...data, updatedAt: now };
     // The other folders belong to the computer: they stay only while the project stays on it.
-    const [before] = await db.select().from(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
-    const kept = before?.runnerId === input.data.runnerId ? parseFolders(before.folders).filter((f) => f !== input.data.path) : [];
-    await db
+    const before = await db.select().from(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
+    const same = before.find((w) => w.runnerId === data.runnerId);
+    const kept = same ? parseFolders(same.folders).filter((f) => f !== data.path) : [];
+    // Without `add`, the project's only local folder (as before several computers); with it, one more,
+    // the default only when it is the first.
+    const others = and(eq(projectWorkspaces.projectId, id), ne(projectWorkspaces.runnerId, data.runnerId));
+    const isDefault = add ? (same?.isDefault ?? !before.some((w) => w.runnerId !== data.runnerId)) : true;
+    const upsert = db
       .insert(projectWorkspaces)
-      .values({ projectId: id, createdBy: userId, createdAt: now, ...values, folders: JSON.stringify(kept) })
-      .onConflictDoUpdate({ target: projectWorkspaces.projectId, set: { ...values, folders: JSON.stringify(kept), createdBy: userId } });
+      .values({ projectId: id, createdBy: userId, createdAt: now, ...values, isDefault, folders: JSON.stringify(kept) })
+      .onConflictDoUpdate({
+        target: [projectWorkspaces.projectId, projectWorkspaces.runnerId],
+        set: { ...values, isDefault, folders: JSON.stringify(kept), createdBy: userId },
+      });
+    if (add) await upsert;
+    else await db.batch([db.delete(projectWorkspaces).where(others), upsert]);
     await notifyProject(c.env, id);
-    return c.json({ workspace: await getWorkspace(c.env, id) });
+    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId: data.runnerId }), workspaces: await listWorkspaces(c.env, id) });
+  })
+  // Makes one of the project's computers its default, where its local work goes unless a thread says otherwise.
+  .put("/:id/workspace/default", async (c) => {
+    const id = c.req.param("id");
+    const project = await findMembership(c.env, id, c.get("user").id);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
+    const input = WorkspaceDefaultInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    if (!(await getWorkspace(c.env, id, { runnerId: input.data.runnerId }))) {
+      return c.json({ error: "invalid_input", message: "This project has no local folder on that computer." }, 400);
+    }
+    const db = createDb(c.env.DB);
+    await db
+      .update(projectWorkspaces)
+      .set({ isDefault: sql`${projectWorkspaces.runnerId} = ${input.data.runnerId}` })
+      .where(eq(projectWorkspaces.projectId, id));
+    await notifyProject(c.env, id);
+    const workspaces = await listWorkspaces(c.env, id);
+    return c.json({ workspace: workspaces[0] ?? null, workspaces });
   })
   // Other folders on the same computer the project's agent may work in, besides its main folder.
   .post("/:id/workspace/folders", async (c) => {
@@ -458,7 +492,7 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
     const input = WorkspaceFolderInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
-    const workspace = await getWorkspace(c.env, id);
+    const workspace = await getWorkspace(c.env, id, { runnerId: input.data.runnerId });
     if (!workspace) return c.json({ error: "invalid_input", message: "Connect a local folder to this project first." }, 400);
     if (workspace.folders.length >= MAX_WORKSPACE_FOLDERS) {
       return c.json({ error: "invalid_input", message: `A project can have at most ${MAX_WORKSPACE_FOLDERS} other folders.` }, 400);
@@ -472,8 +506,8 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!parseInfo(runner?.info ?? null)?.folders.some((f) => f.path === input.data.path)) {
       return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
     }
-    await setWorkspaceFolder(c.env, id, input.data.path, true);
-    return c.json({ workspace: await getWorkspace(c.env, id) });
+    await setWorkspaceFolder(c.env, id, input.data.path, true, workspace.runnerId);
+    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId: workspace.runnerId }) });
   })
   .delete("/:id/workspace/folders", async (c) => {
     const id = c.req.param("id");
@@ -482,17 +516,22 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
     const path = c.req.query("path");
     if (!path) return c.json({ error: "invalid_input", message: "Which folder?" }, 400);
-    await setWorkspaceFolder(c.env, id, path, false);
-    return c.json({ workspace: await getWorkspace(c.env, id) });
+    const runnerId = c.req.query("runner") || undefined;
+    await setWorkspaceFolder(c.env, id, path, false, runnerId);
+    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId }) });
   })
   .delete("/:id/workspace", async (c) => {
     const id = c.req.param("id");
     const project = await findMembership(c.env, id, c.get("user").id);
     if (!project) return c.json({ error: "not_found" }, 404);
     if (!canManage(project.role)) return c.json({ error: "forbidden", message: "Only project owners and admins can do this." }, 403);
-    await createDb(c.env.DB).delete(projectWorkspaces).where(eq(projectWorkspaces.projectId, id));
+    // One computer's local folder (`?runner=`), or all of them.
+    const runnerId = c.req.query("runner");
+    const one = runnerId ? and(eq(projectWorkspaces.projectId, id), eq(projectWorkspaces.runnerId, runnerId)) : eq(projectWorkspaces.projectId, id);
+    await createDb(c.env.DB).delete(projectWorkspaces).where(one);
     await notifyProject(c.env, id);
-    return c.json({ workspace: null });
+    const workspaces = await listWorkspaces(c.env, id);
+    return c.json({ workspace: workspaces[0] ?? null, workspaces });
   })
   .get("/:id/ws", async (c) => {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {

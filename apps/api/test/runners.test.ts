@@ -171,6 +171,49 @@ describe("local workspace", () => {
     expect((await api("/api/runner/connect", { token, headers: { upgrade: "websocket" } })).status).toBe(401);
   });
 
+  it("works on several of the person's computers, with the default one taking the work", { timeout: 20_000 }, async () => {
+    const user = await signUp();
+    const a = await pair(user);
+    const b = await pair(user);
+    const sideA = await connectRunner(a.token, ["cancel", "agent"]);
+    const sideB = await connectRunner(b.token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user)).filter((r) => r.folders.length).length === 2, "both hellos");
+    const project = await createProject(user);
+    type Workspaces = { workspace: ProjectWorkspace | null; workspaces: ProjectWorkspace[] };
+    const path = "/Users/ismail/code/myrel";
+    const put = async (body: unknown) =>
+      (await (await api(`/api/projects/${project.id}/workspace`, { method: "PUT", token: user, body: JSON.stringify(body) })).json()) as Workspaces;
+    const get = async () => (await (await api(`/api/projects/${project.id}/workspace`, { token: user })).json()) as Workspaces;
+    const devices = async () => (await get()).workspaces.map((w) => [w.runnerId, w.isDefault]);
+
+    await put({ runnerId: a.runner.id, path, cli: "claude" });
+    await put({ runnerId: b.runner.id, path, cli: "claude", add: true });
+    expect(await devices()).toEqual([
+      [a.runner.id, true],
+      [b.runner.id, false],
+    ]);
+    const made = await api(`/api/projects/${project.id}/workspace/default`, { method: "PUT", token: user, body: JSON.stringify({ runnerId: b.runner.id }) });
+    expect(((await made.json()) as Workspaces).workspace?.runnerId).toBe(b.runner.id);
+
+    // The work goes to the default computer, not the other one.
+    const chat = await openChat(project.id, user);
+    const { threadAgent } = await startThread(project.id, user);
+    await until(() => sideB.frames.find((f) => f.type === "task.start"), "task.start on the default computer");
+    expect(sideA.frames.some((f) => f.type === "task.start")).toBe(false);
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "local" });
+
+    // Taking one computer off leaves the other, which becomes the default.
+    await api(`/api/projects/${project.id}/workspace?runner=${b.runner.id}`, { method: "DELETE", token: user });
+    expect(await devices()).toEqual([[a.runner.id, true]]);
+    // Without `add`, a computer's folder replaces the project's others, as before.
+    await put({ runnerId: b.runner.id, path, cli: "claude", add: true });
+    await put({ runnerId: b.runner.id, path, cli: "claude" });
+    expect(await devices()).toEqual([[b.runner.id, true]]);
+    chat.close();
+    sideA.ws.close();
+    sideB.ws.close();
+  });
+
   it("browses and shares the computer's folders from the web app", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

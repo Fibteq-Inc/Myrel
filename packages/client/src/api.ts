@@ -721,10 +721,28 @@ export class ApiClient {
     return (await this.request<{ folders: RunnerFolder[] }>(url, { method: "DELETE" })).folders;
   }
 
+  /** The project's default local folder. */
   async getWorkspace(projectId: string) {
     return (
       await this.request<{ workspace: ProjectWorkspace | null }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`)
     ).workspace;
+  }
+
+  /** Every local folder of the project, one per computer, the default first. */
+  async getWorkspaces(projectId: string) {
+    return (
+      await this.request<{ workspaces?: ProjectWorkspace[] }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`)
+    ).workspaces ?? [];
+  }
+
+  /** Makes one of the project's computers its default. Returns the project's local folders. */
+  async setDefaultWorkspace(projectId: string, runnerId: string) {
+    return (
+      await this.request<{ workspaces: ProjectWorkspace[] }>(`/api/projects/${encodeURIComponent(projectId)}/workspace/default`, {
+        method: "PUT",
+        body: { runnerId },
+      })
+    ).workspaces;
   }
 
   async setWorkspace(projectId: string, input: SetWorkspaceInput) {
@@ -736,23 +754,26 @@ export class ApiClient {
     ).workspace;
   }
 
-  /** Adds one of the computer's shared folders to the project's other folders. */
-  async addWorkspaceFolder(projectId: string, path: string) {
+  /** Adds one of the computer's shared folders to the project's other folders (on `runnerId`, else the default computer). */
+  async addWorkspaceFolder(projectId: string, path: string, runnerId?: string) {
     return (
       await this.request<{ workspace: ProjectWorkspace }>(`/api/projects/${encodeURIComponent(projectId)}/workspace/folders`, {
         method: "POST",
-        body: { path },
+        body: { path, ...(runnerId && { runnerId }) },
       })
     ).workspace;
   }
 
-  async removeWorkspaceFolder(projectId: string, path: string) {
-    const url = `/api/projects/${encodeURIComponent(projectId)}/workspace/folders?path=${encodeURIComponent(path)}`;
+  async removeWorkspaceFolder(projectId: string, path: string, runnerId?: string) {
+    const runner = runnerId ? `&runner=${encodeURIComponent(runnerId)}` : "";
+    const url = `/api/projects/${encodeURIComponent(projectId)}/workspace/folders?path=${encodeURIComponent(path)}${runner}`;
     return (await this.request<{ workspace: ProjectWorkspace }>(url, { method: "DELETE" })).workspace;
   }
 
-  async clearWorkspace(projectId: string) {
-    await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace`, { method: "DELETE" });
+  /** Takes the project off one computer (`runnerId`), or off all of them. */
+  async clearWorkspace(projectId: string, runnerId?: string) {
+    const runner = runnerId ? `?runner=${encodeURIComponent(runnerId)}` : "";
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace${runner}`, { method: "DELETE" });
   }
 
   // --- artifacts ---
