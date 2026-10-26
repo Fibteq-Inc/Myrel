@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import type { PullRequest } from "@myrel/protocol";
+import type { PullFile, PullFiles, PullRequest } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { GithubError, githubFetch, installationToken, type RepoPermissions } from "./app";
@@ -224,6 +224,72 @@ export async function openPullRequest(
   const pr = await trackPullRequest(env, projectId, threadId, url, credit, created);
   if (!pr) throw new Error(`The pull request ${url} was opened but could not be followed.`);
   return { pr, created };
+}
+
+type ApiPullFile = {
+  filename: string;
+  previous_filename?: string;
+  status: PullFile["status"];
+  additions: number;
+  deletions: number;
+  patch?: string;
+};
+
+/** At most this many files are listed (three of GitHub's pages); the rest are on GitHub. */
+const FILES_PAGE = 100;
+const FILES_PAGES = 3;
+/** Diffs past these sizes are left out, so one huge file cannot make the answer megabytes. */
+const PATCH_MAX = 100_000;
+const PATCHES_MAX = 1_000_000;
+
+/**
+ * The files a thread's pull request changes, with their diffs, at its latest commit. GitHub is
+ * asked once per commit: the answer is kept in the edge cache under the head sha, so opening the
+ * same pull request again costs nothing until new commits arrive. Null when the thread has no
+ * such pull request.
+ */
+export async function pullFiles(env: PullsEnv, projectId: string, threadId: string, fullName: string, number: number): Promise<PullFiles | null> {
+  const [row] = await createDb(env.DB)
+    .select()
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.projectId, projectId),
+        eq(pullRequests.threadId, threadId),
+        eq(pullRequests.fullName, fullName),
+        eq(pullRequests.number, number),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  const key = new Request(`https://cache.myrel.internal/pull-files/${row.repoId}/${row.number}/${row.headSha}`);
+  const cache = await caches.open("pull-files");
+  const hit = await cache.match(key);
+  if (hit) return (await hit.json()) as PullFiles;
+
+  const { token } = await installationToken(env, row.installationId, { repositoryIds: [row.repoId], permissions: READ });
+  const raw: ApiPullFile[] = [];
+  for (let page = 1; page <= FILES_PAGES; page++) {
+    const batch = await githubFetch<ApiPullFile[]>(token, `/repos/${row.fullName}/pulls/${row.number}/files?per_page=${FILES_PAGE}&page=${page}`);
+    raw.push(...batch);
+    if (batch.length < FILES_PAGE) break;
+  }
+  let budget = PATCHES_MAX;
+  const files = raw.map((f): PullFile => {
+    const fits = f.patch !== undefined && f.patch.length <= PATCH_MAX && f.patch.length <= budget;
+    if (fits) budget -= f.patch!.length;
+    return {
+      path: f.filename,
+      previousPath: f.previous_filename ?? null,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+      patch: fits ? f.patch! : null,
+    };
+  });
+  const result: PullFiles = { files, truncated: (row.changedFiles ?? 0) > files.length || raw.length === FILES_PAGE * FILES_PAGES };
+  await cache.put(key, Response.json(result, { headers: { "cache-control": "max-age=604800" } }));
+  return result;
 }
 
 /** Why a pull request's branch must stay; `pr`: the open pull request that uses it, or this one reopened. */

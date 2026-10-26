@@ -403,6 +403,23 @@ export const PullRequest = z.object({
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 
+/** One file a pull request changes, with its diff hunk as GitHub gives it. */
+export const PullFile = z.object({
+  path: z.string(),
+  /** The old path of a renamed file. */
+  previousPath: z.string().nullable(),
+  status: z.enum(["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"]),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+  /** The unified diff; null for binary files and ones too large to show (GitHub's link has them). */
+  patch: z.string().nullable(),
+});
+export type PullFile = z.infer<typeof PullFile>;
+
+/** The files of a pull request at its latest commit; `truncated` when there were more than are listed. */
+export const PullFiles = z.object({ files: z.array(PullFile), truncated: z.boolean() });
+export type PullFiles = z.infer<typeof PullFiles>;
+
 export const AddProjectRepoInput = z.object({
   installationId: z.number().int().positive(),
   repoId: z.number().int().positive(),

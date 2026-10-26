@@ -38,6 +38,7 @@ import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
 import { CHAT_MIN, PANEL_MIN, useThreadPanel } from "./panel-state";
+import { PullRequestsTab } from "./pull-requests-tab";
 import { ThreadUsageTab } from "./thread-usage";
 
 const CONVERSATION = "conversation";
@@ -125,9 +126,7 @@ export function ThreadPanel({
       icon: GitPullRequest,
       count: prs.length || undefined,
       content: prs.length ? (
-        <div className="p-4">
-          <PullRequestCards pullRequests={prs} fold={false} wide />
-        </div>
+        <PullRequestsTab projectId={project.id} threadId={thread.id} pullRequests={prs} />
       ) : (
         <EmptyTab icon={GitPullRequest} title={t("workspace.prEmpty")}>
           {t("workspace.prEmptyBody")}

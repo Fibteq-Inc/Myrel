@@ -1,4 +1,4 @@
-import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
+import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullFiles, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { runInDurableObject, env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -591,6 +591,40 @@ describe("pull requests", () => {
     fakeGithub.pulls[`acme/app#${b}`] = pull({ number: b, html_url: before2, body: "Earlier.", created_at: new Date(Date.now() - 10 * 60_000).toISOString() });
     await trackPullRequest(env, project.id, thread.id, before2, { ...credit, since: turnStart });
     expect((fakeGithub.pulls[`acme/app#${b}`] as { body: string }).body).toBe("Earlier.");
+  });
+
+  it("lists a pull request's files and diffs once per commit, leaving out huge diffs", async () => {
+    const { token, project, thread } = await setup();
+    const n = number + 7;
+    const sha = `sha-files-${crypto.randomUUID()}`;
+    fakeGithub.pulls[`acme/app#${n}`] = pull({ number: n, html_url: `https://github.com/acme/app/pull/${n}`, head: { sha, ref: "myrel/files" }, changed_files: 3 });
+    fakeGithub.pullFiles[`acme/app#${n}`] = [
+      { filename: "src/a.ts", status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1,2 @@\n-a\n+b\n+c" },
+      { filename: "src/new.ts", previous_filename: "src/old.ts", status: "renamed", additions: 0, deletions: 0 },
+      { filename: "big.json", status: "added", additions: 9000, deletions: 0, patch: "+".repeat(200_000) },
+    ];
+    await trackPullRequest(env, project.id, thread.id, `https://github.com/acme/app/pull/${n}`);
+    const path = `/api/projects/${project.id}/threads/${thread.id}/pull-requests/${n}/files?repo=acme/app`;
+
+    const res = await api(path, { token });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as PullFiles;
+    expect(body.truncated).toBe(false);
+    expect(body.files).toEqual([
+      { path: "src/a.ts", previousPath: null, status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1,2 @@\n-a\n+b\n+c" },
+      { path: "src/new.ts", previousPath: "src/old.ts", status: "renamed", additions: 0, deletions: 0, patch: null },
+      { path: "big.json", previousPath: null, status: "added", additions: 9000, deletions: 0, patch: null },
+    ]);
+
+    // The same commit again comes from the cache, without asking GitHub.
+    const asked = () => fakeGithub.requests.filter((r) => r.url.includes(`/pulls/${n}/files`)).length;
+    const before = asked();
+    expect(((await (await api(path, { token })).json()) as PullFiles).files).toHaveLength(3);
+    expect(asked()).toBe(before);
+
+    // Another thread's pull request, or one in another repository, is not found.
+    expect((await api(path.replace("repo=acme/app", "repo=acme/docs"), { token })).status).toBe(404);
+    expect((await api(`/api/projects/${project.id}/threads/${thread.id}/pull-requests/${n + 1}/files?repo=acme/app`, { token })).status).toBe(404);
   });
 
   it("ignores events about pull requests no thread opened", async () => {
