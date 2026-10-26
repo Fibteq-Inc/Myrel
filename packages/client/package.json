@@ -5,16 +5,20 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./highlight": "./src/highlight.ts"
   },
   "scripts": {
     "typecheck": "tsc",
     "test": "vitest run"
   },
   "dependencies": {
-    "@myrel/protocol": "workspace:*"
+    "@myrel/protocol": "workspace:*",
+    "highlight.js": "11.11.1",
+    "lowlight": "3.3.0"
   },
   "devDependencies": {
+    "@types/hast": "3.0.4",
     "vitest": "5.0.5"
   }
 }

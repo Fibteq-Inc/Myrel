@@ -1,3 +1,4 @@
+import { fenceLanguage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import {
   DECISION_LANG,
@@ -14,11 +15,12 @@ import {
 import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, FileText, MessagesSquare, MonitorSmartphone } from "lucide-react";
-import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { filesQuery, runnersQuery, workspaceQuery } from "../../lib/api";
+import { CodeTokens, useCodeLines } from "../../lib/highlight";
 import { FilePreview } from "../files";
 import { DecisionCard } from "./decision-card";
 
@@ -241,6 +243,7 @@ function ThreadLink({ projectId, threadId, children }: { projectId: string; thre
 }
 
 function CodeBlock({ lang, children }: { lang?: string; children: string }) {
+  const lines = useCodeLines(children, lang ? fenceLanguage(lang) : undefined);
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-rail">
       <div className="flex h-8 items-center border-b border-line pl-3 pr-1 font-mono text-[11px] text-subtle">
@@ -248,7 +251,16 @@ function CodeBlock({ lang, children }: { lang?: string; children: string }) {
         <CopyButton text={children} className="ml-auto" />
       </div>
       <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-body">
-        <code>{children}</code>
+        <code>
+          {lines
+            ? lines.map((line, i) => (
+                <Fragment key={i}>
+                  {i > 0 && "\n"}
+                  <CodeTokens line={line} />
+                </Fragment>
+              ))
+            : children}
+        </code>
       </pre>
     </div>
   );

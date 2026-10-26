@@ -323,6 +323,15 @@ const TYPES: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   pdf: "application/pdf",
+  // Code that browsers upload as octet-stream still opens as text.
+  sql: "text/plain",
+  sh: "text/plain",
+  diff: "text/plain",
+  patch: "text/plain",
+  toml: "text/plain",
+  jsx: "text/plain",
+  go: "text/plain",
+  rs: "text/plain",
 };
 
 /** Content type from a file's extension; text written by agents is UTF-8. */

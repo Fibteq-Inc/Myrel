@@ -102,6 +102,8 @@ describe("files", () => {
     expect(fileKind("text/plain", "notes.txt")).toBe("text");
     expect(fileKind("", "src/app.tsx")).toBe("text");
     expect(fileKind("application/json", "data")).toBe("text");
+    expect(fileKind("application/octet-stream", "db/0001_init.sql")).toBe("text");
+    expect(fileKind("", "fix.patch")).toBe("text");
     expect(fileKind("application/pdf", "report.pdf")).toBe("other");
   });
 
