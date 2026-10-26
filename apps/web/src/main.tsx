@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { queryClient } from "./lib/api";
 import { initialLocale, saveLocale } from "./lib/i18n";
 import { initTheme } from "./lib/theme";
+import { RouteError } from "./components/route-error";
 import { ConfirmProvider } from "./components/ui/confirm";
 import { routeTree } from "./routeTree.gen";
 import "./styles.css";
@@ -21,7 +22,7 @@ window.addEventListener("vite:preloadError", () => {
 
 initTheme();
 
-const router = createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" });
+const router = createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent", defaultErrorComponent: RouteError });
 
 declare module "@tanstack/react-router" {
   interface Register {

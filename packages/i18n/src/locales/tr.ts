@@ -3,6 +3,9 @@ import type { Catalog } from "../index";
 export const tr: Catalog = {
   // Shared
   "common.error": "Bir şeyler ters gitti",
+  "routeError.offlineTitle": "{host} adresine ulaşılamıyor",
+  "routeError.offlineBody": "Bağlantını kontrol et. Bağlantı gelince Myrel kendisi yeniden dener.",
+  "routeError.retry": "Tekrar dene",
   "common.copy": "Kopyala",
   "common.copied": "Kopyalandı",
   "common.close": "Kapat",
@@ -590,6 +593,8 @@ export const tr: Catalog = {
     "Myrel GitHub App'i hesabına ya da organizasyonuna kur ve hangi depoları görebileceğini seç.",
   "github.connect": "GitHub'ı bağla",
   "github.signIn": "Zaten kurulu mu? GitHub ile giriş yap",
+  "github.reauthHint": "GitHub oturumunun süresi doldu. Tarayıcında yeniden giriş yap, sonra buraya dön.",
+  "github.reauth": "GitHub ile giriş yap",
   "github.empty": "Henüz bağlı depo yok.",
   "github.private": "Özel",
   "github.disconnect": "Bağlantıyı kes",

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Section } from "./settings";
-import { api, githubReposQuery, githubStatusQuery, projectReposQuery } from "../lib/api";
+import { api, githubReposQuery, githubStatusQuery, platform, projectReposQuery } from "../lib/api";
 import { errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
 
 /** Messages for `?github=` after the GitHub round trip (see apps/api/src/routes/github.ts). */
@@ -203,9 +203,23 @@ function RepoPicker({ projectId, connected, returnTo }: { projectId: string; con
   });
   // GitHub signs an app's known user back in without asking, so this is a quick round trip.
   const signIn = needsGithubSignIn(available.error) || needsGithubSignIn(add.error);
+  const inBrowser = platform.name === "web";
   useEffect(() => {
-    if (signIn) window.location.assign(api.githubConnectUrl("authorize", returnTo));
-  }, [signIn, returnTo]);
+    if (signIn && inBrowser) window.location.assign(api.githubConnectUrl("authorize", returnTo));
+  }, [signIn, inBrowser, returnTo]);
+  // The apps sign in to GitHub in the system browser (the round trip needs the browser's session,
+  // and the app's window must never be sent off to the server); coming back to the app asks again.
+  const { refetch } = available;
+  const { reset } = add;
+  useEffect(() => {
+    if (!signIn || inBrowser) return;
+    const again = () => {
+      reset();
+      void refetch();
+    };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [signIn, inBrowser, refetch, reset]);
 
   if (!open) {
     return (
@@ -233,7 +247,20 @@ function RepoPicker({ projectId, connected, returnTo }: { projectId: string; con
           onChange={(e) => setFilter(e.target.value)}
         />
       </div>
-      {add.error && <Notice ok={false}>{errorMessage(add.error, t)}</Notice>}
+      {signIn && !inBrowser ? (
+        <Notice ok={false}>
+          {t("github.reauthHint")}{" "}
+          <button
+            type="button"
+            className="font-medium text-accent hover:underline"
+            onClick={() => void platform.openExternal(api.githubConnectUrl("authorize", returnTo))}
+          >
+            {t("github.reauth")}
+          </button>
+        </Notice>
+      ) : (
+        add.error && <Notice ok={false}>{errorMessage(add.error, t)}</Notice>
+      )}
       <ul className="max-h-72 overflow-y-auto">
         {available.isPending ? (
           <Loading />
