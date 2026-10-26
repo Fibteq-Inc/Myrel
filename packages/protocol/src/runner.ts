@@ -110,8 +110,10 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "settings": reports its settings in hello and changes them when asked ("settings.set").
  * "update": updates itself to a newer version when asked ("runner.update"), if it can (`updates`).
  * "models": lists each CLI's models (RunnerCli.models) and runs the one in task.start's `model`.
- * "github-token": lends git the turn's GitHub token (task.start's `github`, renewed by "task.github")
+ * "git-token": lends git the turn's GitHub token (task.start's `github`, renewed by "task.github")
  * for the project's repositories on github.com, without writing it anywhere.
+ * "github-token": the same in runner 0.21.0 only, which takes tokens of up to 255 characters and so
+ * drops a task.start carrying one of GitHub's longer installation tokens: never sent one.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -126,6 +128,7 @@ export const RunnerFeature = z.enum([
   "update",
   "models",
   "github-token",
+  "git-token",
 ]);
 
 /**
@@ -279,12 +282,13 @@ export type TaskModel = z.infer<typeof TaskModel>;
 
 /**
  * A short-lived GitHub App installation token for a turn on the person's computer (feature
- * "github-token"): git clones and pushes the project's connected repositories over HTTPS with it
+ * "git-token"): git clones and pushes the project's connected repositories over HTTPS with it
  * when the computer's own git login does not answer first. `repos` (owner/name) are the ones it
  * covers; their SSH addresses are sent over HTTPS for the turn.
  */
 export const TaskGithub = z.object({
-  token: z.string().min(20).max(255),
+  // GitHub's installation tokens are about 520 characters since its 2026 format (ghs_<app id>_<JWT>).
+  token: z.string().min(20).max(4096),
   expiresAt: Timestamp,
   repos: z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/).max(200)).max(100),
 });
@@ -372,10 +376,10 @@ export const ServerToRunner = z.discriminatedUnion("type", [
         resume: z.object({ after: TaskId, prompt: z.string().min(1).max(MAX_TASK_TEXT) }).optional(),
       })
       .optional(),
-    /** The turn's GitHub token (feature "github-token"); older runners ignore it. */
+    /** The turn's GitHub token (feature "git-token"); older runners ignore it. */
     github: TaskGithub.optional(),
   }),
-  /** A new GitHub token for a running task, before its last one expires (feature "github-token"). */
+  /** A new GitHub token for a running task, before its last one expires (feature "git-token"). */
   z.object({ type: z.literal("task.github"), taskId: TaskId, github: TaskGithub }),
   /** Stop a running task. The runner answers with its "task.done" (cancelled: true). Needs feature "cancel". */
   z.object({ type: z.literal("task.cancel"), taskId: TaskId }),

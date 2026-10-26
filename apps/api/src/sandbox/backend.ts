@@ -234,7 +234,7 @@ export async function projectGithubToken(env: Env, projectId: string, runSec: nu
 
 /**
  * The same token for a turn on a person's computer (task.start's `github`): the same repositories and
- * permissions, but only for a runner that can keep it out of files (feature "github-token") and only
+ * permissions, but only for a runner that can keep it out of files (feature "git-token") and only
  * when the computer is the person's the turn works for. A token of its own, revoked when the turn ends.
  */
 export async function localGithubToken(
@@ -243,7 +243,7 @@ export async function localGithubToken(
   runnerId: string,
   requester: string | null,
 ): Promise<TaskGithub | null> {
-  if (!requester || !(await runnerHasFeature(env, runnerId, "github-token")) || !(await ownsComputer(env, runnerId, requester))) return null;
+  if (!requester || !(await runnerHasFeature(env, runnerId, "git-token")) || !(await ownsComputer(env, runnerId, requester))) return null;
   const scope = await githubScope(env, projectId);
   if (!scope) return null;
   try {

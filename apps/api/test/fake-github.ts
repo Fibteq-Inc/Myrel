@@ -3,6 +3,9 @@
  * covers repos 7 (acme/app) and 8 (acme/docs). Requests are recorded so tests
  * can check what Myrel asked for.
  */
+/** An installation token in GitHub's stateless format (ghs_<app id>_<JWT>, about 520 characters). */
+export const INSTALLATION_TOKEN = `ghs_1234567_eyJhbGciOiJSUzI1NiJ9.${"eyJpbnN0YWxsYXRpb24iOjF9".repeat(18)}.${"c2lnbmF0dXJl".repeat(5)}`;
+
 export const fakeGithub = {
   installations: [{ id: 42, account: { login: "acme", type: "Organization", avatar_url: "https://avatars.test/acme" } }],
   repos: [
@@ -57,7 +60,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const ids: number[] | undefined = body?.repository_ids;
     if (ids?.some((id) => !fakeGithub.repos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
     const repositories = ids ? fakeGithub.repos.filter((r) => ids.includes(r.id)) : undefined;
-    return Response.json({ token: "inst-token", expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
+    return Response.json({ token: INSTALLATION_TOKEN, expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
   }
   if (url.pathname === "/installation/token" && method === "DELETE") return new Response(null, { status: 204 });
   if (url.pathname === "/installation/repositories") {

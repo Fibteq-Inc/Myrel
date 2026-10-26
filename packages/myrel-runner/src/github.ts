@@ -5,7 +5,7 @@ import type { TaskGithub } from "@myrel/protocol";
 import { selfCommand } from "./bridge";
 
 /**
- * The turn's GitHub token for git on this computer (feature "github-token"). The token is never
+ * The turn's GitHub token for git on this computer (feature "git-token"). The token is never
  * written anywhere, and not even put in the CLI's environment: the runner keeps it in memory and
  * serves it on 127.0.0.1 at an address only that run knows (MYREL_GIT_CREDENTIALS). A git credential
  * helper (`myrel-runner git-credential`) fetches it from there, so a renewed token ("task.github")

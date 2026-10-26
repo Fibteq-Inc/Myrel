@@ -1,4 +1,4 @@
-import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, type ServerToRunner } from "@myrel/protocol";
+import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { runInDurableObject, env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -10,7 +10,7 @@ import { attributionBlock, withAttribution } from "../src/github/attribution";
 import { listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
 import { githubLogin, projectRepoToken } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
-import { fakeGithub } from "./fake-github";
+import { fakeGithub, INSTALLATION_TOKEN } from "./fake-github";
 
 const BASE = "http://myrel.test";
 // The GitHub settings are secrets (src/env.d.ts), which the generated test Env does not list.
@@ -254,8 +254,8 @@ describe("project repositories", () => {
       await connect(token);
       await expect(projectRepoToken(env, project.id, "acme/app", { contents: "write", metadata: "read" })).rejects.toThrow("cannot push");
       // Reading still works, and so does writing where they can push.
-      await expect(projectRepoToken(env, project.id, "acme/app")).resolves.toMatchObject({ token: "inst-token" });
-      await expect(projectRepoToken(env, project.id, "acme/docs", { contents: "write", metadata: "read" })).resolves.toMatchObject({ token: "inst-token" });
+      await expect(projectRepoToken(env, project.id, "acme/app")).resolves.toMatchObject({ token: INSTALLATION_TOKEN });
+      await expect(projectRepoToken(env, project.id, "acme/docs", { contents: "write", metadata: "read" })).resolves.toMatchObject({ token: INSTALLATION_TOKEN });
     } finally {
       fakeGithub.userPush = [7, 8];
     }
@@ -561,7 +561,7 @@ describe("GitHub on the person's computer", () => {
     send({
       type: "hello",
       protocol: RUNNER_PROTOCOL_VERSION,
-      version: "0.21.0",
+      version: "0.21.1",
       hostname: "mbp",
       platform: "darwin",
       folders: [{ path: "/Users/ismail/code/app", name: "app" }],
@@ -592,8 +592,10 @@ describe("GitHub on the person's computer", () => {
 
   it("lends a local turn a token of its own for the project's repositories, renews it and revokes it when the turn ends", { timeout: 30_000 }, async () => {
     const before = revoked().length;
-    const { frames, send, ws, start, threadAgent, author } = await localProject(["cancel", "agent", "github-token"]);
-    expect(start.github).toMatchObject({ token: "inst-token", repos: ["acme/app"] });
+    const { frames, send, ws, start, threadAgent, author } = await localProject(["cancel", "agent", "git-token"]);
+    expect(start.github).toMatchObject({ token: INSTALLATION_TOKEN, repos: ["acme/app"] });
+    // The runner drops a frame it cannot read, so it must fit the protocol with GitHub's long tokens.
+    expect(ServerToRunner.safeParse(start).success).toBe(true);
     expect(Date.parse(start.github!.expiresAt)).toBeGreaterThan(Date.now());
     expect(start.prompt).toContain("Myrel lent git a short-lived token");
     // The same repositories and permissions as a cloud turn's.
@@ -603,12 +605,19 @@ describe("GitHub on the person's computer", () => {
     // A long turn gets a new one before the last expires; both stop working when the turn ends.
     await threadAgent.renewGithub({ taskId: start.taskId, requester: author });
     const renewed = await until(() => frames.find((f) => f.type === "task.github"), "task.github");
-    expect(renewed).toMatchObject({ taskId: start.taskId, github: { token: "inst-token", repos: ["acme/app"] } });
+    expect(renewed).toMatchObject({ taskId: start.taskId, github: { token: INSTALLATION_TOKEN, repos: ["acme/app"] } });
     expect(revoked().length).toBe(before);
 
     send({ type: "task.done", taskId: start.taskId, ok: true, result: "Cloned." });
     await until(() => revoked().length === before + 2, "tokens revoked at the end of the turn");
-    expect(revoked().at(-1)?.auth).toBe("inst-token");
+    expect(revoked().at(-1)?.auth).toBe(INSTALLATION_TOKEN);
+    ws.close();
+  });
+
+  it("gives runner 0.21.0, which drops a task with a long token, none", { timeout: 30_000 }, async () => {
+    const { send, ws, start } = await localProject(["cancel", "agent", "github-token"]);
+    expect(start.github).toBeUndefined();
+    send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
     ws.close();
   });
 

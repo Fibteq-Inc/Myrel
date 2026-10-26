@@ -14,7 +14,7 @@ import {
   type RunnerSettingsInput,
   RunnerToServer,
   type RunnerUpdateState,
-  type ServerToRunner,
+  ServerToRunner,
 } from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -34,7 +34,7 @@ export type TaskStart = {
   agent?: AgentStart;
   /** The model and effort, only ever ones the runner listed (so only runners with feature "models"). */
   model?: TaskModel;
-  /** The turn's GitHub token (only runners with feature "github-token"). Never stored or logged here. */
+  /** The turn's GitHub token (only runners with feature "git-token"). Never stored or logged here. */
   github?: TaskGithub;
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
@@ -215,9 +215,7 @@ export class RunnerAgent extends Agent<Env> {
     const connection = this.getConnections()[Symbol.iterator]().next().value as Connection | undefined;
     if (!connection) return { ok: false, reason: "The computer is offline. Ask the person to run `myrel-runner start` on it." };
     const { taskId } = input;
-    this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at)
-      VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()})`;
-    send(connection, {
+    const frame: ServerToRunner = {
       type: "task.start",
       taskId,
       threadId: input.threadId,
@@ -228,7 +226,17 @@ export class RunnerAgent extends Agent<Env> {
       ...(input.agent && { agent: input.agent }),
       ...(input.model && { model: input.model }),
       ...(input.github && { github: input.github }),
-    });
+    };
+    // A runner drops a frame it cannot read, and the task would then wait for output forever.
+    const checked = ServerToRunner.safeParse(frame);
+    if (!checked.success) {
+      const issue = checked.error.issues[0];
+      console.error("task.start does not fit the runner protocol", taskId, issue?.path.join("."), issue?.message);
+      return { ok: false, reason: `Myrel could not send this task to the computer (${issue?.path.join(".") || "frame"}: ${issue?.message ?? "invalid"}).` };
+    }
+    this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at)
+      VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()})`;
+    send(connection, frame);
     return { ok: true };
   }
 
