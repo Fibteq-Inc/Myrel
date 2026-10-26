@@ -896,12 +896,24 @@ export class ProjectAgent extends Agent<Env> {
     };
   }
 
-  /** A thread's messages after `seq`, with the members' names, for a running turn to take in. Callable over RPC. */
-  async threadMessagesAfter(threadId: string, seq: number): Promise<{ messages: Message[]; names: Record<string, string> }> {
+  /**
+   * A thread's messages after `seq`, and the earlier ones people edited after `editedAfter`, with the
+   * members' names, for a running turn to take in. Callable over RPC.
+   */
+  async threadMessagesAfter(
+    threadId: string,
+    seq: number,
+    editedAfter?: string,
+  ): Promise<{ messages: Message[]; edited: Message[]; names: Record<string, string> }> {
     const messages = this.sql<MessageRow>`SELECT * FROM messages WHERE thread_id = ${threadId} AND seq > ${seq} ORDER BY seq`.map((r) =>
       this.toMessage(r),
     );
-    return { messages, names: messages.length ? (await this.directory()).names : {} };
+    const edited = editedAfter
+      ? this.sql<MessageRow>`SELECT * FROM messages WHERE thread_id = ${threadId} AND seq <= ${seq} AND edited_at > ${editedAfter} ORDER BY seq`.map(
+          (r) => this.toMessage(r),
+        )
+      : [];
+    return { messages, edited, names: messages.length || edited.length ? (await this.directory()).names : {} };
   }
 
   /** This server's public address (for links and for the sandbox to call back), or null before anyone connected. Callable over RPC. */
