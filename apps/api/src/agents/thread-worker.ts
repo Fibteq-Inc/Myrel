@@ -89,6 +89,8 @@ export function threadPrompt(input: {
   planFinished?: boolean;
   /** Passes each section that stays the same from turn to turn (memory, brief, repositories…); "" leaves it out. */
   lasting?: (section: string) => string;
+  /** The most characters the prompt may take: the oldest messages and coordinator notes go first (see fitPrompt). */
+  budget?: number;
 }): string {
   const lasting = input.lasting ?? ((section: string) => section);
   const isNew = (m: Message) => m.seq > input.lastSeenSeq || editedSince(m, input.lastSeenAt);
@@ -99,7 +101,8 @@ export function threadPrompt(input: {
   const pulls = (input.pullRequests ?? []).map(renderPullRequest);
   const runs = input.routineRuns.map((r) => `- ${r.createdAt}${r.isNew ? " · NEW" : ""}: "${r.name}": ${r.prompt}`);
   const mine = input.routines.filter((r) => r.target.kind === "thread" && r.target.threadId === input.thread.id);
-  return [
+  // Once each: lasting records every section it passes, for the next turn to compare with.
+  const head = [
     `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
     lasting(renderKnowledge(input.knowledge)),
     lasting(`## Brief from the coordinator\n${input.brief}`),
@@ -111,10 +114,8 @@ export function threadPrompt(input: {
         : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
     ),
     input.followUp ? "" : `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
-    input.followUp
-      ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already; one marked edited is an earlier message a person changed, so its new text replaces the old)\n${history.join("\n\n") || "(no new messages)"}`
-      : `## Thread so far, oldest first (NEW = arrived, or edited by its author, since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
-    notes.length ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${notes.join("\n")}` : "",
+  ];
+  const tail = [
     pulls.length ? lasting(`## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}`) : "",
     github.length ? `## GitHub events on those pull requests (NEW = since your last turn)\n${github.join("\n\n")}` : "",
     input.artifacts?.length
@@ -133,9 +134,61 @@ export function threadPrompt(input: {
       : "",
     input.resumeNote ?? "",
     "Continue the work now.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ];
+  const render = (left: { history: number; notes: number }) => {
+    const leftOut = (n: number, what: string) => (n ? `(The ${n} oldest ${what} are left out to keep this prompt within its size limit.)` : "");
+    const messages = [leftOut(left.history, "messages"), ...history.slice(left.history)].filter(Boolean).join("\n\n");
+    const shownNotes = notes.slice(left.notes);
+    const noteText = shownNotes.length ? [leftOut(left.notes, "notes"), ...shownNotes].filter(Boolean).join("\n") : "";
+    return [
+      ...head,
+      input.followUp
+        ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already; one marked edited is an earlier message a person changed, so its new text replaces the old)\n${messages || "(no new messages)"}`
+        : `## Thread so far, oldest first (NEW = arrived, or edited by its author, since your last turn)\n${messages || "(no messages yet)"}`,
+      noteText ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${noteText}` : "",
+      ...tail,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  };
+  return fitPrompt(render, { history: history.length, notes: notes.length }, input.budget);
+}
+
+/**
+ * The prompt within `budget` characters. A long thread's messages, coordinator notes and the like
+ * were all repeated every turn, so it outgrew the runner's limit and the agent could not start;
+ * the oldest messages go first, then the oldest notes, while the instructions, memory, brief and
+ * the message the thread started from stay. A prompt still too long (one huge newest message)
+ * keeps its start and its end.
+ */
+export function fitPrompt(
+  render: (left: { history: number; notes: number }) => string,
+  counts: { history: number; notes: number },
+  budget = Number.POSITIVE_INFINITY,
+): string {
+  let prompt = render({ history: 0, notes: 0 });
+  if (prompt.length <= budget) return prompt;
+  // Keep the newest message: drop from the oldest, finding the fewest to leave out by halving.
+  const fewest = (fits: (n: number) => boolean, max: number) => {
+    let lo = 0;
+    let hi = max;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (fits(mid)) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
+  };
+  const maxHistory = Math.max(0, counts.history - 1);
+  const history = fewest((n) => render({ history: n, notes: 0 }).length <= budget, maxHistory);
+  prompt = render({ history, notes: 0 });
+  if (prompt.length <= budget) return prompt;
+  const notes = fewest((n) => render({ history, notes: n }).length <= budget, counts.notes);
+  prompt = render({ history, notes });
+  if (prompt.length <= budget) return prompt;
+  const cut = "\n\n(…part of this prompt is cut here to keep it within its size limit…)\n\n";
+  const tail = Math.floor((budget - cut.length) / 3);
+  return `${prompt.slice(0, budget - cut.length - tail)}${cut}${prompt.slice(-tail)}`;
 }
 
 function renderPullRequest(pr: PullRequest): string {
