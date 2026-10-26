@@ -8,6 +8,7 @@ import {
   parseDecision,
   resolveFileCode,
   resolveFileHref,
+  splitFilePaths,
   threadIdFromHref,
 } from "@myrel/protocol";
 import { Link, useParams } from "@tanstack/react-router";
@@ -47,6 +48,8 @@ const MarkdownBody = memo(function MarkdownBody({
   onChoose?: (label: string) => void;
 }) {
   const { projectId, threadId } = useParams({ strict: false });
+  const projectFiles = useProjectFiles(projectId);
+  const remarkPlugins = useMemo(() => [remarkGfm, remarkFilePaths(projectFiles)], [projectFiles]);
   const components: Components = {
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
@@ -84,12 +87,46 @@ const MarkdownBody = memo(function MarkdownBody({
   };
   return (
     <div className="prose-myrel">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+      <Markdown remarkPlugins={remarkPlugins} components={components}>
         {body}
       </Markdown>
     </div>
   );
 });
+
+/** The project's file paths; none outside a project. */
+function useProjectFiles(projectId: string | undefined): ReadonlySet<string> {
+  const files = useQuery({ ...filesQuery(projectId ?? ""), staleTime: 30_000, enabled: !!projectId });
+  return useMemo(() => new Set(files.data?.map((f) => f.path)), [files.data]);
+}
+
+type MdNode = { type: string; value?: string; url?: string; children?: MdNode[] };
+
+/**
+ * Turns project file paths written as plain text into links, so they open like `[x](path)` does:
+ * agents do not always link the files they name.
+ */
+function remarkFilePaths(projectFiles: ReadonlySet<string>) {
+  const walk = (node: MdNode) => {
+    if (!node.children || node.type === "link" || node.type === "linkReference") return;
+    node.children = node.children.flatMap((child): MdNode[] => {
+      if (child.type !== "text") {
+        walk(child);
+        return [child];
+      }
+      const parts = splitFilePaths(child.value ?? "", projectFiles);
+      if (parts.length === 1 && typeof parts[0] === "string") return [child];
+      return parts.map((part) =>
+        typeof part === "string"
+          ? { type: "text", value: part }
+          : { type: "link", url: part.path, children: [{ type: "text", value: part.text }] },
+      );
+    });
+  };
+  return () => (tree: MdNode) => {
+    if (projectFiles.size > 0) walk(tree);
+  };
+}
 
 /** What file paths in this project's messages can open: its files, and its local folder if it has one. */
 function useFileRefContext(projectId: string): FileRefContext {
