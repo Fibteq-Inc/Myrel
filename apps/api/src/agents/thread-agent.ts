@@ -1,5 +1,6 @@
 import {
   type AgentConnector,
+  MAX_TASK_TEXT,
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
@@ -193,8 +194,8 @@ function saveBranch(threadId: string): string {
   return `myrel/saved/${threadId}`;
 }
 
-/** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
-const MAX_AGENT_PROMPT = 90_000;
+/** Room left under the runner protocol's prompt limit for what the runner adds (the skills folder line). */
+const PROMPT_SLACK = 1000;
 /** How long one agent turn may run. */
 const AGENT_TURN_SEC = 3600;
 /** A turn on a person's computer gets a new GitHub token this often; each lasts an hour. */
@@ -555,8 +556,8 @@ export class ThreadAgent extends Agent<Env> {
     const seen = JSON.parse(this.getMeta("agent_prompt_seen") ?? "null") as { task: string; hashes: string[] } | null;
     const unchanged = unchangedSections(seen && seen.task === this.getMeta("agent_last_task") ? seen.hashes : []);
     await this.startAgentTurn({
-      prompt: threadPrompt({ ...promptInput, ...note }),
-      followUp: { prompt: threadPrompt({ ...promptInput, followUp: true, ...note, lasting: unchanged.lasting }), unchanged },
+      prompt: (budget) => threadPrompt({ ...promptInput, ...note, budget }),
+      followUp: { prompt: (budget) => threadPrompt({ ...promptInput, followUp: true, ...note, lasting: unchanged.lasting, budget }), unchanged },
       requester,
       place,
       timezone: ctx.defaultTimezone,
@@ -582,12 +583,13 @@ export class ThreadAgent extends Agent<Env> {
    * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
    */
   private async startAgentTurn(input: {
-    prompt: string;
+    /** The thread's part of the prompt, within `budget` characters (see threadPrompt). */
+    prompt: (budget: number) => string;
     /**
      * The same, with only what is new since the last turn, for a CLI session that continues it:
-     * sections it holds unchanged from then are left out (see unchangedSections).
+     * sections it holds unchanged from then are left out (see unchangedSections). Called once.
      */
-    followUp: { prompt: string; unchanged: ReturnType<typeof unchangedSections> };
+    followUp: { prompt: (budget: number) => string; unchanged: ReturnType<typeof unchangedSections> };
     place: Exclude<TaskPlace, { kind: "error" }>;
     timezone: string;
     language: string;
@@ -620,8 +622,6 @@ export class ThreadAgent extends Agent<Env> {
             github: !!github,
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
-    // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
-    const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
     if (github) this.githubTokens.set(taskId, [github.token]);
     // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
@@ -653,7 +653,10 @@ export class ThreadAgent extends Agent<Env> {
       const connectors = await this.turnConnectors(place, input.requester);
       const infos = connectors.map((c) => ({ name: c.name, title: c.title }));
       const skills = await this.turnSkills(place, input.requester);
-      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context, infos, skills), timeoutSec: AGENT_TURN_SEC });
+      // A long thread leaves its oldest messages out so the whole prompt, instructions too, fits.
+      const budget = (p: AgentPlace) => MAX_TASK_TEXT - PROMPT_SLACK - agentPrompt(p, "", infos, skills).length;
+      const fullPrompt = (p: AgentPlace) => agentPrompt(p, input.prompt(budget(p)), infos, skills);
+      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: fullPrompt(agentPlace), timeoutSec: AGENT_TURN_SEC });
       // The stored spec keeps only the start of the prompt; the runner gets all of it.
       const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
       if (place.kind === "local") {
@@ -666,13 +669,11 @@ export class ThreadAgent extends Agent<Env> {
           ),
         );
         const { unchanged } = input.followUp;
-        const short = agentPrompt(agentPlace, input.followUp.prompt, infos, skills, unchanged.lasting);
-        // A session that resumes holds this turn's sections from now on, unless the thread was cut to fit.
-        this.setMeta("agent_prompt_seen", JSON.stringify({ task: taskId, hashes: context === input.prompt ? unchanged.hashes : [] }));
-        const resume =
-          previousTask && input.followUp.prompt.length <= MAX_AGENT_PROMPT
-            ? { after: previousTask, prompt: unchanged.left() ? `${UNCHANGED_NOTE}\n\n${short}` : short }
-            : undefined;
+        // Budgeted as if the instructions were sent again, which they are when they changed.
+        const short = agentPrompt(agentPlace, input.followUp.prompt(budget(agentPlace) - UNCHANGED_NOTE.length - 2), infos, skills, unchanged.lasting);
+        // A session that resumes holds this turn's sections from now on: fitting leaves out only messages and notes.
+        this.setMeta("agent_prompt_seen", JSON.stringify({ task: taskId, hashes: unchanged.hashes }));
+        const resume = previousTask ? { after: previousTask, prompt: unchanged.left() ? `${UNCHANGED_NOTE}\n\n${short}` : short } : undefined;
         const agent = {
           mcpPath,
           token,
@@ -708,12 +709,7 @@ export class ThreadAgent extends Agent<Env> {
         const harness = cloudHarness(picked.success ? picked.data : await projectCloudCli(this.env, projectId), model.model);
         spec.harness = harness.id;
         spec.title = harness.title;
-        spec.prompt = agentPrompt(
-          { kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId), harness: harness.id },
-          context,
-          infos,
-          skills,
-        );
+        spec.prompt = fullPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId), harness: harness.id });
         spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: token, MYREL_MCP_TOKEN: token };
