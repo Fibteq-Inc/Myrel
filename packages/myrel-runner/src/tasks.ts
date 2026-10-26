@@ -158,6 +158,14 @@ export class TaskRunner {
     }
   }
 
+  /**
+   * People's new messages for a running task, mid-turn ("task.steer"): true once its CLI took them.
+   * Only Codex's app server takes them; for other CLIs they reach the agent with its next Myrel tool call.
+   */
+  async steer(taskId: string, text: string): Promise<boolean> {
+    return (await this.turns.get(taskId)?.steer(text)) ?? false;
+  }
+
   /** A running task's new GitHub token ("task.github"). */
   renewGithub(taskId: string, github: TaskGithub) {
     this.git.renew(taskId, github);

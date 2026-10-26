@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 import { agentProject, api, type Play, signUp, until } from "./fake-agent";
 
 /** A thread on the person's fake computer, worked by `play`, and a way to write in it as them. */
-async function steerSetup(play: Play) {
+async function steerSetup(play: Play, runner?: { features: string[]; cli: "codex" }) {
   const token = await signUp();
-  const computer = await agentProject(token, play);
+  const computer = await agentProject(token, play, runner);
   const { project } = computer;
   const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
   const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
@@ -114,6 +114,80 @@ describe("messages written while the thread's agent works", () => {
     expect(bodies).toContain("Stopped; continuing with the new message.");
     expect(bodies.some((b) => b.includes("was cancelled"))).toBe(false);
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "the second turn to end");
+    close();
+  });
+
+  /** A runner that steers (feature "steer") and answers each "task.steer" with `taken`; the steers it got. */
+  async function steeringRunner(taken: boolean, play: Play) {
+    const setup = await steerSetup(play, { features: ["folders", "cancel", "agent", "agent-clis", "steer"], cli: "codex" });
+    const steers: Extract<ServerToRunner, { type: "task.steer" }>[] = [];
+    setup.ws.addEventListener("message", (e) => {
+      const frame = JSON.parse(e.data as string) as ServerToRunner;
+      if (frame.type !== "task.steer") return;
+      steers.push(frame);
+      setup.send({ type: "task.steered", requestId: frame.requestId, taken });
+    });
+    return { ...setup, steers };
+  }
+
+  it("go into the running turn at once when its CLI takes them (Codex's app server)", { timeout: 30_000 }, async () => {
+    let wrote!: () => void;
+    const written = new Promise<void>((r) => (wrote = r));
+    // Written once the reply's call returned, so that call cannot take the message in.
+    let replied!: () => void;
+    const started = new Promise<void>((r) => (replied = r));
+    const results: string[] = [];
+    const { projectAgent, thread, write, turns, steers, close } = await steeringRunner(true, async (turn, index) => {
+      if (index > 0) return;
+      await turn.call("reply", { text: "Başlıyorum." });
+      replied();
+      await written;
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "active" }] })).text);
+      await turn.call("reply", { text: "Bitti." });
+    });
+    await started;
+    const m = await write("Entegrasyon testi de ekle");
+    const steer = await until(() => steers[0], "the steer frame");
+    expect(steer.taskId).toBe(turns[0]!.start.taskId);
+    expect(steer.text).toContain("## A new message in this thread while you work");
+    expect(steer.text).toContain("Entegrasyon testi de ekle");
+    // Delivered as soon as the CLI took it, before any call to Myrel.
+    await until(async () => ((await projectAgent.getThread(thread.id))!.seenSeq ?? 0) >= m.seq, "the message marked delivered");
+    wrote();
+    await until(() => results.length === 1, "the plan call");
+    // Not a second time with the next call.
+    expect(results[0]).not.toContain("Entegrasyon testi de ekle");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "the turn to end");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(turns).toHaveLength(1);
+    close();
+  });
+
+  it("wait for the next call to Myrel when the running CLI does not take them", { timeout: 30_000 }, async () => {
+    let wrote!: () => void;
+    const written = new Promise<void>((r) => (wrote = r));
+    // Written once the reply's call returned, so that call cannot take the message in.
+    let replied!: () => void;
+    const started = new Promise<void>((r) => (replied = r));
+    const results: string[] = [];
+    const { projectAgent, thread, write, steers, close } = await steeringRunner(false, async (turn, index) => {
+      if (index > 0) return;
+      await turn.call("reply", { text: "Başlıyorum." });
+      replied();
+      await written;
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "active" }] })).text);
+      await turn.call("reply", { text: "Bitti." });
+    });
+    await started;
+    const m = await write("Entegrasyon testi de ekle");
+    await until(() => steers.length === 1, "the steer frame");
+    // Given back: still waiting for the agent.
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await projectAgent.getThread(thread.id))!.seenSeq ?? 0).toBeLessThan(m.seq);
+    wrote();
+    await until(() => results.length === 1, "the plan call");
+    expect(results[0]).toContain("Entegrasyon testi de ekle");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "the turn to end");
     close();
   });
 });

@@ -349,6 +349,8 @@ export class ThreadAgent extends Agent<Env> {
       this.setMeta("wake_seq", String(Math.max(reason.seq, Number(this.getMeta("wake_seq") ?? 0))));
     } else this.setMeta("wake_other", "1");
     await this.markDirty();
+    // Into the running turn right away where its CLI takes it, without holding up the sender.
+    if (reason.kind === "message" && !reason.edited && this.runningTask()) await this.queue("steerNews", null);
   }
 
   /**
@@ -1565,6 +1567,46 @@ export class ThreadAgent extends Agent<Env> {
    * another person's computer or connectors, so it waits for a turn of its own (or Interrupt).
    */
   private async takeNews(): Promise<string | null> {
+    const news = await this.pendingNews();
+    if (!news || !this.claimNews(news)) return null;
+    const { projectId, threadId } = this.ids();
+    await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).updateThread(threadId, { seenSeq: news.last });
+    return news.text;
+  }
+
+  /**
+   * Queue callback after a person wrote while a turn runs on a computer: their messages (as takeNews
+   * takes them) go to the CLI at once when it takes them mid-turn (Codex's app server, runner feature
+   * "steer"), instead of with the agent's next call to Myrel. Claimed first, so a tool call meanwhile
+   * cannot deliver them twice; given back when the CLI did not take them.
+   */
+  async steerNews(): Promise<void> {
+    const row = this.runningTask();
+    const spec = row?.backend === "local" ? (JSON.parse(row.spec) as StoredSpec) : null;
+    // Only Codex's app server takes them; asking any other CLI would only hold them up meanwhile.
+    if (!row || !spec?.runnerId || !spec.agent || spec.harness !== "codex") return;
+    if (!(await runnerHasFeature(this.env, spec.runnerId, "steer"))) return;
+    const news = await this.pendingNews();
+    const dirty = this.getMeta("dirty");
+    if (!news || !this.claimNews(news)) return;
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, spec.runnerId);
+    const taken = await runner.steerTask(row.id, news.text).catch((err) => (console.warn("steering the running turn failed", err), false));
+    if (taken) {
+      const { projectId, threadId } = this.ids();
+      await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).updateThread(threadId, { seenSeq: news.last });
+      return;
+    }
+    // Not taken: they wait for the agent's next call to Myrel (or the next turn), as before.
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.last) return;
+    this.setMeta("last_seen_seq", String(news.seen));
+    if (dirty !== null) this.setMeta("dirty", dirty);
+  }
+
+  /**
+   * People's messages the running turn has not seen, up to the first one from someone other than the
+   * person the turn works for, as the note to give the agent. Not yet claimed (claimNews).
+   */
+  private async pendingNews(): Promise<{ text: string; seen: number; last: number; whole: boolean } | null> {
     const requester = this.getMeta("requester");
     if (!requester || !this.runningTask()) return null;
     const seen = Number(this.getMeta("last_seen_seq") ?? 0);
@@ -1575,14 +1617,16 @@ export class ThreadAgent extends Agent<Env> {
     const taken = other === -1 ? messages : messages.slice(0, other);
     const news = taken.filter((m) => m.authorKind === "user");
     if (!news.length) return null;
-    const last = taken.at(-1)!.seq;
-    // Read again: another call may have taken them meanwhile.
-    if (Number(this.getMeta("last_seen_seq") ?? 0) !== seen) return null;
-    this.setMeta("last_seen_seq", String(last));
+    return { text: newsNote(news, names), seen, last: taken.at(-1)!.seq, whole: other === -1 };
+  }
+
+  /** Marks pending news seen; false when another call took them meanwhile. */
+  private claimNews(news: { seen: number; last: number; whole: boolean }): boolean {
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.seen) return false;
+    this.setMeta("last_seen_seq", String(news.last));
     // Taken in whole, with nothing else waiting: no turn after this one just for them.
-    if (other === -1 && !this.getMeta("wake_other") && Number(this.getMeta("wake_seq") ?? 0) <= last) this.setMeta("dirty", "0");
-    await project.updateThread(threadId, { seenSeq: last });
-    return newsNote(news, names);
+    if (news.whole && !this.getMeta("wake_other") && Number(this.getMeta("wake_seq") ?? 0) <= news.last) this.setMeta("dirty", "0");
+    return true;
   }
 
   /**
@@ -2174,3 +2218,4 @@ async function isMember(env: Env, projectId: string, userId: string): Promise<bo
     await env.DB.prepare("SELECT 1 AS y FROM project_members WHERE project_id = ? AND user_id = ?").bind(projectId, userId).first(),
   );
 }
+

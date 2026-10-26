@@ -20,7 +20,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.22.0";
+export const RUNNER_VERSION = "0.23.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -191,6 +191,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "settings",
         "models",
         "git-token",
+        "steer",
         ...(updates === "service" ? (["update"] as const) : []),
       ],
       settings: settingsOf(config),
@@ -260,6 +261,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const answer = async (frame: Extract<ServerToRunner, { requestId: string }>) => {
     const { requestId } = frame;
     if (frame.type === "dirs.list") return send({ type: "dirs", requestId, ...(await listDirs(frame.path)) });
+    if (frame.type === "task.steer") return send({ type: "task.steered", requestId, taken: await tasks.steer(frame.taskId, frame.text) });
     if (frame.type === "file.read") return send({ type: "file", requestId, ...(await readProjectFile(config, frame)) });
     if (frame.type === "runner.update") {
       if (updates !== "service") {

@@ -47,6 +47,8 @@ export class AppServerTurn {
   private turnId?: string;
   /** Asked to stop before the turn started: interrupt it as soon as it has an id. */
   private stopping = false;
+  /** Messages handed to the running turn whose answer has not come yet. */
+  private readonly steering = new Set<(ok: boolean) => void>();
   /** The files each file change is about, for its approval, which names only the change. */
   private readonly changes = new Map<string, string[]>();
 
@@ -72,6 +74,24 @@ export class AppServerTurn {
     this.stopping = true;
     if (this.threadId && this.turnId) this.request("turn/interrupt", { threadId: this.threadId, turnId: this.turnId }, () => {});
     return true;
+  }
+
+  /**
+   * Adds people's new message to the running turn (`turn/steer`): Codex reads it before its next step,
+   * without the turn stopping. False when there is no running turn to take it.
+   */
+  steer(text: string): Promise<boolean> {
+    const { threadId, turnId } = this;
+    if (this.finished || this.stopping || !threadId || !turnId) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const done = (ok: boolean) => {
+        this.steering.delete(done);
+        resolve(ok);
+      };
+      // The turn may end before Codex answers; finish() answers false then.
+      this.steering.add(done);
+      this.request("turn/steer", { threadId, expectedTurnId: turnId, input: [{ type: "text", text }] }, (m) => done(!m.error));
+    });
   }
 
   /** One line of the app server's stdout. */
@@ -251,6 +271,7 @@ export class AppServerTurn {
   private finish() {
     if (this.finished) return;
     this.finished = true;
+    for (const done of [...this.steering]) done(false);
     this.io.end();
   }
 

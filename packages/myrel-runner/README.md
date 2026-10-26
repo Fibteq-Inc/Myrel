@@ -114,7 +114,8 @@ or `auto`, the app server runs with approval policy `on-request`: a step its san
 needs the network such as `git push`, a file outside the folders) comes to you as the same card Claude Code's
 questions use, and the step waits for your answer. With `read` and `full`, and with `codex exec`, nothing is asked:
 such a step fails and the run goes on. Stopping a turn from Myrel interrupts it the way Codex's own Stop does, so the
-session is whole for the next turn. Set `MYREL_CODEX_EXEC=1` in the runner's environment to keep `codex exec`.
+session is whole for the next turn. A message you write in the thread while it works goes into the running turn at
+once (`turn/steer`, runner 0.23.0 or later), instead of with its next call to one of Myrel's tools. Set `MYREL_CODEX_EXEC=1` in the runner's environment to keep `codex exec`.
 
 Antigravity CLI is stricter than Codex below `full`: there is no sandbox where its commands run on their own. A
 command, a web page or a file outside the folders needs approval, which it cannot ask for when Myrel runs it, and
