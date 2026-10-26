@@ -179,7 +179,7 @@ export function ThreadRunnerPicker({
 }
 
 /** An effort level's name; one Myrel does not know shows as the CLI wrote it. */
-function effortName(effort: string, t: ReturnType<typeof useT>): string {
+export function effortName(effort: string, t: ReturnType<typeof useT>): string {
   return (EFFORT_LEVELS as readonly string[]).includes(effort) ? t(`modelPicker.effort.${effort}` as MessageKey) : effort;
 }
 
@@ -358,7 +358,8 @@ function Chip({
   );
 }
 
-function Sheet({ open, onClose, title, hint, children }: { open: boolean; onClose: () => void; title: string; hint?: string; children: React.ReactNode }) {
+/** A bottom sheet of options, shared with the project settings. */
+export function Sheet({ open, onClose, title, hint, children }: { open: boolean; onClose: () => void; title: string; hint?: string; children: React.ReactNode }) {
   const t = useT();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
@@ -377,17 +378,20 @@ function Sheet({ open, onClose, title, hint, children }: { open: boolean; onClos
   );
 }
 
-function Option({
+/** One choice in a Sheet. `wrap` lets a long title take more than one line. */
+export function Option({
   kind,
   checked,
   title,
   note,
+  wrap,
   onPress,
 }: {
   kind: "radio" | "check";
   checked: boolean;
   title: string;
   note?: string;
+  wrap?: boolean;
   onPress: () => void;
 }) {
   const colors = useColors();
@@ -402,7 +406,7 @@ function Option({
       <View style={[styles.mark, kind === "radio" ? { borderRadius: 10 } : { borderRadius: 5 }, checked && styles.markOn]}>
         {checked && <Check size={13} strokeWidth={3} color={colors.onAccent} />}
       </View>
-      <Text style={styles.optionText} numberOfLines={1}>
+      <Text style={styles.optionText} numberOfLines={wrap ? undefined : 1}>
         {title}
       </Text>
       {note && <Text style={styles.optionNote}>{note}</Text>}

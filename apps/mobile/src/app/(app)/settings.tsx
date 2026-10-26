@@ -7,14 +7,15 @@ import { useQuery } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 import * as WebBrowser from "expo-web-browser";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
+import { Section } from "../../components/settings-section";
 import { Button, errorMessage } from "../../components/ui";
 import * as purchases from "../../lib/purchases";
 import { useSession } from "../../lib/session";
 import { useThemePreference } from "../../lib/theme";
-import { makeStyles, radius, useColors } from "../../theme";
+import { makeStyles, useColors } from "../../theme";
 
 // The app's own policies, published by Fibteq; a self-hosted server's operator sets that server's terms.
 const LEGAL_SITE = "https://myrel.fibteq.io";
@@ -283,29 +284,9 @@ function LegalLink({ label, url }: { label: string; url: string }) {
   );
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
-  const styles = useStyles();
-  return (
-    <View style={{ gap: 8 }}>
-      <Text style={styles.section}>{title}</Text>
-      <View style={styles.card}>{children}</View>
-      {hint && <Text style={styles.hint}>{hint}</Text>}
-    </View>
-  );
-}
-
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
     page: { padding: 16, gap: 24 },
-    section: { color: colors.subtle, fontSize: 13, fontWeight: "600" },
-    card: {
-      gap: 4,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.line,
-      backgroundColor: colors.raised,
-      padding: 14,
-    },
     option: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 },
     value: { color: colors.fg, fontSize: 15 },
     hint: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
