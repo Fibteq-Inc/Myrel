@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ServerToRunner } from "@myrel/protocol";
 import { CREDENTIALS_VAR, GitCredentials, gitEnv } from "../src/github";
 
 const run = promisify(execFile);
@@ -64,5 +65,22 @@ describe("the turn's GitHub token for git", () => {
     expect(await rewrite("git@github.com:Fibteq-Inc/Myrel.git")).toBe("https://github.com/Fibteq-Inc/Myrel.git");
     expect(await rewrite("ssh://git@github.com/Fibteq-Inc/Myrel.git")).toBe("https://github.com/Fibteq-Inc/Myrel.git");
     expect(await rewrite("git@github.com:Fibteq-Inc/Other.git")).toBe("git@github.com:Fibteq-Inc/Other.git");
+  });
+});
+
+describe("task.start with a GitHub token", () => {
+  it("takes GitHub's stateless installation tokens (about 520 characters)", () => {
+    const long = `ghs_1234567_eyJhbGciOiJSUzI1NiJ9.${"eyJpbnN0YWxsYXRpb24iOjF9".repeat(18)}.${"c2lnbmF0dXJl".repeat(5)}`;
+    const frame = {
+      type: "task.start",
+      taskId: "task_01JTEST0000000000000000000",
+      threadId: "thr_01JTEST0000000000000000000",
+      folder: "/work",
+      cli: "claude",
+      prompt: "x",
+      github: github(long),
+    };
+    expect(long.length).toBeGreaterThan(500);
+    expect(ServerToRunner.safeParse(frame).success).toBe(true);
   });
 });
