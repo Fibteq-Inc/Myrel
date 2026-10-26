@@ -28,7 +28,7 @@ import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
-import { listPullRequests } from "../github/pulls";
+import { listPullRequests, pullFiles } from "../github/pulls";
 import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
@@ -402,6 +402,15 @@ export const projectRoutes = new Hono<AppEnv>()
     const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
     if (!thread) return c.json({ error: "not_found" }, 404);
     return c.json({ pullRequests: await listPullRequests(c.env.DB, c.req.param("id"), thread) });
+  })
+  // The files one of them changes, with their diffs (?repo=owner/name).
+  .get("/:id/threads/:threadId/pull-requests/:number/files", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    const number = Number(c.req.param("number"));
+    const repo = c.req.query("repo");
+    if (!thread || !repo || !Number.isInteger(number)) return c.json({ error: "not_found" }, 404);
+    const files = await pullFiles(c.env, c.req.param("id"), thread, repo, number);
+    return files ? c.json(files) : c.json({ error: "not_found" }, 404);
   })
   // What the thread's cloud tasks saved (its Artifacts workspace): history and one folder or file.
   .get("/:id/threads/:threadId/files", async (c) => {

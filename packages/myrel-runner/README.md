@@ -104,9 +104,17 @@ Read-only tasks (`--access read`) always run in the folder itself.
 | `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` | `--yolo` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
-the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode; Codex and
-Antigravity CLI cannot ask mid-run, so for them `auto` is the same as `edit` (Antigravity's own auto mode needs its
-terminal sandbox and is missing on business accounts).
+the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode. For Codex
+and Antigravity CLI `auto` is the same as `edit` (Antigravity's own auto mode needs its terminal sandbox and is
+missing on business accounts).
+
+Codex runs as its app server (`codex app-server`, one process per turn) where the installed Codex has one, and as
+`codex exec --json` otherwise. The sandbox is the same either way (the table above). As a thread's agent with `edit`
+or `auto`, the app server runs with approval policy `on-request`: a step its sandbox does not allow (a command that
+needs the network such as `git push`, a file outside the folders) comes to you as the same card Claude Code's
+questions use, and the step waits for your answer. With `read` and `full`, and with `codex exec`, nothing is asked:
+such a step fails and the run goes on. Stopping a turn from Myrel interrupts it the way Codex's own Stop does, so the
+session is whole for the next turn. Set `MYREL_CODEX_EXEC=1` in the runner's environment to keep `codex exec`.
 
 Antigravity CLI is stricter than Codex below `full`: there is no sandbox where its commands run on their own. A
 command, a web page or a file outside the folders needs approval, which it cannot ask for when Myrel runs it, and
@@ -161,7 +169,8 @@ level does not allow on its own (with `edit`: `git commit`, `git push`, tests) i
 Allow commands this turn, Don't run), so there is no need to restart the runner with `--access full` for one task. A
 file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
-are asked about. Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code and Kimi Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
+are asked about. Codex asks the same way for what its sandbox does not allow, when it runs as its app server (see
+above). Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code and Kimi Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
 `external_directory` allow rules, Kimi Code as the session's `additionalDirectories`).
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.

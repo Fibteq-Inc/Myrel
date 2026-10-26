@@ -1,6 +1,6 @@
 {
   "name": "myrel-runner",
-  "version": "0.21.2",
+  "version": "0.22.1",
   "description": "Short name for @fibteq/myrel-runner, so `npx myrel-runner` works.",
   "license": "AGPL-3.0-only",
   "author": "Fibteq",

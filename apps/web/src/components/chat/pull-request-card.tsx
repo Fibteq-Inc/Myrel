@@ -27,28 +27,20 @@ export function mentionedPullRequests(body: string, pullRequests: PullRequest[])
  * Pull requests a thread opened, each a card with its live state: open,
  * merged or closed, CI and review. The webhook keeps them current. In the
  * conversation a run of several folds the finished ones behind one line, so
- * they do not stack up under the last reply; `fold={false}` lists them all.
- * `wide`: fill the width (the PR tab), with the whole title and the branch.
+ * they do not stack up under the last reply. The thread's PR tab lists them
+ * all its own way (PullRequestsTab).
  */
-export function PullRequestCards({
-  pullRequests,
-  fold = true,
-  wide = false,
-}: {
-  pullRequests: PullRequest[];
-  fold?: boolean;
-  wide?: boolean;
-}) {
+export function PullRequestCards({ pullRequests }: { pullRequests: PullRequest[] }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   if (pullRequests.length === 0) return null;
-  const { shown, folded } = fold ? foldPullRequests(pullRequests) : { shown: pullRequests, folded: [] };
+  const { shown, folded } = foldPullRequests(pullRequests);
   const merged = folded.filter((pr) => pr.state === "merged").length;
   const closed = folded.filter((pr) => pr.state === "closed").length;
   return (
     <div className="flex flex-col gap-2">
       {(open ? pullRequests : shown).map((pr) => (
-        <PullRequestCard key={pr.url} pr={pr} wide={wide} />
+        <PullRequestCard key={pr.url} pr={pr} />
       ))}
       {folded.length > 0 && (
         <button
@@ -73,60 +65,66 @@ export function PullRequestCards({
   );
 }
 
-function PullRequestCard({ pr, wide }: { pr: PullRequest; wide: boolean }) {
-  const t = useT();
-  const state =
-    pr.state === "merged"
-      ? { icon: GitMerge, label: t("pr.merged"), className: "text-merged" }
-      : pr.state === "closed"
-        ? { icon: GitPullRequestClosed, label: t("pr.closed"), className: "text-bad" }
-        : pr.draft
-          ? { icon: GitPullRequestDraft, label: t("pr.draft"), className: "text-subtle" }
-          : { icon: GitPullRequest, label: t("pr.open"), className: "text-ok" };
+function PullRequestCard({ pr }: { pr: PullRequest }) {
+  const state = usePullRequestState(pr);
   const StateIcon = state.icon;
   return (
     <a
       href={pr.url}
       target="_blank"
       rel="noreferrer"
-      className={cn(
-        "group flex items-center gap-3 rounded-xl border border-card bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover",
-        !wide && "max-w-md",
-      )}
+      className="group flex max-w-md items-center gap-3 rounded-xl border border-card bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover"
     >
       <span className={cn("flex size-9 flex-none items-center justify-center rounded-lg border border-edge bg-panel", state.className)}>
         <StateIcon size={17} aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn("block text-[13.5px] font-semibold", wide ? "line-clamp-2" : "truncate")}>{pr.title}</span>
-        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-subtle">
-          <span className="truncate">
-            {pr.repo}#{pr.number}
-          </span>
-          <span className={state.className}>{state.label}</span>
-          {wide && pr.branch && <span className="max-w-[16rem] truncate font-mono text-[11px]">{pr.branch}</span>}
-          <Size pr={pr} />
-          {pr.state === "open" && <Checks checks={pr.checks} />}
-          {pr.state === "open" && pr.conflict && (
-            <span className="flex items-center gap-1 text-bad">
-              <TriangleAlert size={12} aria-hidden="true" />
-              {t("pr.conflict")}
-            </span>
-          )}
-          {pr.state === "open" && pr.review && (
-            <span className={cn("flex items-center gap-1", pr.review === "approved" ? "text-ok" : "text-warn")}>
-              {pr.review === "approved" ? (
-                <CircleCheck size={12} aria-hidden="true" />
-              ) : (
-                <MessageSquareWarning size={12} aria-hidden="true" />
-              )}
-              {pr.review === "approved" ? t("pr.approved") : t("pr.changesRequested")}
-            </span>
-          )}
-        </span>
+        <span className="block truncate text-[13.5px] font-semibold">{pr.title}</span>
+        <PullRequestMeta pr={pr} />
       </span>
       <ExternalLink size={14} className="flex-none text-subtle group-hover:text-muted" aria-hidden="true" />
     </a>
+  );
+}
+
+/** Open, draft, merged or closed: its icon, label and color. */
+export function usePullRequestState(pr: PullRequest) {
+  const t = useT();
+  return pr.state === "merged"
+    ? { icon: GitMerge, label: t("pr.merged"), className: "text-merged" }
+    : pr.state === "closed"
+      ? { icon: GitPullRequestClosed, label: t("pr.closed"), className: "text-bad" }
+      : pr.draft
+        ? { icon: GitPullRequestDraft, label: t("pr.draft"), className: "text-subtle" }
+        : { icon: GitPullRequest, label: t("pr.open"), className: "text-ok" };
+}
+
+/** The line under a pull request's title: where it is, its state and size, and while open its CI, conflicts and review. */
+export function PullRequestMeta({ pr, branch = false }: { pr: PullRequest; branch?: boolean }) {
+  const t = useT();
+  const state = usePullRequestState(pr);
+  return (
+    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-subtle">
+      <span className="truncate">
+        {pr.repo}#{pr.number}
+      </span>
+      <span className={state.className}>{state.label}</span>
+      {branch && pr.branch && <span className="max-w-[16rem] truncate font-mono text-[11px]">{pr.branch}</span>}
+      <Size pr={pr} />
+      {pr.state === "open" && <Checks checks={pr.checks} />}
+      {pr.state === "open" && pr.conflict && (
+        <span className="flex items-center gap-1 text-bad">
+          <TriangleAlert size={12} aria-hidden="true" />
+          {t("pr.conflict")}
+        </span>
+      )}
+      {pr.state === "open" && pr.review && (
+        <span className={cn("flex items-center gap-1", pr.review === "approved" ? "text-ok" : "text-warn")}>
+          {pr.review === "approved" ? <CircleCheck size={12} aria-hidden="true" /> : <MessageSquareWarning size={12} aria-hidden="true" />}
+          {pr.review === "approved" ? t("pr.approved") : t("pr.changesRequested")}
+        </span>
+      )}
+    </span>
   );
 }
 

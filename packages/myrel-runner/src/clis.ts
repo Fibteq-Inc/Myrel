@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type CliModel, type RunnerCli, type TaskModel, unwrapShell } from "@myrel/protocol";
 import type { AcpMcpServer, AcpTurn, AcpTurnOptions } from "./acp";
+import type { AppServerTurn, AppServerTurnOptions } from "./app-server";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
@@ -34,6 +35,8 @@ export type ParseState = {
   draftStep?: unknown;
   /** The ACP conversation of this run, for CLIs that speak ACP (see CliAdapter.acp). */
   acp?: AcpTurn;
+  /** The app server turn of this run, when Codex runs as `codex app-server` (see CliAdapter.appServer). */
+  appServer?: AppServerTurn;
 };
 
 /**
@@ -72,6 +75,12 @@ export type CliAdapter = {
    * `input`) and agent()'s mcpServers go in the session (see acp.ts).
    */
   acp?(access: Access, model?: TaskModel): Pick<AcpTurnOptions, "mode" | "allow" | "serverTools" | "config">;
+  /**
+   * For Codex: run `<bin> app-server` with agent()'s flags and these, instead of args(), when the
+   * installed version has one (see hasAppServer). `asks`: steps the sandbox does not allow can be put
+   * to the person, so the app server may ask instead of failing them.
+   */
+  appServer?(opts: { access: Access; dirs: string[]; asks: boolean }): Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config">;
   /** Whether `<bin> --version` printed this CLI's version, for a binary name another tool also uses. */
   isMine?(version: string): boolean;
   /** The models the CLI lists, with the efforts each takes; undefined when it could not be asked. */
@@ -317,6 +326,9 @@ const claude: CliAdapter = {
   modelArgs: ({ model, effort }) => [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])],
 };
 
+/** Codex's sandbox for each access level: auto stays in the workspace like edit, asking about the rest where it can. */
+const CODEX_SANDBOX = { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" } as const;
+
 const codex: CliAdapter = {
   id: "codex",
   bin: "codex",
@@ -325,8 +337,7 @@ const codex: CliAdapter = {
     "--json",
     "--skip-git-repo-check",
     "--sandbox",
-    // `codex exec` cannot ask mid-run, so auto stays in the workspace like edit.
-    { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" }[access],
+    CODEX_SANDBOX[access],
     ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]),
     ...extra,
     // exec's own flags go before its resume subcommand, which takes the session and the prompt.
@@ -364,7 +375,16 @@ const codex: CliAdapter = {
     if (access && access !== "read") args.push("-c", 'apps._default.default_tools_approval_mode="approve"');
     return { args, env: { [TOKEN_VAR]: token } };
   },
+  // The sandbox is as with exec; below full access, a step it does not allow is asked about in the
+  // thread instead of failing. Full access has no sandbox, so nothing to ask.
+  // The other folders go in the session's config, not on the command line, where a shell could split them.
+  appServer: ({ access, dirs, asks }) => ({
+    ...(dirs.length && { config: { "sandbox_workspace_write.writable_roots": dirs } }),
+    sandbox: CODEX_SANDBOX[access],
+    approvalPolicy: asks && (access === "edit" || access === "auto") ? "on-request" : "never",
+  }),
   line(line, state) {
+    if (state.appServer) return state.appServer.receive(line);
     const event = parseJson(line);
     if (!event) return;
     if (event.type === "thread.started" && typeof event.thread_id === "string") state.sessionId = event.thread_id;
@@ -388,7 +408,7 @@ const codex: CliAdapter = {
     }
     if (event.type === "turn.completed") state.failed = false;
   },
-  // `codex exec --json` leaves its rate limits out; the session file it writes has them.
+  // `codex exec --json` leaves its rate limits out; the session file it writes has them. (The app server reports them.)
   limits: (state) => readCodexLimits(state.sessionId),
   models: async () => parseCodexModels((await output("codex", ["debug", "models"])) ?? ""),
   modelArgs: ({ model, effort }) => [
@@ -934,17 +954,36 @@ export function parseKimiModels(json: string): CliModel[] | undefined {
 
 export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor, muse, kimi };
 
+/** How long `<bin> --version` may take: a first start on Windows, behind a virus scan, can be slow. */
+const VERSION_TIMEOUT = process.platform === "win32" ? 30_000 : 10_000;
+
 /** The first line `<bin> --version` prints, or null when it does not run. */
 function cliVersion(bin: string): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
+    execFile(bin, ["--version"], { timeout: VERSION_TIMEOUT, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
       resolve(err ? null : firstLine(stdout) || null);
     });
   });
 }
 
-/** How long `<bin> --version` may take: a first start on Windows, behind a virus scan, can be slow. */
-const VERSION_TIMEOUT = process.platform === "win32" ? 30_000 : 10_000;
+/** Whether each Codex version has an app server, by version. */
+const appServers = new Map<string, Promise<boolean>>();
+
+/**
+ * Whether `<bin> app-server` runs on this computer's Codex, asked once per version. Older versions
+ * have none; MYREL_CODEX_EXEC=1 keeps `codex exec` for everyone.
+ */
+export async function hasAppServer(bin: string): Promise<boolean> {
+  if (process.env.MYREL_CODEX_EXEC === "1") return false;
+  const version = await cliVersion(bin);
+  if (!version) return false;
+  let known = appServers.get(version);
+  if (!known) {
+    known = output(bin, ["app-server", "--help"], 10_000).then((help) => !!help?.includes("--listen"));
+    appServers.set(version, known);
+  }
+  return known;
+}
 
 /** A CLI that was not found, and what running it said. */
 export type MissingCli = { id: CliId; reason: string };

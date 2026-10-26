@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { childEnv } from "../src/config";
 import { detectClis, type MissingCli, missingReason } from "../src/clis";
 import { expandWindowsVars, mergePath, parseRegPath, refreshPath } from "../src/path";
 import { sameClis } from "../src/runner";
@@ -43,6 +44,8 @@ describe("CLI detection", () => {
     process.env.PATH = "/nowhere";
     await refreshPath();
     expect(process.env.PATH.split(":")).toContain(dirname(process.execPath));
+    // Tasks start the CLI (codex exec or codex app-server alike) with childEnv, so they find it the same way.
+    expect(childEnv().PATH).toBe(process.env.PATH);
   });
 
   it("says why a CLI was not found", async () => {
