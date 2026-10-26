@@ -221,7 +221,7 @@ export default function ThreadScreen() {
       {current === "changes" ? (
         <ChangesTab tasks={tasks} />
       ) : current === "pr" ? (
-        <PullRequestsTab pullRequests={pullRequests} />
+        <PullRequestsTab projectId={projectId} threadId={threadId} pullRequests={pullRequests} />
       ) : current === "terminal" ? (
         <TerminalTab projectId={projectId} tasks={tasks} output={state.output} />
       ) : current === "files" ? (

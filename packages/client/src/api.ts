@@ -36,6 +36,7 @@ import type {
   ProjectWorkspace,
   ProviderId,
   ProviderInfo,
+  PullFiles,
   PullRequest,
   PutMemoryInput,
   PairRunnerResult,
@@ -617,6 +618,12 @@ export class ApiClient {
   async listPullRequests(projectId: string, threadId: string) {
     const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests`;
     return (await this.request<{ pullRequests: PullRequest[] }>(path)).pullRequests;
+  }
+
+  /** The files a thread's pull request changes, with their diffs, at its latest commit. */
+  pullRequestFiles(projectId: string, threadId: string, repo: string, number: number) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests/${number}/files`;
+    return this.request<PullFiles>(`${base}?repo=${encodeURIComponent(repo)}`);
   }
 
   /** What the thread's cloud tasks saved: history and the folder or file at `path`. Null when nothing was saved. */

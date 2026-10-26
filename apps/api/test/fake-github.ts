@@ -18,6 +18,8 @@ export const fakeGithub = {
   >,
   /** Pull requests by "owner/name#number", in GitHub's REST shape. */
   pulls: {} as Record<string, unknown>,
+  /** A pull request's changed files by "owner/name#number", in GitHub's REST shape. */
+  pullFiles: {} as Record<string, unknown[]>,
   /** Branches by "owner/name#branch"; one not listed exists unprotected unless `deleted`. */
   branches: {} as Record<string, { protected?: boolean; deleted?: boolean }>,
   /** CI on a commit, by sha. */
@@ -109,6 +111,13 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) return Response.json({}, { status: 201 });
   if (/^\/repos\/[^/]+\/[^/]+\/(issues\/\d+\/assignees|pulls\/\d+\/requested_reviewers)$/.test(url.pathname)) {
     return Response.json({}, { status: 201 });
+  }
+  const pullFiles = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/files$/);
+  if (pullFiles) {
+    const all = fakeGithub.pullFiles[`${pullFiles[1]}#${pullFiles[2]}`] ?? [];
+    const per = Number(url.searchParams.get("per_page") ?? 30);
+    const page = Number(url.searchParams.get("page") ?? 1);
+    return Response.json(all.slice((page - 1) * per, page * per));
   }
   const pull = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
   if (pull && method === "PATCH") {
