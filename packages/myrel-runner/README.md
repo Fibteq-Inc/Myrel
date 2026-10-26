@@ -119,7 +119,8 @@ once (`turn/steer`, runner 0.23.0 or later), instead of with its next call to on
 
 Subagents show in the thread's Terminal tab (runner 0.24.0 or later): Claude Code's Agent tool and the agents Codex's
 app server spawns each get a line when they start (with what they are for) and when they end (with their answer), and
-their steps show indented under their name. Codex subagents' tokens count toward the turn's usage.
+their steps show indented under their name. Codex subagents' tokens count toward the turn's usage. From 0.25.0 the
+ending line also says which model the subagent ran on and how many tokens it used, for the tab's list of subagents.
 
 Antigravity CLI is stricter than Codex below `full`: there is no sandbox where its commands run on their own. A
 command, a web page or a file outside the folders needs approval, which it cannot ask for when Myrel runs it, and

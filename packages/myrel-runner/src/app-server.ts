@@ -3,7 +3,7 @@ import { request as httpsRequest } from "node:https";
 import { type TaskModel, unwrapShell } from "@myrel/protocol";
 import type { ParseState } from "./clis";
 import { codexLimits } from "./limits";
-import { endAgent, startAgent, step } from "./subagents";
+import { agentUsage, endAgent, startAgent, step } from "./subagents";
 
 /**
  * A client for one turn of Codex's app server (`codex app-server`): newline-delimited JSON-RPC
@@ -162,7 +162,11 @@ export class AppServerTurn {
   /** A subagent's event: `agent` is its thread. */
   private subagent(method: string, p: Obj, agent: string) {
     if (method === "item/started" || method === "item/completed") return this.item(method, obj(p.item), agent);
-    if (method === "thread/tokenUsage/updated") return this.addUsage(p);
+    if (method === "thread/tokenUsage/updated") {
+      const last = obj(obj(p.tokenUsage).last);
+      agentUsage(this.state, agent, count(last.inputTokens) + count(last.outputTokens));
+      return this.addUsage(p);
+    }
   }
 
   private addUsage(p: Obj) {
@@ -209,7 +213,7 @@ export class AppServerTurn {
       case "subAgentActivity": {
         const id = str(item.agentThreadId);
         if (!id) return;
-        if (item.kind === "started") startAgent(this.state, id, agentName(item.agentPath));
+        if (item.kind === "started") startAgent(this.state, id, agentName(item.agentPath), "", { model: str(item.model) });
         else if (item.kind === "completed") endAgent(this.state, id, true);
         else if (item.kind === "interrupted") endAgent(this.state, id, false);
         return;
@@ -220,7 +224,7 @@ export class AppServerTurn {
   /** The agent spawning, waiting on or closing subagents: their start, with what they are for, and their end. */
   private collab(method: string, item: Obj) {
     const ids = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.filter((id): id is string => typeof id === "string") : [];
-    if (item.tool === "spawnAgent") for (const id of ids) startAgent(this.state, id, "", str(item.prompt) ?? "");
+    if (item.tool === "spawnAgent") for (const id of ids) startAgent(this.state, id, "", str(item.prompt) ?? "", { model: str(item.model) });
     if (method !== "item/completed") return;
     for (const [id, raw] of Object.entries(obj(item.agentsStates))) {
       const s = obj(raw);

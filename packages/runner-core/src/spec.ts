@@ -116,6 +116,8 @@ export const EventAgent = z.object({
   id: z.string().min(1).max(200),
   label: z.string().max(100),
   state: z.enum(["started", "done", "failed"]).optional(),
+  model: z.string().max(200).optional(),
+  tokens: z.number().int().nonnegative().optional(),
 });
 export type EventAgent = z.infer<typeof EventAgent>;
 
