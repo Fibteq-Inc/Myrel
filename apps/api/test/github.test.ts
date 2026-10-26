@@ -1,4 +1,4 @@
-import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullFiles, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
+import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullFiles, type PullMergeState, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { runInDurableObject, env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -625,6 +625,46 @@ describe("pull requests", () => {
     // Another thread's pull request, or one in another repository, is not found.
     expect((await api(path.replace("repo=acme/app", "repo=acme/docs"), { token })).status).toBe(404);
     expect((await api(`/api/projects/${project.id}/threads/${thread.id}/pull-requests/${n + 1}/files?repo=acme/app`, { token })).status).toBe(404);
+  });
+
+  it("merges only for someone who can merge on GitHub, when it is clean, at the commit they saw", async () => {
+    const { token, project, thread } = await setup();
+    const n = number + 11;
+    const prUrl = `https://github.com/acme/app/pull/${n}`;
+    fakeGithub.pulls[`acme/app#${n}`] = pull({ number: n, html_url: prUrl, head: { sha: "sha-m1", ref: "myrel/merge-me", repo: { full_name: "acme/app" } }, mergeable_state: "clean" });
+    fakeGithub.checks["sha-m1"] = { check_runs: [{ name: "test", status: "in_progress", conclusion: null }], statuses: [] };
+    fakeGithub.repoSettings["acme/app"] = { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: false };
+    await trackPullRequest(env, project.id, thread.id, prUrl);
+    const path = `/api/projects/${project.id}/threads/${thread.id}/pull-requests/${n}/merge?repo=acme/app`;
+    const state = async () => (await (await api(path, { token })).json()) as PullMergeState;
+    const merge = (body: unknown) => api(path, { method: "POST", token, body: JSON.stringify(body) });
+
+    // Read access on GitHub: no button, and the merge is refused.
+    fakeGithub.permissions["acme/app#octo"] = "read";
+    expect(await state()).toMatchObject({ permitted: false });
+    expect((await merge({ method: "merge", sha: "sha-m1" })).status).toBe(403);
+
+    // Write access, CI still running: the button shows but waits.
+    fakeGithub.permissions["acme/app#octo"] = "write";
+    expect(await state()).toEqual({ permitted: true, blocked: "checks_pending", methods: ["merge", "squash"], sha: "sha-m1" });
+    expect((await merge({ method: "merge", sha: "sha-m1" })).status).toBe(409);
+
+    // CI passes. A merge for a commit they did not see, or a method the repo turned off, is refused.
+    fakeGithub.checks["sha-m1"] = { check_runs: [{ name: "test", status: "completed", conclusion: "success" }], statuses: [] };
+    expect((await state()).blocked).toBeNull();
+    const moved = await merge({ method: "merge", sha: "sha-old" });
+    expect(moved.status).toBe(409);
+    expect(await moved.json()).toMatchObject({ error: "head_moved" });
+    expect((await merge({ method: "rebase", sha: "sha-m1" })).status).toBe(409);
+
+    // It merges through the app with the person named, and the branch goes as asked.
+    const res = await merge({ method: "merge", sha: "sha-m1", deleteBranch: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ merged: true, branchDeleted: true, branchKept: null });
+    const put = fakeGithub.requests.findLast((r) => r.method === "PUT" && r.url.endsWith(`/pulls/${n}/merge`));
+    expect(put?.body).toMatchObject({ merge_method: "merge", sha: "sha-m1", commit_message: expect.stringContaining("@octo") });
+    expect(fakeGithub.branches["acme/app#myrel/merge-me"]).toMatchObject({ deleted: true });
+    expect(await state()).toMatchObject({ blocked: "closed" });
   });
 
   it("ignores events about pull requests no thread opened", async () => {

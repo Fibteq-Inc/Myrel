@@ -152,6 +152,15 @@ export async function githubLogin(db: D1Database, userId: string): Promise<strin
   return row?.login ?? null;
 }
 
+/** The GitHub account a Myrel user connected: its id, which stays, and the login it had then. */
+export async function githubAccountOf(db: D1Database, userId: string): Promise<{ githubId: number; login: string } | null> {
+  const [row] = await createDb(db)
+    .select({ githubId: githubAccounts.githubId, login: githubAccounts.login })
+    .from(githubAccounts)
+    .where(eq(githubAccounts.userId, userId));
+  return row ?? null;
+}
+
 export async function listProjectRepos(db: D1Database, projectId: string): Promise<ProjectRepo[]> {
   const rows = await createDb(db)
     .select({

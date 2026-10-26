@@ -20,6 +20,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-na
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
 import { CodeTokens } from "../code-view";
+import { MergeButton } from "./merge-sheet";
 import { Empty } from "../project/empty";
 import { Spinner } from "../ui";
 
@@ -171,15 +172,18 @@ function PullRequestFiles({ projectId, threadId, pr }: { projectId: string; thre
         </View>
       )}
       {data?.truncated && <Text style={styles.metaText}>{t("pr.filesTruncated", { count: data.files.length })}</Text>}
-      <Pressable
-        accessibilityRole="link"
-        // The OS hands it to the GitHub app when it is installed, the browser otherwise.
-        onPress={() => void Linking.openURL(pr.url).catch(() => {})}
-        style={({ pressed }) => [styles.github, pressed && { backgroundColor: colors.hover }]}
-      >
-        <Text style={styles.githubText}>{t("pr.openOnGithub")}</Text>
-        <ExternalLink size={13} color={colors.fg} />
-      </Pressable>
+      <View style={styles.actions}>
+        <MergeButton projectId={projectId} threadId={threadId} pr={pr} />
+        <Pressable
+          accessibilityRole="link"
+          // The OS hands it to the GitHub app when it is installed, the browser otherwise.
+          onPress={() => void Linking.openURL(pr.url).catch(() => {})}
+          style={({ pressed }) => [styles.github, pressed && { backgroundColor: colors.hover }]}
+        >
+          <Text style={styles.githubText}>{t("pr.openOnGithub")}</Text>
+          <ExternalLink size={13} color={colors.fg} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -279,10 +283,10 @@ const useStyles = makeStyles((colors) =>
     noPatch: { paddingHorizontal: 10, paddingBottom: 8 },
     patch: { backgroundColor: colors.panel, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
     patchLine: { color: colors.body, fontFamily: mono, fontSize: 11.5, lineHeight: 17, paddingHorizontal: 10 },
+    actions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 },
     github: {
       flexDirection: "row",
       alignItems: "center",
-      alignSelf: "flex-end",
       gap: 6,
       borderWidth: 1,
       borderColor: colors.edge,

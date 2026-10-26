@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import {
   AddProjectRepoInput,
+  MergePullInput,
   type CliModelDefaults,
   CreateInviteInput,
   CreateProjectInput,
@@ -28,7 +29,7 @@ import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
-import { listPullRequests, pullFiles } from "../github/pulls";
+import { listPullRequests, MergeError, mergePullRequest, pullFiles, pullMergeState } from "../github/pulls";
 import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
@@ -411,6 +412,31 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!thread || !repo || !Number.isInteger(number)) return c.json({ error: "not_found" }, 404);
     const files = await pullFiles(c.env, c.req.param("id"), thread, repo, number);
     return files ? c.json(files) : c.json({ error: "not_found" }, 404);
+  })
+  // Whether the signed-in person may merge it from here (their own GitHub rights), and why not right now.
+  .get("/:id/threads/:threadId/pull-requests/:number/merge", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    const number = Number(c.req.param("number"));
+    const repo = c.req.query("repo");
+    if (!thread || !repo || !Number.isInteger(number)) return c.json({ error: "not_found" }, 404);
+    const state = await pullMergeState(c.env, c.req.param("id"), thread, repo, number, c.get("user").id);
+    return state ? c.json(state) : c.json({ error: "not_found" }, 404);
+  })
+  // Merges it, for a person who can merge on GitHub, at the commit they saw.
+  .post("/:id/threads/:threadId/pull-requests/:number/merge", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    const number = Number(c.req.param("number"));
+    const repo = c.req.query("repo");
+    if (!thread || !repo || !Number.isInteger(number)) return c.json({ error: "not_found" }, 404);
+    const input = MergePullInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    try {
+      return c.json(await mergePullRequest(c.env, c.req.param("id"), thread, repo, number, c.get("user").id, input.data));
+    } catch (err) {
+      if (!(err instanceof MergeError)) throw err;
+      const status = err.code === "not_found" ? 404 : err.code === "forbidden" ? 403 : err.code === "github" ? 502 : 409;
+      return c.json({ error: err.code, message: err.message }, status);
+    }
   })
   // What the thread's cloud tasks saved (its Artifacts workspace): history and one folder or file.
   .get("/:id/threads/:threadId/files", async (c) => {

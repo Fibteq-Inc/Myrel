@@ -1,10 +1,10 @@
 import { createDb, schema } from "@myrel/db";
-import type { PullFile, PullFiles, PullRequest } from "@myrel/protocol";
+import type { MergeMethod, MergePullInput, MergePullResult, PullFile, PullFiles, PullMergeState, PullRequest } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { GithubError, githubFetch, installationToken, type RepoPermissions } from "./app";
 import { type PullCredit, hasAttribution, withAttribution } from "./attribution";
-import { listProjectRepos, projectRepoToken } from "./store";
+import { githubAccountOf, listProjectRepos, projectRepoToken } from "./store";
 
 const { pullRequests } = schema;
 
@@ -38,6 +38,8 @@ type ApiPull = {
   base: { ref: string };
   /** Whether the branch merges cleanly into its base; null while GitHub is still working it out. */
   mergeable?: boolean | null;
+  /** GitHub's verdict on merging: clean, unstable (checks), dirty (conflicts), blocked (protection), behind, draft or unknown. */
+  mergeable_state?: string;
   /** The size of the change; only on a single pull request and its webhook events, not in lists. */
   additions?: number;
   deletions?: number;
@@ -290,6 +292,153 @@ export async function pullFiles(env: PullsEnv, projectId: string, threadId: stri
   const result: PullFiles = { files, truncated: (row.changedFiles ?? 0) > files.length || raw.length === FILES_PAGE * FILES_PAGES };
   await cache.put(key, Response.json(result, { headers: { "cache-control": "max-age=604800" } }));
   return result;
+}
+
+// --- Merging ---
+
+/** What merging needs: write on contents is what GitHub's merge asks of an app. */
+const MERGE: RepoPermissions = { contents: "write", pull_requests: "write", checks: "read", statuses: "read", metadata: "read" };
+const METHODS: MergeMethod[] = ["merge", "squash", "rebase"];
+
+export class MergeError extends Error {
+  constructor(
+    message: string,
+    readonly code: "not_found" | "forbidden" | "blocked" | "head_moved" | "github",
+  ) {
+    super(message);
+  }
+}
+
+async function threadPull(env: PullsEnv, projectId: string, threadId: string, fullName: string, number: number) {
+  const [row] = await createDb(env.DB)
+    .select()
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.projectId, projectId),
+        eq(pullRequests.threadId, threadId),
+        eq(pullRequests.fullName, fullName),
+        eq(pullRequests.number, number),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Whether the person may merge on GitHub themselves: asked live of GitHub for the account they
+ * connected, by its id (a login can be renamed and taken by someone else). Write, maintain and
+ * admin can merge; read, triage and strangers cannot.
+ */
+async function personCanMerge(env: PullsEnv, token: string, fullName: string, userId: string): Promise<boolean> {
+  const account = await githubAccountOf(env.DB, userId);
+  if (!account) return false;
+  try {
+    const { login } = await githubFetch<{ login: string }>(token, `/user/${account.githubId}`);
+    const perm = await githubFetch<{ permission: string }>(token, `/repos/${fullName}/collaborators/${encodeURIComponent(login)}/permission`);
+    return perm.permission === "admin" || perm.permission === "write";
+  } catch (err) {
+    if (err instanceof GithubError && (err.status === 404 || err.status === 403)) return false;
+    throw err;
+  }
+}
+
+/** Why GitHub's current view of a pull request keeps it from being merged, or null. */
+function mergeBlock(pull: ApiPull, checks: Row["checks"], review: Row["review"]): PullMergeState["blocked"] {
+  if (pull.state !== "open" || pull.merged) return "closed";
+  if (pull.draft) return "draft";
+  if (pull.mergeable === false || pull.mergeable_state === "dirty") return "conflict";
+  if (checks === "failure") return "checks_failed";
+  if (checks === "pending") return "checks_pending";
+  if (review === "changes_requested") return "changes_requested";
+  if (pull.mergeable_state === "blocked") return "protected";
+  if (pull.mergeable === null || pull.mergeable === undefined || pull.mergeable_state === "unknown") return "checking";
+  return null;
+}
+
+async function mergeView(env: PullsEnv, row: Row, userId: string) {
+  const { token } = await installationToken(env, row.installationId, { repositoryIds: [row.repoId], permissions: READ });
+  const [pull, repo, permitted] = await Promise.all([
+    githubFetch<ApiPull>(token, `/repos/${row.fullName}/pulls/${row.number}`),
+    githubFetch<{ allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean }>(token, `/repos/${row.fullName}`),
+    personCanMerge(env, token, row.fullName, userId),
+  ]);
+  const checks = (await checkState(token, row.fullName, pull.head.sha)).state;
+  // Fields GitHub leaves out are taken as allowed; GitHub refuses a method the repository turned off.
+  const allowed = { merge: repo.allow_merge_commit, squash: repo.allow_squash_merge, rebase: repo.allow_rebase_merge };
+  const state: PullMergeState = {
+    permitted,
+    blocked: mergeBlock(pull, checks, row.review),
+    methods: METHODS.filter((m) => allowed[m] !== false),
+    sha: pull.head.sha,
+  };
+  return { state, pull };
+}
+
+/** Whether the person may merge this thread's pull request from Myrel, and why not right now. Null when the thread has no such pull request. */
+export async function pullMergeState(
+  env: PullsEnv,
+  projectId: string,
+  threadId: string,
+  fullName: string,
+  number: number,
+  userId: string,
+): Promise<PullMergeState | null> {
+  const row = await threadPull(env, projectId, threadId, fullName, number);
+  if (!row) return null;
+  return (await mergeView(env, row, userId)).state;
+}
+
+/**
+ * Merges a thread's pull request for a person who can merge on GitHub themselves, after checking
+ * everything the dialog showed again: still open and clean, and still at the commit they saw
+ * (GitHub's sha guard refuses it otherwise). Myrel's app makes the merge; the commit message says
+ * who asked. The webhook then marks it merged and wakes the thread. With deleteBranch, the branch
+ * goes too unless it must stay (a fork's, the default, protected or used by another pull request).
+ */
+export async function mergePullRequest(
+  env: PullsEnv,
+  projectId: string,
+  threadId: string,
+  fullName: string,
+  number: number,
+  userId: string,
+  input: MergePullInput,
+): Promise<MergePullResult> {
+  const row = await threadPull(env, projectId, threadId, fullName, number);
+  if (!row) throw new MergeError("No such pull request in this thread.", "not_found");
+  const { state, pull } = await mergeView(env, row, userId);
+  if (!state.permitted) throw new MergeError("Your GitHub account cannot merge into this repository.", "forbidden");
+  if (state.sha !== input.sha) throw new MergeError("New commits arrived since you looked; check the changes again.", "head_moved");
+  if (state.blocked) throw new MergeError(`It cannot be merged right now (${state.blocked}).`, "blocked");
+  if (!state.methods.includes(input.method)) throw new MergeError(`The repository does not allow ${input.method} merges.`, "blocked");
+
+  const { token } = await projectRepoToken(env, projectId, row.fullName, MERGE);
+  const account = await githubAccountOf(env.DB, userId);
+  try {
+    await githubFetch(token, `/repos/${row.fullName}/pulls/${row.number}/merge`, {
+      method: "PUT",
+      body: {
+        merge_method: input.method,
+        sha: input.sha,
+        ...(input.method !== "rebase" && {
+          commit_message: `Merged by ${account ? `@${account.login}` : "a project member"} via Myrel.`,
+        }),
+      },
+    });
+  } catch (err) {
+    if (err instanceof GithubError && err.status === 409) throw new MergeError("New commits arrived since you looked; check the changes again.", "head_moved");
+    if (err instanceof GithubError && (err.status === 405 || err.status === 422)) throw new MergeError(`GitHub refused the merge: ${err.message}`, "blocked");
+    throw new MergeError(`GitHub could not merge it: ${err instanceof Error ? err.message : String(err)}`, "github");
+  }
+  if (!input.deleteBranch) return { merged: true, branchDeleted: false, branchKept: null };
+  try {
+    const branch = await deletePullBranch(env, projectId, { repo: row.fullName, number: pull.number });
+    return { merged: true, branchDeleted: branch.blocked === null, branchKept: branch.blocked?.kind ?? null };
+  } catch (err) {
+    console.warn("branch not deleted after merge", row.url, err);
+    return { merged: true, branchDeleted: false, branchKept: "failed" };
+  }
 }
 
 /** Why a pull request's branch must stay; `pr`: the open pull request that uses it, or this one reopened. */
