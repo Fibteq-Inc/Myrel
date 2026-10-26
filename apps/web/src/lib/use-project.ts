@@ -1,4 +1,5 @@
 import {
+  applyConversationPage,
   applyEvent,
   applyMessages,
   applyPullRequests,
@@ -8,7 +9,7 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import type { CliId, ClientEventInput, Message } from "@myrel/protocol";
+import { type CliId, type ClientEventInput, CONVERSATION_PAGE_SIZE, type ConversationPage, type Message } from "@myrel/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api, queryClient, runnersQuery, workspaceQuery } from "./api";
 
@@ -18,6 +19,7 @@ type Action =
   | { type: "messages"; messages: Message[] }
   | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] }
   | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] }
+  | { type: "page"; threadId: string | null; page: ConversationPage }
   | { type: "batch"; actions: Action[] };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
@@ -26,6 +28,7 @@ function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "messages") return applyMessages(state, action.messages);
   if (action.type === "tasks") return applyTasks(state, action.tasks);
   if (action.type === "pullRequests") return applyPullRequests(state, action.pullRequests);
+  if (action.type === "page") return applyConversationPage(state, action.threadId, action.page);
   return applyEvent(state, action);
 }
 
@@ -67,6 +70,8 @@ export function useProject(projectId: string) {
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
       lastSeq: cache.get(projectId)?.seq,
+      // Only the project chat's newest messages; threads load when opened, earlier pages on scrolling up.
+      recent: CONVERSATION_PAGE_SIZE,
       onMessages: (messages) => queue({ type: "messages", messages }),
       onEvent: (event) => {
         // Files, memory and instructions are fetched over HTTP; refetch the list that changed.
@@ -97,9 +102,10 @@ export function useProject(projectId: string) {
     };
   }, [projectId]);
 
-  // Remember where this project was left, for the next time it opens. Messages arrive in seq order.
+  // Remember where this project was left, for the next time it opens: the socket knows how far it caught up,
+  // which is past the newest message held when the newest ones are in threads not opened yet.
   useEffect(() => {
-    const seq = state.messages.at(-1)?.seq ?? 0;
+    const seq = socketRef.current?.seq ?? 0;
     if (ready && seq > 0) cache.set(projectId, { state: { ...state, active: {}, progress: {} }, seq });
   }, [projectId, ready, state]);
 
@@ -119,5 +125,14 @@ export function useProject(projectId: string) {
     [projectId],
   );
 
-  return { state, status, ready, send, emit, loadTasks };
+  /** Fetches a conversation's newest page (null: the project chat), or the page before `beforeSeq`. */
+  const loadConversation = useCallback(
+    async (threadId: string | null, beforeSeq?: number) => {
+      const page = await api.getConversationPage(projectId, threadId, beforeSeq);
+      dispatch({ type: "page", threadId, page });
+    },
+    [projectId],
+  );
+
+  return { state, status, ready, send, emit, loadTasks, loadConversation };
 }

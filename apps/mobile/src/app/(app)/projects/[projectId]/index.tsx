@@ -1,4 +1,4 @@
-import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { conversationState, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack } from "expo-router";
@@ -80,7 +80,7 @@ function ChatTab({ owner }: { owner: boolean }) {
   const t = useT();
   const styles = useStyles();
   const { user } = useSession();
-  const { projectId, state, status, ready, send, emit } = useProject();
+  const { projectId, state, status, ready, send, emit, loadConversation } = useProject();
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
   const threads = useMemo(() => threadByCard(state), [state]);
@@ -102,6 +102,8 @@ function ChatTab({ owner }: { owner: boolean }) {
       projectId={projectId}
       messages={messages}
       loading={!ready}
+      hasEarlier={ready && conversationState(state, null).hasEarlier}
+      onLoadEarlier={() => loadConversation(null, messages[0]?.seq)}
       me={user?.id ?? ""}
       names={names}
       reactions={state.reactions}

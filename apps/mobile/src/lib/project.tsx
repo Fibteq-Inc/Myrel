@@ -1,4 +1,5 @@
 import {
+  applyConversationPage,
   applyEvent,
   applyMessages,
   applyPullRequests,
@@ -8,7 +9,7 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import type { CliId, ClientEventInput } from "@myrel/protocol";
+import { type CliId, type ClientEventInput, CONVERSATION_PAGE_SIZE, type ConversationPage } from "@myrel/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppState } from "react-native";
@@ -21,7 +22,8 @@ type Action =
   | { type: "idle" }
   | { type: "messages"; messages: Parameters<typeof applyMessages>[1] }
   | { type: "tasks"; tasks: Parameters<typeof applyTasks>[1] }
-  | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] };
+  | { type: "pullRequests"; pullRequests: Parameters<typeof applyPullRequests>[1] }
+  | { type: "page"; threadId: string | null; page: ConversationPage };
 
 function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "reset") return emptyProjectState;
@@ -29,6 +31,7 @@ function reducer(state: ProjectState, action: Action): ProjectState {
   if (action.type === "messages") return applyMessages(state, action.messages);
   if (action.type === "tasks") return applyTasks(state, action.tasks);
   if (action.type === "pullRequests") return applyPullRequests(state, action.pullRequests);
+  if (action.type === "page") return applyConversationPage(state, action.threadId, action.page);
   return applyEvent(state, action);
 }
 
@@ -42,6 +45,8 @@ type ProjectValue = {
   emit(event: ClientEventInput): void;
   /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
   loadTasks(threadId: string): Promise<void>;
+  /** Fetches a conversation's newest page (null: the project chat), or the page before `beforeSeq`. */
+  loadConversation(threadId: string | null, beforeSeq?: number): Promise<void>;
 };
 
 const ProjectContext = createContext<ProjectValue | null>(null);
@@ -70,6 +75,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     setReady(false);
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
+      // Only the project chat's newest messages; threads load when opened, earlier pages on scrolling up.
+      recent: CONVERSATION_PAGE_SIZE,
       // A sync page lands in one update instead of one per message.
       onMessages: (messages) => dispatch({ type: "messages", messages }),
       onEvent: (event) => {
@@ -122,9 +129,16 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     },
     [api, projectId],
   );
+  const loadConversation = useCallback(
+    async (threadId: string | null, beforeSeq?: number) => {
+      const page = await api.getConversationPage(projectId, threadId, beforeSeq);
+      dispatch({ type: "page", threadId, page });
+    },
+    [api, projectId],
+  );
   const value = useMemo<ProjectValue>(
-    () => ({ projectId, state, status, ready, send, emit, loadTasks }),
-    [projectId, state, status, ready, send, emit, loadTasks],
+    () => ({ projectId, state, status, ready, send, emit, loadTasks, loadConversation }),
+    [projectId, state, status, ready, send, emit, loadTasks, loadConversation],
   );
   return <ProjectContext value={value}>{children}</ProjectContext>;
 }

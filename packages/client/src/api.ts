@@ -1,4 +1,5 @@
 import type {
+  ConversationPage,
   AddProjectRepoInput,
   Artifact,
   ArtifactVersion,
@@ -510,6 +511,20 @@ export class ApiClient {
     return this.request<{ messages: Message[]; hasMore: boolean }>(
       `/api/projects/${encodeURIComponent(projectId)}/messages?after=${afterSeq}`,
     );
+  }
+
+  /** One page of a conversation (null: the project chat), from its newest message back, or ending before `beforeSeq`. */
+  getConversationPage(projectId: string, threadId: string | null, beforeSeq?: number) {
+    const before = beforeSeq ? `&before=${beforeSeq}` : "";
+    return this.request<ConversationPage>(
+      `/api/projects/${encodeURIComponent(projectId)}/messages?conversation=${encodeURIComponent(threadId ?? "chat")}${before}`,
+    );
+  }
+
+  /** A thread's replies that carry a stats line, for its usage breakdown. */
+  async threadUsageMessages(projectId: string, threadId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/usage`;
+    return (await this.request<{ messages: Message[] }>(path)).messages;
   }
 
   // --- project knowledge: instructions, memory, files ---

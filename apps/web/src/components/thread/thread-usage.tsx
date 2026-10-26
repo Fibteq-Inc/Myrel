@@ -1,7 +1,9 @@
 import { messageUsage } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { type Message, planChecklist } from "@myrel/protocol";
-import { ChartColumn, Clock, Coins, Network } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ChartColumn, Clock, Coins, LoaderCircle, Network } from "lucide-react";
+import { api } from "../../lib/api";
 import { useFormat } from "../../lib/format";
 import { duration, harnessName, modelName } from "../chat/message-stats";
 import { Card, Stat } from "../usage-dashboard";
@@ -16,6 +18,42 @@ const add = (a: Usage, b: Usage): Usage => ({
   costMicros: a.costMicros === null || b.costMicros === null ? null : a.costMicros + b.costMicros,
 });
 const ZERO: Usage = { inputTokens: 0, outputTokens: 0, durationMs: 0, costMicros: 0 };
+
+/**
+ * The usage tab of a thread: from the messages held when they are all here, otherwise from the
+ * thread's replies with a stats line, fetched (again whenever the thread's summary moves).
+ */
+export function ThreadUsageTab({
+  projectId,
+  threadId,
+  messages,
+  complete,
+  version,
+}: {
+  projectId: string;
+  threadId: string;
+  messages: Message[];
+  /** Every message of the thread is held. */
+  complete: boolean;
+  /** Changes when the thread's usage does. */
+  version: string;
+}) {
+  const t = useT();
+  const fetched = useQuery({
+    queryKey: ["projects", projectId, "threads", threadId, "usage", version],
+    queryFn: () => api.threadUsageMessages(projectId, threadId),
+    enabled: !complete,
+  });
+  if (complete) return <ThreadUsage messages={messages} />;
+  if (!fetched.data) {
+    return (
+      <div className="flex h-full min-h-60 items-center justify-center text-subtle">
+        <LoaderCircle size={20} className="animate-spin" aria-label={t("chat.loading")} />
+      </div>
+    );
+  }
+  return <ThreadUsage messages={fetched.data} />;
+}
 
 /**
  * A thread's usage, from the stats lines under its agent's messages: totals, where it ran with which

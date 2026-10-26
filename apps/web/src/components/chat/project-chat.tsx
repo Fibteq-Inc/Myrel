@@ -1,4 +1,4 @@
-import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { conversationState, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { type CliId, decisionPicks, type Message } from "@myrel/protocol";
 import { MessagesSquare } from "lucide-react";
@@ -21,10 +21,13 @@ const NONE: Message[] = [];
 /** The project chat: everything said to the coordinator, with a card for each thread it opened. */
 export function ProjectChat({ me, className = "" }: { me: string; className?: string }) {
   const t = useT();
-  const { project, names, state, ready, send, emit } = useProjectContext();
+  const { project, names, state, ready, send, emit, loadConversation } = useProjectContext();
   // Drawn once the first sync is done, so a long chat opens at its end instead of scrolling there as pages arrive.
   const chat = ready ? projectChat(state) : NONE;
-  const history = useHistoryWindow(chat);
+  const history = useHistoryWindow(chat, {
+    hasEarlier: ready && conversationState(state, null).hasEarlier,
+    load: () => loadConversation(null, chat[0]?.seq),
+  });
   const choose = useCallback((label: string) => send(label), [send]);
   const roots = threadByCard(state);
   const answers = decisionAnswers(chat);
@@ -52,7 +55,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
         className="flex-1 overflow-y-auto"
       >
         {/* While loading, the placeholder sits at the bottom, where the newest messages will. */}
-        <div className={cn("mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6", !ready && "min-h-full justify-end")}>
+        <div className={cn("mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6", !ready && "h-full justify-end overflow-hidden")}>
           {!asked &&
             (ready ? (
               <EmptyChat>
@@ -62,7 +65,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
             ) : (
               <ChatSkeleton />
             ))}
-          <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
+          <EarlierMessages hidden={history.hidden} more={history.more} loading={history.loading} onShow={history.showEarlier} />
           {history.visible.map((m) => {
             const thread = roots.get(m.id);
             // A pick that opened a thread keeps its bubble, which carries the thread's card.

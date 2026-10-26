@@ -1,13 +1,16 @@
-import { createId, formatPlan, type Message, planChecklist, type PullRequest, type Task, type Thread } from "@myrel/protocol";
+import { createId, formatPlan, type Message, type ServerEvent, planChecklist, type PullRequest, type Task, type Thread } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  applyConversationPage,
   applyEvent,
   applyMessage,
   applyMessages,
   applyTasks,
   artifactList,
   checklistProgress,
+  conversationState,
   emptyProjectState,
+  findMessage,
   foldPullRequests,
   freshSteps,
   parseChecklist,
@@ -207,6 +210,48 @@ describe("thread usage", () => {
     expect(threadReplyCount(s, th.id)).toBe(40);
     expect(threadUsage(s, th.id)).toEqual(summary.usage);
     expect(threadSummary(s, th.id)).toBe(summary);
+  });
+});
+
+describe("conversation windows", () => {
+  const sync = (patch: Partial<Extract<ServerEvent, { type: "sync.result" }>>): ServerEvent => ({
+    type: "sync.result",
+    messages: [],
+    hasMore: false,
+    threads: [],
+    reactions: [],
+    artifacts: [],
+    routines: [],
+    ...patch,
+  });
+
+  it("holds everything after a full sync, and only what the windows say after a sync of the newest messages", () => {
+    const th = createId("thread");
+    expect(conversationState(emptyProjectState, th)).toEqual({ loaded: true, hasEarlier: false });
+    const s = applyEvent(emptyProjectState, sync({ windows: [{ threadId: null, hasEarlier: true }] }));
+    expect(conversationState(s, null)).toEqual({ loaded: true, hasEarlier: true });
+    expect(conversationState(s, th)).toEqual({ loaded: false, hasEarlier: true });
+  });
+
+  it("puts a fetched page in seq order without doubling messages that came in live, and keeps the thread's root aside", () => {
+    const root = msg(1);
+    const t = thread(root.id);
+    let s = applyEvent(emptyProjectState, sync({ windows: [{ threadId: null, hasEarlier: false }] }));
+    s = applyMessages(s, [root, msg(4), msg(6, t.id)]);
+    const page = { messages: [msg(2, t.id), msg(3, t.id), s.messages[2]!], hasEarlier: false, reactions: [], root };
+    s = applyConversationPage(s, t.id, page);
+    expect(s.messages.map((m) => m.seq)).toEqual([1, 2, 3, 4, 6]);
+    expect(threadMessages(s, t.id).map((m) => m.seq)).toEqual([2, 3, 6]);
+    expect(conversationState(s, t.id)).toEqual({ loaded: true, hasEarlier: false });
+    expect(findMessage(s, root.id)).toBe(root);
+  });
+
+  it("drops what it held when the server starts over from the newest messages", () => {
+    let s = applyMessages(applyEvent(emptyProjectState, sync({ windows: [{ threadId: null, hasEarlier: false }] })), [msg(1)]);
+    s = applyConversationPage(s, createId("thread"), { messages: [], hasEarlier: false, reactions: [] });
+    s = applyEvent(s, sync({ windows: [{ threadId: null, hasEarlier: true }], reset: true }));
+    expect(s.messages).toEqual([]);
+    expect(s.windows).toEqual({ "": { hasEarlier: true } });
   });
 });
 

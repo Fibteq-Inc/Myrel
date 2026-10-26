@@ -1,6 +1,7 @@
 import { messageUsage } from "@myrel/client";
 import { useI18n } from "@myrel/i18n/react";
 import { type Message, planChecklist } from "@myrel/protocol";
+import { useQuery } from "@tanstack/react-query";
 import { ChartColumn } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
@@ -8,7 +9,8 @@ import { formatCost, formatDuration, formatTokens, modelName } from "../../lib/f
 import { makeStyles, mono, radius, useColors } from "../../theme";
 import { harnessName } from "../message-stats";
 import { Empty } from "../project/empty";
-import { useRelativeTime } from "../ui";
+import { useSession } from "../../lib/session";
+import { Spinner, useRelativeTime } from "../ui";
 
 type Usage = ReturnType<typeof messageUsage>;
 
@@ -21,10 +23,46 @@ const add = (a: Usage, b: Usage): Usage => ({
 const ZERO: Usage = { inputTokens: 0, outputTokens: 0, durationMs: 0, costMicros: 0 };
 
 /**
+ * A thread's usage from the messages held when they are all here, otherwise from the thread's replies
+ * with a stats line, fetched (again whenever the thread's summary moves).
+ */
+export function ThreadUsageTab({
+  projectId,
+  threadId,
+  messages,
+  complete,
+  version,
+}: {
+  projectId: string;
+  threadId: string;
+  messages: Message[];
+  /** Every message of the thread is held. */
+  complete: boolean;
+  /** Changes when the thread's usage does. */
+  version: string;
+}) {
+  const { api, server } = useSession();
+  const fetched = useQuery({
+    queryKey: ["threadUsage", server, projectId, threadId, version],
+    queryFn: () => api.threadUsageMessages(projectId, threadId),
+    enabled: !complete,
+  });
+  if (complete) return <ThreadUsage messages={messages} />;
+  if (!fetched.data) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Spinner size={20} />
+      </View>
+    );
+  }
+  return <ThreadUsage messages={fetched.data} />;
+}
+
+/**
  * A thread's usage, from the stats lines under its agent's messages: totals, where it ran with which
  * harness and model, and each reply's share.
  */
-export function ThreadUsageTab({ messages }: { messages: Message[] }) {
+function ThreadUsage({ messages }: { messages: Message[] }) {
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();

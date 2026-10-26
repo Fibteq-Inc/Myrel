@@ -30,6 +30,8 @@ import {
   type ServerEvent,
   CLOUD_RUNNER,
   SYNC_PAGE_SIZE,
+  CONVERSATION_PAGE_SIZE,
+  type ConversationPage,
   type Thread,
   type ThreadCli,
   type ThreadRunner,
@@ -177,6 +179,9 @@ type TurnQuestions = { open: Map<string, { threadId: string }>; settled: Set<str
 const OBSERVE_DELAY_SEC = 60;
 /** Relays the coordinator sees each turn, so it does not repeat one. */
 const RELAY_HISTORY = 20;
+/** Messages a client may catch up on after being away; past this it starts again from the newest ones. */
+const RESYNC_LIMIT = 1000;
+
 /** A relay between the same two threads (either way) within this window is refused, so notes cannot bounce. */
 const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
 /** How many recent coordinator notes in threads are searched for mentions of a thread that finished. */
@@ -468,20 +473,41 @@ export class ProjectAgent extends Agent<Env> {
         const threads = this.listThreads();
         const artifacts = this.artifacts.list();
         const routines = this.listRoutines();
-        let afterSeq = event.afterSeq;
-        for (;;) {
-          const page = this.getMessagesAfter(afterSeq);
+        const [newest] = this.sql<{ seq: number | null }>`SELECT MAX(seq) AS seq FROM messages`;
+        const lastSeq = newest?.seq ?? 0;
+        // A client that asks for `recent` gets the project chat's newest messages; threads load when opened.
+        // So does one that has been away so long that catching up would mean too many messages.
+        if (event.recent && (event.afterSeq === 0 || this.countMessagesAfter(event.afterSeq) > RESYNC_LIMIT)) {
+          const chat = this.getConversationPage(null, null, event.recent);
           send(connection, {
             type: "sync.result",
-            ...page,
-            ...(event.all ? { streamed: true } : {}),
+            messages: chat.messages,
+            hasMore: false,
             threads,
-            reactions: this.reactionsFor(page.messages.map((m) => m.id)),
+            reactions: chat.reactions,
             artifacts,
             routines,
+            windows: [{ threadId: null, hasEarlier: chat.hasEarlier }],
+            ...(event.afterSeq > 0 ? { reset: true } : {}),
+            lastSeq,
           });
-          if (!event.all || !page.hasMore) break;
-          afterSeq = page.messages.at(-1)!.seq;
+        } else {
+          let afterSeq = event.afterSeq;
+          for (;;) {
+            const page = this.getMessagesAfter(afterSeq);
+            send(connection, {
+              type: "sync.result",
+              ...page,
+              ...(event.all ? { streamed: true } : {}),
+              threads,
+              reactions: this.reactionsFor(page.messages.map((m) => m.id)),
+              artifacts,
+              routines,
+              ...(page.hasMore ? {} : { lastSeq }),
+            });
+            if (!event.all || !page.hasMore) break;
+            afterSeq = page.messages.at(-1)!.seq;
+          }
         }
         for (const [threadId, label] of this.active) {
           send(connection, { type: "agent.activity", threadId, active: true, label });
@@ -547,6 +573,36 @@ export class ProjectAgent extends Agent<Env> {
     const rows = this.sql<MessageRow>`
       SELECT * FROM messages WHERE seq > ${afterSeq} ORDER BY seq LIMIT ${limit + 1}`;
     return { messages: rows.slice(0, limit).map((r) => this.toMessage(r)), hasMore: rows.length > limit };
+  }
+
+  /**
+   * One page of a conversation (null: the project chat), oldest first, ending just before `beforeSeq`
+   * (null: at its newest message). A thread's oldest page also carries the message it opened from.
+   * Callable over RPC.
+   */
+  getConversationPage(threadId: string | null, beforeSeq: number | null, limit = CONVERSATION_PAGE_SIZE): ConversationPage {
+    const before = beforeSeq ?? Number.MAX_SAFE_INTEGER;
+    const rows =
+      threadId === null
+        ? this.sql<MessageRow>`SELECT * FROM messages WHERE thread_id IS NULL AND seq < ${before} ORDER BY seq DESC LIMIT ${limit + 1}`
+        : this.sql<MessageRow>`SELECT * FROM messages WHERE thread_id = ${threadId} AND seq < ${before} ORDER BY seq DESC LIMIT ${limit + 1}`;
+    const hasEarlier = rows.length > limit;
+    const messages = rows.slice(0, limit).reverse().map((r) => this.toMessage(r));
+    const rootId = threadId && !hasEarlier ? this.getThread(threadId)?.rootMessageId : undefined;
+    const root = rootId ? this.getMessage(rootId) : null;
+    return { messages, hasEarlier, reactions: this.reactionsFor(messages.map((m) => m.id)), ...(root && { root }) };
+  }
+
+  /** A thread's messages that carry a stats line, for its usage breakdown. Callable over RPC. */
+  threadStatsMessages(threadId: string): Message[] {
+    return this.sql<MessageRow>`SELECT * FROM messages WHERE thread_id = ${threadId} AND stats IS NOT NULL ORDER BY seq`.map((r) =>
+      this.toMessage(r),
+    );
+  }
+
+  private countMessagesAfter(seq: number): number {
+    const [row] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM messages WHERE seq > ${seq}`;
+    return row?.n ?? 0;
   }
 
   /** The id of a thread's newest message, or null when it has none. Callable over RPC. */
