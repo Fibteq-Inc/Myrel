@@ -788,10 +788,11 @@ describe("local workspace", () => {
     await until(async () => (await threadAgent.getTasks())[1]?.status === "failed", "cloud turn");
     expect((await threadAgent.getTasks())[1]).toMatchObject({ backend: "sandbox", harness: "opencode" });
 
-    // Local with the computer offline: the thread says why it cannot work.
+    // Local with the computer offline (for a while, so not about to reconnect): the thread says why it cannot work.
     await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ taskTarget: "local" }) });
     runnerSide.ws.close();
     await until(async () => !(await listRunners(user))[0]?.online, "offline");
+    await env.DB.prepare("UPDATE runners SET last_seen_at = ?").bind(Date.now() - 10 * 60_000).run();
     const last = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "once more" });
     await threadAgent.wake({ kind: "message", messageId: last.id });
     await until(async () => (await bodies()).some((b) => b.includes("it is offline")), "offline notice");
@@ -811,6 +812,92 @@ describe("local workspace", () => {
     expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
     expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
     chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("waits for a computer that just went offline instead of moving the turn to the cloud", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    let runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const chat = await openChat(project.id, user);
+    const labels: (string | undefined)[] = [];
+    chat.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data as string) as { type: string; label?: string };
+      if (event.type === "agent.activity") labels.push(event.label);
+    });
+    const { projectAgent, threadAgent, thread, author } = await startThread(project.id, user);
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const starts = (side: typeof runnerSide) => side.frames.filter((f): f is Start => f.type === "task.start");
+    const first = await until(() => starts(runnerSide)[0], "task.start");
+    runnerSide.send({ type: "task.done", taskId: first.taskId, ok: true, result: "Done." });
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "done", "first turn done");
+
+    // The runner restarts for an update; a message written meanwhile waits for it.
+    runnerSide.ws.close();
+    await until(async () => !(await listRunners(user))[0]?.online, "offline");
+    const next = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "again" });
+    await threadAgent.wake({ kind: "message", messageId: next.id });
+    await until(() => labels.some((l) => l?.includes("to reconnect")), "the waiting line");
+    await threadAgent.reconnectRetry();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await threadAgent.getTasks()).toHaveLength(1);
+
+    // Back: the next look sends the turn to it, with its own CLI.
+    runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.online, "online again");
+    await threadAgent.reconnectRetry();
+    const second = await until(() => starts(runnerSide)[0], "task.start after the reconnect");
+    expect((await threadAgent.getTasks()).map((t) => t.backend)).toEqual(["local", "local"]);
+    runnerSide.send({ type: "task.done", taskId: second.taskId, ok: true, result: "Done." });
+    await until(async () => (await threadAgent.getTasks())[1]?.status === "done", "second turn done");
+
+    // Gone for longer than a restart takes: the project's auto setting sends the turn to the cloud as before.
+    runnerSide.ws.close();
+    await until(async () => !(await listRunners(user))[0]?.online, "offline again");
+    await env.DB.prepare("UPDATE runners SET last_seen_at = ? WHERE id = ?").bind(Date.now() - 10 * 60_000, runner.id).run();
+    const last = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "once more" });
+    await threadAgent.wake({ kind: "message", messageId: last.id });
+    await until(async () => (await threadAgent.getTasks())[2], "cloud turn");
+    expect((await threadAgent.getTasks())[2]).toMatchObject({ backend: "sandbox" });
+    chat.close();
+  });
+
+  it("stops a thread's turn from its chat with one line, and nothing continues it on its own", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const { projectAgent, threadAgent, thread } = await startThread(project.id, user);
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
+    const start = await until(
+      () => runnerSide.frames.find((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start"),
+      "task.start",
+    );
+    expect((await api(`/api/projects/${project.id}/threads/${thread.id}/stop`, { method: "POST", token: await signUp(), body: "{}" })).status).toBe(404);
+    const stop = await api(`/api/projects/${project.id}/threads/${thread.id}/stop`, { method: "POST", token: user, body: "{}" });
+    expect(stop.status).toBe(200);
+    await until(() => runnerSide.frames.some((f) => f.type === "task.cancel" && f.taskId === start.taskId), "task.cancel");
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
+    await until(async () => (await bodies()).includes("Stopped. Write here to continue."), "the stop line");
+    expect((await bodies()).some((b) => b.includes("was cancelled"))).toBe(false);
+    expect((await projectAgent.getThread(thread.id))?.status).toBe("review_ready");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runnerSide.frames.filter((f) => f.type === "task.start")).toHaveLength(1);
+    // Nothing running: still fine, so a tap that comes late does not show an error.
+    expect((await api(`/api/projects/${project.id}/threads/${thread.id}/stop`, { method: "POST", token: user, body: "{}" })).status).toBe(200);
     runnerSide.ws.close();
   });
 

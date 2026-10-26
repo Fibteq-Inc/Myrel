@@ -5,7 +5,7 @@ import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { freshInstallationToken, githubConfigured, installationToken } from "../github/app";
 import { listProjectRepos, repoWritable } from "../github/store";
-import { getWorkspace, listWorkspaces, runnerHasFeature, workspaceClis } from "../runners";
+import { getWorkspace, isRunnerReconnecting, listWorkspaces, runnerHasFeature, workspaceClis } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts), for a task that works for `principal`. */
 export function sandboxBackend(env: Env, threadId: string, principal = ""): RunnerBackend {
@@ -100,7 +100,9 @@ export function cloudHarness(cli: CloudCli, model: Pick<ModelConfig, "kind" | "m
 export type TaskPlace =
   | { kind: "local"; workspace: ProjectWorkspace }
   | { kind: "cloud" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** The person's computer dropped off moments ago and is most likely coming back: try again shortly. */
+  | { kind: "wait"; runnerName: string };
 
 /**
  * Where the project's next task runs, by its task target setting: on the
@@ -120,6 +122,10 @@ export type TaskPlace =
  * `runner`: the cloud, or the computer the thread was set to (it waits for that one) or first ran on (it stays
  * there: its CLI session and uncommitted work are there). Without one, when the project's computer
  * for the person is offline, another of theirs in the project that is online (and has the CLI) does.
+ *
+ * A computer of theirs that went offline only moments ago (a runner restarting for an update, a
+ * dropped connection) is waited for (`wait`) rather than replaced by the cloud, whose CLI and
+ * session are not the ones the thread was working with.
  */
 export async function taskPlace(
   env: Env,
@@ -156,6 +162,9 @@ export async function taskPlace(
         break;
       }
     }
+  }
+  if (workspace && own && !workspace.online && (await isRunnerReconnecting(env, workspace.runnerId))) {
+    return { kind: "wait", runnerName: workspace.runnerName };
   }
   if (workspace && !own) {
     if (target === "auto") return { kind: "cloud" };

@@ -658,6 +658,12 @@ export class ApiClient {
     return this.request<{ ok: true }>(path, { method: "POST", body: {} });
   }
 
+  /** Stops the thread's work: its running turn, and anything waiting to continue it on its own. */
+  stopThread(projectId: string, threadId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/stop`;
+    return this.request<{ ok: true }>(path, { method: "POST", body: {} });
+  }
+
   // --- usage ---
 
   /** Model usage across the caller's projects, bucketed by day in the caller's time zone. */

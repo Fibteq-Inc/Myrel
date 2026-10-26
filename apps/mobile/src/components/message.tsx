@@ -22,6 +22,7 @@ import { type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
+import { StopButton } from "./stop-button";
 import { MyrelMark, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
@@ -294,18 +295,19 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label }: { label: string }) {
+export function Thinking({ label, onStop }: { label: string; onStop?: () => Promise<unknown> }) {
   const colors = useColors();
   const styles = useStyles();
   return (
-    <View style={styles.agent} accessibilityRole="progressbar" accessibilityLabel={label}>
+    <View style={styles.agent}>
       <MyrelMark size={28} />
-      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }}>
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }} accessibilityRole="progressbar" accessibilityLabel={label}>
         <Spinner size={15} color={colors.subtle} />
         <Text style={{ color: colors.subtle, fontSize: 15, flexShrink: 1 }} numberOfLines={2}>
           {label}…
         </Text>
       </View>
+      {onStop && <StopButton onStop={onStop} />}
     </View>
   );
 }

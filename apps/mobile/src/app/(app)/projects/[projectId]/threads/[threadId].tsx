@@ -200,6 +200,7 @@ export default function ThreadScreen() {
           onSend={onSend}
           onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
           onInterrupt={waiting && { messageId: waiting.id, run: () => api.interruptThread(projectId, threadId) }}
+          onStop={() => api.stopThread(projectId, threadId)}
           header={header}
           tools={
             pickable &&

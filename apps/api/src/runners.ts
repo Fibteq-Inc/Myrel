@@ -49,6 +49,20 @@ export async function isRunnerOnline(env: Env, runnerId: string): Promise<boolea
   return agent.isOnline();
 }
 
+/**
+ * A computer that went offline this recently is most likely coming back: the runner restarts
+ * itself after an update (about ten seconds) and reconnects within seconds when its connection
+ * drops. Work meant for it waits this long rather than moving elsewhere.
+ */
+export const RECONNECT_GRACE_MS = 90_000;
+
+/** Whether an offline computer was last connected within RECONNECT_GRACE_MS of `now`. */
+export async function isRunnerReconnecting(env: Env, runnerId: string, now = Date.now()): Promise<boolean> {
+  const [row] = await createDb(env.DB).select({ lastSeenAt: runners.lastSeenAt }).from(runners).where(eq(runners.id, runnerId));
+  const seen = row?.lastSeenAt?.getTime();
+  return seen !== undefined && now - seen < RECONNECT_GRACE_MS;
+}
+
 export async function toRunner(env: Env, row: RunnerRow): Promise<Runner> {
   const info = parseInfo(row.info);
   return {

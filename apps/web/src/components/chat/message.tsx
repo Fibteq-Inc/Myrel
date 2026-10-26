@@ -10,6 +10,7 @@ import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
 import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
+import { StopButton } from "./stop-button";
 
 export type Names = Record<string, string>;
 
@@ -235,15 +236,16 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label }: { label?: string }) {
+export function Thinking({ label, onStop }: { label?: string; onStop?: () => Promise<unknown> }) {
   const t = useT();
   return (
-    <div className="flex items-center gap-3.5" role="status">
+    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
       <MyrelMark size={28} />
-      <span className="flex items-center gap-2 text-[13px] text-subtle">
+      <span className="flex items-center gap-2 text-[13px] text-subtle" role="status">
         <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
         {label ?? t("message.thinking")}…
       </span>
+      {onStop && <StopButton onStop={onStop} />}
     </div>
   );
 }

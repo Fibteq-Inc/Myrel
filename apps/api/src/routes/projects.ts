@@ -460,6 +460,14 @@ export const projectRoutes = new Hono<AppEnv>()
     const done = await agent.interrupt();
     return done.ok ? c.json({ ok: true }) : c.json({ error: "cannot_interrupt", message: done.error }, 409);
   })
+  // Stops the thread's work: its running turn, and anything waiting to continue it on its own.
+  .post("/:id/threads/:threadId/stop", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    const done = await agent.stop();
+    return done.ok ? c.json({ ok: true }) : c.json({ error: "cannot_stop", message: done.error }, 409);
+  })
   // The local folders this project works in, one per computer; `workspace` is the default one.
   .get("/:id/workspace", async (c) => {
     const id = c.req.param("id");
