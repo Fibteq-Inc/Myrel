@@ -199,7 +199,8 @@ export function ThreadPanel({
         </div>
       )}
 
-      {!thread ? (
+      {/* Until the first sync is done, so a long thread opens at its end instead of scrolling there as pages arrive. */}
+      {!thread || !ready ? (
         <PanelMissing loading={!ready} onClose={close} />
       ) : (
         <>

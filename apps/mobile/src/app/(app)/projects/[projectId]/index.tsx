@@ -80,7 +80,7 @@ function ChatTab({ owner }: { owner: boolean }) {
   const t = useT();
   const styles = useStyles();
   const { user } = useSession();
-  const { projectId, state, status, send, emit } = useProject();
+  const { projectId, state, status, ready, send, emit } = useProject();
   const names = useNames(projectId);
   const messages = useMemo(() => projectChat(state), [state]);
   const threads = useMemo(() => threadByCard(state), [state]);
@@ -101,6 +101,7 @@ function ChatTab({ owner }: { owner: boolean }) {
     <Conversation
       projectId={projectId}
       messages={messages}
+      loading={!ready}
       me={user?.id ?? ""}
       names={names}
       reactions={state.reactions}

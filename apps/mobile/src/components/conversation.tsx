@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import { ArrowDown } from "lucide-react-native";
 import { type ComponentRef, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
@@ -18,6 +18,7 @@ import { MessageView, type Names, Thinking } from "./message";
  */
 export function Conversation({
   messages,
+  loading = false,
   me,
   names,
   reactions,
@@ -38,6 +39,8 @@ export function Conversation({
   composer,
 }: {
   messages: Message[];
+  /** The first sync is still running: a spinner instead of messages, so the list opens at its newest one. */
+  loading?: boolean;
   me: string;
   names: Names;
   reactions: Record<string, Reaction[]>;
@@ -78,8 +81,16 @@ export function Conversation({
   // A tap on a card is shown on the card itself, not again as a bubble.
   const picks = useMemo(() => decisionPicks(messages), [messages]);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
-  const data = useMemo(() => [...messages].reverse(), [messages]);
+  const data = useMemo(() => (loading ? [] : [...messages].reverse()), [loading, messages]);
   const list = useRef<FlatList<Message>>(null);
+  // A message the person just sent brings them to the newest one even when they had scrolled up.
+  const newest = data[0];
+  const seen = useRef(newest?.id);
+  useEffect(() => {
+    const sent = newest && newest.id !== seen.current && newest.authorKind === "user" && newest.authorId === me;
+    seen.current = newest?.id;
+    if (sent) list.current?.scrollToOffset({ offset: 0, animated: true });
+  }, [newest, me]);
   // Far from the newest message, a button takes the reader back down in one tap.
   const [away, setAway] = useState(false);
   // KeyboardAvoidingView measures itself relative to its parent, so anything
@@ -118,11 +129,21 @@ export function Conversation({
             contentContainerStyle={styles.list}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
+            // A new message keeps what the reader is looking at in place, and follows only near the newest one.
+            maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: FOLLOW }}
             // Inverted: the offset is the distance from the newest message.
             onScroll={(e) => setAway(e.nativeEvent.contentOffset.y > AWAY)}
             scrollEventThrottle={100}
             ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
-            ListEmptyComponent={empty ? <View style={styles.empty}>{empty}</View> : undefined}
+            ListEmptyComponent={
+              loading ? (
+                <View style={styles.empty}>
+                  <ActivityIndicator color={colors.subtle} accessibilityLabel={t("chat.loading")} />
+                </View>
+              ) : empty ? (
+                <View style={styles.empty}>{empty}</View>
+              ) : undefined
+            }
             renderItem={({ item }) => {
               const footer = footerFor?.(item);
               // A pick that opened a thread keeps its bubble, which carries the thread's card.
@@ -175,6 +196,9 @@ export function Conversation({
 
 /** How far from the newest message (in px) the reader has to be before the "jump to latest" button shows. */
 const AWAY = 400;
+
+/** Within this distance (in px) of the newest message, the list keeps following new ones. */
+const FOLLOW = 80;
 
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({

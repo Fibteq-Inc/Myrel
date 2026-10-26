@@ -43,7 +43,7 @@ export default function ThreadScreen() {
   const t = useT();
   const { threadId } = useLocalSearchParams<{ threadId: string }>();
   const { user, api } = useSession();
-  const { projectId, state, status, send, emit, loadTasks } = useProject();
+  const { projectId, state, status, ready, send, emit, loadTasks } = useProject();
   const names = useNames(projectId);
   const thread = state.threads[threadId];
   const { locale } = useI18n();
@@ -174,6 +174,7 @@ export default function ThreadScreen() {
         <Conversation
           threadId={threadId}
           messages={messages}
+          loading={!ready}
           me={user?.id ?? ""}
           names={names}
           reactions={state.reactions}
