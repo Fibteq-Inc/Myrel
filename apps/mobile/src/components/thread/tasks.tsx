@@ -3,6 +3,7 @@ import { clockTime, dayLabel, localDay, relativeTime } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { type Task, type TerminalLine, unwrapShell } from "@myrel/protocol";
 import {
+  Bot,
   ChevronRight,
   CircleAlert,
   CircleCheck,
@@ -220,16 +221,17 @@ function useNow(live: boolean): number {
 
 /**
  * How long each line's step took: what the runner reported, or for a tool call reported when it
- * started, until the next tool call (or the end of the task).
+ * started, until the next tool call of the same agent (subagents run alongside it) or the end of the task.
  */
 function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
-  let next: number | undefined;
+  const next = new Map<string, number>();
   const times: (number | undefined)[] = new Array(lines.length);
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i]!;
+    const who = l.agent?.id ?? "";
     if (l.ms !== undefined) times[i] = l.ms;
-    else if (l.tool && l.at !== undefined) times[i] = Math.max(0, (next ?? end) - l.at);
-    if (l.tool && l.at !== undefined) next = l.at;
+    else if (l.tool && l.at !== undefined) times[i] = Math.max(0, (next.get(who) ?? end) - l.at);
+    if (l.tool && l.at !== undefined) next.set(who, l.at);
   }
   return times;
 }
@@ -282,23 +284,65 @@ function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean
   const styles = useStyles();
   const t = useT();
   const [open, setOpen] = useState(false);
+  if (line.agent?.state) return <AgentRow line={line} first={first} time={time} />;
+  const agent = line.agent;
   const step = line.tool ? line.text.replace(/^→ /, "") : null;
   const command = step?.startsWith("$ ") ? unwrapShell(step.slice(2)) : null;
   const text = command ?? step ?? line.text;
   const long = !!step && (text.length > FOLD_CHARS || text.split("\n").length > FOLD_LINES);
   const tone = line.stream === "stderr" ? colors.bad : step ? colors.fg : line.stream === "system" ? colors.subtle : colors.muted;
   return (
-    <View style={[styles.line, step && !first ? { marginTop: 8 } : null]}>
+    <View
+      style={[styles.line, step && !first ? { marginTop: 8 } : null, agent ? styles.sub : null]}
+      accessibilityLabel={agent && step ? `${t("tasks.agentStep", { name: agent.label })}: ${text}` : undefined}
+    >
       <Text style={[styles.out, styles.prompt, { color: command ? colors.accent : colors.subtle }]}>
         {command ? "$" : step ? "›" : " "}
       </Text>
       <View style={{ flex: 1, minWidth: 0 }}>
+        {agent && step && <Text style={styles.agentLabel}>{agent.label}</Text>}
         <Text
           style={[step && !command ? styles.prose : styles.out, { color: tone }]}
           numberOfLines={long && !open ? FOLD_LINES : undefined}
         >
           {text}
         </Text>
+        {long && (
+          <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={6}>
+            <Text style={styles.more}>{open ? t("tasks.showLess") : t("tasks.showMore")}</Text>
+          </Pressable>
+        )}
+      </View>
+      {time && <Text style={[styles.out, { color: colors.subtle }]}>{time}</Text>}
+    </View>
+  );
+}
+
+/** A subagent starting (with what it is for) or ending (with its answer, folded when long). */
+function AgentRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
+  const colors = useColors();
+  const styles = useStyles();
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const agent = line.agent!;
+  const key = agent.state === "started" ? "tasks.agentStarted" : agent.state === "done" ? "tasks.agentDone" : "tasks.agentFailed";
+  const text = line.text.trim();
+  const long = text.length > FOLD_CHARS || text.split("\n").length > FOLD_LINES;
+  const tone = agent.state === "failed" ? colors.bad : agent.state === "done" ? colors.ok : colors.accent;
+  return (
+    <View style={[styles.line, first ? null : { marginTop: 8 }]}>
+      <View style={styles.agentIcon}>
+        <Bot size={13} color={tone} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.prose, { color: agent.state === "failed" ? colors.bad : colors.fg, fontWeight: "500" }]}>
+          {t(key, { name: agent.label })}
+        </Text>
+        {!!text && (
+          <Text style={[styles.prose, { color: colors.muted }]} numberOfLines={long && !open ? FOLD_LINES : undefined}>
+            {text}
+          </Text>
+        )}
         {long && (
           <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={6}>
             <Text style={styles.more}>{open ? t("tasks.showLess") : t("tasks.showMore")}</Text>
@@ -351,6 +395,9 @@ const useStyles = makeStyles((colors) =>
     headline: { color: colors.muted, fontSize: 12.5, paddingLeft: 22 },
     line: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
     prompt: { width: 8 },
+    sub: { marginLeft: 6, paddingLeft: 10, borderLeftWidth: 1, borderLeftColor: colors.line },
+    agentLabel: { color: colors.accent, fontSize: 11, lineHeight: 15 },
+    agentIcon: { width: 13, paddingTop: 3 },
     out: { fontFamily: mono, fontSize: 11.5, lineHeight: 18, color: colors.muted },
     prose: { fontSize: 13, lineHeight: 19 },
     more: { color: colors.accent, fontSize: 12, marginTop: 2 },

@@ -2,18 +2,25 @@ import { execFile } from "node:child_process";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type CliId, type CliLimits, type CliModel, type RunnerCli, type TaskModel, unwrapShell } from "@myrel/protocol";
+import { type CliId, type CliLimits, type CliModel, type LineAgent, type RunnerCli, type TaskModel, unwrapShell } from "@myrel/protocol";
 import type { AcpMcpServer, AcpTurn, AcpTurnOptions } from "./acp";
 import type { AppServerTurn, AppServerTurnOptions } from "./app-server";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
 import { refreshPath } from "./path";
+import { type AgentNote, endAgent, type SubAgent, startAgent, step } from "./subagents";
 
 /** What a CLI's output told us so far. */
 export type ParseState = {
   /** The latest human-readable step, e.g. "Edit src/app.ts". */
   progress?: string;
+  /** The subagent `progress` comes from; absent for the agent's own steps (see subagents.ts). */
+  progressAgent?: LineAgent;
+  /** Subagents started this run, by the id their lines carry. */
+  agents?: Map<string, SubAgent>;
+  /** Subagents that started or ended since the last report. */
+  agentNotes?: AgentNote[];
   /** Session id to resume this conversation later, when the CLI supports it. */
   sessionId?: string;
   /** Final answer, once the CLI printed it. */
@@ -295,9 +302,12 @@ const claude: CliAdapter = {
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.type === "system" && typeof event.model === "string") state.model = event.model;
     if (event.type === "rate_limit_event") state.limits = claudeLimits(event.rate_limit_info, state.limits);
+    // A subagent's messages name the Agent tool use that started it.
+    const parent = typeof event.parent_tool_use_id === "string" && event.parent_tool_use_id ? event.parent_tool_use_id : undefined;
     if (event.type === "assistant") {
       const message = (event.message ?? {}) as { id?: unknown; model?: unknown; usage?: unknown; content?: unknown[] };
-      if (typeof message.model === "string") state.model = message.model;
+      // A subagent may run on a smaller model; the turn's model is the agent's own.
+      if (typeof message.model === "string" && !parent) state.model = message.model;
       // Each part of one model call arrives as its own event carrying the call's usage.
       if (typeof message.id === "string" && message.usage && !state.counted?.has(message.id)) {
         (state.counted ??= new Set()).add(message.id);
@@ -305,11 +315,30 @@ const claude: CliAdapter = {
       }
       const content = message.content ?? [];
       for (const part of content as Array<Record<string, unknown>>) {
-        if (part.type === "tool_use") state.progress = describeTool(String(part.name), part.input);
-        else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-          state.progress = clip(part.text);
+        if (part.type === "tool_use") {
+          const input = (part.input ?? {}) as Record<string, unknown>;
+          if (AGENT_TOOLS.has(String(part.name)) && typeof part.id === "string") {
+            const label = typeof input.subagent_type === "string" ? input.subagent_type : "Agent";
+            const purpose = typeof input.description === "string" ? input.description : "";
+            startAgent(state, part.id, label, purpose, { background: input.run_in_background === true });
+          } else step(state, describeTool(String(part.name), part.input), parent);
+        } else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+          step(state, clip(part.text), parent);
         }
       }
+    }
+    // The Agent tool's result is the subagent's answer, unless it runs in the background.
+    if (event.type === "user") {
+      const content = ((event.message ?? {}) as { content?: unknown }).content;
+      for (const part of Array.isArray(content) ? (content as Array<Record<string, unknown>>) : []) {
+        const agent = part.type === "tool_result" && typeof part.tool_use_id === "string" ? state.agents?.get(part.tool_use_id) : undefined;
+        if (agent && !agent.background) endAgent(state, part.tool_use_id as string, part.is_error !== true, resultText(part.content));
+      }
+    }
+    // A background subagent ends with a notification naming its tool use.
+    if (event.type === "system" && event.subtype === "task_notification" && typeof event.tool_use_id === "string") {
+      const summary = typeof event.summary === "string" ? event.summary : "";
+      endAgent(state, event.tool_use_id, event.status === "completed", summary);
     }
     if (event.type === "result") {
       // The run's own totals, when they say more than what was summed along the way.
@@ -1054,6 +1083,19 @@ function parseArgs(args: unknown): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** Claude Code's tool for starting a subagent ("Task" in older versions). */
+const AGENT_TOOLS = new Set(["Agent", "Task"]);
+
+/** The text of a tool result: a string, or text blocks. */
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((c) => ((c as { type?: unknown }).type === "text" ? String((c as { text?: unknown }).text ?? "") : ""))
+    .filter(Boolean)
+    .join("\n");
 }
 
 function describeTool(name: string, input: unknown): string {

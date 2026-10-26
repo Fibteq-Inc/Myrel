@@ -14,6 +14,7 @@ import {
   formatPlanUpdate,
   type PlanUpdate,
   type ProjectWorkspace,
+  type LineAgent,
   type MarkMemoryInput,
   type Message,
   type MessageStats,
@@ -227,7 +228,7 @@ const QUESTION_TIMEOUT_SEC = 120;
 /** A choice card the agent asked that waits on the coordinator: answered there, or passed on to people. */
 type PendingQuestion = { id: string; card: string; question: string };
 
-type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null };
+type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null; agent: string | null };
 
 /** Terminal lines kept per task; older ones are dropped. */
 const MAX_LOG_LINES = 2000;
@@ -295,7 +296,8 @@ export class ThreadAgent extends Agent<Env> {
       text TEXT NOT NULL,
       at INTEGER,
       ms INTEGER,
-      tool INTEGER
+      tool INTEGER,
+      agent TEXT
     )`;
     this.migrateLogTimes();
     this.sql`CREATE TABLE IF NOT EXISTS github_events (
@@ -1809,14 +1811,17 @@ export class ThreadAgent extends Agent<Env> {
     const ms = (v: number | undefined) => (v === undefined ? {} : { ms: Math.round(v) });
     for (const e of events) {
       progress = reduceTask(progress, e);
-      if (e.type === "log") lines.push({ stream: e.stream, text: e.text, at, ...ms(e.ms) });
-      else if (e.type === "tool") lines.push({ stream: "system", text: `→ ${e.title}`, at, tool: true, ...ms(e.ms) });
+      const agent = (e.type === "log" || e.type === "tool") && e.agent ? { agent: e.agent } : {};
+      if (e.type === "log") lines.push({ stream: e.stream, text: e.text, at, ...ms(e.ms), ...agent });
+      // A subagent starting or ending: its purpose or answer, shown with its state.
+      else if (e.type === "tool" && e.agent?.state) lines.push({ stream: "system", text: e.title, at, ...ms(e.ms), ...agent });
+      else if (e.type === "tool") lines.push({ stream: "system", text: `→ ${e.title}`, at, tool: true, ...ms(e.ms), ...agent });
       else if (e.type === "phase" && e.state === "failed") lines.push({ stream: "stderr", text: e.detail ?? `${e.phase} failed`, at });
       else if (e.type === "pr") lines.push({ stream: "system", text: `Pull request: ${e.url}`, at });
     }
     for (const l of lines) {
-      this.sql`INSERT INTO task_log (task_id, stream, text, at, ms, tool)
-        VALUES (${taskId}, ${l.stream}, ${l.text}, ${l.at ?? null}, ${l.ms ?? null}, ${l.tool ? 1 : null})`;
+      this.sql`INSERT INTO task_log (task_id, stream, text, at, ms, tool, agent)
+        VALUES (${taskId}, ${l.stream}, ${l.text}, ${l.at ?? null}, ${l.ms ?? null}, ${l.tool ? 1 : null}, ${l.agent ? JSON.stringify(l.agent) : null})`;
     }
     if (lines.length) {
       this.sql`DELETE FROM task_log WHERE task_id = ${taskId} AND id <= (
@@ -2231,7 +2236,7 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   private taskLog(taskId: string, limit = MAX_LOG_LINES): TerminalLine[] {
-    return this.sql<LogRow>`SELECT stream, text, at, ms, tool FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT ${limit}`
+    return this.sql<LogRow>`SELECT stream, text, at, ms, tool, agent FROM task_log WHERE task_id = ${taskId} ORDER BY id DESC LIMIT ${limit}`
       .reverse()
       .map((r) => ({
         stream: r.stream,
@@ -2239,6 +2244,7 @@ export class ThreadAgent extends Agent<Env> {
         ...(r.at !== null && { at: r.at }),
         ...(r.ms !== null && { ms: r.ms }),
         ...(r.tool && { tool: true }),
+        ...(r.agent && { agent: JSON.parse(r.agent) as LineAgent }),
       }));
   }
 
@@ -2262,12 +2268,13 @@ export class ThreadAgent extends Agent<Env> {
    * Threads that ran tasks on a person's computer before tasks were unified
    * kept them in an older `tasks` table. Moves them into the current one.
    */
-  /** Terminal lines got their time, duration and tool flag later; older threads gain the columns. */
+  /** Terminal lines got their time, duration, tool flag and subagent later; older threads gain the columns. */
   private migrateLogTimes() {
     const columns = new Set(this.sql<{ name: string }>`PRAGMA table_info(task_log)`.map((c) => c.name));
     if (!columns.has("at")) this.sql`ALTER TABLE task_log ADD COLUMN at INTEGER`;
     if (!columns.has("ms")) this.sql`ALTER TABLE task_log ADD COLUMN ms INTEGER`;
     if (!columns.has("tool")) this.sql`ALTER TABLE task_log ADD COLUMN tool INTEGER`;
+    if (!columns.has("agent")) this.sql`ALTER TABLE task_log ADD COLUMN agent TEXT`;
   }
 
   private migrateLocalTasks() {

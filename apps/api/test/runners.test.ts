@@ -901,6 +901,35 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("tags a subagent's lines in the terminal", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const { threadAgent } = await startThread(project.id, user);
+    const start = await until(() => runnerSide.frames.find((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start"), "task.start");
+    const explore = { id: "tu1", label: "Explore" };
+    runnerSide.send({ type: "task.progress", taskId: start.taskId, text: "Find the auth flow", agent: { ...explore, state: "started" } });
+    runnerSide.send({ type: "task.progress", taskId: start.taskId, text: "Grep: session", agent: explore });
+    runnerSide.send({ type: "task.progress", taskId: start.taskId, text: "", agent: { ...explore, state: "done" }, ms: 4200 });
+    runnerSide.send({ type: "task.progress", taskId: start.taskId, text: "Bash: pnpm test" });
+    await until(async () => (await threadAgent.getTasks())[0]?.log.some((l) => l.text.includes("pnpm test")), "progress");
+    const log = (await threadAgent.getTasks())[0]!.log.slice(-4);
+    expect(log.map(({ text, tool, agent, ms }) => ({ text, tool, agent, ms }))).toEqual([
+      { text: "Find the auth flow", tool: undefined, agent: { ...explore, state: "started" }, ms: undefined },
+      { text: "→ Grep: session", tool: true, agent: explore, ms: undefined },
+      { text: "", tool: undefined, agent: { ...explore, state: "done" }, ms: 4200 },
+      { text: "→ Bash: pnpm test", tool: true, agent: undefined, ms: undefined },
+    ]);
+    runnerSide.ws.close();
+  });
+
   it("continues a turn the runner's restart cut off, a bounded number of times", { timeout: 30_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

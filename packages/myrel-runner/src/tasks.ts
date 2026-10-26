@@ -236,15 +236,22 @@ export class TaskRunner {
     /** The CLI's usage so far, for the server to show under the agent's replies. */
     const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
     const flushProgress = () => {
+      // A subagent starting or ending is a line of its own, never skipped for a later step; it goes
+      // first, since the latest step comes after it.
+      for (const note of state.agentNotes?.splice(0) ?? []) {
+        this.send({ type: "task.progress", taskId: task.taskId, text: note.text, agent: note.agent, ...(note.ms !== undefined && { ms: note.ms }) });
+      }
       const u = usage();
       const usageKey = u ? JSON.stringify(u) : "";
       const textChanged = !!state.progress && state.progress !== sentProgress;
-      if (!textChanged && usageKey === sentUsage) return;
-      sentProgress = state.progress;
-      sentUsage = usageKey;
-      lastProgress = Date.now();
-      // Unchanged text goes as empty, so the server does not log the same step twice.
-      this.send({ type: "task.progress", taskId: task.taskId, text: textChanged ? state.progress! : "", ...(u && { usage: u }) });
+      if (textChanged || usageKey !== sentUsage) {
+        sentProgress = state.progress;
+        sentUsage = usageKey;
+        lastProgress = Date.now();
+        // Unchanged text goes as empty, so the server does not log the same step twice.
+        const agent = textChanged && state.progressAgent;
+        this.send({ type: "task.progress", taskId: task.taskId, text: textChanged ? state.progress! : "", ...(u && { usage: u }), ...(agent && { agent }) });
+      }
     };
 
     child.stdout!.setEncoding("utf8");
@@ -263,7 +270,7 @@ export class TaskRunner {
       }
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
-      if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage)) flushProgress();
+      if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage) || state.agentNotes?.length) flushProgress();
     });
     child.stderr!.setEncoding("utf8");
     child.stderr!.on("data", (chunk: string) => {
