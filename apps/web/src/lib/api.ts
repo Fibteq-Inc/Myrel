@@ -34,7 +34,9 @@ export const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: false } },
 });
 
-export const sessionQuery = queryOptions({ queryKey: ["session"], queryFn: () => api.getSession() });
+// Asks even when the system says it is offline (it can be wrong, and a paused query would leave the
+// app blank at start); without a connection the route's error page retries until it is back.
+export const sessionQuery = queryOptions({ queryKey: ["session"], queryFn: () => api.getSession(), networkMode: "always" });
 export const projectsQuery = queryOptions({ queryKey: ["projects"], queryFn: () => api.listProjects() });
 export const projectQuery = (id: string) =>
   queryOptions({ queryKey: ["projects", id], queryFn: () => api.getProject(id) });

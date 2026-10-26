@@ -7,6 +7,9 @@ import type { PluralMessage } from "../index";
 export const en = {
   // Shared
   "common.error": "Something went wrong",
+  "routeError.offlineTitle": "Can't reach {host}",
+  "routeError.offlineBody": "Check your connection. Myrel tries again on its own as soon as it is back.",
+  "routeError.retry": "Try again",
   "common.copy": "Copy",
   "common.copied": "Copied",
   "common.close": "Close",
@@ -592,6 +595,8 @@ export const en = {
     "Install the Myrel GitHub App on your account or organization and choose which repositories it can see.",
   "github.connect": "Connect GitHub",
   "github.signIn": "Already installed? Sign in with GitHub",
+  "github.reauthHint": "Your GitHub sign-in has expired. Sign in again in your browser, then come back here.",
+  "github.reauth": "Sign in to GitHub",
   "github.empty": "No repositories connected yet.",
   "github.private": "Private",
   "github.disconnect": "Disconnect",
