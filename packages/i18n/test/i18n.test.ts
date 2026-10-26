@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { catalogs, createTranslator, LOCALES, matchLocale, relativeTime } from "../src";
+import { catalogs, clockTime, createTranslator, dayLabel, LOCALES, localDay, matchLocale, relativeTime } from "../src";
 
 const params = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 const other = (message: string | { other: string }) => (typeof message === "string" ? message : message.other);
@@ -61,5 +61,22 @@ describe("relativeTime", () => {
     expect(relativeTime(createTranslator("en"), "en", "2026-10-19T11:55:00Z", now)).toBe("5m");
     expect(relativeTime(createTranslator("tr"), "tr", "2026-10-19T09:00:00Z", now)).toBe("3 sa");
     expect(relativeTime(createTranslator("tr"), "tr", "2026-10-19T11:59:30Z", now)).toBe("şimdi");
+  });
+});
+
+describe("dayLabel and clockTime", () => {
+  const now = new Date(2026, 9, 26, 14, 0).getTime();
+  it("names today and yesterday, then dates", () => {
+    const en = createTranslator("en");
+    expect(dayLabel(en, "en", new Date(2026, 9, 26, 0, 5).toISOString(), now)).toBe("Today");
+    expect(dayLabel(createTranslator("tr"), "tr", new Date(2026, 9, 25, 23, 50).toISOString(), now)).toBe("Dün");
+    expect(dayLabel(en, "en", new Date(2026, 9, 23, 12).toISOString(), now)).toBe("Fri, Oct 23");
+    expect(dayLabel(en, "en", new Date(2025, 9, 23, 12).toISOString(), now)).toContain("2025");
+  });
+  it("shows a 24-hour local time", () => {
+    expect(clockTime("tr", new Date(2026, 9, 26, 9, 5).toISOString())).toBe("09:05");
+  });
+  it("groups by local day", () => {
+    expect(localDay(new Date(2026, 0, 2, 23, 59).getTime())).toBe("2026-01-02");
   });
 });

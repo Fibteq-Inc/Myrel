@@ -11,10 +11,12 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react";
-import type { Translate } from "@myrel/i18n";
+import { newestFirst, taskHeadline } from "@myrel/client";
+import { clockTime, dayLabel, localDay, type Translate } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { useFormat } from "../../lib/format";
 import { duration } from "../chat/message-stats";
 import { FilesTab } from "./files";
 import { EmptyTab, type WorkspaceTab } from "./workspace-panel";
@@ -44,12 +46,28 @@ export function withTasks(tabs: WorkspaceTab[], data: TaskData, t: Translate): W
   return [...filled.slice(0, 2), files, ...filled.slice(2)];
 }
 
-/** Every task, newest last. The running one opens by itself; finished ones stay folded. */
+/**
+ * Every task, newest first under a heading for its day. The running one and, once all are done, the
+ * latest open by themselves; the rest stay folded.
+ */
 function TerminalTab({ projectId, tasks, output }: TaskData) {
+  const { t, locale } = useI18n();
+  const sorted = newestFirst(tasks);
+  const days: { day: string; tasks: Task[] }[] = [];
+  for (const task of sorted) {
+    const day = localDay(task.createdAt);
+    if (days.at(-1)?.day === day) days.at(-1)!.tasks.push(task);
+    else days.push({ day, tasks: [task] });
+  }
   return (
     <div className="flex flex-col gap-3 p-4">
-      {tasks.map((task) => (
-        <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} />
+      {days.map(({ day, tasks: dayTasks }, i) => (
+        <section key={day} className={`flex flex-col gap-3 ${i > 0 ? "mt-2" : ""}`}>
+          <h3 className="text-xs font-medium text-subtle">{dayLabel(t, locale, dayTasks[0]!.createdAt)}</h3>
+          {dayTasks.map((task) => (
+            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} latest={task.id === sorted[0]!.id} />
+          ))}
+        </section>
       ))}
     </div>
   );
@@ -92,10 +110,11 @@ function ChangesTab({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; lines: TerminalLine[] }) {
-  const t = useT();
+function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: Task; lines: TerminalLine[]; latest: boolean }) {
+  const { t, locale } = useI18n();
+  const format = useFormat();
   const running = task.status === "running";
-  const [open, setOpen] = useState(running);
+  const [open, setOpen] = useState(running || latest);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const now = useNow(running);
@@ -107,6 +126,7 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
   const total = (task.finishedAt ? Date.parse(task.finishedAt) : now) - started;
   const lastAt = lines.findLast((l) => l.at !== undefined)?.at ?? started;
   const quietMs = running ? now - lastAt : 0;
+  const headline = taskHeadline(task.summary);
 
   return (
     <div className="flex flex-col gap-2">
@@ -122,9 +142,14 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
           <SquareTerminal size={14} className="flex-none text-subtle" aria-hidden="true" />
           <span className="truncate font-medium">{task.title}</span>
           <span className="flex-none text-xs text-subtle">{task.harness}</span>
+          {headline && <span className="min-w-0 flex-1 truncate text-xs text-muted">{headline}</span>}
         </button>
-        <span className="flex-none text-xs tabular-nums text-subtle" title={t("tasks.totalTime")}>
-          {dur(Math.max(0, total))}
+        <span className="flex flex-none items-center gap-1.5 text-xs tabular-nums text-subtle">
+          <time dateTime={task.createdAt} title={t("tasks.startedAt", { time: `${format.dateTime(task.createdAt)} · ${format.relative(task.createdAt)}` })}>
+            {clockTime(locale, task.createdAt)}
+          </time>
+          <span aria-hidden="true">·</span>
+          <span title={t("tasks.totalTime")}>{dur(Math.max(0, total))}</span>
         </span>
         {task.prUrl && (
           <a

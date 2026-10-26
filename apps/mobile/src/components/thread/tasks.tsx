@@ -1,3 +1,5 @@
+import { newestFirst, taskHeadline } from "@myrel/client";
+import { clockTime, dayLabel, localDay, relativeTime } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { type Task, type TerminalLine, unwrapShell } from "@myrel/protocol";
 import {
@@ -19,14 +21,14 @@ import { makeStyles, mono, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
 import { errorMessage, Spinner } from "../ui";
 
-/** Every task the thread's agent ran, newest last. The running one opens by itself; finished ones stay folded. */
+/**
+ * Every task the thread's agent ran, newest first under a heading for its day. The running one and,
+ * once all are done, the latest open by themselves; the rest stay folded.
+ */
 export function TerminalTab({ projectId, tasks, output }: { projectId: string; tasks: Task[]; output: Record<string, TerminalLine[]> }) {
   const colors = useColors();
   const styles = useStyles();
-  const t = useT();
-  const list = useRef<ComponentRef<typeof ScrollView>>(null);
-  // Follows new output while the reader is at the bottom; scrolling up stops that.
-  const pinned = useRef(true);
+  const { t, locale } = useI18n();
   if (tasks.length === 0) {
     return (
       <Empty
@@ -36,19 +38,24 @@ export function TerminalTab({ projectId, tasks, output }: { projectId: string; t
       />
     );
   }
+  const sorted = newestFirst(tasks);
+  const days: { day: string; tasks: Task[] }[] = [];
+  for (const task of sorted) {
+    const day = localDay(task.createdAt);
+    if (days.at(-1)?.day === day) days.at(-1)!.tasks.push(task);
+    else days.push({ day, tasks: [task] });
+  }
   return (
-    <ScrollView
-      ref={list}
-      contentContainerStyle={styles.page}
-      onScroll={(e) => {
-        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-        pinned.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
-      }}
-      scrollEventThrottle={100}
-      onContentSizeChange={() => pinned.current && list.current?.scrollToEnd({ animated: false })}
-    >
-      {tasks.map((task) => (
-        <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} />
+    <ScrollView contentContainerStyle={styles.page}>
+      {days.map(({ day, tasks: dayTasks }, i) => (
+        <View key={day} style={[styles.day, i > 0 && { marginTop: 8 }]}>
+          <Text style={styles.dayLabel} accessibilityRole="header">
+            {dayLabel(t, locale, dayTasks[0]!.createdAt)}
+          </Text>
+          {dayTasks.map((task) => (
+            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} latest={task.id === sorted[0]!.id} />
+          ))}
+        </View>
       ))}
     </ScrollView>
   );
@@ -117,13 +124,13 @@ function PullRequestLink({ url }: { url: string }) {
   );
 }
 
-function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; lines: TerminalLine[] }) {
+function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: Task; lines: TerminalLine[]; latest: boolean }) {
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();
   const { api } = useSession();
   const running = task.status === "running";
-  const [open, setOpen] = useState(running);
+  const [open, setOpen] = useState(running || latest);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const now = useNow(running);
@@ -135,6 +142,8 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
   const lastAt = lines.findLast((l) => l.at !== undefined)?.at ?? started;
   const quietMs = running ? now - lastAt : 0;
   const dur = (ms: number) => formatDuration(ms, t, locale);
+  const headline = taskHeadline(task.summary);
+  const clock = clockTime(locale, task.createdAt);
 
   return (
     <View style={{ gap: 8 }}>
@@ -152,8 +161,11 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
           </Text>
           <Text style={styles.meta}>{task.harness}</Text>
         </Pressable>
-        <Text style={styles.meta} accessibilityLabel={`${t("tasks.totalTime")}: ${dur(Math.max(0, total))}`}>
-          {dur(Math.max(0, total))}
+        <Text
+          style={styles.meta}
+          accessibilityLabel={`${t("tasks.startedAt", { time: `${clock}, ${relativeTime(t, locale, task.createdAt)}` })}. ${t("tasks.totalTime")}: ${dur(Math.max(0, total))}`}
+        >
+          {clock} · {dur(Math.max(0, total))}
         </Text>
         {task.prUrl && <PullRequestLink url={task.prUrl} />}
         {running && (
@@ -179,6 +191,11 @@ function TaskRow({ projectId, task, lines }: { projectId: string; task: Task; li
           </Pressable>
         )}
       </View>
+      {headline && (
+        <Text style={styles.headline} numberOfLines={1}>
+          {headline}
+        </Text>
+      )}
       {stopError && running && <Text style={[styles.note, { color: colors.bad }]}>{stopError}</Text>}
       {open && <Terminal lines={lines} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
       {quietMs > QUIET_MS && <Text style={styles.note}>{t("tasks.quiet", { time: dur(quietMs) })}</Text>}
@@ -222,8 +239,23 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
   const styles = useStyles();
   const { t, locale } = useI18n();
   const times = stepTimes(lines, end);
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  // Follows new output while the reader is at the bottom; scrolling up stops that.
+  const pinned = useRef(true);
   return (
-    <View accessibilityLabel={t("tasks.terminalOutput")} style={styles.terminal}>
+    <ScrollView
+      ref={scroll}
+      nestedScrollEnabled
+      accessibilityLabel={t("tasks.terminalOutput")}
+      style={styles.terminal}
+      contentContainerStyle={styles.terminalBody}
+      onScroll={(e) => {
+        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+        pinned.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
+      }}
+      scrollEventThrottle={100}
+      onContentSizeChange={() => pinned.current && scroll.current?.scrollToEnd({ animated: false })}
+    >
       {lines.length === 0 && <Text style={[styles.out, { color: colors.subtle }]}>{t("tasks.waiting")}</Text>}
       {lines.map((l, i) => (
         <TerminalRow
@@ -233,7 +265,7 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
           time={times[i] === undefined ? undefined : formatDuration(times[i]!, t, locale)}
         />
       ))}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -307,13 +339,16 @@ const useStyles = makeStyles((colors) =>
     stop: { color: colors.muted, fontSize: 12 },
     note: { color: colors.muted, fontSize: 12, paddingLeft: 22 },
     terminal: {
+      maxHeight: 420,
       borderRadius: radius.sm,
       borderWidth: 1,
       borderColor: colors.line,
       backgroundColor: colors.console,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
     },
+    terminalBody: { paddingHorizontal: 10, paddingVertical: 8 },
+    day: { gap: 14 },
+    dayLabel: { color: colors.subtle, fontSize: 12, fontWeight: "500" },
+    headline: { color: colors.muted, fontSize: 12.5, paddingLeft: 22 },
     line: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
     prompt: { width: 8 },
     out: { fontFamily: mono, fontSize: 11.5, lineHeight: 18, color: colors.muted },
