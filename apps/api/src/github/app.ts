@@ -97,7 +97,7 @@ export async function appSlug(env: GithubEnv): Promise<string> {
 // --- Installation tokens ---
 
 export type RepoPermissions = Partial<
-  Record<"contents" | "pull_requests" | "issues" | "metadata" | "checks" | "statuses", "read" | "write">
+  Record<"contents" | "pull_requests" | "issues" | "metadata" | "checks" | "statuses" | "workflows", "read" | "write">
 >;
 
 type AccessToken = { token: string; expires_at: string; repositories?: GithubApiRepo[] };

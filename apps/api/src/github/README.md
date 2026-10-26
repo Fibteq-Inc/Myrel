@@ -49,6 +49,7 @@ Replace `https://myrel.example.com` with your server's public address.
 | Checks | Read-only |
 | Commit statuses | Read-only |
 | Metadata | Read-only (mandatory) |
+| Workflows | Read and write (so agents can push changes to `.github/workflows`) |
 
 **Subscribe to events:** Pull request, Pull request review, Pull request review comment,
 Issue comment, Push, Check run, Repository. Installation events are always sent.

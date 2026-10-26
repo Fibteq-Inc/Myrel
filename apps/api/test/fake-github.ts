@@ -36,6 +36,8 @@ export const fakeGithub = {
   userRepos: [7, 8],
   /** Of those, the ones they can push to; the rest they can only read. */
   userPush: [7, 8],
+  /** Whether installation 42 accepted the app's workflows permission. */
+  workflowsGranted: true,
 };
 
 const realFetch = globalThis.fetch;
@@ -67,6 +69,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (Number(tokenMatch[1]) !== 42) return new Response("{}", { status: 404 });
     const ids: number[] | undefined = body?.repository_ids;
     if (ids?.some((id) => !fakeGithub.repos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
+    if (body?.permissions?.workflows && !fakeGithub.workflowsGranted) {
+      return Response.json({ message: "The permissions requested are not granted to this installation." }, { status: 422 });
+    }
     const repositories = ids ? fakeGithub.repos.filter((r) => ids.includes(r.id)) : undefined;
     return Response.json({ token: INSTALLATION_TOKEN, expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
   }
