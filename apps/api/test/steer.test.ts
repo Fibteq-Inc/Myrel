@@ -28,17 +28,21 @@ describe("messages written while the thread's agent works", () => {
   it("reach the running turn with its next call to Myrel, and need no turn of their own", { timeout: 30_000 }, async () => {
     let wrote!: () => void;
     const written = new Promise<void>((r) => (wrote = r));
+    // Written once the reply's call returned, so that call cannot take the message in.
+    let replied!: () => void;
+    const started = new Promise<void>((r) => (replied = r));
     const results: string[] = [];
     const { projectAgent, thread, write, turns, close } = await steerSetup(async (turn, index) => {
       if (index > 0) return;
       await turn.call("reply", { text: "Başlıyorum." });
+      replied();
       await written;
       results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "active" }] })).text);
       results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "done" }] })).text);
       await turn.call("reply", { text: "Bitti." });
     });
 
-    await until(async () => (await projectAgent.getMessagesAfter(0, 500)).messages.some((m: Message) => m.body === "Başlıyorum."), "the first reply");
+    await started;
     const seenBefore = (await projectAgent.getThread(thread.id))!.seenSeq!;
     const m = await write("Entegrasyon testi de ekle");
     // Clients show it as waiting for the agent until the agent takes it in.
@@ -52,6 +56,59 @@ describe("messages written while the thread's agent works", () => {
     // Delivered once.
     expect(results[1]).not.toContain("Entegrasyon testi de ekle");
     expect((await projectAgent.getThread(thread.id))!.seenSeq).toBeGreaterThanOrEqual(m.seq);
+
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "the turn to end");
+    // Taken in already: no second turn starts just for it.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(turns).toHaveLength(1);
+    close();
+  });
+
+  it("reach the running turn when the person edits one it already took in, marked seen", { timeout: 30_000 }, async () => {
+    let wrote!: () => void;
+    const written = new Promise<void>((r) => (wrote = r));
+    // Written once the reply's call returned, so that call cannot take the message in.
+    let replied!: () => void;
+    const started = new Promise<void>((r) => (replied = r));
+    let edited!: () => void;
+    const editing = new Promise<void>((r) => (edited = r));
+    const results: string[] = [];
+    const { projectAgent, me, thread, write, turns, close } = await steerSetup(async (turn, index) => {
+      if (index > 0) return;
+      await turn.call("reply", { text: "Başlıyorum." });
+      replied();
+      await written;
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "active" }] })).text);
+      await editing;
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "active" }] })).text);
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "done" }] })).text);
+      await turn.call("reply", { text: "Bitti." });
+    });
+
+    await started;
+    const m = await write("Entegrasyon testi de ekle");
+    wrote();
+    await until(() => results.length === 1, "the message taken in");
+    expect(results[0]).toContain("Entegrasyon testi de ekle");
+
+    // The person changes it while the turn still runs.
+    const project = projectAgent as unknown as {
+      editOwnMessage(id: string, userId: string, body: string): Promise<string | null>;
+      reactionsFor(ids: string[]): Promise<{ emoji: string; authorId: string }[]>;
+    };
+    expect(await project.editOwnMessage(m.id, me, "Entegrasyon testi de ekle, Vitest ile")).toBeNull();
+    edited();
+
+    await until(() => results.length === 3, "the plan calls");
+    expect(results[1]).toContain("## A message edited in this thread while you work");
+    expect(results[1]).toContain("Entegrasyon testi de ekle, Vitest ile");
+    // Delivered once.
+    expect(results[2]).not.toContain("Vitest ile");
+    const reactions = await until(async () => {
+      const r = await project.reactionsFor([m.id]);
+      return r.length ? r : null;
+    }, "the seen reaction");
+    expect(reactions).toMatchObject([{ emoji: "👀", authorId: "thread-agent" }]);
 
     await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "the turn to end");
     // Taken in already: no second turn starts just for it.

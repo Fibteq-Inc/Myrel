@@ -5,6 +5,7 @@ import {
   type CliLimits,
   PairRunnerResult,
   RUNNER_PROTOCOL_VERSION,
+  type RunnerCli,
   type RunnerToServer,
   ServerToRunner,
 } from "@myrel/protocol";
@@ -88,6 +89,14 @@ export type StartOptions = {
   /** Called when the server says this runner no longer exists. */
   onRevoked?: () => void;
 };
+
+/** How often the runner looks for CLIs again. */
+const REDETECT_EVERY_MS = 5 * 60 * 1000;
+
+/** Whether two lists name the same CLIs at the same versions. */
+export function sameClis(a: RunnerCli[], b: RunnerCli[]): boolean {
+  return a.length === b.length && a.every((c) => b.some((d) => d.id === c.id && d.version === c.version));
+}
 
 /**
  * Keeps an outbound WebSocket to the server open (reconnecting with backoff),
@@ -222,9 +231,22 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     ).then((changed) => changed.some(Boolean) && hello());
   readModels();
   readCodex();
+  // A CLI installed (or put on PATH) while the runner runs shows up without a restart.
+  const redetect = () =>
+    void detectClis().then((next) => {
+      if (sameClis(clis, next)) return;
+      const before = new Map(clis.map((c) => [c.id, c]));
+      clis.splice(0, clis.length, ...next.map((c) => (before.get(c.id)?.version === c.version ? before.get(c.id)! : c)));
+      log(`CLIs found: ${clis.map((c) => c.id).join(", ") || "none"}`);
+      hello();
+      readModels();
+      readCodex();
+    }, () => {});
   const codexLimits = setInterval(readCodex, 10 * 60 * 1000);
   const modelLists = setInterval(readModels, 6 * 60 * 60 * 1000);
+  const cliLooks = setInterval(redetect, REDETECT_EVERY_MS);
   codexLimits.unref?.();
+  cliLooks.unref?.();
   // Removes the worktrees of threads whose work is merged (see pruneWorktrees).
   const prune = () =>
     void pruneWorktrees((w) => tasks.inUse(w))
@@ -247,6 +269,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     clearInterval(pruning);
     clearInterval(codexLimits);
     clearInterval(modelLists);
+    clearInterval(cliLooks);
     clearInterval(autoUpdating);
     clearTimeout(firstCheck);
     clearTimeout(confirmTimer);

@@ -19,7 +19,7 @@ Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code or Kimi Code.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code) or `kimi` (Kimi Code) on your `PATH`, already signed in.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code) or `kimi` (Kimi Code) on your `PATH`, already signed in. The runner looks for them again every few minutes, so one you install later shows up without a restart; on Windows it also reads the PATH saved in your user settings and the usual npm, pnpm, Scoop and winget folders. `myrel-runner status` lists the CLIs it could not find and why.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices

@@ -1,5 +1,6 @@
 import {
   type AgentConnector,
+  MAX_TASK_TEXT,
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
@@ -151,6 +152,22 @@ type TaskRow = {
  * A run's spec as stored. Runs on the person's computer name their CLI (claude, codex…) as the harness.
  * agent: the run was one turn of the thread's agent. Older runs were tasks Myrel's own loop handed out.
  */
+/** What a running turn has not seen of its person, before it is claimed (see ThreadAgent.pendingNews). */
+type PendingNews = {
+  text: string;
+  /** last_seen_seq when read, and what it becomes once taken. */
+  seen: number;
+  last: number;
+  /** Nobody else's message comes after them. */
+  whole: boolean;
+  hasNew: boolean;
+  edited: Message[];
+  /** The edits taken are every edit not yet taken (none by anyone else). */
+  allEdits: boolean;
+  /** edits_taken when read. */
+  editsTaken: string;
+  readAt: string;
+};
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean };
 
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
@@ -193,8 +210,8 @@ function saveBranch(threadId: string): string {
   return `myrel/saved/${threadId}`;
 }
 
-/** The runner protocol's limit for a task's prompt, less room for the agent's instructions. */
-const MAX_AGENT_PROMPT = 90_000;
+/** Room left under the runner protocol's prompt limit for what the runner adds (the skills folder line). */
+const PROMPT_SLACK = 1000;
 /** How long one agent turn may run. */
 const AGENT_TURN_SEC = 3600;
 /** A turn on a person's computer gets a new GitHub token this often; each lasts an hour. */
@@ -347,10 +364,11 @@ export class ThreadAgent extends Agent<Env> {
     // next turn for them, but still does for anything else.
     if (reason.kind === "message" && !reason.edited && reason.seq !== undefined) {
       this.setMeta("wake_seq", String(Math.max(reason.seq, Number(this.getMeta("wake_seq") ?? 0))));
-    } else this.setMeta("wake_other", "1");
+    } else if (reason.kind === "message" && reason.edited) this.setMeta("wake_edit", new Date().toISOString());
+    else this.setMeta("wake_other", "1");
     await this.markDirty();
     // Into the running turn right away where its CLI takes it, without holding up the sender.
-    if (reason.kind === "message" && !reason.edited && this.runningTask()) await this.queue("steerNews", null);
+    if (reason.kind === "message" && this.runningTask()) await this.queue("steerNews", null);
   }
 
   /**
@@ -461,6 +479,7 @@ export class ThreadAgent extends Agent<Env> {
     if (this.runningTask()) return;
     this.setMeta("dirty", "0");
     this.deleteMeta("wake_other");
+    this.deleteMeta("wake_edit");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) return;
@@ -512,6 +531,9 @@ export class ThreadAgent extends Agent<Env> {
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     const lastSeenAt = this.getMeta("last_seen_at") ?? undefined;
+    // Edits the last turn took in while it ran are not new to this one.
+    const editsTaken = JSON.parse(this.getMeta("edits_taken") ?? "{}") as Record<string, string>;
+    this.deleteMeta("edits_taken");
     // Only the last few runs matter; older ones are history the thread already acted on.
     const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
       SELECT * FROM (SELECT * FROM routine_runs ORDER BY id DESC LIMIT 5) ORDER BY id`;
@@ -531,7 +553,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("last_seen_at", new Date().toISOString());
     // People see that the agent took in the message they changed.
     for (const m of ctx.messages) {
-      if (m.authorKind === "user" && editedSince(m, lastSeenAt)) {
+      if (m.authorKind === "user" && editedSince(m, lastSeenAt) && editsTaken[m.id] !== m.editedAt) {
         await project.addReaction({ messageId: m.id, emoji: SEEN_EMOJI, authorKind: "agent", authorId: THREAD_AGENT_ID });
       }
     }
@@ -540,6 +562,7 @@ export class ThreadAgent extends Agent<Env> {
       brief: this.getMeta("brief") ?? "",
       lastSeenSeq,
       lastSeenAt,
+      editsTaken,
       notes,
       artifacts: await project.listArtifacts(),
       repos: await listProjectRepos(this.env.DB, projectId),
@@ -557,8 +580,8 @@ export class ThreadAgent extends Agent<Env> {
     const seen = JSON.parse(this.getMeta("agent_prompt_seen") ?? "null") as { task: string; hashes: string[] } | null;
     const unchanged = unchangedSections(seen && seen.task === this.getMeta("agent_last_task") ? seen.hashes : []);
     await this.startAgentTurn({
-      prompt: threadPrompt({ ...promptInput, ...note }),
-      followUp: { prompt: threadPrompt({ ...promptInput, followUp: true, ...note, lasting: unchanged.lasting }), unchanged },
+      prompt: (budget) => threadPrompt({ ...promptInput, ...note, budget }),
+      followUp: { prompt: (budget) => threadPrompt({ ...promptInput, followUp: true, ...note, lasting: unchanged.lasting, budget }), unchanged },
       requester,
       place,
       timezone: ctx.defaultTimezone,
@@ -584,12 +607,13 @@ export class ThreadAgent extends Agent<Env> {
    * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
    */
   private async startAgentTurn(input: {
-    prompt: string;
+    /** The thread's part of the prompt, within `budget` characters (see threadPrompt). */
+    prompt: (budget: number) => string;
     /**
      * The same, with only what is new since the last turn, for a CLI session that continues it:
-     * sections it holds unchanged from then are left out (see unchangedSections).
+     * sections it holds unchanged from then are left out (see unchangedSections). Called once.
      */
-    followUp: { prompt: string; unchanged: ReturnType<typeof unchangedSections> };
+    followUp: { prompt: (budget: number) => string; unchanged: ReturnType<typeof unchangedSections> };
     place: Exclude<TaskPlace, { kind: "error" }>;
     timezone: string;
     language: string;
@@ -622,8 +646,6 @@ export class ThreadAgent extends Agent<Env> {
             github: !!github,
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
-    // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
-    const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
     if (github) this.githubTokens.set(taskId, [github.token]);
     // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
@@ -655,7 +677,10 @@ export class ThreadAgent extends Agent<Env> {
       const connectors = await this.turnConnectors(place, input.requester);
       const infos = connectors.map((c) => ({ name: c.name, title: c.title }));
       const skills = await this.turnSkills(place, input.requester);
-      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: agentPrompt(agentPlace, context, infos, skills), timeoutSec: AGENT_TURN_SEC });
+      // A long thread leaves its oldest messages out so the whole prompt, instructions too, fits.
+      const budget = (p: AgentPlace) => MAX_TASK_TEXT - PROMPT_SLACK - agentPrompt(p, "", infos, skills).length;
+      const fullPrompt = (p: AgentPlace) => agentPrompt(p, input.prompt(budget(p)), infos, skills);
+      const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: fullPrompt(agentPlace), timeoutSec: AGENT_TURN_SEC });
       // The stored spec keeps only the start of the prompt; the runner gets all of it.
       const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
       if (place.kind === "local") {
@@ -668,13 +693,11 @@ export class ThreadAgent extends Agent<Env> {
           ),
         );
         const { unchanged } = input.followUp;
-        const short = agentPrompt(agentPlace, input.followUp.prompt, infos, skills, unchanged.lasting);
-        // A session that resumes holds this turn's sections from now on, unless the thread was cut to fit.
-        this.setMeta("agent_prompt_seen", JSON.stringify({ task: taskId, hashes: context === input.prompt ? unchanged.hashes : [] }));
-        const resume =
-          previousTask && input.followUp.prompt.length <= MAX_AGENT_PROMPT
-            ? { after: previousTask, prompt: unchanged.left() ? `${UNCHANGED_NOTE}\n\n${short}` : short }
-            : undefined;
+        // Budgeted as if the instructions were sent again, which they are when they changed.
+        const short = agentPrompt(agentPlace, input.followUp.prompt(budget(agentPlace) - UNCHANGED_NOTE.length - 2), infos, skills, unchanged.lasting);
+        // A session that resumes holds this turn's sections from now on: fitting leaves out only messages and notes.
+        this.setMeta("agent_prompt_seen", JSON.stringify({ task: taskId, hashes: unchanged.hashes }));
+        const resume = previousTask ? { after: previousTask, prompt: unchanged.left() ? `${UNCHANGED_NOTE}\n\n${short}` : short } : undefined;
         const agent = {
           mcpPath,
           token,
@@ -710,12 +733,7 @@ export class ThreadAgent extends Agent<Env> {
         const harness = cloudHarness(picked.success ? picked.data : await projectCloudCli(this.env, projectId), model.model);
         spec.harness = harness.id;
         spec.title = harness.title;
-        spec.prompt = agentPrompt(
-          { kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId), harness: harness.id },
-          context,
-          infos,
-          skills,
-        );
+        spec.prompt = fullPrompt({ kind: "cloud", images: model.model.images ?? false, saveBranch: saveBranch(threadId), harness: harness.id });
         spec.saveRepos = { dir: SANDBOX_REPOS, branch: saveBranch(threadId) };
         if (skills.length) spec.skills = { url: `${origin}${mcpPath}/skills` };
         const secrets: Record<string, string> = { MYREL_MODEL_API_KEY: token, MYREL_MCP_TOKEN: token };
@@ -1562,23 +1580,23 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
-   * People's messages the running turn has not seen, as a note to add to a tool's result, and from
-   * then on seen. Only the messages of the person the turn works for: anyone else's ask may need
-   * another person's computer or connectors, so it waits for a turn of its own (or Interrupt).
+   * People's messages the running turn has not seen, and their earlier messages they edited since it
+   * started, as a note to add to a tool's result, and from then on seen. Only the messages of the
+   * person the turn works for: anyone else's ask may need another person's computer or connectors,
+   * so it waits for a turn of its own (or Interrupt).
    */
   private async takeNews(): Promise<string | null> {
     const news = await this.pendingNews();
     if (!news || !this.claimNews(news)) return null;
-    const { projectId, threadId } = this.ids();
-    await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).updateThread(threadId, { seenSeq: news.last });
+    await this.newsDelivered(news);
     return news.text;
   }
 
   /**
-   * Queue callback after a person wrote while a turn runs on a computer: their messages (as takeNews
-   * takes them) go to the CLI at once when it takes them mid-turn (Codex's app server, runner feature
-   * "steer"), instead of with the agent's next call to Myrel. Claimed first, so a tool call meanwhile
-   * cannot deliver them twice; given back when the CLI did not take them.
+   * Queue callback after a person wrote or edited a message while a turn runs on a computer: what
+   * takeNews would take goes to the CLI at once when it takes input mid-turn (Codex's app server,
+   * runner feature "steer"), instead of with the agent's next call to Myrel. Claimed first, so a tool
+   * call meanwhile cannot deliver it twice; given back when the CLI did not take it.
    */
   async steerNews(): Promise<void> {
     const row = this.runningTask();
@@ -1587,46 +1605,83 @@ export class ThreadAgent extends Agent<Env> {
     if (!row || !spec?.runnerId || !spec.agent || spec.harness !== "codex") return;
     if (!(await runnerHasFeature(this.env, spec.runnerId, "steer"))) return;
     const news = await this.pendingNews();
-    const dirty = this.getMeta("dirty");
-    if (!news || !this.claimNews(news)) return;
+    if (!news) return;
+    const before = { dirty: this.getMeta("dirty"), wakeEdit: this.getMeta("wake_edit") };
+    if (!this.claimNews(news)) return;
+    const claimed = this.getMeta("edits_taken") ?? "{}";
     const runner = await getAgentByName(this.env.RUNNER_AGENT, spec.runnerId);
     const taken = await runner.steerTask(row.id, news.text).catch((err) => (console.warn("steering the running turn failed", err), false));
-    if (taken) {
-      const { projectId, threadId } = this.ids();
-      await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).updateThread(threadId, { seenSeq: news.last });
-      return;
-    }
+    if (taken) return this.newsDelivered(news);
     // Not taken: they wait for the agent's next call to Myrel (or the next turn), as before.
-    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.last) return;
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.last || (this.getMeta("edits_taken") ?? "{}") !== claimed) return;
     this.setMeta("last_seen_seq", String(news.seen));
-    if (dirty !== null) this.setMeta("dirty", dirty);
+    this.setMeta("edits_taken", news.editsTaken);
+    if (before.wakeEdit !== null) this.setMeta("wake_edit", before.wakeEdit);
+    if (before.dirty !== null) this.setMeta("dirty", before.dirty);
   }
 
   /**
-   * People's messages the running turn has not seen, up to the first one from someone other than the
-   * person the turn works for, as the note to give the agent. Not yet claimed (claimNews).
+   * What the running turn has not seen of its person: new messages up to the first one from someone
+   * else, and their messages edited since, as the note to give the agent. Not yet claimed (claimNews).
    */
-  private async pendingNews(): Promise<{ text: string; seen: number; last: number; whole: boolean } | null> {
+  private async pendingNews(): Promise<PendingNews | null> {
     const requester = this.getMeta("requester");
     if (!requester || !this.runningTask()) return null;
     const seen = Number(this.getMeta("last_seen_seq") ?? 0);
+    const editsTaken = this.getMeta("edits_taken") ?? "{}";
+    const taken0 = JSON.parse(editsTaken) as Record<string, string>;
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const { messages, names } = await project.threadMessagesAfter(threadId, seen);
+    const readAt = new Date().toISOString();
+    const read = await project.threadMessagesAfter(threadId, seen, this.getMeta("last_seen_at") ?? undefined);
+    const { messages, names } = read;
     const other = messages.findIndex((m) => m.authorKind === "user" && m.authorId !== requester);
     const taken = other === -1 ? messages : messages.slice(0, other);
     const news = taken.filter((m) => m.authorKind === "user");
-    if (!news.length) return null;
-    return { text: newsNote(news, names), seen, last: taken.at(-1)!.seq, whole: other === -1 };
+    const edits = read.edited.filter((m) => m.authorKind === "user" && taken0[m.id] !== m.editedAt);
+    const edited = edits.filter((m) => m.authorId === requester);
+    if (!news.length && !edited.length) return null;
+    return {
+      text: newsNote(news, names, edited),
+      seen,
+      last: news.length ? taken.at(-1)!.seq : seen,
+      whole: other === -1,
+      hasNew: news.length > 0,
+      edited,
+      allEdits: edited.length === edits.length,
+      editsTaken,
+      readAt,
+    };
   }
 
   /** Marks pending news seen; false when another call took them meanwhile. */
-  private claimNews(news: { seen: number; last: number; whole: boolean }): boolean {
-    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.seen) return false;
+  private claimNews(news: PendingNews): boolean {
+    // Read again: another call may have taken them meanwhile.
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.seen || (this.getMeta("edits_taken") ?? "{}") !== news.editsTaken) return false;
     this.setMeta("last_seen_seq", String(news.last));
+    if (news.edited.length) {
+      const editsTaken = JSON.parse(news.editsTaken) as Record<string, string>;
+      for (const m of news.edited) editsTaken[m.id] = m.editedAt!;
+      this.setMeta("edits_taken", JSON.stringify(editsTaken));
+      // Every edit the wake was for is taken in (none by anyone else waits): no turn after this one for it.
+      const wakeEdit = this.getMeta("wake_edit");
+      if (wakeEdit && wakeEdit <= news.readAt && news.allEdits) this.deleteMeta("wake_edit");
+    }
     // Taken in whole, with nothing else waiting: no turn after this one just for them.
-    if (news.whole && !this.getMeta("wake_other") && Number(this.getMeta("wake_seq") ?? 0) <= news.last) this.setMeta("dirty", "0");
+    if (news.whole && !this.getMeta("wake_other") && !this.getMeta("wake_edit") && Number(this.getMeta("wake_seq") ?? 0) <= news.last) {
+      this.setMeta("dirty", "0");
+    }
     return true;
+  }
+
+  /** People see claimed news as taken in: new messages as seen, edited ones with the agent's 👀. */
+  private async newsDelivered(news: PendingNews): Promise<void> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    if (news.hasNew) await project.updateThread(threadId, { seenSeq: news.last });
+    for (const m of news.edited) {
+      await project.addReaction({ messageId: m.id, emoji: SEEN_EMOJI, authorKind: "agent", authorId: THREAD_AGENT_ID });
+    }
   }
 
   /**

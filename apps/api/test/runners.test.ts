@@ -1,5 +1,5 @@
 import type { Project, ProjectSettings, ProjectWorkspace, Runner, ServerToRunner } from "@myrel/protocol";
-import { RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
+import { MAX_TASK_TEXT, RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -444,6 +444,10 @@ describe("local workspace", () => {
       costMicros: null,
     });
 
+    // Long messages make the thread outgrow the runner's prompt limit: the oldest ones are left out.
+    for (let i = 0; i < 4; i++) {
+      await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: `uzun ${i} ${"x".repeat(30_000)}` });
+    }
     // A message during the turn waits for it instead of starting a second agent.
     const followUp = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: "kısa tut" });
     await threadAgent.wake({ kind: "message", messageId: followUp.id });
@@ -475,6 +479,11 @@ describe("local workspace", () => {
     expect(short).toContain("Current time:");
     expect(short).not.toContain("You are Myrel");
     expect(short).not.toContain("## Brief from the coordinator");
+    for (const prompt of [next.prompt, short]) {
+      expect(prompt.length).toBeLessThanOrEqual(MAX_TASK_TEXT);
+      expect(prompt).toMatch(/The \d+ oldest messages are left out/);
+      expect(prompt).not.toContain("uzun 0 ");
+    }
     // It replied itself, so its final message is not posted again.
     expect((await bodies()).filter((b) => b === "Summary posted.")).toHaveLength(0);
 

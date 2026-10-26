@@ -7,6 +7,7 @@ import { PullRequestMeta, usePullRequestState } from "../chat/pull-request-card"
 import { api } from "../../lib/api";
 import { CodeTokens, lineClass, useCodeLines } from "../../lib/highlight";
 import { cn } from "../../lib/ui";
+import { MergeButton } from "./merge-button";
 
 /**
  * The thread's pull requests and what each changes. On a wide panel the list
@@ -119,6 +120,7 @@ function PullRequestDetail({
           {t("pr.openOnGithub")}
           <ExternalLink size={12} aria-hidden="true" />
         </a>
+        <MergeButton projectId={projectId} threadId={threadId} pr={pr} />
       </div>
       {isPending ? (
         <p className="flex items-center gap-2 text-[13px] text-subtle">

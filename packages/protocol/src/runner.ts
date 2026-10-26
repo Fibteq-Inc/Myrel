@@ -230,7 +230,8 @@ export const RunnerInfo = z.object({
 });
 export type RunnerInfo = z.infer<typeof RunnerInfo>;
 
-const MAX_TASK_TEXT = 100_000;
+/** Longest prompt (and result) a task carries; the server fits an agent's prompt within it. */
+export const MAX_TASK_TEXT = 100_000;
 
 /** Ties a runner's answer to the server's request. */
 export const RunnerRequestId = z.string().min(1).max(64);
