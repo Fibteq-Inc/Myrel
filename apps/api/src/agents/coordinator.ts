@@ -1,5 +1,6 @@
 import {
   CLI_NAMES,
+  CLOUD_RUNNER,
   type CliId,
   type Message,
   type MessageRelay,
@@ -7,6 +8,7 @@ import {
   type RunnerCli,
   type Thread,
   type ThreadCli,
+  type ThreadRunner,
   ThreadCloseReason,
   threadLink,
 } from "@myrel/protocol";
@@ -65,6 +67,8 @@ export type CoordinatorHost = {
     projectAck?: string;
     /** The CLI it runs with on the person's computer; absent: the project folder's. */
     cli?: ThreadCli;
+    /** Where it works from its first turn (the cloud); absent: where the project's settings say. */
+    runner?: ThreadRunner;
   }): Promise<Thread>;
   /** A recent thread the same person opened with the same ask, if this message repeats one. */
   findDuplicate(messageId: string): Thread | null;
@@ -104,6 +108,8 @@ For each new message in the project chat:
 Emoji: a reaction is a full answer when words would add nothing. Pick it by the situation: 👀 seen (an edit, an FYI), 👍 ok or agreed, 🙏 thanks, ✅ confirms something is done, 🎉 good news. One reaction per message is enough.
 
 Picking a CLI: a person can offer CLIs from their computer with their ask, shown under the message. When it offers several, start_thread needs cli (one of them) and cli_reason: one short sentence in the person's language saying why, which people see in the thread. Pick the one that suits the work and can work right now: skip a CLI whose limits are used up or nearly so (see "The computer's CLIs"), and otherwise prefer the first one offered. With one CLI offered, or none, leave cli out.
+
+Working in the cloud: a thread works on the asking person's computer when the project has a folder there and it is online, else in the cloud. Pass cloud: true to start_thread, with cloud_reason (one short sentence in the person's language, which people see in the thread), only when the person asks for the cloud or the work cannot be done on their computer (a thread there already failed for lack of something only the cloud has). Otherwise leave it out: on the computer the CLI keeps its session and the person's own logins. A cloud thread ignores the CLIs offered from the computer and runs with the project's cloud CLI.
 
 Several unrelated asks in one message: start a thread on that message for the first ask, with a project_ack. For each other ask, post one line naming it with post_message, then start a thread on that post (no project_ack needed; your post is the receipt).
 
@@ -344,8 +350,14 @@ export function coordinatorTools(
           .max(300)
           .optional()
           .describe("With cli: one short sentence in the person's language on why this CLI, shown in the thread."),
+        cloud: z.boolean().optional().describe("Only when the work has to run in the cloud, not on the person's computer (see Working in the cloud)."),
+        cloud_reason: z
+          .string()
+          .max(300)
+          .optional()
+          .describe("With cloud: one short sentence in the person's language on why the cloud, shown in the thread."),
       }),
-      run: async ({ message_id, title, instructions, ack, project_ack, allow_duplicate, cli, cli_reason }) => {
+      run: async ({ message_id, title, instructions, ack, project_ack, allow_duplicate, cli, cli_reason, cloud, cloud_reason }) => {
         const root = host.getMessage(message_id);
         if (!root || root.threadId) throw new Error(`${message_id} is not a project-chat message.`);
         const existing = host.threadForRoot(message_id);
@@ -361,7 +373,10 @@ export function coordinatorTools(
         if (root.authorKind === "user" && !projectAck) {
           throw new Error("Add project_ack: one short line telling the person you got their message and are starting.");
         }
-        const threadCli = pickCli(root.clis ?? [], cli, cli_reason);
+        const why = cloud_reason?.trim();
+        if (cloud && !why) throw new Error("Add cloud_reason: one short sentence, in the person's language, on why this thread works in the cloud.");
+        // The CLIs offered come from the person's computer; a cloud thread runs with the project's cloud CLI.
+        const threadCli = cloud ? null : pickCli(root.clis ?? [], cli, cli_reason);
         const thread = await host.startThread({
           rootMessageId: message_id,
           title,
@@ -369,6 +384,7 @@ export function coordinatorTools(
           ack,
           projectAck,
           ...(threadCli && { cli: threadCli }),
+          ...(cloud && { runner: { id: CLOUD_RUNNER, by: "coordinator" as const, reason: why! } }),
         });
         return `Started thread ${thread.id}.`;
       },

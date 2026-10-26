@@ -34,7 +34,8 @@ A project can have a folder on more than one of your computers, for example your
 
 Which computer a thread works on:
 
-- **Picked for the thread**: when the project is on more than one of your computers, the thread's message box shows **This thread works on**. The thread waits for that computer, even when it is offline.
+- **Picked for the thread**: when the project is on one of your computers, the thread's message box shows **This thread works on**. A computer picked there makes the thread wait for it, even when it is offline.
+- **Cloud**: **This thread works on** also offers **Cloud**. Any member of the project can pick it, and from its next turn the thread works in the cloud, whoever writes in it. It starts there without the computer's CLI session and unfinished changes, on its own branch. Myrel can also open a thread in the cloud from the start when you ask for that, and says why at the top of the thread.
 - **Where it started**: after its first turn, a thread stays on that computer, because its CLI session and unfinished changes are there.
 - **Otherwise the default**: a new thread goes to the project's default computer. If that one is offline, another of your computers in the project that is online and has the thread's CLI takes over.
 
