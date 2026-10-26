@@ -350,7 +350,8 @@ export class ThreadAgent extends Agent<Env> {
     // next turn for them, but still does for anything else.
     if (reason.kind === "message" && !reason.edited && reason.seq !== undefined) {
       this.setMeta("wake_seq", String(Math.max(reason.seq, Number(this.getMeta("wake_seq") ?? 0))));
-    } else this.setMeta("wake_other", "1");
+    } else if (reason.kind === "message" && reason.edited) this.setMeta("wake_edit", new Date().toISOString());
+    else this.setMeta("wake_other", "1");
     await this.markDirty();
   }
 
@@ -462,6 +463,7 @@ export class ThreadAgent extends Agent<Env> {
     if (this.runningTask()) return;
     this.setMeta("dirty", "0");
     this.deleteMeta("wake_other");
+    this.deleteMeta("wake_edit");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) return;
@@ -514,6 +516,9 @@ export class ThreadAgent extends Agent<Env> {
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
     const lastSeenSeq = Number(this.getMeta("last_seen_seq") ?? 0);
     const lastSeenAt = this.getMeta("last_seen_at") ?? undefined;
+    // Edits the last turn took in while it ran are not new to this one.
+    const editsTaken = JSON.parse(this.getMeta("edits_taken") ?? "{}") as Record<string, string>;
+    this.deleteMeta("edits_taken");
     // Only the last few runs matter; older ones are history the thread already acted on.
     const runRows = this.sql<NoteRow & { name: string; prompt: string }>`
       SELECT * FROM (SELECT * FROM routine_runs ORDER BY id DESC LIMIT 5) ORDER BY id`;
@@ -533,7 +538,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("last_seen_at", new Date().toISOString());
     // People see that the agent took in the message they changed.
     for (const m of ctx.messages) {
-      if (m.authorKind === "user" && editedSince(m, lastSeenAt)) {
+      if (m.authorKind === "user" && editedSince(m, lastSeenAt) && editsTaken[m.id] !== m.editedAt) {
         await project.addReaction({ messageId: m.id, emoji: SEEN_EMOJI, authorKind: "agent", authorId: THREAD_AGENT_ID });
       }
     }
@@ -542,6 +547,7 @@ export class ThreadAgent extends Agent<Env> {
       brief: this.getMeta("brief") ?? "",
       lastSeenSeq,
       lastSeenAt,
+      editsTaken,
       notes,
       artifacts: await project.listArtifacts(),
       repos: await listProjectRepos(this.env.DB, projectId),
@@ -1602,29 +1608,52 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
-   * People's messages the running turn has not seen, as a note to add to a tool's result, and from
-   * then on seen. Only the messages of the person the turn works for: anyone else's ask may need
-   * another person's computer or connectors, so it waits for a turn of its own (or Interrupt).
+   * People's messages the running turn has not seen, and their earlier messages they edited since it
+   * started, as a note to add to a tool's result, and from then on seen. Only the messages of the
+   * person the turn works for: anyone else's ask may need another person's computer or connectors,
+   * so it waits for a turn of its own (or Interrupt).
    */
   private async takeNews(): Promise<string | null> {
     const requester = this.getMeta("requester");
     if (!requester || !this.runningTask()) return null;
     const seen = Number(this.getMeta("last_seen_seq") ?? 0);
+    const editsTaken = JSON.parse(this.getMeta("edits_taken") ?? "{}") as Record<string, string>;
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const { messages, names } = await project.threadMessagesAfter(threadId, seen);
+    const readAt = new Date().toISOString();
+    const read = await project.threadMessagesAfter(threadId, seen, this.getMeta("last_seen_at") ?? undefined);
+    const { messages, names } = read;
     const other = messages.findIndex((m) => m.authorKind === "user" && m.authorId !== requester);
     const taken = other === -1 ? messages : messages.slice(0, other);
     const news = taken.filter((m) => m.authorKind === "user");
-    if (!news.length) return null;
-    const last = taken.at(-1)!.seq;
+    const edits = read.edited.filter((m) => m.authorKind === "user" && editsTaken[m.id] !== m.editedAt);
+    const edited = edits.filter((m) => m.authorId === requester);
+    if (!news.length && !edited.length) return null;
+    const last = news.length ? taken.at(-1)!.seq : seen;
     // Read again: another call may have taken them meanwhile.
-    if (Number(this.getMeta("last_seen_seq") ?? 0) !== seen) return null;
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== seen || (this.getMeta("edits_taken") ?? "{}") !== JSON.stringify(editsTaken)) return null;
     this.setMeta("last_seen_seq", String(last));
+    if (edited.length) {
+      for (const m of edited) editsTaken[m.id] = m.editedAt!;
+      this.setMeta("edits_taken", JSON.stringify(editsTaken));
+      // Every edit the wake was for is taken in (none by anyone else waits): no turn after this one for it.
+      const wakeEdit = this.getMeta("wake_edit");
+      if (wakeEdit && wakeEdit <= readAt && edited.length === edits.length) this.deleteMeta("wake_edit");
+    }
     // Taken in whole, with nothing else waiting: no turn after this one just for them.
-    if (other === -1 && !this.getMeta("wake_other") && Number(this.getMeta("wake_seq") ?? 0) <= last) this.setMeta("dirty", "0");
-    await project.updateThread(threadId, { seenSeq: last });
-    return newsNote(news, names);
+    if (
+      other === -1 &&
+      !this.getMeta("wake_other") &&
+      !this.getMeta("wake_edit") &&
+      Number(this.getMeta("wake_seq") ?? 0) <= last
+    )
+      this.setMeta("dirty", "0");
+    if (news.length) await project.updateThread(threadId, { seenSeq: last });
+    // People see that the agent took in the message they changed.
+    for (const m of edited) {
+      await project.addReaction({ messageId: m.id, emoji: SEEN_EMOJI, authorKind: "agent", authorId: THREAD_AGENT_ID });
+    }
+    return newsNote(news, names, edited);
   }
 
   /**
