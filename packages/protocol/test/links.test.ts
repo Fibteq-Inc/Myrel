@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type FileRefContext, resolveFileCode, resolveFileHref, threadIdFromHref, threadLink } from "../src/links";
+import { type FileRefContext, resolveFileCode, resolveFileHref, splitFilePaths, threadIdFromHref, threadLink } from "../src/links";
 
 describe("thread links", () => {
   const id = "thr_01JAAAAAAAAAAAAAAAAAAAAAAA";
@@ -51,5 +51,28 @@ describe("file references", () => {
     for (const href of [undefined, "https://example.com/a.md", "#thr_01JAAAAAAAAAAAAAAAAAAAAAAA", "mailto:a@b.co", "/projects/x"]) {
       expect(resolveFileHref(href, mine)).toBeNull();
     }
+  });
+});
+
+describe("file paths in plain text", () => {
+  const files = new Set(["yemvit-ihracat-sevkiyat/form-duzeni-1023-sonuc.json", "rapor.md"]);
+
+  it("cuts out project file paths written without a link", () => {
+    expect(splitFilePaths("Kanıt: yemvit-ihracat-sevkiyat/form-duzeni-1023-sonuc.json", files)).toEqual([
+      "Kanıt: ",
+      { text: "yemvit-ihracat-sevkiyat/form-duzeni-1023-sonuc.json", path: "yemvit-ihracat-sevkiyat/form-duzeni-1023-sonuc.json" },
+    ]);
+    expect(splitFilePaths("Bkz. rapor.md'yi ve ./rapor.md.", files)).toEqual([
+      "Bkz. ",
+      { text: "rapor.md", path: "rapor.md" },
+      "'yi ve ",
+      { text: "./rapor.md", path: "rapor.md" },
+      ".",
+    ]);
+  });
+
+  it("leaves other text alone", () => {
+    expect(splitFilePaths("diger/sonuc.json ve example.com", files)).toEqual(["diger/sonuc.json ve example.com"]);
+    expect(splitFilePaths("rapor.md", new Set())).toEqual(["rapor.md"]);
   });
 });

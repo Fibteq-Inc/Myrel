@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import { mayBeFileName, resolveFileCode } from "@myrel/protocol";
+import { mayBeFileName, resolveFileCode, splitFilePaths } from "@myrel/protocol";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
@@ -36,6 +36,8 @@ class MyrelRenderer extends Renderer {
   constructor(
     private readonly decision: DecisionHandlers | undefined,
     private readonly onLink: (href: string) => void,
+    private readonly projectFiles: ReadonlySet<string>,
+    private readonly linkStyle: TextStyle | undefined,
   ) {
     super({ selectable: true });
   }
@@ -46,6 +48,17 @@ class MyrelRenderer extends Renderer {
       if (decision) return <DecisionCard key={this.getKey()} decision={decision} {...this.decision} />;
     }
     return <CodeBlock key={this.getKey()} text={text} language={language} containerStyle={containerStyle} textStyle={textStyle} />;
+  }
+
+  // Project file paths written as plain text open the file too: agents do not always link them.
+  override text(text: string | ReactNode[], styles?: TextStyle): ReactNode {
+    if (typeof text !== "string") return super.text(text, styles);
+    const parts = splitFilePaths(text, this.projectFiles);
+    if (parts.length === 1 && typeof parts[0] === "string") return super.text(text, styles);
+    return super.text(
+      parts.map((part) => (typeof part === "string" ? part : this.link(part.text, part.path, { ...styles, ...this.linkStyle }))),
+      styles,
+    );
   }
 
   override codespan(text: string, styles?: TextStyle): ReactNode {
@@ -155,13 +168,14 @@ export function MessageMarkdown({
 }) {
   const theme = useTheme();
   const markedStyles = useMarkedStyles();
+  const { projectFiles } = useFileRefContext();
   const hasDecision = decision !== undefined;
   const answer = decision?.answer;
   const onChoose = decision?.onChoose;
   // Rebuilding the renderer re-parses the message, so only do it when what it draws changes.
   const renderer = useMemo(
-    () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink),
-    [hasDecision, answer, onChoose, onLink],
+    () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink, projectFiles, markedStyles.link),
+    [hasDecision, answer, onChoose, onLink, projectFiles, markedStyles.link],
   );
   const elements = useMarkdown(body, { colorScheme: theme, renderer, tokenizer, styles: markedStyles });
   return <View>{elements}</View>;

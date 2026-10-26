@@ -88,3 +88,33 @@ function resolve(ref: string, ctx: FileRefContext, local: boolean): FileRef | nu
   if (!local || !ctx.workspace) return null;
   return { kind: ctx.workspace === "mine" ? "local" : "elsewhere", path };
 }
+
+/**
+ * Plain text cut around the project files' paths it names, so a path an agent wrote without a link
+ * or code (`Kanıt: notes/sonuc.json`) still opens the file. Only exact project file paths count;
+ * punctuation and a Turkish suffix after one (`rapor.md'yi`, `sonuc.json.`) stay text.
+ */
+export function splitFilePaths(text: string, projectFiles: ReadonlySet<string>): Array<string | { text: string; path: string }> {
+  if (projectFiles.size === 0 || !text.includes(".")) return [text];
+  const parts: Array<string | { text: string; path: string }> = [];
+  let last = 0;
+  for (const match of text.matchAll(/[^\s"'`<>()[\]{}|*]+/g)) {
+    const word = trimEndPunctuation(match[0]);
+    if (!mayBeFileName(word)) continue;
+    const path = normalizeFilePath(word);
+    if (!projectFiles.has(path)) continue;
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    parts.push({ text: word, path });
+    last = match.index + word.length;
+  }
+  if (last === 0) return [text];
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+/** The word without the punctuation after it, by hand: a `[…]+$` regex is slow on a long run of it. */
+function trimEndPunctuation(word: string): string {
+  let end = word.length;
+  while (end > 0 && ".,;:!?…".includes(word[end - 1]!)) end--;
+  return word.slice(0, end);
+}
