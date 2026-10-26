@@ -2,11 +2,12 @@ import { useT } from "@myrel/i18n/react";
 import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import { ArrowDown } from "lucide-react-native";
 import { type ComponentRef, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
+import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
 import { makeStyles, useColors } from "../theme";
+import { ChatSkeleton } from "./chat-skeleton";
 import { PlanCard, PlanUpdateNote } from "./checklist";
 import { Composer, type ComposerHandle } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
@@ -39,7 +40,7 @@ export function Conversation({
   composer,
 }: {
   messages: Message[];
-  /** The first sync is still running: a spinner instead of messages, so the list opens at its newest one. */
+  /** The first sync is still running: a placeholder instead of messages, so the list opens at its newest one. */
   loading?: boolean;
   me: string;
   names: Names;
@@ -137,8 +138,8 @@ export function Conversation({
             ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
             ListEmptyComponent={
               loading ? (
-                <View style={styles.empty}>
-                  <ActivityIndicator color={colors.subtle} accessibilityLabel={t("chat.loading")} />
+                <View style={styles.loading}>
+                  <ChatSkeleton />
                 </View>
               ) : empty ? (
                 <View style={styles.empty}>{empty}</View>
@@ -218,5 +219,7 @@ const useStyles = makeStyles((colors) =>
       justifyContent: "center",
     },
     empty: { flex: 1, alignItems: "center", justifyContent: "center", transform: [{ scaleY: -1 }] },
+    // Flipped back like the empty state; the placeholder sits where the newest messages will.
+    loading: { flex: 1, justifyContent: "flex-end", transform: [{ scaleY: -1 }] },
   }),
 );

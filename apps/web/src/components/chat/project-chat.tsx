@@ -1,7 +1,7 @@
 import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { type CliId, decisionPicks, type Message } from "@myrel/protocol";
-import { LoaderCircle, MessagesSquare } from "lucide-react";
+import { MessagesSquare } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -12,6 +12,7 @@ import { Composer, type ComposerHandle } from "./composer";
 import { EarlierMessages, useHistoryWindow } from "./history";
 import { decisionAnswers, MessageView, Thinking } from "./message";
 import { ScrollToEnd } from "./scroll-to-end";
+import { ChatSkeleton } from "./skeleton";
 import { StarterExamples, StarterList } from "./starter";
 import { ThreadCard } from "./thread-card";
 
@@ -50,7 +51,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
         mine={last?.authorKind === "user" && last.authorId === me}
         className="flex-1 overflow-y-auto"
       >
-        <div className="mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6">
+        {/* While loading, the placeholder sits at the bottom, where the newest messages will. */}
+        <div className={cn("mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 py-7 sm:px-6", !ready && "min-h-full justify-end")}>
           {!asked &&
             (ready ? (
               <EmptyChat>
@@ -58,7 +60,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 <StarterList project={project} asked={false} />
               </EmptyChat>
             ) : (
-              <LoadingChat />
+              <ChatSkeleton />
             ))}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
@@ -102,15 +104,6 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           handle={composer}
         />
       </div>
-    </div>
-  );
-}
-
-function LoadingChat() {
-  const t = useT();
-  return (
-    <div className="flex justify-center py-20 text-subtle">
-      <LoaderCircle size={20} className="animate-spin" aria-label={t("chat.loading")} />
     </div>
   );
 }
