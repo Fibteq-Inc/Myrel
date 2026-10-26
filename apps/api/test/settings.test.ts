@@ -4,6 +4,7 @@ import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { decryptSecret, encryptSecret } from "../src/crypto";
 import { projectProvider } from "../src/keys";
+import { emails } from "./fake-llm";
 
 const BASE = "http://myrel.test";
 // Secrets are injected by vitest.config.ts, so the generated binding types do not list them.
@@ -229,6 +230,47 @@ describe("members and invites", () => {
     // Even if it were still attached, a former member's key is not used.
     await env.DB.prepare("UPDATE projects SET llm_key_id = ? WHERE id = ?").bind(bobKey.id, project.id).run();
     expect(await projectProvider(env, project.id)).toMatchObject({ ok: false });
+  });
+});
+
+describe("invitation emails", () => {
+  it("emails the invitee a link, and says so when the email cannot go out", async () => {
+    const alice = await signUp(undefined, "Alice");
+    const bob = await signUp(undefined, "Bob");
+    const project = await createProject(alice.token);
+    const base = `/api/projects/${project.id}`;
+    const to = (address: string) => emails.filter((m) => m.to === address);
+
+    // Someone with an account is sent to their invitations.
+    await json(api(`${base}/invites`, { method: "POST", token: alice.token, body: { email: bob.email } }), 201);
+    expect(to(bob.email)).toHaveLength(1);
+    expect(to(bob.email)[0]).toMatchObject({ subject: "Alice invited you to P on Myrel" });
+    expect(to(bob.email)[0]!.text).toContain(`${BASE}/settings/invites`);
+
+    // Someone without one is sent to sign up.
+    const carol = `c${crypto.randomUUID()}@example.com`;
+    await json(api(`${base}/invites`, { method: "POST", token: alice.token, body: { email: carol } }), 201);
+    expect(to(carol)[0]!.text).toContain(`${BASE}/login?signup`);
+
+    // A failed send is reported with its cause; the invitation stays.
+    const proto = Object.getPrototypeOf(env.EMAIL) as { send: SendEmail["send"] };
+    const send = proto.send;
+    proto.send = async () => {
+      throw Object.assign(new Error("sender not verified"), { code: "E_SENDER_NOT_VERIFIED" });
+    };
+    const dave = `d${crypto.randomUUID()}@example.com`;
+    try {
+      const failed = await json<{ error: string; message: string }>(
+        api(`${base}/invites`, { method: "POST", token: alice.token, body: { email: dave } }),
+        502,
+      );
+      expect(failed.error).toBe("invite_email_failed");
+      expect(failed.message).toContain("E_SENDER_NOT_VERIFIED");
+    } finally {
+      proto.send = send;
+    }
+    const pending = await json<{ invites: Invite[] }>(api(`${base}/invites`, { token: alice.token }));
+    expect(pending.invites.map((i) => i.email)).toContain(dave);
   });
 });
 

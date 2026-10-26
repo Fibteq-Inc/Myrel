@@ -571,6 +571,8 @@ function Invites({ projectId }: { projectId: string }) {
       setEmail("");
       return refresh();
     },
+    // The invite can be saved even when its email fails: show it in the list either way.
+    onError: refresh,
   });
   const revoke = useMutation({ mutationFn: (id: string) => api.revokeInvite(projectId, id), onSuccess: refresh });
 

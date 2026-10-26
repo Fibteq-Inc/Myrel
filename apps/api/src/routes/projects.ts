@@ -30,6 +30,8 @@ import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRep
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
+import { emailEnabled } from "../notifications/channels";
+import { sendInviteEmail } from "../notifications/invite";
 import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
 import { parseCliModels } from "../task-model";
 
@@ -252,6 +254,29 @@ export const projectRoutes = new Hono<AppEnv>()
       .select({ id: projectInvites.id, createdAt: projectInvites.createdAt })
       .from(projectInvites)
       .where(and(eq(projectInvites.projectId, id), eq(projectInvites.email, email)));
+
+    // The invitee hears of it by email when the server can send one; someone with an account opens
+    // their invitations, anyone else signs up with the address.
+    if (emailEnabled(c.env)) {
+      const [account] = await db.select({ id: user.id }).from(user).where(sql`lower(${user.email}) = ${email}`);
+      const origin = c.env.BETTER_AUTH_URL?.replace(/\/$/, "") || new URL(c.req.url).origin;
+      const link = `${origin}${account ? "/settings/invites" : "/login?signup"}`;
+      try {
+        await sendInviteEmail(c.env, { to: email, projectName: project.name, inviterName: me.name, link });
+      } catch (err) {
+        // Email Service throws errors with a string code (E_SENDER_NOT_VERIFIED and so on) that names the cause.
+        const code = (err as { code?: unknown }).code;
+        console.error("invite email failed", code, err);
+        const reason = typeof code === "string" ? ` (${code})` : "";
+        return c.json(
+          {
+            error: "invite_email_failed",
+            message: `The invitation is saved, but the email to ${email} could not be sent${reason}. They still see it under Settings → Invitations after signing in with this address.`,
+          },
+          502,
+        );
+      }
+    }
     return c.json(
       {
         invite: {

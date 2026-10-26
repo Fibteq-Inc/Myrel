@@ -469,7 +469,7 @@ export const tr: Catalog = {
   "members.removeConfirm": "{name} projeden çıkarılsın mı?",
   "projectInvites.title": "Kişi davet et",
   "projectInvites.description":
-    "Davet edilen kişi bu e-postayla giriş yapınca daveti Ayarlar → Davetler altında görür. Kayıtlar kapalı olsa bile bu e-postayla hesap açabilir.",
+    "Sunucu e-posta gönderebiliyorsa davet edilen kişiye bağlantılı bir e-posta gider. Bu e-postayla giriş yapınca daveti Ayarlar → Davetler altında görür. Kayıtlar kapalı olsa bile bu e-postayla hesap açabilir.",
   "projectInvites.role": "Rol",
   "projectInvites.invite": "Davet et",
   "projectInvites.pending": "Bekliyor · {role} · davet eden: {name}",
