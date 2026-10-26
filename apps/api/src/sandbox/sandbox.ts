@@ -36,6 +36,9 @@ const PRINCIPAL_KEY = "principal";
 type StoredRun = { taskId: string; threadId: string; harness: HarnessId; timeoutSec: number; deadline: number; lines: number };
 const RUN_KEY = "run";
 
+/** How long a cancelled run gets to wind down before its container is stopped (see forceStop). */
+const CANCEL_GRACE_MS = 20_000;
+
 /** How many times a follow that broke off without the run ending is started again. */
 const MAX_FOLLOWS = 3;
 
@@ -62,6 +65,12 @@ export class Sandbox extends DurableObject<Env> {
 
   /** Starts a task and returns once it is running. Its events go to the thread. */
   async run(input: SandboxRun): Promise<void> {
+    // A cancelled run still winding down (the thread already ended its turn): wait for it, or stop it.
+    const cancelled = this.current?.abort.signal.aborted ? this.current.taskId : null;
+    if (cancelled) {
+      for (let waited = 0; this.current?.taskId === cancelled && waited < CANCEL_GRACE_MS; waited += 250) await new Promise((r) => setTimeout(r, 250));
+      if (this.current?.taskId === cancelled) await this.stopNow(cancelled);
+    }
     if (this.current) throw new Error("This thread's sandbox is already running a task.");
     const spec = TaskSpec.parse(input.spec);
     const abort = new AbortController();
@@ -86,6 +95,7 @@ export class Sandbox extends DurableObject<Env> {
   async cancel(taskId: string): Promise<boolean> {
     if (this.current?.taskId === taskId) {
       this.current.abort.abort(new Error("Cancelled"));
+      this.ctx.waitUntil(this.forceStop(taskId));
       return true;
     }
     const container = this.ctx.container;
@@ -122,6 +132,24 @@ export class Sandbox extends DurableObject<Env> {
     }
     this.ctx.waitUntil(this.reattach(run, abort.signal));
     return true;
+  }
+
+  /**
+   * A cancelled run that has not wound down within CANCEL_GRACE_MS (its output stream or the kill did
+   * not end): the container goes, so nothing of it keeps running and the next task can start.
+   */
+  private async forceStop(taskId: string) {
+    await new Promise((r) => setTimeout(r, CANCEL_GRACE_MS));
+    await this.stopNow(taskId);
+  }
+
+  private async stopNow(taskId: string) {
+    if (this.current?.taskId !== taskId) return;
+    console.warn(`sandbox: run ${taskId} did not stop when cancelled; stopping its container`);
+    this.current = null;
+    this.ended = taskId;
+    await this.ctx.storage.delete(RUN_KEY);
+    await this.ctx.container?.destroy().catch(() => {});
   }
 
   /**

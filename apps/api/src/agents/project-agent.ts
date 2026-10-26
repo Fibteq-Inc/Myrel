@@ -1377,7 +1377,7 @@ export class ProjectAgent extends Agent<Env> {
           computerClis,
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.forwardedFor(inbox), questions, reacted, this.startedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
@@ -1437,6 +1437,21 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /**
+   * Who a follow-up this turn forwards to a thread is for, as forwardedFor. Undefined when no person
+   * or routine asked anything this turn (the coordinator passes on what another thread reported or
+   * decided): the note is then not someone's ask, and the thread keeps working for the person it
+   * already works for, on their computer and with its CLI, rather than for nobody in the cloud.
+   */
+  private followUpFor(inbox: InboxItem[]): string | null | undefined {
+    const asked = inbox.some((item) => {
+      if (item.kind === "routine") return true;
+      if (item.kind !== "message" && item.kind !== "edited") return false;
+      return this.getMessage(item.messageId)?.authorKind === "user";
+    });
+    return asked ? this.forwardedFor(inbox) : undefined;
+  }
+
+  /**
    * Who a thread this coordinator turn opens on its own message works for: as forwardedFor, but a
    * thread's request counts for the person that thread works for. So a thread the coordinator opens
    * because another thread reported something runs where that one did (their computer), not in the
@@ -1454,7 +1469,8 @@ export class ProjectAgent extends Agent<Env> {
 
   private coordinatorHost(
     meter?: TurnMeter,
-    forwardedFor: string | null = null,
+    /** Who a follow-up this turn forwards is for (see followUpFor); undefined when nobody asked for it. */
+    forwardedFor?: string | null,
     questions: TurnQuestions = { open: new Map(), settled: new Set() },
     /** Collects the messages the coordinator reacted to this turn. */
     reacted?: Set<string>,
@@ -1509,7 +1525,7 @@ export class ProjectAgent extends Agent<Env> {
         if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
         relayInThread({ kind, threadId, note }, relayLine(kind, note));
         // A forwarded ask works for whoever asked it; an answer to the thread's own request changes nothing.
-        await this.wakeThread(threadId, { kind: "coordinator", note, reopened, ...(kind === "follow_up" && { forwardedFor }) });
+        await this.wakeThread(threadId, { kind: "coordinator", note, reopened, ...(kind === "follow_up" && forwardedFor !== undefined && { forwardedFor }) });
       },
       answerQuestion: async (questionId, answer, source) => {
         const { threadId, agent } = await openQuestion(questionId);
