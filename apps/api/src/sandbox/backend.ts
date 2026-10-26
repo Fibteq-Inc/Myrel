@@ -215,7 +215,11 @@ async function githubScope(env: Env, projectId: string) {
   return { installationId: first.installationId, repositoryIds: covered.map((r) => r.repoId), repos: covered.map((r) => r.fullName) };
 }
 
-const TURN_GITHUB_PERMISSIONS = { contents: "write", pull_requests: "write", metadata: "read" } as const;
+/**
+ * Pushing, and reading pull requests. Opening and closing them goes through Myrel's tools
+ * (open_pull_request, close_pull_request), so gh cannot close, merge or open one past them.
+ */
+const TURN_GITHUB_PERMISSIONS = { contents: "write", pull_requests: "read", metadata: "read" } as const;
 
 /**
  * The token a cloud agent turn gets for the project's connected repositories, so git and gh work

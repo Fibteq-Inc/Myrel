@@ -34,7 +34,7 @@ type ApiPull = {
   body?: string | null;
   created_at?: string;
   user?: { login: string };
-  head: { sha: string; ref: string };
+  head: { sha: string; ref: string; repo?: { full_name: string } | null };
   base: { ref: string };
   /** Whether the branch merges cleanly into its base; null while GitHub is still working it out. */
   mergeable?: boolean | null;
@@ -92,6 +92,8 @@ export async function trackPullRequest(
   url: string,
   /** Given when the thread opened it: the first time it is followed, it is credited (see creditPull). */
   credit?: PullCredit,
+  /** The thread opened it through Myrel's GitHub App, so it may close it (closePullRequest). */
+  opened = false,
 ): Promise<PullRequest | null> {
   const parsed = parsePullUrl(url);
   if (!parsed) return null;
@@ -112,6 +114,8 @@ export async function trackPullRequest(
     }
   }
   const checks = await checkState(token, repo.fullName, pull.head.sha);
+  // One the agent opened with gh during this turn (an app bot is its author) is its own too.
+  const own = opened || (!!credit?.since && !!pull.created_at && pull.created_at >= credit.since && !!pull.user?.login.endsWith("[bot]"));
   const values = {
     repoId: repo.repoId,
     number: pull.number,
@@ -127,6 +131,8 @@ export async function trackPullRequest(
     headRef: pull.head.ref,
     checks: checks.state,
     conflict: pull.mergeable === false,
+    // Following a pull request never takes it away from the thread that opened it.
+    ...(own && { openedByThread: threadId }),
   };
   const [row] = await createDb(env.DB)
     .insert(pullRequests)
@@ -206,9 +212,92 @@ export async function openPullRequest(
     url = open[0].html_url;
     created = false;
   }
-  const pr = await trackPullRequest(env, projectId, threadId, url, credit);
+  const pr = await trackPullRequest(env, projectId, threadId, url, credit, created);
   if (!pr) throw new Error(`The pull request ${url} was opened but could not be followed.`);
   return { pr, created };
+}
+
+/** Why a pull request's branch must stay; `pr`: the open pull request that uses it, or this one reopened. */
+export type BranchBlock = { kind: "fork" | "default" | "protected" | "gone" | "in_use" | "reopened"; pr?: number };
+
+/** A pull request's branch, and why it may not be deleted when it may not. */
+export type PullBranch = { repo: string; number: number; branch: string; blocked: BranchBlock | null };
+
+/** What closing did: closed now or already, and the branch the person may be asked to delete. */
+export type ClosedPull = { pr: PullRequest; already: boolean; branch: PullBranch };
+
+/**
+ * Closes, without merging, a pull request this thread opened, after leaving the reason as a
+ * comment. Only its own: one it merely follows (track_pull_request) is someone else's work. A
+ * merged one cannot be closed. The branch stays; deleting it is the person's call (deletePullBranch).
+ */
+export async function closePullRequest(env: PullsEnv, projectId: string, threadId: string, url: string, reason: string): Promise<ClosedPull> {
+  const parsed = parsePullUrl(url);
+  if (!parsed) throw new Error("That is not a pull request link (https://github.com/<owner>/<name>/pull/<number>).");
+  const { token, repo } = await projectRepoToken(env, projectId, parsed.fullName, WRITE);
+  const [row] = await createDb(env.DB)
+    .select()
+    .from(pullRequests)
+    .where(and(eq(pullRequests.repoId, repo.repoId), eq(pullRequests.number, parsed.number)))
+    .limit(1);
+  if (row?.openedByThread !== threadId) {
+    throw new Error(
+      `${repo.fullName}#${parsed.number} was not opened by this thread, so it cannot close it. If it should be closed, ask the person to close it on GitHub.`,
+    );
+  }
+  const pull = await githubFetch<ApiPull>(token, `/repos/${repo.fullName}/pulls/${parsed.number}`);
+  if (pull.merged || pull.merged_at) throw new Error(`${repo.fullName}#${pull.number} is already merged; a merged pull request cannot be closed.`);
+  const already = pull.state === "closed";
+  if (!already) {
+    await githubFetch(token, `/repos/${repo.fullName}/issues/${pull.number}/comments`, { method: "POST", body: { body: reason } }).catch((err) =>
+      console.warn("closing comment not posted", pull.html_url, err),
+    );
+    await githubFetch(token, `/repos/${repo.fullName}/pulls/${pull.number}`, { method: "PATCH", body: { state: "closed" } });
+  }
+  // Saved before GitHub's event arrives, so the close is not news that wakes the thread again.
+  const next = await save(env, row, { state: "closed" });
+  const branch = { repo: repo.fullName, number: pull.number, branch: pull.head.ref, blocked: await branchBlocked(token, repo, pull) };
+  return { pr: toPullRequest(next), already, branch };
+}
+
+/**
+ * Why a closed pull request's branch must stay, or null when it can go: it is in a fork, it is
+ * the default or a protected branch, another open pull request uses it, or it is already gone.
+ */
+async function branchBlocked(token: string, repo: { fullName: string; defaultBranch: string }, pull: ApiPull): Promise<BranchBlock | null> {
+  const ref = pull.head.ref;
+  if (pull.head.repo?.full_name.toLowerCase() !== repo.fullName.toLowerCase()) return { kind: "fork" };
+  if (ref === repo.defaultBranch) return { kind: "default" };
+  const path = ref.split("/").map(encodeURIComponent).join("/");
+  let protectedBranch: boolean;
+  try {
+    protectedBranch = (await githubFetch<{ protected?: boolean }>(token, `/repos/${repo.fullName}/branches/${path}`)).protected === true;
+  } catch (err) {
+    if (err instanceof GithubError && err.status === 404) return { kind: "gone" };
+    throw err;
+  }
+  if (protectedBranch) return { kind: "protected" };
+  const owner = repo.fullName.split("/")[0]!;
+  const open = await githubFetch<ApiPull[]>(token, `/repos/${repo.fullName}/pulls?state=open&head=${encodeURIComponent(`${owner}:${ref}`)}`);
+  const other = open.find((p) => p.number !== pull.number);
+  if (other) return { kind: "in_use", pr: other.number };
+  return null;
+}
+
+/**
+ * Deletes the branch of a closed pull request a thread opened, once a person said so on the card.
+ * Checked again here, since the branch may have changed hands since. Says what happened.
+ */
+export async function deletePullBranch(env: PullsEnv, projectId: string, b: { repo: string; number: number }): Promise<PullBranch> {
+  const { token, repo } = await projectRepoToken(env, projectId, b.repo, { contents: "write", pull_requests: "read", metadata: "read" });
+  const pull = await githubFetch<ApiPull>(token, `/repos/${repo.fullName}/pulls/${b.number}`);
+  const branch = { repo: repo.fullName, number: pull.number, branch: pull.head.ref };
+  if (pull.state !== "closed") return { ...branch, blocked: { kind: "reopened", pr: pull.number } };
+  const blocked = await branchBlocked(token, repo, pull);
+  if (blocked) return { ...branch, blocked };
+  const path = pull.head.ref.split("/").map(encodeURIComponent).join("/");
+  await githubFetch(token, `/repos/${repo.fullName}/git/refs/heads/${path}`, { method: "DELETE" });
+  return { ...branch, blocked: null };
 }
 
 /** The combined CI result on a commit: check runs plus legacy commit statuses. */

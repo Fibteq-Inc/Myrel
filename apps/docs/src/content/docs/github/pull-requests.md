@@ -28,6 +28,12 @@ The thread picks the work up again by itself when:
 
 Review comments come from GitHub, not from you, so for anything beyond the pull request's scope Myrel checks with you first.
 
+## Closing a pull request
+
+Ask in the thread, for example "close that pull request, we went another way". Myrel closes it without merging and leaves the reason as a comment on it. It closes only pull requests its own thread opened, never one someone else opened, and a merged one cannot be closed.
+
+The branch stays, so the pull request can be reopened. When Myrel thinks the branch can go, a card asks you: **Delete the branch** or **Keep the branch**. Only the person the thread works for, or the project's owner or an admin, can delete it, and Myrel never deletes the default branch, a protected branch or one another open pull request uses.
+
 ## Tasks on your computer
 
 When the thread runs on [your computer](/computer/connect/), git uses your own login and the pull request is still opened through the Myrel app.
