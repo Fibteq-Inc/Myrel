@@ -34,3 +34,20 @@ export type BillingSummary = {
   /** A Team plan's members besides its owner, for its owner. */
   members: { userId: string; name: string; email: string }[];
 };
+
+/** A gift link an admin made: Pro free for `months`, for one person, with no card. */
+export type BillingGift = {
+  id: string;
+  /** Who it is for, as the admin wrote it. */
+  note: string;
+  months: number;
+  createdAt: string;
+  expiresAt: string;
+  /** open: nobody used it yet; claimed: someone opened its Checkout; redeemed: their Pro started. */
+  status: "open" | "claimed" | "redeemed" | "expired" | "revoked";
+  /** Who claimed or redeemed it. */
+  person: { name: string; email: string } | null;
+};
+
+/** What a gift link offers the person who opened it; `unavailable` once it is used by someone else, expired or revoked. */
+export type GiftOffer = { status: "open" | "redeemed" | "unavailable"; months: number | null };

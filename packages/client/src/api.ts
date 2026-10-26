@@ -5,6 +5,7 @@ import type {
   ArtifactVersion,
   ArtifactView,
   AdminSettings,
+  BillingGift,
   BillingSummary,
   ApiKey,
   CatalogCategory,
@@ -18,6 +19,7 @@ import type {
   CreateInviteInput,
   CreateProjectInput,
   Instructions,
+  GiftOffer,
   GithubRepo,
   GithubStatus,
   Invite,
@@ -674,8 +676,27 @@ export class ApiClient {
   }
 
   /** A Stripe Checkout URL for Pro or Team. */
-  startCheckout(input: { plan: "pro" | "team"; interval: "month" | "year"; seats?: number }) {
+  startCheckout(input: { plan: "pro" | "team"; interval: "month" | "year"; seats?: number; gift?: string }) {
     return this.request<{ url: string }>("/api/billing/checkout", { method: "POST", body: input });
+  }
+
+  /** What a gift link (its token) offers the caller. */
+  getGiftOffer(token: string) {
+    return this.request<GiftOffer>(`/api/billing/gift/${encodeURIComponent(token)}`);
+  }
+
+  /** The server's gift links, for its admins. */
+  async listGifts() {
+    return (await this.request<{ gifts: BillingGift[] }>("/api/billing/gifts")).gifts;
+  }
+
+  /** A new gift link; its URL is shown only now. */
+  createGift(input: { note: string; months: number }) {
+    return this.request<{ url: string }>("/api/billing/gifts", { method: "POST", body: input });
+  }
+
+  revokeGift(id: string) {
+    return this.request<null>(`/api/billing/gifts/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   /** A Stripe billing portal URL: change plan or card, cancel, invoices. */

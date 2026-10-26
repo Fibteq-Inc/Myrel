@@ -4,6 +4,7 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { Monitor, Smartphone, TabletSmartphone } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { DOWNLOADS } from "../lib/downloads";
+import { pendingGift } from "../lib/gift";
 import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
 import { Checkbox } from "../components/ui/controls";
 import { Turnstile } from "../components/turnstile";
@@ -66,7 +67,8 @@ function LoginPage() {
       else await api.signIn({ email, password });
       // Refetch now: the app layout reads the cached session, and invalidating alone keeps the old null.
       await queryClient.fetchQuery({ ...sessionQuery, staleTime: 0 });
-      await navigate({ to: "/" });
+      // Someone who came from a gift link goes on to claim it.
+      await navigate({ to: pendingGift() ? "/settings/billing" : "/" });
     } catch (err) {
       setError(errorMessage(err, t));
       // A token works once.

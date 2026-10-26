@@ -1,4 +1,4 @@
-import type { BillingSummary, Project } from "@myrel/protocol";
+import type { BillingGift, BillingSummary, Project } from "@myrel/protocol";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
@@ -405,6 +405,103 @@ describe("hosted billing", () => {
     expect(session.get("subscription_data[trial_settings][end_behavior][missing_payment_method]")).toBe("cancel");
     expect(session.get("automatic_tax[enabled]")).toBe("true");
     expect(session.get("payment_method_collection")).toBe("if_required");
+  });
+});
+
+describe("gift links", () => {
+  /** Stripe for a gift Checkout: no coupon yet, so it is made on first use. */
+  function fakeStripe() {
+    const calls: { method: string; url: string; body: string }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url, body: String(init?.body ?? "") });
+      if (url.includes("/coupons/") && method === "GET") return Response.json({ error: { message: "No such coupon" } }, { status: 404 });
+      const reply = url.includes("/customers")
+        ? { id: "cus_gift" }
+        : url.includes("/prices")
+          ? { data: [{ id: "price_pro", product: "prod_pro" }] }
+          : url.endsWith("/coupons")
+            ? { id: "myrel_gift_pro_12m" }
+            : { url: "https://checkout.stripe.test/gift" };
+      return Response.json(reply);
+    };
+    return calls;
+  }
+
+  async function makeGift(months = 12) {
+    const admin = await signUp("admin@example.com").catch(() => null);
+    // The admin account is made once per test file run; sign in when it already exists.
+    const token =
+      admin?.token ??
+      (
+        await api("/api/auth/sign-in/email", {
+          method: "POST",
+          body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+        })
+      ).headers.get("set-auth-token")!;
+    const res = await api("/api/billing/gifts", { method: "POST", token, body: JSON.stringify({ note: "Ayşe", months }) });
+    expect(res.status).toBe(201);
+    const { url } = (await res.json()) as { url: string };
+    return { adminToken: token, url, gift: url.split("/gift/")[1]! };
+  }
+
+  it("lets only admins make gift links", async () => {
+    const { token } = await signUp();
+    expect((await api("/api/billing/gifts", { method: "POST", token, body: JSON.stringify({}) })).status).toBe(403);
+    expect((await api("/api/billing/gifts", { token })).status).toBe(403);
+  });
+
+  it("gives one person Pro with no card and no trial, then marks the link used", async () => {
+    const { adminToken, gift } = await makeGift();
+    const friend = await signUp();
+    const calls = fakeStripe();
+
+    expect(await (await api(`/api/billing/gift/${gift}`, { token: friend.token })).json()).toEqual({ status: "open", months: 12 });
+    const res = await api("/api/billing/checkout", { method: "POST", token: friend.token, body: JSON.stringify({ plan: "pro", gift }) });
+    expect(await res.json()).toEqual({ url: "https://checkout.stripe.test/gift" });
+
+    const coupon = new URLSearchParams(calls.find((c) => c.url.endsWith("/coupons") && c.method === "POST")!.body);
+    expect(coupon.get("percent_off")).toBe("100");
+    expect(coupon.get("duration")).toBe("repeating");
+    expect(coupon.get("duration_in_months")).toBe("12");
+    expect(coupon.get("applies_to[products][0]")).toBe("prod_pro");
+    const session = new URLSearchParams(calls.find((c) => c.url.endsWith("/checkout/sessions"))!.body);
+    expect(session.get("discounts[0][coupon]")).toBe("myrel_gift_pro_12m");
+    expect(session.get("allow_promotion_codes")).toBeNull();
+    expect(session.get("subscription_data[trial_period_days]")).toBeNull();
+    expect(session.get("payment_method_collection")).toBe("if_required");
+    const giftId = session.get("subscription_data[metadata][gift_id]")!;
+    expect(giftId).toMatch(/^[0-9a-f]{64}$/);
+
+    // Someone else cannot use the same link once it is claimed.
+    const other = await signUp();
+    expect(await (await api(`/api/billing/gift/${gift}`, { token: other.token })).json()).toEqual({ status: "unavailable", months: null });
+    const stolen = await api("/api/billing/checkout", { method: "POST", token: other.token, body: JSON.stringify({ plan: "pro", gift }) });
+    expect(stolen.status).toBe(410);
+
+    // The subscription starts: the friend is on Pro and the link shows as used.
+    await webhook(subscriptionEvent(friend.userId, "myrel_pro_monthly", "active", { metadata: { user_id: friend.userId, gift_id: giftId } }));
+    expect(((await (await api("/api/billing", { token: friend.token })).json()) as BillingSummary).plan).toBe("pro");
+    const { gifts } = (await (await api("/api/billing/gifts", { token: adminToken })).json()) as { gifts: BillingGift[] };
+    expect(gifts.find((g) => g.id === giftId)).toMatchObject({ status: "redeemed", note: "Ayşe", person: { email: friend.email } });
+    // Not twice, and a used link cannot be cancelled.
+    const again = await api("/api/billing/checkout", { method: "POST", token: friend.token, body: JSON.stringify({ plan: "pro", gift }) });
+    expect(again.status).toBe(409);
+    expect((await api(`/api/billing/gifts/${giftId}`, { method: "DELETE", token: adminToken })).status).toBe(404);
+  });
+
+  it("stops a cancelled link and keeps the hash, not the link, in the database", async () => {
+    const { adminToken, gift } = await makeGift(3);
+    expect(await env.DB.prepare("SELECT 1 FROM billing_gifts WHERE id = ?").bind(gift).first()).toBeNull();
+    const { gifts } = (await (await api("/api/billing/gifts", { token: adminToken })).json()) as { gifts: BillingGift[] };
+    const made = gifts.find((g) => g.months === 3 && g.status === "open")!;
+    expect((await api(`/api/billing/gifts/${made.id}`, { method: "DELETE", token: adminToken })).status).toBe(204);
+
+    const friend = await signUp();
+    const res = await api("/api/billing/checkout", { method: "POST", token: friend.token, body: JSON.stringify({ plan: "pro", gift }) });
+    expect(res.status).toBe(410);
   });
 });
 

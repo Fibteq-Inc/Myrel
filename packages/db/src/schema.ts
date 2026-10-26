@@ -540,6 +540,27 @@ export const billingTeamMembers = sqliteTable(
   (t) => [primaryKey({ columns: [t.ownerId, t.userId] }), uniqueIndex("billing_team_members_user_idx").on(t.userId)],
 );
 
+/**
+ * Gift links an admin made: each gives one person Pro free for `months`, through a Checkout with a
+ * 100% coupon and no card. The link's token is shown once; only its SHA-256 is kept, as the id.
+ */
+export const billingGifts = sqliteTable("billing_gifts", {
+  id: text("id").primaryKey(),
+  /** Who it is for, as the admin wrote it. */
+  note: text("note").notNull().default(""),
+  months: integer("months").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  /** Unused after this, the link stops working. */
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  /** The person who opened a Checkout with it; nobody else can use it from then on. */
+  claimedBy: text("claimed_by"),
+  /** When the subscription it paid for started. */
+  redeemedAt: integer("redeemed_at", { mode: "timestamp_ms" }),
+  subscriptionId: text("subscription_id"),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+});
+
 /** Stripe webhook events already handled, so a redelivery is ignored. */
 export const stripeEvents = sqliteTable("stripe_events", {
   id: text("id").primaryKey(),
