@@ -1,11 +1,11 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskModel, TaskTarget, type ThreadRunner } from "@myrel/protocol";
+import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskGithub, type TaskModel, TaskTarget, type ThreadRunner } from "@myrel/protocol";
 import { claudeModel, type ModelConfig, type RunnerBackend, type TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { githubConfigured, installationToken } from "../github/app";
+import { freshInstallationToken, githubConfigured, installationToken } from "../github/app";
 import { listProjectRepos, repoWritable } from "../github/store";
-import { getWorkspace, listWorkspaces, workspaceClis } from "../runners";
+import { getWorkspace, listWorkspaces, runnerHasFeature, workspaceClis } from "../runners";
 
 /** The cloud backend: the thread's own container (see sandbox.ts), for a task that works for `principal`. */
 export function sandboxBackend(env: Env, threadId: string, principal = ""): RunnerBackend {
@@ -31,9 +31,9 @@ export function sandboxBackend(env: Env, threadId: string, principal = ""): Runn
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel },
+  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel; github?: TaskGithub | null },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent, model } = where;
+  const { projectId, threadId, workspace, agent, model, github } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -50,6 +50,7 @@ export function localBackend(
         prompt: spec.prompt,
         agent,
         model,
+        ...(github && { github }),
       });
       if (!started.ok) throw new Error(started.reason);
     },
@@ -197,23 +198,58 @@ export async function taskPlace(
 }
 
 /**
- * The token a cloud agent turn gets for the project's connected repositories, so git and gh work
- * in the sandbox without asking. One installation token covers every connected repository of the
- * first repository's installation (nearly always all of them). Null without any.
+ * The repositories a turn's GitHub token covers: the project's connected ones that whoever connected
+ * them can push to (see repoWritable), of the first one's installation (nearly always all of them,
+ * as one installation token covers one installation). Null without any.
  */
-export async function projectGithubToken(env: Env, projectId: string, runSec: number): Promise<string | null> {
+async function githubScope(env: Env, projectId: string) {
   if (!githubConfigured(env)) return null;
-  // Only repositories whoever connected them can push to (see repoWritable).
   const all = await listProjectRepos(env.DB, projectId);
   const writable = await Promise.all(all.map((r) => repoWritable(env.DB, projectId, r)));
   const repos = all.filter((_, i) => writable[i]);
   const first = repos[0];
   if (!first) return null;
-  const repositoryIds = repos.filter((r) => r.installationId === first.installationId).map((r) => r.repoId);
-  const permissions = { contents: "write", pull_requests: "write", metadata: "read" } as const;
+  const covered = repos.filter((r) => r.installationId === first.installationId);
+  return { installationId: first.installationId, repositoryIds: covered.map((r) => r.repoId), repos: covered.map((r) => r.fullName) };
+}
+
+const TURN_GITHUB_PERMISSIONS = { contents: "write", pull_requests: "write", metadata: "read" } as const;
+
+/**
+ * The token a cloud agent turn gets for the project's connected repositories, so git and gh work
+ * in the sandbox without asking. Null without any.
+ */
+export async function projectGithubToken(env: Env, projectId: string, runSec: number): Promise<string | null> {
+  const scope = await githubScope(env, projectId);
+  if (!scope) return null;
   try {
     const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
-    return (await installationToken(env, first.installationId, { repositoryIds, permissions }, minValidMs)).token;
+    const { installationId, repositoryIds } = scope;
+    return (await installationToken(env, installationId, { repositoryIds, permissions: TURN_GITHUB_PERMISSIONS }, minValidMs)).token;
+  } catch (err) {
+    console.warn("no GitHub token for the project", projectId, err);
+    return null;
+  }
+}
+
+/**
+ * The same token for a turn on a person's computer (task.start's `github`): the same repositories and
+ * permissions, but only for a runner that can keep it out of files (feature "github-token") and only
+ * when the computer is the person's the turn works for. A token of its own, revoked when the turn ends.
+ */
+export async function localGithubToken(
+  env: Env,
+  projectId: string,
+  runnerId: string,
+  requester: string | null,
+): Promise<TaskGithub | null> {
+  if (!requester || !(await runnerHasFeature(env, runnerId, "github-token")) || !(await ownsComputer(env, runnerId, requester))) return null;
+  const scope = await githubScope(env, projectId);
+  if (!scope) return null;
+  try {
+    const { installationId, repositoryIds, repos } = scope;
+    const res = await freshInstallationToken(env, installationId, { repositoryIds, permissions: TURN_GITHUB_PERMISSIONS });
+    return { token: res.token, expiresAt: new Date(res.expires_at).toISOString(), repos };
   } catch (err) {
     console.warn("no GitHub token for the project", projectId, err);
     return null;

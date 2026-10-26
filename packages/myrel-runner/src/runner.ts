@@ -20,7 +20,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.20.0";
+export const RUNNER_VERSION = "0.21.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -190,6 +190,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "files",
         "settings",
         "models",
+        "github-token",
         ...(updates === "service" ? (["update"] as const) : []),
       ],
       settings: settingsOf(config),
@@ -316,6 +317,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         void tasks.start(frame);
       }
       if (frame.type === "task.cancel") tasks.cancel(frame.taskId);
+      if (frame.type === "task.github") tasks.renewGithub(frame.taskId, frame.github);
       if ("requestId" in frame) {
         void answer(frame).catch((err: unknown) =>
           send({ type: "request.failed", requestId: frame.requestId, message: errorText(err) }),

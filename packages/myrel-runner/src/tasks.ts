@@ -2,10 +2,11 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CliId, CliLimits, RunnerToServer, ServerToRunner } from "@myrel/protocol";
+import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
 import { ADAPTERS, type CliAdapter, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
+import { GitCredentials } from "./github";
 import { downloadSkills, type RunSkills } from "./skills";
 import { threadWorktree, type Worktree } from "./worktrees";
 
@@ -42,6 +43,8 @@ export class TaskRunner {
   private readonly cancelled = new Set<string>();
   /** Tasks stopped because this runner shuts down: the server continues them after it restarts. */
   private readonly interrupted = new Set<string>();
+  /** The GitHub tokens lent to running tasks' git. */
+  private readonly git = new GitCredentials();
   private send: Send = () => {};
 
   constructor(private readonly opts: TaskRunnerOptions) {}
@@ -131,11 +134,23 @@ export class TaskRunner {
 
     // A session that cannot be resumed (deleted, or from another CLI version) fails before any
     // output: the turn then starts a new session with the whole thread.
-    const retry = await this.attempt(task, { cwd, adapter, agent, dirs, asks: asks && !!agentDir, skills, where, cleanup }, session?.id, short ?? task.prompt);
-    if (retry) {
-      log(`  could not resume the ${adapter.id} session; starting a new one`);
-      await this.attempt(task, { cwd, adapter, agent, dirs, asks: asks && !!agentDir, skills, where, cleanup }, undefined, task.prompt);
+    // Git clones and pushes the project's repositories with the turn's GitHub token, lent only for this run.
+    const env = task.github ? { ...agent.env, ...(await this.git.lend(task.taskId, task.github)) } : agent.env;
+    try {
+      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup };
+      const retry = await this.attempt(task, run, session?.id, short ?? task.prompt);
+      if (retry) {
+        log(`  could not resume the ${adapter.id} session; starting a new one`);
+        await this.attempt(task, run, undefined, task.prompt);
+      }
+    } finally {
+      this.git.end(task.taskId);
     }
+  }
+
+  /** A running task's new GitHub token ("task.github"). */
+  renewGithub(taskId: string, github: TaskGithub) {
+    this.git.renew(taskId, github);
   }
 
   /** One run of the CLI. True when a resumed session failed before any output, so the caller can start a new one. */
@@ -145,6 +160,8 @@ export class TaskRunner {
       cwd: string;
       adapter: CliAdapter;
       agent: { args: string[]; env?: Record<string, string>; mcpServers?: AcpMcpServer[] };
+      /** The CLI's environment variables besides the runner's own. */
+      env?: Record<string, string>;
       dirs: string[];
       asks: boolean;
       skills: RunSkills | null;
@@ -168,7 +185,7 @@ export class TaskRunner {
     const args = adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
-      env: childEnv(agent.env),
+      env: childEnv(run.env),
       stdio: ["pipe", "pipe", "pipe"],
       // Windows CLIs are .cmd shims. Only fixed flags are on the command line; the prompt goes on stdin.
       shell: process.platform === "win32",

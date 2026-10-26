@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import {
   type AgentStart,
+  type TaskGithub,
   type TaskModel,
   type CliId,
   RUNNER_PROTOCOL_VERSION,
@@ -33,6 +34,8 @@ export type TaskStart = {
   agent?: AgentStart;
   /** The model and effort, only ever ones the runner listed (so only runners with feature "models"). */
   model?: TaskModel;
+  /** The turn's GitHub token (only runners with feature "github-token"). Never stored or logged here. */
+  github?: TaskGithub;
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
@@ -224,7 +227,18 @@ export class RunnerAgent extends Agent<Env> {
       prompt: input.prompt,
       ...(input.agent && { agent: input.agent }),
       ...(input.model && { model: input.model }),
+      ...(input.github && { github: input.github }),
     });
+    return { ok: true };
+  }
+
+  /** Hands a running task a new GitHub token before its last one expires. Callable over RPC by thread agents. */
+  renewGithub(taskId: string, github: TaskGithub): TaskStartResult {
+    const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (task?.status !== "running") return { ok: false, reason: "This task is not running." };
+    const [connection] = this.getConnections();
+    if (!connection) return { ok: false, reason: "The computer is offline." };
+    send(connection, { type: "task.github", taskId, github });
     return { ok: true };
   }
 

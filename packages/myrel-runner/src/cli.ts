@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@myrel/protocol";
 import { readBridgeRun, runBridge } from "./bridge";
 import { detectClis } from "./clis";
+import { runGitCredential } from "./github";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RESTART_EXIT_CODE, RUNNER_VERSION, startRunner } from "./runner";
 import { settingsOf } from "./self-update";
@@ -83,6 +84,9 @@ async function main(argv: string[]) {
         run: await readBridgeRun(),
         version: RUNNER_VERSION,
       });
+    // Started by git as the credential helper of a run's GitHub token (see github.ts). Not for people.
+    case "git-credential":
+      return runGitCredential(arg, process.stdin, (text) => process.stdout.write(text));
     case "pair": {
       const server = values.server ?? (await loadConfig()).server;
       if (!arg || !server) throw new Error("Usage: myrel-runner pair <code> --server <url>");

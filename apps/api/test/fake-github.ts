@@ -20,7 +20,7 @@ export const fakeGithub = {
     string,
     { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
-  requests: [] as { method: string; url: string; body?: unknown }[],
+  requests: [] as { method: string; url: string; body?: unknown; auth?: string }[],
   /** The repositories of installation 42 the signed-in user can reach themselves. */
   userRepos: [7, 8],
   /** Of those, the ones they can push to; the rest they can only read. */
@@ -34,7 +34,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.hostname !== "github.com" && url.hostname !== "api.github.com") return realFetch(input, init);
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(init.body as string) : undefined;
-  fakeGithub.requests.push({ method, url: url.href, body });
+  const auth = new Headers(init?.headers).get("authorization")?.replace(/^Bearer /, "");
+  fakeGithub.requests.push({ method, url: url.href, body, auth });
 
   if (url.href === "https://github.com/login/oauth/access_token") {
     return body.code === "good-code" ? Response.json({ access_token: "user-token" }) : Response.json({ error: "bad_verification_code" });
@@ -58,6 +59,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const repositories = ids ? fakeGithub.repos.filter((r) => ids.includes(r.id)) : undefined;
     return Response.json({ token: "inst-token", expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
   }
+  if (url.pathname === "/installation/token" && method === "DELETE") return new Response(null, { status: 204 });
   if (url.pathname === "/installation/repositories") {
     return Response.json({ total_count: fakeGithub.repos.length, repositories: fakeGithub.repos });
   }
