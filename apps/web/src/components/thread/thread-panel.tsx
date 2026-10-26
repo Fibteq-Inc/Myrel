@@ -126,7 +126,7 @@ export function ThreadPanel({
       count: prs.length || undefined,
       content: prs.length ? (
         <div className="p-4">
-          <PullRequestCards pullRequests={prs} fold={false} />
+          <PullRequestCards pullRequests={prs} fold={false} wide />
         </div>
       ) : (
         <EmptyTab icon={GitPullRequest} title={t("workspace.prEmpty")}>

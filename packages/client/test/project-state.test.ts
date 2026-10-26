@@ -292,6 +292,10 @@ describe("pull request folding", () => {
     checks: null,
     review: null,
     conflict: false,
+    branch: "",
+    additions: null,
+    deletions: null,
+    changedFiles: null,
     updatedAt,
   });
   const numbers = (prs: PullRequest[]) => prs.map((p) => p.number);
