@@ -74,7 +74,8 @@ export function closeRunners() {
  * A new project working in FOLDER on a fake computer of `token`'s user, with `play` as the
  * thread agent. `turns` lists every turn so far.
  */
-export async function agentProject(token: string, play: Play, opts: { features?: string[] } = {}) {
+export async function agentProject(token: string, play: Play, opts: { features?: string[]; cli?: "claude" | "codex" } = {}) {
+  const cli = opts.cli ?? "claude";
   const codeRes = await api("/api/runners/pairing", { method: "POST", token });
   const { code } = (await codeRes.json()) as { code: string };
   const paired = await api("/api/runner/pair", {
@@ -128,7 +129,7 @@ export async function agentProject(token: string, play: Play, opts: { features?:
     hostname: "mbp",
     platform: "darwin",
     folders: [{ path: FOLDER, name: "myrel" }],
-    clis: [{ id: "claude", version: "2.1.0" }],
+    clis: [{ id: cli, version: cli === "claude" ? "2.1.0" : "0.164.0" }],
     features: opts.features ?? ["folders", "cancel", "agent"],
     running: [],
   });
@@ -141,7 +142,7 @@ export async function agentProject(token: string, play: Play, opts: { features?:
     const put = await api(`/api/projects/${project.id}/workspace`, {
       method: "PUT",
       token,
-      body: JSON.stringify({ runnerId: runner.runner.id, path: FOLDER, cli: "claude" }),
+      body: JSON.stringify({ runnerId: runner.runner.id, path: FOLDER, cli }),
     });
     return put.status === 200;
   }, "the project's local folder");

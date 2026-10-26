@@ -114,6 +114,8 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * for the project's repositories on github.com, without writing it anywhere.
  * "github-token": the same in runner 0.21.0 only, which takes tokens of up to 255 characters and so
  * drops a task.start carrying one of GitHub's longer installation tokens: never sent one.
+ * "steer": hands people's new messages to a running task's CLI mid-turn ("task.steer"), when that CLI
+ * takes them (Codex's app server); answered "task.steered" with taken false when it does not.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -129,6 +131,7 @@ export const RunnerFeature = z.enum([
   "models",
   "github-token",
   "git-token",
+  "steer",
 ]);
 
 /**
@@ -334,6 +337,8 @@ export const RunnerToServer = z.discriminatedUnion("type", [
   z.object({ type: z.literal("update.accepted"), requestId: RunnerRequestId, update: RunnerUpdateState }),
   /** How an update goes on; null once there is nothing to show any more. */
   z.object({ type: z.literal("update.status"), update: RunnerUpdateState.nullable() }),
+  /** Answers "task.steer": whether the running CLI took the message (feature "steer"). */
+  z.object({ type: z.literal("task.steered"), requestId: RunnerRequestId, taken: z.boolean() }),
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServer>;
 
@@ -382,6 +387,11 @@ export const ServerToRunner = z.discriminatedUnion("type", [
   }),
   /** A new GitHub token for a running task, before its last one expires (feature "git-token"). */
   z.object({ type: z.literal("task.github"), taskId: TaskId, github: TaskGithub }),
+  /**
+   * People's new messages for a running task's CLI, mid-turn (feature "steer"). Answered with
+   * "task.steered": taken false when the task is gone or its CLI takes nothing mid-turn.
+   */
+  z.object({ type: z.literal("task.steer"), requestId: RunnerRequestId, taskId: TaskId, text: z.string().min(1).max(MAX_TASK_TEXT) }),
   /** Stop a running task. The runner answers with its "task.done" (cancelled: true). Needs feature "cancel". */
   z.object({ type: z.literal("task.cancel"), taskId: TaskId }),
   z.object({ type: z.literal("pong") }),

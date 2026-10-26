@@ -181,6 +181,32 @@ describe("Codex app server turn", () => {
     expect(b.sent.at(-1)).toMatchObject({ method: "turn/interrupt", params: { threadId: "thr-2", turnId: "turn-2" } });
   });
 
+  it("hands a message to the running turn, and says when it could not", async () => {
+    const a = turn();
+    a.t.start();
+    // No turn yet to take it.
+    expect(await a.t.steer("dur")).toBe(false);
+    a.answer("initialize", {});
+    a.answer("thread/start", { thread: { id: "thr-1" } });
+    a.answer("turn/start", { turn: { id: "turn-1" } });
+    const taken = a.t.steer("README'yi de güncelle");
+    expect(a.sent.at(-1)).toMatchObject({
+      method: "turn/steer",
+      params: { threadId: "thr-1", expectedTurnId: "turn-1", input: [{ type: "text", text: "README'yi de güncelle" }] },
+    });
+    a.answer("turn/steer", { turnId: "turn-1" });
+    expect(await taken).toBe(true);
+    const refused = a.t.steer("x");
+    a.feed({ id: a.sent.at(-1)!.id, error: { code: -32600, message: "no active turn" } });
+    expect(await refused).toBe(false);
+    // Still unanswered when the turn ends: not taken.
+    const late = a.t.steer("y");
+    a.feed({ method: "turn/completed", params: { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } } });
+    expect(await late).toBe(false);
+    expect(a.state.failed).toBe(false);
+    expect(await a.t.steer("z")).toBe(false);
+  });
+
   it("maps the app server's rate limits like the session files' ones", () => {
     expect(appServerLimits({ primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 4102444800 } })).toMatchObject({
       status: "limited",
@@ -283,6 +309,11 @@ process.stdin.on("end", () => process.exit(0));
     expect(done).toMatchObject({ type: "task.done", ok: true, usage: { inputTokens: 7, outputTokens: 3, model: "gpt-6" } });
     expect(done.result).toMatch(/^fix the bug in .*proj \(\["app-server"\]\)$/);
     expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "codex")).toMatchObject({ id: "thr-app" });
+  });
+
+  it("says a task it has no app server turn for took no message", async () => {
+    const runner = new TaskRunner({ config: () => ({ folders: [], access: "edit" }), sessions: new SessionStore() });
+    expect(await runner.steer("task_01JTEST0000000000000000009", "hi")).toBe(false);
   });
 
   it("keeps codex exec where Codex has no app server, or when MYREL_CODEX_EXEC=1", async () => {

@@ -152,6 +152,22 @@ type TaskRow = {
  * A run's spec as stored. Runs on the person's computer name their CLI (claude, codex…) as the harness.
  * agent: the run was one turn of the thread's agent. Older runs were tasks Myrel's own loop handed out.
  */
+/** What a running turn has not seen of its person, before it is claimed (see ThreadAgent.pendingNews). */
+type PendingNews = {
+  text: string;
+  /** last_seen_seq when read, and what it becomes once taken. */
+  seen: number;
+  last: number;
+  /** Nobody else's message comes after them. */
+  whole: boolean;
+  hasNew: boolean;
+  edited: Message[];
+  /** The edits taken are every edit not yet taken (none by anyone else). */
+  allEdits: boolean;
+  /** edits_taken when read. */
+  editsTaken: string;
+  readAt: string;
+};
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean };
 
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
@@ -353,6 +369,8 @@ export class ThreadAgent extends Agent<Env> {
     } else if (reason.kind === "message" && reason.edited) this.setMeta("wake_edit", new Date().toISOString());
     else this.setMeta("wake_other", "1");
     await this.markDirty();
+    // Into the running turn right away where its CLI takes it, without holding up the sender.
+    if (reason.kind === "message" && this.runningTask()) await this.queue("steerNews", null);
   }
 
   /**
@@ -1614,10 +1632,50 @@ export class ThreadAgent extends Agent<Env> {
    * so it waits for a turn of its own (or Interrupt).
    */
   private async takeNews(): Promise<string | null> {
+    const news = await this.pendingNews();
+    if (!news || !this.claimNews(news)) return null;
+    await this.newsDelivered(news);
+    return news.text;
+  }
+
+  /**
+   * Queue callback after a person wrote or edited a message while a turn runs on a computer: what
+   * takeNews would take goes to the CLI at once when it takes input mid-turn (Codex's app server,
+   * runner feature "steer"), instead of with the agent's next call to Myrel. Claimed first, so a tool
+   * call meanwhile cannot deliver it twice; given back when the CLI did not take it.
+   */
+  async steerNews(): Promise<void> {
+    const row = this.runningTask();
+    const spec = row?.backend === "local" ? (JSON.parse(row.spec) as StoredSpec) : null;
+    // Only Codex's app server takes them; asking any other CLI would only hold them up meanwhile.
+    if (!row || !spec?.runnerId || !spec.agent || spec.harness !== "codex") return;
+    if (!(await runnerHasFeature(this.env, spec.runnerId, "steer"))) return;
+    const news = await this.pendingNews();
+    if (!news) return;
+    const before = { dirty: this.getMeta("dirty"), wakeEdit: this.getMeta("wake_edit") };
+    if (!this.claimNews(news)) return;
+    const claimed = this.getMeta("edits_taken") ?? "{}";
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, spec.runnerId);
+    const taken = await runner.steerTask(row.id, news.text).catch((err) => (console.warn("steering the running turn failed", err), false));
+    if (taken) return this.newsDelivered(news);
+    // Not taken: they wait for the agent's next call to Myrel (or the next turn), as before.
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.last || (this.getMeta("edits_taken") ?? "{}") !== claimed) return;
+    this.setMeta("last_seen_seq", String(news.seen));
+    this.setMeta("edits_taken", news.editsTaken);
+    if (before.wakeEdit !== null) this.setMeta("wake_edit", before.wakeEdit);
+    if (before.dirty !== null) this.setMeta("dirty", before.dirty);
+  }
+
+  /**
+   * What the running turn has not seen of its person: new messages up to the first one from someone
+   * else, and their messages edited since, as the note to give the agent. Not yet claimed (claimNews).
+   */
+  private async pendingNews(): Promise<PendingNews | null> {
     const requester = this.getMeta("requester");
     if (!requester || !this.runningTask()) return null;
     const seen = Number(this.getMeta("last_seen_seq") ?? 0);
-    const editsTaken = JSON.parse(this.getMeta("edits_taken") ?? "{}") as Record<string, string>;
+    const editsTaken = this.getMeta("edits_taken") ?? "{}";
+    const taken0 = JSON.parse(editsTaken) as Record<string, string>;
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const readAt = new Date().toISOString();
@@ -1626,34 +1684,50 @@ export class ThreadAgent extends Agent<Env> {
     const other = messages.findIndex((m) => m.authorKind === "user" && m.authorId !== requester);
     const taken = other === -1 ? messages : messages.slice(0, other);
     const news = taken.filter((m) => m.authorKind === "user");
-    const edits = read.edited.filter((m) => m.authorKind === "user" && editsTaken[m.id] !== m.editedAt);
+    const edits = read.edited.filter((m) => m.authorKind === "user" && taken0[m.id] !== m.editedAt);
     const edited = edits.filter((m) => m.authorId === requester);
     if (!news.length && !edited.length) return null;
-    const last = news.length ? taken.at(-1)!.seq : seen;
+    return {
+      text: newsNote(news, names, edited),
+      seen,
+      last: news.length ? taken.at(-1)!.seq : seen,
+      whole: other === -1,
+      hasNew: news.length > 0,
+      edited,
+      allEdits: edited.length === edits.length,
+      editsTaken,
+      readAt,
+    };
+  }
+
+  /** Marks pending news seen; false when another call took them meanwhile. */
+  private claimNews(news: PendingNews): boolean {
     // Read again: another call may have taken them meanwhile.
-    if (Number(this.getMeta("last_seen_seq") ?? 0) !== seen || (this.getMeta("edits_taken") ?? "{}") !== JSON.stringify(editsTaken)) return null;
-    this.setMeta("last_seen_seq", String(last));
-    if (edited.length) {
-      for (const m of edited) editsTaken[m.id] = m.editedAt!;
+    if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.seen || (this.getMeta("edits_taken") ?? "{}") !== news.editsTaken) return false;
+    this.setMeta("last_seen_seq", String(news.last));
+    if (news.edited.length) {
+      const editsTaken = JSON.parse(news.editsTaken) as Record<string, string>;
+      for (const m of news.edited) editsTaken[m.id] = m.editedAt!;
       this.setMeta("edits_taken", JSON.stringify(editsTaken));
       // Every edit the wake was for is taken in (none by anyone else waits): no turn after this one for it.
       const wakeEdit = this.getMeta("wake_edit");
-      if (wakeEdit && wakeEdit <= readAt && edited.length === edits.length) this.deleteMeta("wake_edit");
+      if (wakeEdit && wakeEdit <= news.readAt && news.allEdits) this.deleteMeta("wake_edit");
     }
     // Taken in whole, with nothing else waiting: no turn after this one just for them.
-    if (
-      other === -1 &&
-      !this.getMeta("wake_other") &&
-      !this.getMeta("wake_edit") &&
-      Number(this.getMeta("wake_seq") ?? 0) <= last
-    )
+    if (news.whole && !this.getMeta("wake_other") && !this.getMeta("wake_edit") && Number(this.getMeta("wake_seq") ?? 0) <= news.last) {
       this.setMeta("dirty", "0");
-    if (news.length) await project.updateThread(threadId, { seenSeq: last });
-    // People see that the agent took in the message they changed.
-    for (const m of edited) {
+    }
+    return true;
+  }
+
+  /** People see claimed news as taken in: new messages as seen, edited ones with the agent's 👀. */
+  private async newsDelivered(news: PendingNews): Promise<void> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    if (news.hasNew) await project.updateThread(threadId, { seenSeq: news.last });
+    for (const m of news.edited) {
       await project.addReaction({ messageId: m.id, emoji: SEEN_EMOJI, authorKind: "agent", authorId: THREAD_AGENT_ID });
     }
-    return newsNote(news, names, edited);
   }
 
   /**
@@ -2267,3 +2341,4 @@ async function isMember(env: Env, projectId: string, userId: string): Promise<bo
     await env.DB.prepare("SELECT 1 AS y FROM project_members WHERE project_id = ? AND user_id = ?").bind(projectId, userId).first(),
   );
 }
+

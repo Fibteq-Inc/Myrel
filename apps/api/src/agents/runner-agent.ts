@@ -188,6 +188,7 @@ export class RunnerAgent extends Agent<Env> {
         await this.saveInfo({ update: frame.update ?? undefined });
         return;
       case "dirs":
+      case "task.steered":
       case "request.failed":
         this.waiting.get(frame.requestId)?.(frame);
         return;
@@ -248,6 +249,17 @@ export class RunnerAgent extends Agent<Env> {
     if (!connection) return { ok: false, reason: "The computer is offline." };
     send(connection, { type: "task.github", taskId, github });
     return { ok: true };
+  }
+
+  /**
+   * Hands people's new messages to a running task's CLI mid-turn (feature "steer"). True once the CLI
+   * took them; false when it cannot (another CLI, an older runner, the turn just ended). Callable over RPC.
+   */
+  async steerTask(taskId: string, text: string): Promise<boolean> {
+    const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
+    if (task?.status !== "running") return false;
+    const answer = await this.ask({ type: "task.steer", taskId, text }, "steer");
+    return answer.ok !== false && answer.type === "task.steered" && answer.taken;
   }
 
   /** Asks the computer to stop a task; its result arrives as a cancelled "task.done". Callable over RPC. */
