@@ -99,7 +99,7 @@ export function splitFilePaths(text: string, projectFiles: ReadonlySet<string>):
   const parts: Array<string | { text: string; path: string }> = [];
   let last = 0;
   for (const match of text.matchAll(/[^\s"'`<>()[\]{}|*]+/g)) {
-    const word = match[0].replace(/[.,;:!?…]+$/, "");
+    const word = trimEndPunctuation(match[0]);
     if (!mayBeFileName(word)) continue;
     const path = normalizeFilePath(word);
     if (!projectFiles.has(path)) continue;
@@ -110,4 +110,11 @@ export function splitFilePaths(text: string, projectFiles: ReadonlySet<string>):
   if (last === 0) return [text];
   if (last < text.length) parts.push(text.slice(last));
   return parts;
+}
+
+/** The word without the punctuation after it, by hand: a `[…]+$` regex is slow on a long run of it. */
+function trimEndPunctuation(word: string): string {
+  let end = word.length;
+  while (end > 0 && ".,;:!?…".includes(word[end - 1]!)) end--;
+  return word.slice(0, end);
 }
