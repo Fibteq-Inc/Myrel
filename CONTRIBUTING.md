@@ -29,7 +29,7 @@ Useful commands:
 |---|---|
 | `pnpm typecheck` | Type-checks every package |
 | `pnpm test` | Runs the Vitest suites (the API tests run inside the Workers runtime) |
-| `pnpm check:changed` | Type-checks and tests only the packages your branch changes (against `main`, uncommitted files included) and the packages that depend on them |
+| `pnpm check:changed` | Type-checks and tests only the packages your branch changes (against a freshly fetched `origin/main`, uncommitted files included) and the packages that depend on them |
 | `pnpm build` | Builds the web app and bundles the Worker |
 | `pnpm db:generate` | Creates a D1 migration after you change `packages/db/src/schema.ts` |
 

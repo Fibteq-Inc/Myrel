@@ -21,7 +21,7 @@
     "deploy:docs": "pnpm --filter @myrel/docs run deploy",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "check:changed": "turbo run typecheck test --affected",
+    "check:changed": "git fetch --quiet origin main; TURBO_SCM_BASE=origin/main turbo run typecheck test --affected",
     "db:generate": "pnpm --filter @myrel/db generate",
     "db:migrate:local": "pnpm --filter @myrel/api exec wrangler d1 migrations apply myrel --local"
   },
