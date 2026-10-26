@@ -21,6 +21,7 @@
     "deploy:docs": "pnpm --filter @myrel/docs run deploy",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "check:changed": "turbo run typecheck test --affected",
     "db:generate": "pnpm --filter @myrel/db generate",
     "db:migrate:local": "pnpm --filter @myrel/api exec wrangler d1 migrations apply myrel --local"
   },
