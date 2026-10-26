@@ -18,6 +18,8 @@ export const fakeGithub = {
   >,
   /** Pull requests by "owner/name#number", in GitHub's REST shape. */
   pulls: {} as Record<string, unknown>,
+  /** Branches by "owner/name#branch"; one not listed exists unprotected unless `deleted`. */
+  branches: {} as Record<string, { protected?: boolean; deleted?: boolean }>,
   /** CI on a commit, by sha. */
   checks: {} as Record<
     string,
@@ -88,11 +90,23 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       merged: false,
       created_at: new Date().toISOString(),
       user: { login: "fibteq[bot]" },
-      head: { sha: `sha-${number}`, ref: body.head },
+      head: { sha: `sha-${number}`, ref: body.head, repo: { full_name: repo } },
     };
     fakeGithub.pulls[`${repo}#${number}`] = created;
     return Response.json(created, { status: 201 });
   }
+  const branch = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/(branches|git\/refs\/heads)\/(.+)$/);
+  if (branch) {
+    const key = `${branch[1]}#${decodeURIComponent(branch[3]!)}`;
+    const b = fakeGithub.branches[key] ?? {};
+    if (b.deleted) return new Response("{}", { status: 404 });
+    if (method === "DELETE") {
+      fakeGithub.branches[key] = { ...b, deleted: true };
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ name: decodeURIComponent(branch[3]!), protected: b.protected ?? false });
+  }
+  if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) return Response.json({}, { status: 201 });
   if (/^\/repos\/[^/]+\/[^/]+\/(issues\/\d+\/assignees|pulls\/\d+\/requested_reviewers)$/.test(url.pathname)) {
     return Response.json({}, { status: 201 });
   }

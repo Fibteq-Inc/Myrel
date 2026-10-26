@@ -35,7 +35,7 @@ import {
 } from "@myrel/runner-core";
 import { createDb, schema } from "@myrel/db";
 import { Agent, getAgentByName } from "agents";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest";
@@ -44,7 +44,16 @@ import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import type { PullCredit } from "../github/attribution";
-import { CONFLICT_RETRY_SEC, type ConflictCheck, checkConflict, listPullRequests, openPullRequest, trackPullRequest } from "../github/pulls";
+import {
+  CONFLICT_RETRY_SEC,
+  type ConflictCheck,
+  checkConflict,
+  closePullRequest,
+  deletePullBranch,
+  listPullRequests,
+  openPullRequest,
+  trackPullRequest,
+} from "../github/pulls";
 import { connectRepoByName, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
@@ -90,6 +99,7 @@ import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } f
 import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, type ResumeWhere, resumeNote, resumingMessage } from "./auto-resume";
 import { SEEN_EMOJI, THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
+import { type BranchRequest, branchAnswer, branchBlockText, branchRequestMessage, branchResultMessage } from "./branch-request";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
 import type { TaskWithLog } from "./thread-tasks";
@@ -314,6 +324,8 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerAccess(reason))) return;
     // A tap on the repository card connects it first, so the turn it starts has it.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
+    // A tap on the branch card deletes it (or keeps it) without a turn.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
     if (reason.kind === "coordinator") {
       const forwarded = reason.forwardedFor !== undefined;
       this.sql`INSERT INTO notes (body, created_at, forwarded, actor)
@@ -430,6 +442,7 @@ export class ThreadAgent extends Agent<Env> {
   async close(): Promise<void> {
     this.setMeta("closed", "1");
     this.deleteMeta("pending_question");
+    this.deleteMeta("branch_request");
     this.setMeta("dirty", "0");
     await this.cancelRunningTask();
   }
@@ -1196,6 +1209,55 @@ export class ThreadAgent extends Agent<Env> {
     return true;
   }
 
+  /**
+   * A person answered the branch card of a pull request the agent closed. "Delete" deletes the
+   * branch when they are the person the thread worked for, or a project owner or admin. Either way
+   * the answer and the line saying what happened need no turn. Returns true when it was an answer.
+   */
+  private async answerBranchRequest(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const request = JSON.parse(this.getMeta("branch_request") ?? "null") as BranchRequest | null;
+    const answer = request ? branchAnswer(reason.body ?? "") : null;
+    if (!request || !answer) return false;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const language = this.getMeta("language") ?? "en";
+    let body: string | null = null;
+    if (answer === "delete") {
+      const role = reason.authorId
+        ? (
+            await createDb(this.env.DB)
+              .select({ role: schema.projectMembers.role })
+              .from(schema.projectMembers)
+              .where(and(eq(schema.projectMembers.projectId, projectId), eq(schema.projectMembers.userId, reason.authorId)))
+              .limit(1)
+          )[0]?.role
+        : undefined;
+      const allowed = !!reason.authorId && (reason.authorId === request.requester || role === "owner" || role === "admin");
+      if (!allowed) {
+        // The card stays for someone who may answer it.
+        body = branchResultMessage({ branch: request.branch, forbidden: true }, language);
+      } else {
+        this.deleteMeta("branch_request");
+        try {
+          body = branchResultMessage(await deletePullBranch(this.env, projectId, request), language);
+        } catch (err) {
+          console.warn("deleting the branch failed", request, err);
+          body = language === "tr" ? `\`${request.branch}\` dalı silinemedi: GitHub isteği reddetti.` : `\`${request.branch}\` could not be deleted: GitHub refused.`;
+        }
+      }
+    } else {
+      this.deleteMeta("branch_request");
+    }
+    const line = body ? await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body }) : null;
+    const seen = line?.seq ?? reason.seq;
+    // Neither the answer nor the line after it is news for the next turn, unless someone wrote in between.
+    if (reason.seq !== undefined && seen !== undefined && reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1 && seen <= reason.seq + 1) {
+      this.setMeta("last_seen_seq", String(seen));
+      await project.updateThread(threadId, { seenSeq: seen });
+    }
+    return true;
+  }
+
   /** Shares the folder on the computer the run is on and adds it to the project's folders there. */
   private async addProjectFolder(projectId: string, folder: string): Promise<boolean> {
     const workspace = await this.runningWorkspace();
@@ -1433,6 +1495,16 @@ export class ThreadAgent extends Agent<Env> {
         openPullRequest: async (input) => {
           const { pr, created } = await openPullRequest(this.env, projectId, threadId, input, await this.pullCredit());
           return `${created ? "Opened" : "An open pull request already exists for that branch:"} ${pr.url} (${pr.repo}#${pr.number}). Myrel follows it: CI failures, reviews and the merge will wake you.`;
+        },
+        closePullRequest: async ({ url, reason, deleteBranch }) => {
+          const { pr, already, branch } = await closePullRequest(this.env, projectId, threadId, url, reason);
+          const done = `${pr.repo}#${pr.number} ${already ? "was already closed" : "is closed without merging; your reason is on it as a comment"}.`;
+          if (!deleteBranch) return `${done} Its branch ${branch.branch} stays, so it can be reopened.`;
+          if (branch.blocked) return `${done} Its branch ${branch.branch} cannot be deleted: ${branchBlockText(branch.blocked, "en")}.`;
+          const m = await reply(branchRequestMessage(branch, reason, turn()?.language ?? "en"), "decision");
+          const request: BranchRequest = { ...branch, requester: this.getMeta("requester") || null, messageId: m.id };
+          this.setMeta("branch_request", JSON.stringify(request));
+          return `${done} A card asks the person whether to delete its branch ${branch.branch}; Myrel deletes it if they say so, without you. Do not ask again.`;
         },
       }),
       ...suggestionTools({

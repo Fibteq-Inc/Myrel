@@ -7,7 +7,7 @@ import { appJwt, pemToPkcs8 } from "../src/github/app";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { listRepoFiles, readRepoFile } from "../src/github/files";
 import { attributionBlock, withAttribution } from "../src/github/attribution";
-import { listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
+import { closePullRequest, deletePullBranch, listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
 import { githubLogin, projectRepoToken } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
 import { fakeGithub, INSTALLATION_TOKEN } from "./fake-github";
@@ -492,6 +492,55 @@ describe("pull requests", () => {
     await expect(openPullRequest(env, project.id, thread.id, { repo: "acme/docs", head: "x", title: "x" }, credit)).rejects.toThrow("not connected");
   });
 
+  it("closes only a pull request its thread opened, never a merged one, and deletes the branch only when it may", async () => {
+    const { project, thread } = await setup();
+    const credit = { name: "İsmail", login: null, threadUrl: null };
+    const { pr } = await openPullRequest(env, project.id, thread.id, { repo: "acme/app", head: "myrel/try-a", title: "Try A" }, credit);
+    const url = pr.url;
+
+    // Someone else's pull request the thread only follows is not its own to close.
+    const other = number + 40;
+    fakeGithub.pulls[`acme/app#${other}`] = pull({ number: other, html_url: `https://github.com/acme/app/pull/${other}` });
+    await trackPullRequest(env, project.id, thread.id, `https://github.com/acme/app/pull/${other}`, credit);
+    await expect(closePullRequest(env, project.id, thread.id, `https://github.com/acme/app/pull/${other}`, "No")).rejects.toThrow("not opened by this thread");
+    // Nor is the thread's own one closable from another thread, even after that thread follows it.
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: "u", body: "other work" });
+    const second = await projectAgent.createThread(root.id, "Other");
+    await trackPullRequest(env, project.id, second.id, url, credit);
+    await expect(closePullRequest(env, project.id, second.id, url, "No")).rejects.toThrow("not opened by this thread");
+
+    const before = fakeGithub.requests.length;
+    const closed = await closePullRequest(env, project.id, thread.id, url, "Went with B instead.");
+    expect(closed).toMatchObject({ already: false, pr: { state: "closed" }, branch: { branch: "myrel/try-a", blocked: null } });
+    const sent = fakeGithub.requests.slice(before);
+    expect(sent.find((r) => r.url.endsWith(`/issues/${pr.number}/comments`))?.body).toEqual({ body: "Went with B instead." });
+    expect(sent.find((r) => r.method === "PATCH")?.body).toEqual({ state: "closed" });
+    // Closing leaves the branch alone.
+    expect(sent.some((r) => r.method === "DELETE")).toBe(false);
+    expect((await listPullRequests(env.DB, project.id, second.id)).find((p) => p.number === pr.number)?.state).toBe("closed");
+    // Closing it again only says so.
+    expect(await closePullRequest(env, project.id, thread.id, url, "Again")).toMatchObject({ already: true });
+
+    // The branch goes once a person says so, and only once.
+    expect(await deletePullBranch(env, project.id, { repo: "acme/app", number: pr.number })).toMatchObject({ blocked: null });
+    expect(fakeGithub.branches["acme/app#myrel/try-a"]?.deleted).toBe(true);
+    expect(await deletePullBranch(env, project.id, { repo: "acme/app", number: pr.number })).toMatchObject({ blocked: { kind: "gone" } });
+
+    // A protected branch stays; so does one another open pull request uses.
+    const { pr: b } = await openPullRequest(env, project.id, thread.id, { repo: "acme/app", head: "release/1", title: "B" }, credit);
+    fakeGithub.branches["acme/app#release/1"] = { protected: true };
+    expect((await closePullRequest(env, project.id, thread.id, b.url, "x")).branch.blocked).toEqual({ kind: "protected" });
+    const { pr: c } = await openPullRequest(env, project.id, thread.id, { repo: "acme/app", head: "myrel/shared", title: "C" }, credit);
+    fakeGithub.pulls[`acme/app#${other}`] = pull({ number: other, head: { sha: "s", ref: "myrel/shared" } });
+    expect((await closePullRequest(env, project.id, thread.id, c.url, "x")).branch.blocked).toEqual({ kind: "in_use", pr: other });
+
+    // A merged pull request cannot be closed.
+    const { pr: d } = await openPullRequest(env, project.id, thread.id, { repo: "acme/app", head: "myrel/done", title: "D" }, credit);
+    fakeGithub.pulls[`acme/app#${d.number}`] = { ...(fakeGithub.pulls[`acme/app#${d.number}`] as object), state: "closed", merged: true };
+    await expect(closePullRequest(env, project.id, thread.id, d.url, "x")).rejects.toThrow("already merged");
+  });
+
   it("credits a pull request the agent opened itself once, and never one a reply only mentions", async () => {
     const { project, thread } = await setup();
     const credit = { name: "İsmail", login: null, threadUrl: "https://myrel.test/projects/p/threads/t" };
@@ -600,7 +649,7 @@ describe("GitHub on the person's computer", () => {
     expect(start.prompt).toContain("Myrel lent git a short-lived token");
     // The same repositories and permissions as a cloud turn's.
     const minted = fakeGithub.requests.findLast((r) => r.url.endsWith("/access_tokens"));
-    expect(minted?.body).toEqual({ repository_ids: [7], permissions: { contents: "write", pull_requests: "write", metadata: "read" } });
+    expect(minted?.body).toEqual({ repository_ids: [7], permissions: { contents: "write", pull_requests: "read", metadata: "read" } });
 
     // A long turn gets a new one before the last expires; both stop working when the turn ends.
     await threadAgent.renewGithub({ taskId: start.taskId, requester: author });

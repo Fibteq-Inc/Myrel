@@ -345,6 +345,11 @@ export const pullRequests = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     threadId: text("thread_id").notNull(),
+    /**
+     * The thread that opened it through Myrel, which may close it. Set only when it was opened
+     * (open_pull_request, or credited as just opened), never by following someone else's.
+     */
+    openedByThread: text("opened_by_thread"),
     url: text("url").notNull(),
     title: text("title").notNull(),
     state: text("state", { enum: ["open", "closed", "merged"] }).notNull(),

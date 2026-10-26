@@ -225,6 +225,13 @@
       "when": 1792836501556,
       "tag": "0031_project_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1793008253312,
+      "tag": "0032_pull_opened_by_thread",
+      "breakpoints": true
     }
   ]
 }

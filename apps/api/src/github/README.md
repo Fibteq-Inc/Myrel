@@ -101,7 +101,8 @@ signed-in session. The desktop and mobile apps will get their own flow.
   hands out a token limited to one project repository. Sandbox tasks clone and open pull
   requests with it.
 - `files.ts`: the thread agent's `repo_list_files` and `repo_read_file` tools.
-- `pulls.ts`: pull requests threads opened (`pull_requests` table). A finished task's pull
+- `pulls.ts`: pull requests threads opened (`pull_requests` table; `opened_by_thread` is the thread that
+  opened it, the only one `close_pull_request` lets close it, and deletes its branch after a card). A finished task's pull
   request is tracked; webhook events for it update its state, reach clients as `pr.updated`
   and wake the thread's agent when something needs it.
 - `../routes/github.ts`: `/api/github` (status, connect, callback, repos, webhook).

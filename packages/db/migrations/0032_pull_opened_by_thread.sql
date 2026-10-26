@@ -1,0 +1,1 @@
+ALTER TABLE `pull_requests` ADD `opened_by_thread` text;

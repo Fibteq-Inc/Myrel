@@ -39,6 +39,8 @@ export type ThreadHost = {
   requestRepo(repo: string, reason: string): Promise<string>;
   /** Opens a pull request on a connected repository through Myrel's GitHub App; says what happened. */
   openPullRequest(input: { repo: string; head: string; base?: string; title: string; body?: string; draft?: boolean }): Promise<string>;
+  /** Closes a pull request this thread opened, and asks the person about its branch when asked to; says what happened. */
+  closePullRequest(input: { url: string; reason: string; deleteBranch: boolean }): Promise<string>;
   /** Directory listing of a connected repository. */
   listRepoFiles(repo: string, path: string, ref?: string): Promise<string>;
   /** Text of one file in a connected repository. */
@@ -297,6 +299,17 @@ export function threadTools(host: ThreadHost): Tool[] {
         draft: z.boolean().optional(),
       }),
       run: (input) => host.openPullRequest(input),
+    }),
+    tool({
+      name: "close_pull_request",
+      description:
+        "Close, without merging, a pull request this thread opened (open_pull_request), when the person asks or the work no longer needs it. The reason goes on it as a comment. A merged pull request cannot be closed, nor one the thread only follows. The branch stays unless delete_branch: then a card asks the person whether to delete it.",
+      input: z.object({
+        url: z.string().url().describe("The pull request's github.com link."),
+        reason: z.string().trim().min(1).max(1000).describe("Why it is closed, in the person's language; posted on the pull request."),
+        delete_branch: z.boolean().default(false).describe("Ask the person, with a card, whether to delete its branch too."),
+      }),
+      run: ({ url, reason, delete_branch }) => host.closePullRequest({ url, reason, deleteBranch: delete_branch }),
     }),
     tool({
       name: "track_pull_request",
