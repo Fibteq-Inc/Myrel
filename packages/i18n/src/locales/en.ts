@@ -471,7 +471,7 @@ export const en = {
   "members.removeConfirm": "Remove {name} from the project?",
   "projectInvites.title": "Invite people",
   "projectInvites.description":
-    "They see the invitation under Settings → Invitations after signing in with this email, and can create an account with it even when sign-ups are closed.",
+    "They get an email with a link when this server can send email. They see the invitation under Settings → Invitations after signing in with this email, and can create an account with it even when sign-ups are closed.",
   "projectInvites.role": "Role",
   "projectInvites.invite": "Invite",
   "projectInvites.pending": "Pending · {role} · invited by {name}",
