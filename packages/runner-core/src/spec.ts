@@ -111,6 +111,14 @@ export type Phase = z.infer<typeof Phase>;
 export const TodoStatus = z.enum(["pending", "in_progress", "done"]);
 export type TodoStatus = z.infer<typeof TodoStatus>;
 
+/** The subagent an event comes from (see LineAgent in @myrel/protocol); absent for the agent's own. */
+export const EventAgent = z.object({
+  id: z.string().min(1).max(200),
+  label: z.string().max(100),
+  state: z.enum(["started", "done", "failed"]).optional(),
+});
+export type EventAgent = z.infer<typeof EventAgent>;
+
 /**
  * What a runner reports while a task runs. Every runner (the cloud sandbox,
  * the local `myrel-runner`) speaks this, whatever harness it starts.
@@ -134,12 +142,19 @@ export const RunnerEvent = z.discriminatedUnion("type", [
     text: z.string(),
     /** How long the step this line reports took (opening the sandbox, starting the harness). */
     ms: z.number().nonnegative().optional(),
+    agent: EventAgent.optional(),
   }),
   /**
    * The harness used a tool (edited a file, ran a command). `ms` is how long it ran, when the
    * harness reports the tool once it finished; without it the tool ran until the next one started.
    */
-  z.object({ type: z.literal("tool"), name: z.string().max(100), title: z.string().max(500), ms: z.number().nonnegative().optional() }),
+  z.object({
+    type: z.literal("tool"),
+    name: z.string().max(100),
+    title: z.string().max(500),
+    ms: z.number().nonnegative().optional(),
+    agent: EventAgent.optional(),
+  }),
   /** Prose the harness wrote. The last one is the task's summary. */
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("pr"), url: z.string().url() }),

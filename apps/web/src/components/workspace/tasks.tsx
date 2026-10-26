@@ -1,5 +1,6 @@
 import { type Task, type TerminalLine, unwrapShell } from "@myrel/protocol";
 import {
+  Bot,
   ChevronRight,
   CircleAlert,
   FolderTree,
@@ -214,16 +215,17 @@ function useDuration() {
 
 /**
  * How long each line's step took: what the runner reported, or for a tool call reported when it
- * started, until the next tool call (or the end of the task).
+ * started, until the next tool call of the same agent (subagents run alongside it) or the end of the task.
  */
 function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
-  let next: number | undefined;
+  const next = new Map<string, number>();
   const times: (number | undefined)[] = new Array(lines.length);
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i]!;
+    const who = l.agent?.id ?? "";
     if (l.ms !== undefined) times[i] = l.ms;
-    else if (l.tool && l.at !== undefined) times[i] = Math.max(0, (next ?? end) - l.at);
-    if (l.tool && l.at !== undefined) next = l.at;
+    else if (l.tool && l.at !== undefined) times[i] = Math.max(0, (next.get(who) ?? end) - l.at);
+    if (l.tool && l.at !== undefined) next.set(who, l.at);
   }
   return times;
 }
@@ -269,6 +271,8 @@ const FOLD_LINES = 3;
 function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  if (line.agent?.state) return <AgentRow line={line} first={first} time={time} />;
+  const agent = line.agent;
   const step = line.tool ? line.text.replace(/^→ /, "") : null;
   const command = step?.startsWith("$ ") ? unwrapShell(step.slice(2)) : null;
   const text = command ?? step ?? line.text;
@@ -276,11 +280,15 @@ function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean
   const folded = long && !open;
   const tone = line.stream === "stderr" ? "text-bad" : step ? "" : line.stream === "system" ? "text-subtle" : "text-muted";
   return (
-    <div className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 ${step && !first ? "mt-2" : ""} ${tone}`}>
+    <div
+      className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 ${step && !first ? "mt-2" : ""} ${agent ? "ml-1.5 border-l border-line pl-3" : ""} ${tone}`}
+      title={agent ? t("tasks.agentStep", { name: agent.label }) : undefined}
+    >
       <span aria-hidden="true" className={`w-[1ch] select-none ${command ? "text-accent" : step ? "text-subtle" : ""}`}>
         {command ? "$" : step ? "›" : ""}
       </span>
       <div className="min-w-0">
+        {agent && step && <div className="font-sans text-[11px] leading-[1.4] text-accent">{agent.label}</div>}
         <div
           className={`whitespace-pre-wrap [overflow-wrap:anywhere] ${step && !command ? "font-sans text-[13px] leading-[1.5] text-fg" : ""} ${command ? "text-fg" : ""} ${folded ? "line-clamp-3" : ""}`}
         >
@@ -288,6 +296,34 @@ function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean
         </div>
         {long && (
           <button type="button" onClick={() => setOpen(!open)} className="mt-0.5 font-sans text-xs text-accent hover:underline">
+            {open ? t("tasks.showLess") : t("tasks.showMore")}
+          </button>
+        )}
+      </div>
+      <span className="whitespace-nowrap pl-2 text-right tabular-nums text-subtle" title={time ? t("tasks.stepTime") : undefined}>
+        {time ?? ""}
+      </span>
+    </div>
+  );
+}
+
+/** A subagent starting (with what it is for) or ending (with its answer, folded when long). */
+function AgentRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const agent = line.agent!;
+  const key = agent.state === "started" ? "tasks.agentStarted" : agent.state === "done" ? "tasks.agentDone" : "tasks.agentFailed";
+  const text = line.text.trim();
+  const long = text.length > FOLD_CHARS || text.split("\n").length > FOLD_LINES;
+  const tone = agent.state === "failed" ? "text-bad" : agent.state === "done" ? "text-ok" : "text-accent";
+  return (
+    <div className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 ${first ? "" : "mt-2"}`}>
+      <Bot size={13} aria-hidden="true" className={`mt-[3px] flex-none ${tone}`} />
+      <div className="min-w-0 font-sans text-[13px] leading-[1.5]">
+        <div className={`font-medium ${agent.state === "failed" ? "text-bad" : "text-fg"}`}>{t(key, { name: agent.label })}</div>
+        {text && <div className={`whitespace-pre-wrap text-muted [overflow-wrap:anywhere] ${long && !open ? "line-clamp-3" : ""}`}>{text}</div>}
+        {long && (
+          <button type="button" onClick={() => setOpen(!open)} className="mt-0.5 text-xs text-accent hover:underline">
             {open ? t("tasks.showLess") : t("tasks.showMore")}
           </button>
         )}

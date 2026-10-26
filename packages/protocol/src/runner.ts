@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { idPattern } from "./ids";
-import { ProjectId, TaskId, ThreadId, Timestamp } from "./models";
+import { LineAgent, ProjectId, TaskId, ThreadId, Timestamp } from "./models";
 
 /**
  * myrel-runner: a small daemon on the user's own computer. It opens an
@@ -312,7 +312,16 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     interrupted: z.array(TaskId).max(100).default([]),
   }),
   /** A line of progress from the CLI (what it is doing now). Empty when only its usage changed. */
-  z.object({ type: z.literal("task.progress"), taskId: TaskId, text: z.string().max(2000), usage: CliUsage.optional() }),
+  z.object({
+    type: z.literal("task.progress"),
+    taskId: TaskId,
+    text: z.string().max(2000),
+    usage: CliUsage.optional(),
+    /** The subagent this step is from; absent for the agent's own steps. Older runners never send it. */
+    agent: LineAgent.optional(),
+    /** How long the step took, when known (a subagent's run, on its ending line). */
+    ms: z.number().nonnegative().optional(),
+  }),
   z.object({
     type: z.literal("task.done"),
     taskId: TaskId,

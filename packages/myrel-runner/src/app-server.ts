@@ -3,6 +3,7 @@ import { request as httpsRequest } from "node:https";
 import { type TaskModel, unwrapShell } from "@myrel/protocol";
 import type { ParseState } from "./clis";
 import { codexLimits } from "./limits";
+import { endAgent, startAgent, step } from "./subagents";
 
 /**
  * A client for one turn of Codex's app server (`codex app-server`): newline-delimited JSON-RPC
@@ -129,20 +130,14 @@ export class AppServerTurn {
   }
 
   private notified(method: string, p: Obj) {
-    // Other threads' events (a subagent's) are not this turn's.
-    if (this.threadId && p.threadId !== undefined && p.threadId !== this.threadId) return;
+    // Another thread's events are a subagent's: its steps and tokens count, its turn ending does not end this one.
+    if (this.threadId && p.threadId !== undefined && p.threadId !== this.threadId) return this.subagent(method, p, String(p.threadId));
     switch (method) {
       case "item/started":
       case "item/completed":
         return this.item(method, obj(p.item));
-      case "thread/tokenUsage/updated": {
-        // `last` is one model call; `total` also holds the session's earlier turns.
-        const last = obj(obj(p.tokenUsage).last);
-        const u = (this.state.usage ??= { inputTokens: 0, outputTokens: 0 });
-        u.inputTokens += count(last.inputTokens);
-        u.outputTokens += count(last.outputTokens);
-        return;
-      }
+      case "thread/tokenUsage/updated":
+        return this.addUsage(p);
       case "account/rateLimits/updated": {
         const limits = appServerLimits(p.rateLimits);
         if (limits) this.state.limits = limits;
@@ -164,35 +159,74 @@ export class AppServerTurn {
     }
   }
 
-  private item(method: string, item: Obj) {
+  /** A subagent's event: `agent` is its thread. */
+  private subagent(method: string, p: Obj, agent: string) {
+    if (method === "item/started" || method === "item/completed") return this.item(method, obj(p.item), agent);
+    if (method === "thread/tokenUsage/updated") return this.addUsage(p);
+  }
+
+  private addUsage(p: Obj) {
+    // `last` is one model call; `total` also holds the session's earlier turns.
+    const last = obj(obj(p.tokenUsage).last);
+    const u = (this.state.usage ??= { inputTokens: 0, outputTokens: 0 });
+    u.inputTokens += count(last.inputTokens);
+    u.outputTokens += count(last.outputTokens);
+  }
+
+  /** One item of the turn, or (agent) of a subagent's thread. */
+  private item(method: string, item: Obj, agent?: string) {
+    const show = (text: string) => step(this.state, clip(text), agent);
     switch (item.type) {
       case "commandExecution": {
         if (method !== "item/started") return;
         const action = str(obj((item.commandActions as unknown[] | undefined)?.[0]).command);
         const command = action ?? unwrapShell(str(item.command) ?? "");
-        if (command) this.state.progress = clip(`$ ${command}`);
+        if (command) show(`$ ${command}`);
         return;
       }
       case "fileChange": {
         const paths = Array.isArray(item.changes) ? item.changes.map((c) => str(obj(c).path)).filter((p): p is string => !!p) : [];
         if (typeof item.id === "string" && paths.length) this.changes.set(item.id, paths);
-        if (method === "item/started" && paths.length) this.state.progress = clip(`Edit ${paths.join(", ")}`);
+        if (method === "item/started" && paths.length) show(`Edit ${paths.join(", ")}`);
         return;
       }
       case "mcpToolCall":
-        if (method === "item/started") this.state.progress = clip(`${str(item.server) ?? "mcp"}.${str(item.tool) ?? "tool"}`);
+        if (method === "item/started") show(`${str(item.server) ?? "mcp"}.${str(item.tool) ?? "tool"}`);
         return;
       case "webSearch":
-        if (method === "item/started" && str(item.query)) this.state.progress = clip(`Search ${str(item.query)}`);
+        if (method === "item/started" && str(item.query)) show(`Search ${str(item.query)}`);
         return;
       case "agentMessage": {
         const text = str(item.text)?.trim();
         if (method !== "item/completed" || !text) return;
-        // The last message is the answer, as with exec.
-        this.state.progress = clip(text);
-        this.state.result = text;
+        show(text);
+        // The last message is the answer, as with exec; a subagent's goes to the agent, not to people.
+        if (!agent) this.state.result = text;
         return;
       }
+      case "collabAgentToolCall":
+        return this.collab(method, item);
+      case "subAgentActivity": {
+        const id = str(item.agentThreadId);
+        if (!id) return;
+        if (item.kind === "started") startAgent(this.state, id, agentName(item.agentPath));
+        else if (item.kind === "completed") endAgent(this.state, id, true);
+        else if (item.kind === "interrupted") endAgent(this.state, id, false);
+        return;
+      }
+    }
+  }
+
+  /** The agent spawning, waiting on or closing subagents: their start, with what they are for, and their end. */
+  private collab(method: string, item: Obj) {
+    const ids = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.filter((id): id is string => typeof id === "string") : [];
+    if (item.tool === "spawnAgent") for (const id of ids) startAgent(this.state, id, "", str(item.prompt) ?? "");
+    if (method !== "item/completed") return;
+    for (const [id, raw] of Object.entries(obj(item.agentsStates))) {
+      const s = obj(raw);
+      const message = str(s.message) ?? "";
+      if (s.status === "completed" || s.status === "shutdown") endAgent(this.state, id, true, message);
+      else if (s.status === "errored" || s.status === "interrupted") endAgent(this.state, id, false, message);
     }
   }
 
@@ -337,4 +371,9 @@ function allowed(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** A subagent's name from its path ("/root/explorer" → "explorer"); empty for an unnamed one. */
+function agentName(path: unknown): string {
+  return (str(path) ?? "").split("/").filter(Boolean).pop() ?? "";
 }

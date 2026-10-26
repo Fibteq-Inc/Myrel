@@ -266,6 +266,18 @@ export const ThreadFiles = z.object({
 });
 export type ThreadFiles = z.infer<typeof ThreadFiles>;
 
+/**
+ * The subagent a terminal line comes from, when the thread's agent started one (Claude Code's Agent
+ * tool, Codex's spawned agents). Lines without it are the agent's own. `state` marks the line that
+ * reports the subagent starting (its text is its purpose) or ending (its text is its answer).
+ */
+export const LineAgent = z.object({
+  id: z.string().min(1).max(200),
+  label: z.string().max(100),
+  state: z.enum(["started", "done", "failed"]).optional(),
+});
+export type LineAgent = z.infer<typeof LineAgent>;
+
 export const TerminalLine = z.object({
   stream: z.enum(["stdout", "stderr", "system"]),
   text: z.string(),
@@ -275,6 +287,7 @@ export const TerminalLine = z.object({
   ms: z.number().nonnegative().optional(),
   /** The line is a tool call (a command, a file edit). */
   tool: z.boolean().optional(),
+  agent: LineAgent.optional(),
 });
 export type TerminalLine = z.infer<typeof TerminalLine>;
 

@@ -150,12 +150,16 @@ export class RunnerAgent extends Agent<Env> {
         if (task?.status !== "running") return;
         const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
         if (frame.usage) await thread.cliUsage(task.id, frame.usage);
-        // Empty text: only the usage changed.
-        if (!frame.text) return;
+        // Empty text: only the usage changed (a subagent starting or ending may have none).
+        if (!frame.text && !frame.agent?.state) return;
         const project = await getAgentByName(this.env.PROJECT_AGENT, task.project_id);
-        // The activity line takes the step's first line; the terminal keeps all of it (an agent's message, a long command).
-        await project.setActivity(task.thread_id, true, frame.text.trim().split("\n")[0]!.slice(0, 200));
-        await thread.taskEvents(task.id, [{ type: "tool", name: "cli", title: frame.text.trim() }]);
+        // The activity line takes the step's first line, after the subagent's name when it is one's;
+        // the terminal keeps all of it (an agent's message, a long command).
+        const first = frame.text.trim().split("\n")[0]!;
+        const activity = frame.agent ? [frame.agent.label, first].filter(Boolean).join(": ") : first;
+        if (activity) await project.setActivity(task.thread_id, true, activity.slice(0, 200));
+        const step = { type: "tool", name: "cli", title: frame.text.trim() } as const;
+        await thread.taskEvents(task.id, [{ ...step, ...(frame.agent && { agent: frame.agent }), ...(frame.ms !== undefined && { ms: frame.ms }) }]);
         return;
       }
       case "task.folders": {
