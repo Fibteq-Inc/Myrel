@@ -7,6 +7,7 @@ import type { AcpMcpServer, AcpTurn, AcpTurnOptions } from "./acp";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
+import { refreshPath } from "./path";
 
 /** What a CLI's output told us so far. */
 export type ParseState = {
@@ -942,20 +943,40 @@ function cliVersion(bin: string): Promise<string | null> {
   });
 }
 
-/** Which CLIs are installed, by running `<bin> --version`. */
-export async function detectClis(): Promise<RunnerCli[]> {
+/** How long `<bin> --version` may take: a first start on Windows, behind a virus scan, can be slow. */
+const VERSION_TIMEOUT = process.platform === "win32" ? 30_000 : 10_000;
+
+/** A CLI that was not found, and what running it said. */
+export type MissingCli = { id: CliId; reason: string };
+
+/**
+ * Which CLIs are installed, by running `<bin> --version`. The PATH is looked at again first
+ * (see refreshPath), so a CLI installed while the runner runs is found on the next look.
+ */
+export async function detectClis(missing?: MissingCli[]): Promise<RunnerCli[]> {
+  await refreshPath().catch(() => {});
   const found = await Promise.all(
     Object.values(ADAPTERS).map(
       (a) =>
         new Promise<RunnerCli | null>((resolve) => {
-          execFile(a.bin, ["--version"], { timeout: 10_000, shell: process.platform === "win32", env: childEnv() }, (err, stdout) => {
-            if (err || (a.isMine && !a.isMine(firstLine(stdout)))) return resolve(null);
+          execFile(a.bin, ["--version"], { timeout: VERSION_TIMEOUT, shell: process.platform === "win32", env: childEnv(), windowsHide: true }, (err, stdout, stderr) => {
+            if (err || (a.isMine && !a.isMine(firstLine(stdout)))) {
+              missing?.push({ id: a.id, reason: err ? missingReason(err, stderr) : `\`${a.bin} --version\` printed "${firstLine(stdout)}"` });
+              return resolve(null);
+            }
             resolve({ id: a.id, version: firstLine(stdout) || null });
           });
         }),
     ),
   );
   return found.filter((c): c is RunnerCli => c !== null);
+}
+
+/** Why `<bin> --version` failed, in one line. */
+export function missingReason(err: Error & { code?: unknown; killed?: boolean }, stderr = ""): string {
+  if (err.killed) return `no answer in ${VERSION_TIMEOUT / 1000}s`;
+  if (err.code === "ENOENT") return "not on PATH";
+  return firstLine(stderr) || err.message.split("\n")[0] || "failed";
 }
 
 function count(v: unknown): number {
