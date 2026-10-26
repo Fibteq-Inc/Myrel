@@ -1042,7 +1042,7 @@ export class ThreadAgent extends Agent<Env> {
     return tool({
       name: "approve_access",
       description:
-        "Claude Code calls this when a step needs permission; it asks the person when the step reaches outside the project's folders. Do not call it yourself.",
+        "Claude Code (and myrel-runner, for Codex's app server) calls this when a step needs permission; it asks the person when the step reaches outside the project's folders. Do not call it yourself.",
       input: z.object({ tool_name: z.string().max(200), input: z.record(z.string(), z.unknown()).default({}), tool_use_id: z.string().optional() }),
       run: async ({ tool_name, input }) => {
         const started = JSON.parse(this.getMeta("access_folders") ?? "[]") as string[];

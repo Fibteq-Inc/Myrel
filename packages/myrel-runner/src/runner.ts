@@ -20,7 +20,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.21.1";
+export const RUNNER_VERSION = "0.22.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -114,7 +114,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const readCodex = () => {
     if (clis.some((c) => c.id === "codex")) void readCodexLimits().then((l) => setLimits("codex", l), () => {});
   };
-  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log, onLimits: setLimits, onChange: writeRunning });
+  const tasks = new TaskRunner({ config: () => config, sessions: new SessionStore(), log, onLimits: setLimits, onChange: writeRunning, version: RUNNER_VERSION });
   // What the previous runner was doing when it stopped (an update, a restart): the server continues it.
   const interrupted = takeInterrupted();
   if (interrupted.length) log(`${interrupted.length} task(s) stopped when the runner restarted; Myrel continues them.`);
