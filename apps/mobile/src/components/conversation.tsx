@@ -33,6 +33,7 @@ export function Conversation({
   onSend,
   onEdit,
   onInterrupt,
+  onStop,
   header,
   plan,
   onOpenPlan,
@@ -63,6 +64,8 @@ export function Conversation({
   onEdit?: (messageId: string, body: string) => void;
   /** Set when a message waits for the thread's working agent: stops its turn so the message goes now. */
   onInterrupt?: { messageId: string; run: () => Promise<unknown> };
+  /** Set in a thread: stops its agent's turn from the "Working" line. */
+  onStop?: () => Promise<unknown>;
   /** Pinned above the list (e.g. a thread's checklist). */
   header?: ReactNode;
   /** The plan card the agent is moving along, drawn from the thread's fresh checklist. */
@@ -148,7 +151,7 @@ export function Conversation({
             // Inverted: the offset is the distance from the newest message.
             onScroll={(e) => setAway(e.nativeEvent.contentOffset.y > AWAY)}
             scrollEventThrottle={100}
-            ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
+            ListHeaderComponent={working ? <Thinking label={working} onStop={onStop} /> : undefined}
             // Inverted: the end of the list is its top, the oldest message held.
             onEndReached={loadEarlier}
             onEndReachedThreshold={0.5}

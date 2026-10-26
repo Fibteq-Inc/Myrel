@@ -229,6 +229,8 @@ const PREFETCH_MAX_BYTES = 200 * 1024 * 1024;
 const WATCHDOG_GRACE_SEC = 300;
 /** How often a running cloud turn checks that its sandbox is still on it (a deploy restarts sandboxes). */
 const SANDBOX_CHECK_SEC = 60;
+/** How often a turn waiting for the person's computer to reconnect looks again (see waitForComputer). */
+const RECONNECT_RETRY_SEC = 5;
 /** Why a cloud turn ended when its sandbox lost it. */
 const SANDBOX_LOST = "The sandbox stopped while working, most likely because a new version of Myrel was deployed. Send your message again to continue.";
 
@@ -497,6 +499,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("requester", requester ?? "");
     const place = await taskPlace(this.env, projectId, requester, ctx.thread.cli?.id, ctx.thread.runner);
     if (place.kind === "error") return this.cannotWork(place.message);
+    if (place.kind === "wait") return this.waitForComputer(place.runnerName);
     // The container takes the longest to be ready, so it starts while the turn is put together.
     if (place.kind === "cloud" && this.env.SANDBOX && (await canUseSandbox(this.env, projectId)).ok) {
       this.ctx.waitUntil(this.env.SANDBOX.getByName(threadId).warm().catch((err) => console.warn("sandbox warm-up failed", err)));
@@ -579,9 +582,34 @@ export class ThreadAgent extends Agent<Env> {
   private async cannotWork(reason: string) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    // It may have been waiting for the computer to come back (waitForComputer).
+    await project.setActivity(threadId, false);
     await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: reason });
     await project.updateThread(threadId, { status: "blocked" });
     await project.notifyThread(threadId, "blocked", reason);
+  }
+
+  /**
+   * The person's computer dropped off moments ago (a runner restarting for an update, say): the turn
+   * tries again shortly rather than moving to the cloud, where another CLI would pick the work up
+   * without the session it had. Once the computer has been gone too long, taskPlace decides as usual.
+   */
+  private async waitForComputer(runnerName: string) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const tr = (this.getMeta("language") ?? "").startsWith("tr");
+    await project.setActivity(threadId, true, tr ? `${runnerName} yeniden bağlanıyor, bekleniyor` : `Waiting for ${runnerName} to reconnect`);
+    this.setMeta("dirty", "1");
+    // One look at a time, however many messages arrive meanwhile.
+    if (this.getMeta("reconnect_wait") === "1") return;
+    this.setMeta("reconnect_wait", "1");
+    await this.schedule(RECONNECT_RETRY_SEC, "reconnectRetry");
+  }
+
+  /** Schedule callback: another try at the turn that waits for the person's computer. */
+  async reconnectRetry(): Promise<void> {
+    this.deleteMeta("reconnect_wait");
+    await this.queue("threadTurn", null);
   }
 
   /**
@@ -596,7 +624,7 @@ export class ThreadAgent extends Agent<Env> {
      * sections it holds unchanged from then are left out (see unchangedSections). Called once.
      */
     followUp: { prompt: (budget: number) => string; unchanged: ReturnType<typeof unchangedSections> };
-    place: Exclude<TaskPlace, { kind: "error" }>;
+    place: Exclude<TaskPlace, { kind: "error" | "wait" }>;
     timezone: string;
     language: string;
     /** Files attached to the thread's messages, oldest first: a cloud turn finds them already downloaded. */
@@ -824,6 +852,24 @@ export class ThreadAgent extends Agent<Env> {
     const replied = turn?.replied ?? false;
     const interrupted = this.getMeta("interrupted_task") === taskId;
     this.deleteMeta("interrupted_task");
+    const stopped = this.getMeta("stopped_task") === taskId;
+    this.deleteMeta("stopped_task");
+    if (stopped) {
+      // Stopped from the chat: one line, and the thread waits for whoever writes next.
+      const tr = (this.getMeta("language") ?? row.language).startsWith("tr");
+      await project.sendMessage({
+        threadId,
+        authorKind: "system",
+        authorId: SYSTEM_ID,
+        body: tr ? "Durduruldu. Devam etmesi için buraya yazın." : "Stopped. Write here to continue.",
+        artifacts: pending,
+        stats: this.runStats(row, turn?.mark).stats,
+      });
+      await project.updateThread(threadId, { status: "review_ready" });
+      await project.setActivity(threadId, false);
+      if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
+      return;
+    }
     if (interrupted) {
       // Stopped for a message that waits: one line, and that message's turn starts now.
       const tr = (this.getMeta("language") ?? row.language).startsWith("tr");
@@ -954,7 +1000,7 @@ export class ThreadAgent extends Agent<Env> {
    * The connectors this turn's agent gets (see turnConnectors), remembered so the gateway knows
    * which remote ones the turn's token opens. None from a runner too old to pass them on.
    */
-  private async turnConnectors(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnConnector[]> {
+  private async turnConnectors(place: Exclude<TaskPlace, { kind: "error" | "wait" }>, requester: string | null): Promise<TurnConnector[]> {
     const { projectId } = this.ids();
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "connectors"))) return [];
     const runnerId = place.kind === "local" ? place.workspace.runnerId : undefined;
@@ -973,7 +1019,7 @@ export class ThreadAgent extends Agent<Env> {
    * The skills this turn's agent gets (see turnSkills), remembered so the running turn's token
    * opens their files. None from a runner too old to put them next to its CLI.
    */
-  private async turnSkills(place: Exclude<TaskPlace, { kind: "error" }>, requester: string | null): Promise<TurnSkill[]> {
+  private async turnSkills(place: Exclude<TaskPlace, { kind: "error" | "wait" }>, requester: string | null): Promise<TurnSkill[]> {
     const { projectId } = this.ids();
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "skills"))) return [];
     const skills = await turnSkills(this.env, { projectId, userId: requester }).catch((err) => {
@@ -1809,6 +1855,28 @@ export class ThreadAgent extends Agent<Env> {
     }
     const cancelled = await this.cancelTask(row.id);
     if (!cancelled.ok) this.deleteMeta("interrupted_task");
+    return cancelled;
+  }
+
+  /**
+   * A person asked to stop the thread's work from its chat ("Stop"): the running turn ends with one
+   * line instead of a failure report, nothing continues it on its own (no automatic continue, no
+   * wait for the computer), and the next turn starts when someone writes. Callable over RPC.
+   */
+  async stop(): Promise<{ ok: true } | { ok: false; error: string }> {
+    this.setMeta("dirty", "0");
+    this.deleteMeta("resume_pending");
+    this.deleteMeta("auto_resume");
+    this.deleteMeta("reconnect_wait");
+    const row = this.runningTask();
+    if (!row) {
+      const { projectId, threadId } = this.ids();
+      await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).setActivity(threadId, false);
+      return { ok: true };
+    }
+    this.setMeta("stopped_task", row.id);
+    const cancelled = await this.cancelTask(row.id);
+    if (!cancelled.ok) this.deleteMeta("stopped_task");
     return cancelled;
   }
 

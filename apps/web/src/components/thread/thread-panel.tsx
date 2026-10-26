@@ -482,7 +482,12 @@ function Conversation({
               );
             })}
             <PullRequestCards pullRequests={unmentioned} />
-            {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
+            {active && (
+              <Thinking
+                label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))}
+                onStop={() => api.stopThread(project.id, thread.id)}
+              />
+            )}
           </div>
         )}
       </ScrollToEnd>
