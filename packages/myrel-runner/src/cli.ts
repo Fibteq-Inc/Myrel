@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@myrel/protocol";
 import { readBridgeRun, runBridge } from "./bridge";
-import { detectClis } from "./clis";
+import { detectClis, type MissingCli } from "./clis";
 import { runGitCredential } from "./github";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RESTART_EXIT_CODE, RUNNER_VERSION, startRunner } from "./runner";
@@ -112,7 +112,8 @@ async function main(argv: string[]) {
     }
     case "status": {
       const config = await loadConfig();
-      const [clis, pairing] = await Promise.all([detectClis(), checkPairing(config)]);
+      const missing: MissingCli[] = [];
+      const [clis, pairing] = await Promise.all([detectClis(missing), checkPairing(config)]);
       if (values.json) {
         const { token, ...rest } = config;
         return console.log(JSON.stringify({ ...rest, paired: Boolean(token && config.server), pairing, clis }));
@@ -123,6 +124,7 @@ async function main(argv: string[]) {
       console.log(`Access:  ${config.access}${config.autoUpdate ? " · auto-update on" : ""}`);
       console.log(`Folders: ${config.folders.map((f) => `\n  ${f.path}`).join("") || "none"}`);
       console.log(`CLIs:    ${clis.map((c) => `\n  ${CLI_NAMES[c.id]} ${c.version ?? ""}`).join("") || "none found"}`);
+      console.log(`Not found: ${missing.map((m) => `\n  ${CLI_NAMES[m.id]}: ${m.reason}`).join("") || "none"}`);
       return;
     }
     case "start": {
