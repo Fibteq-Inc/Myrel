@@ -54,7 +54,17 @@ import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/w
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { projectCliModels, resolveTaskModel } from "../task-model";
 import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
-import { type AgentPlace, agentPrompt, hashAgentToken, newAgentToken, pullRequestUrls, SANDBOX_REPOS, sameHash } from "./harness-agent";
+import {
+  type AgentPlace,
+  agentPrompt,
+  hashAgentToken,
+  newAgentToken,
+  pullRequestUrls,
+  SANDBOX_REPOS,
+  sameHash,
+  UNCHANGED_NOTE,
+  unchangedSections,
+} from "./harness-agent";
 import {
   ACCESS_LEVEL_DENIED,
   ACCESS_WAIT_MS,
@@ -528,9 +538,12 @@ export class ThreadAgent extends Agent<Env> {
     const pending = JSON.parse(this.getMeta("resume_pending") ?? "null") as { resumes: number; lastStep: string | null; where?: ResumeWhere } | null;
     this.deleteMeta("resume_pending");
     const note = { ...(pending ? { resumeNote: resumeNote(pending) } : {}), planFinished: this.getMeta("plan_finished") === "1" };
+    // What a resumed CLI session got on its last turn: it holds those sections already.
+    const seen = JSON.parse(this.getMeta("agent_prompt_seen") ?? "null") as { task: string; hashes: string[] } | null;
+    const unchanged = unchangedSections(seen && seen.task === this.getMeta("agent_last_task") ? seen.hashes : []);
     await this.startAgentTurn({
       prompt: threadPrompt({ ...promptInput, ...note }),
-      followUp: threadPrompt({ ...promptInput, followUp: true, ...note }),
+      followUp: { prompt: threadPrompt({ ...promptInput, followUp: true, ...note, lasting: unchanged.lasting }), unchanged },
       requester,
       place,
       timezone: ctx.defaultTimezone,
@@ -557,8 +570,11 @@ export class ThreadAgent extends Agent<Env> {
    */
   private async startAgentTurn(input: {
     prompt: string;
-    /** The same, with only what is new since the last turn, for a CLI session that continues it. */
-    followUp: string;
+    /**
+     * The same, with only what is new since the last turn, for a CLI session that continues it:
+     * sections it holds unchanged from then are left out (see unchangedSections).
+     */
+    followUp: { prompt: string; unchanged: ReturnType<typeof unchangedSections> };
     place: Exclude<TaskPlace, { kind: "error" }>;
     timezone: string;
     language: string;
@@ -636,8 +652,14 @@ export class ThreadAgent extends Agent<Env> {
               : { transport: "stdio", name: c.name, command: c.command!, args: c.args ?? [], env: await readSecrets(this.env, { id: c.id, secret: c.secret }) },
           ),
         );
+        const { unchanged } = input.followUp;
+        const short = agentPrompt(agentPlace, input.followUp.prompt, infos, skills, unchanged.lasting);
+        // A session that resumes holds this turn's sections from now on, unless the thread was cut to fit.
+        this.setMeta("agent_prompt_seen", JSON.stringify({ task: taskId, hashes: context === input.prompt ? unchanged.hashes : [] }));
         const resume =
-          previousTask && input.followUp.length <= MAX_AGENT_PROMPT ? { after: previousTask, prompt: agentPrompt(agentPlace, input.followUp, infos, skills) } : undefined;
+          previousTask && input.followUp.prompt.length <= MAX_AGENT_PROMPT
+            ? { after: previousTask, prompt: unchanged.left() ? `${UNCHANGED_NOTE}\n\n${short}` : short }
+            : undefined;
         const agent = {
           mcpPath,
           token,
