@@ -21,3 +21,4 @@ export * from "./connector-suggestion";
 export * from "./shell";
 export * from "./paste";
 export * from "./queued";
+export * from "./thread-summary";

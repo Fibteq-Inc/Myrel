@@ -1,6 +1,6 @@
-import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
+import { threadMessages, threadPullRequests, threadSummary, threadTasks, threadUsage } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { CLOUD_RUNNER, planChecklist, waitsForAgent } from "@myrel/protocol";
+import { CLOUD_RUNNER, waitsForAgent } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -124,9 +124,9 @@ export default function ThreadScreen() {
   const ownWorkspaces = useOwnWorkspaces(projectId);
   const placeable = usePlaceable(projectId);
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
-  const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
+  const currentPlan = threadSummary(state, threadId).planMessageId;
   const plan =
-    currentPlan && thread?.statusText ? { messageId: currentPlan.id, text: thread.statusText, live } : undefined;
+    currentPlan && thread?.statusText ? { messageId: currentPlan, text: thread.statusText, live } : undefined;
 
   return (
     <>

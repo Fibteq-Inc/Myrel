@@ -16,6 +16,7 @@ import {
   threadByRoot,
   threadMessages,
   threadReplyCount,
+  threadSummary,
   threadTasks,
   threadUsage,
   workingCount,
@@ -48,6 +49,7 @@ const thread = (rootMessageId: string, patch: Partial<Thread> = {}): Thread => (
   runner: null,
   model: null,
   seenSeq: null,
+  summary: null,
   label: null,
   createdAt: now,
   updatedAt: now,
@@ -194,6 +196,17 @@ describe("thread usage", () => {
     for (const m of [root, cloud, local]) s = applyMessage(s, m);
     expect(threadUsage(s, th.id)).toEqual({ tokens: 165, durationMs: 3000, costMicros: 500 });
     expect(threadUsage(s, createId("thread"))).toBeNull();
+  });
+
+  it("takes the server's summary over the messages it holds, which may be only the newest", () => {
+    const root = msg(1);
+    const summary = { replies: 40, usage: { tokens: 9000, durationMs: 60_000, costMicros: 1200 }, planMessageId: null };
+    const th = thread(root.id, { summary });
+    let s = applyEvent(emptyProjectState, { type: "thread.updated", thread: th });
+    s = applyMessages(s, [root, msg(2, th.id)]);
+    expect(threadReplyCount(s, th.id)).toBe(40);
+    expect(threadUsage(s, th.id)).toEqual(summary.usage);
+    expect(threadSummary(s, th.id)).toBe(summary);
   });
 });
 

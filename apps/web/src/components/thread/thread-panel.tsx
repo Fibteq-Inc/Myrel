@@ -1,4 +1,4 @@
-import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
+import { threadMessages, threadPullRequests, threadSummary, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { CLOUD_RUNNER, decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
@@ -359,7 +359,7 @@ function Conversation({
   // Messages the working agent has not taken in yet: the newest says so, with a way to send them now.
   const waiting = messages.findLast((m) => waitsForAgent(m, thread));
   // The newest plan card is the one the agent is moving along; the thread's checklist is its freshest state.
-  const currentPlan = messages.findLast((m) => m.authorKind === "agent" && planChecklist(m.body) !== null);
+  const currentPlan = threadSummary(state, thread.id).planMessageId;
   const planAnchor = (id: string) => `plan-${id}`;
   const [planOpen, setPlanOpen] = useState(false);
   return (
@@ -376,7 +376,7 @@ function Conversation({
             onOpenChange={setPlanOpen}
             onJump={
               currentPlan
-                ? () => document.getElementById(planAnchor(currentPlan.id))?.scrollIntoView({ behavior: "smooth", block: "start" })
+                ? () => document.getElementById(planAnchor(currentPlan))?.scrollIntoView({ behavior: "smooth", block: "start" })
                 : undefined
             }
           />
@@ -405,7 +405,7 @@ function Conversation({
             if (picks.has(m.id)) return null;
             const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
             if (plan !== null) {
-              const current = m.id === currentPlan?.id;
+              const current = m.id === currentPlan;
               return (
                 <PlanCard
                   key={m.id}
