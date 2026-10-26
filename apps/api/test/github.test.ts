@@ -736,7 +736,7 @@ describe("GitHub on the person's computer", () => {
     expect(start.prompt).toContain("Myrel lent git a short-lived token");
     // The same repositories and permissions as a cloud turn's.
     const minted = fakeGithub.requests.findLast((r) => r.url.endsWith("/access_tokens"));
-    expect(minted?.body).toEqual({ repository_ids: [7], permissions: { contents: "write", pull_requests: "read", metadata: "read" } });
+    expect(minted?.body).toEqual({ repository_ids: [7], permissions: { contents: "write", workflows: "write", pull_requests: "read", metadata: "read" } });
 
     // A long turn gets a new one before the last expires; both stop working when the turn ends.
     await threadAgent.renewGithub({ taskId: start.taskId, requester: author });
@@ -748,6 +748,20 @@ describe("GitHub on the person's computer", () => {
     await until(() => revoked().length === before + 2, "tokens revoked at the end of the turn");
     expect(revoked().at(-1)?.auth).toBe(INSTALLATION_TOKEN);
     ws.close();
+  });
+
+  it("lends the token without workflows while the installation has not accepted that permission", { timeout: 30_000 }, async () => {
+    fakeGithub.workflowsGranted = false;
+    try {
+      const { send, ws, start } = await localProject(["cancel", "agent", "git-token"]);
+      expect(start.github).toMatchObject({ token: INSTALLATION_TOKEN, repos: ["acme/app"] });
+      const minted = fakeGithub.requests.findLast((r) => r.url.endsWith("/access_tokens"));
+      expect(minted?.body).toEqual({ repository_ids: [7], permissions: { contents: "write", pull_requests: "read", metadata: "read" } });
+      send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+      ws.close();
+    } finally {
+      fakeGithub.workflowsGranted = true;
+    }
   });
 
   it("gives runner 0.21.0, which drops a task with a long token, none", { timeout: 30_000 }, async () => {

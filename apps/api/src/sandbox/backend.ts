@@ -3,7 +3,7 @@ import { type AgentStart, CLI_NAMES, CLOUD_RUNNER, CliId, CloudCli, type Project
 import { claudeModel, type ModelConfig, type RunnerBackend, type TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { freshInstallationToken, githubConfigured, installationToken } from "../github/app";
+import { freshInstallationToken, GithubError, githubConfigured, installationToken, type RepoPermissions } from "../github/app";
 import { listProjectRepos, repoWritable } from "../github/store";
 import { getWorkspace, isRunnerReconnecting, listWorkspaces, runnerHasFeature, workspaceClis } from "../runners";
 
@@ -227,8 +227,24 @@ async function githubScope(env: Env, projectId: string) {
 /**
  * Pushing, and reading pull requests. Opening and closing them goes through Myrel's tools
  * (open_pull_request, close_pull_request), so gh cannot close, merge or open one past them.
+ * `workflows` lets a push change .github/workflows, which GitHub refuses without it.
  */
-const TURN_GITHUB_PERMISSIONS = { contents: "write", pull_requests: "read", metadata: "read" } as const;
+const TURN_GITHUB_PERMISSIONS = { contents: "write", workflows: "write", pull_requests: "read", metadata: "read" } as const;
+/** For an installation that has not accepted the app's workflows permission yet. */
+const TURN_GITHUB_PERMISSIONS_NO_WORKFLOWS = { contents: "write", pull_requests: "read", metadata: "read" } as const;
+
+/**
+ * Mints a turn's token, without `workflows` when GitHub says the installation was not granted it
+ * (422), so turns keep their token until the owner accepts the new permission.
+ */
+async function mintTurnToken<T>(mint: (permissions: RepoPermissions) => Promise<T>): Promise<T> {
+  try {
+    return await mint(TURN_GITHUB_PERMISSIONS);
+  } catch (err) {
+    if (!(err instanceof GithubError && err.status === 422)) throw err;
+    return mint(TURN_GITHUB_PERMISSIONS_NO_WORKFLOWS);
+  }
+}
 
 /**
  * The token a cloud agent turn gets for the project's connected repositories, so git and gh work
@@ -240,7 +256,7 @@ export async function projectGithubToken(env: Env, projectId: string, runSec: nu
   try {
     const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
     const { installationId, repositoryIds } = scope;
-    return (await installationToken(env, installationId, { repositoryIds, permissions: TURN_GITHUB_PERMISSIONS }, minValidMs)).token;
+    return (await mintTurnToken((permissions) => installationToken(env, installationId, { repositoryIds, permissions }, minValidMs))).token;
   } catch (err) {
     console.warn("no GitHub token for the project", projectId, err);
     return null;
@@ -263,7 +279,7 @@ export async function localGithubToken(
   if (!scope) return null;
   try {
     const { installationId, repositoryIds, repos } = scope;
-    const res = await freshInstallationToken(env, installationId, { repositoryIds, permissions: TURN_GITHUB_PERMISSIONS });
+    const res = await mintTurnToken((permissions) => freshInstallationToken(env, installationId, { repositoryIds, permissions }));
     return { token: res.token, expiresAt: new Date(res.expires_at).toISOString(), repos };
   } catch (err) {
     console.warn("no GitHub token for the project", projectId, err);
