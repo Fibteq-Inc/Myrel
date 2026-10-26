@@ -1,4 +1,4 @@
-import { newestFirst, taskHeadline } from "@myrel/client";
+import { newestFirst, type SubagentSummary, taskHeadline, taskSubagents } from "@myrel/client";
 import { clockTime, dayLabel, localDay, relativeTime } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { type Task, type TerminalLine, unwrapShell } from "@myrel/protocol";
@@ -14,9 +14,9 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react-native";
-import { type ComponentRef, useEffect, useRef, useState } from "react";
+import { type ComponentRef, useEffect, useMemo, useRef, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { formatDuration } from "../../lib/format";
+import { formatDuration, formatTokens } from "../../lib/format";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
@@ -145,6 +145,11 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
   const dur = (ms: number) => formatDuration(ms, t, locale);
   const headline = taskHeadline(task.summary);
   const clock = clockTime(locale, task.createdAt);
+  const subagents = useMemo(() => taskSubagents(lines, running), [lines, running]);
+  // A subagent picked in the list: the terminal shows only its lines.
+  const [focus, setFocus] = useState<string | null>(null);
+  const focused = subagents.find((a) => a.id === focus);
+  const shown = focused ? lines.filter((l) => l.agent?.id === focused.id) : lines;
 
   return (
     <View style={{ gap: 8 }}>
@@ -198,7 +203,18 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
         </Text>
       )}
       {stopError && running && <Text style={[styles.note, { color: colors.bad }]}>{stopError}</Text>}
-      {open && <Terminal lines={lines} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
+      {open && subagents.length > 0 && (
+        <Subagents agents={subagents} focus={focused?.id ?? null} onFocus={(id) => setFocus(id === focus ? null : id)} now={now} />
+      )}
+      {open && focused && (
+        <View style={styles.filter}>
+          <Text style={styles.filterText}>{t("tasks.subagentFilter", { name: focused.label })}</Text>
+          <Pressable accessibilityRole="button" onPress={() => setFocus(null)} hitSlop={6}>
+            <Text style={styles.link}>{t("tasks.showAllLines")}</Text>
+          </Pressable>
+        </View>
+      )}
+      {open && <Terminal lines={shown} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
       {quietMs > QUIET_MS && <Text style={styles.note}>{t("tasks.quiet", { time: dur(quietMs) })}</Text>}
     </View>
   );
@@ -269,6 +285,74 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
       ))}
     </ScrollView>
   );
+}
+
+const SUBAGENT_STATUS = {
+  running: "tasks.subagentStatusRunning",
+  done: "tasks.subagentStatusDone",
+  failed: "tasks.subagentStatusFailed",
+  stopped: "tasks.subagentStatusStopped",
+} as const;
+
+/**
+ * The task's subagents, one card each: what it is for, how it is doing and what it used. Picking
+ * one opens it (its answer, or its latest step while it runs) and narrows the terminal to its lines.
+ */
+function Subagents({ agents, focus, onFocus, now }: { agents: SubagentSummary[]; focus: string | null; onFocus: (id: string) => void; now: number }) {
+  const colors = useColors();
+  const styles = useStyles();
+  const { t, locale } = useI18n();
+  const running = agents.filter((a) => a.status === "running").length;
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={styles.head}>
+        <Bot size={13} color={colors.muted} />
+        <Text style={styles.agentsTitle}>
+          {t("tasks.subagents", { count: agents.length })}
+          {running > 0 && <Text style={{ color: colors.accent, fontWeight: "400" }}> · {t("tasks.subagentsRunning", { count: running })}</Text>}
+        </Text>
+      </View>
+      {agents.map((a) => {
+        const open = a.id === focus;
+        const ms = a.ms ?? (a.status === "running" && a.startedAt !== undefined ? Math.max(0, now - a.startedAt) : undefined);
+        const meta = [
+          a.model,
+          ms !== undefined ? formatDuration(ms, t, locale) : null,
+          a.steps ? t("tasks.subagentSteps", { count: a.steps }) : null,
+          a.tokens ? t("tasks.subagentTokens", { count: formatTokens(a.tokens, locale) }) : null,
+        ].filter(Boolean);
+        const detail = a.status === "running" ? (a.lastStep ? t("tasks.subagentNow", { step: a.lastStep }) : "") : a.answer;
+        return (
+          <Pressable
+            key={a.id}
+            accessibilityRole="button"
+            accessibilityState={{ selected: open }}
+            accessibilityLabel={`${a.label}, ${t(SUBAGENT_STATUS[a.status])}. ${a.purpose}`}
+            onPress={() => onFocus(a.id)}
+            style={[styles.agent, open && { borderColor: colors.accentLine, backgroundColor: colors.accentSoft }]}
+          >
+            <View style={styles.head}>
+              <SubagentStatus status={a.status} />
+              <Text style={styles.agentName}>{a.label}</Text>
+              <Text style={[styles.agentPurpose, !a.purpose && { fontStyle: "italic", color: colors.subtle }]} numberOfLines={open ? undefined : 1}>
+                {a.purpose || t("tasks.subagentNoPurpose")}
+              </Text>
+            </View>
+            {meta.length > 0 && <Text style={[styles.meta, { paddingLeft: 21 }]}>{meta.join(" · ")}</Text>}
+            {open && !!detail && <Text style={styles.agentDetail}>{detail}</Text>}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function SubagentStatus({ status }: { status: SubagentSummary["status"] }) {
+  const colors = useColors();
+  if (status === "running") return <Spinner size={13} color={colors.accent} />;
+  if (status === "done") return <CircleCheck size={13} color={colors.ok} />;
+  if (status === "stopped") return <CircleSlash size={13} color={colors.subtle} />;
+  return <CircleAlert size={13} color={colors.bad} />;
 }
 
 /** Past this many characters or lines, a step shows folded with a toggle. */
@@ -395,6 +479,30 @@ const useStyles = makeStyles((colors) =>
     headline: { color: colors.muted, fontSize: 12.5, paddingLeft: 22 },
     line: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
     prompt: { width: 8 },
+    agentsTitle: { color: colors.muted, fontSize: 12, fontWeight: "500" },
+    agent: {
+      gap: 2,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.raised,
+    },
+    agentName: { color: colors.fg, fontSize: 13, fontWeight: "600" },
+    agentPurpose: { flex: 1, minWidth: 0, color: colors.muted, fontSize: 13 },
+    agentDetail: {
+      marginTop: 4,
+      paddingTop: 6,
+      paddingLeft: 21,
+      borderTopWidth: 1,
+      borderTopColor: colors.line,
+      color: colors.fg,
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    filter: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+    filterText: { color: colors.muted, fontSize: 12 },
     sub: { marginLeft: 6, paddingLeft: 10, borderLeftWidth: 1, borderLeftColor: colors.line },
     agentLabel: { color: colors.accent, fontSize: 11, lineHeight: 15 },
     agentIcon: { width: 13, paddingTop: 3 },

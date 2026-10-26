@@ -9,7 +9,7 @@ import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
 import { refreshPath } from "./path";
-import { type AgentNote, endAgent, type SubAgent, startAgent, step } from "./subagents";
+import { type AgentNote, agentUsage, endAgent, type SubAgent, startAgent, step } from "./subagents";
 
 /** What a CLI's output told us so far. */
 export type ParseState = {
@@ -311,7 +311,9 @@ const claude: CliAdapter = {
       // Each part of one model call arrives as its own event carrying the call's usage.
       if (typeof message.id === "string" && message.usage && !state.counted?.has(message.id)) {
         (state.counted ??= new Set()).add(message.id);
-        addUsage(state, claudeUsage(message.usage));
+        const usage = claudeUsage(message.usage);
+        addUsage(state, usage);
+        if (parent) agentUsage(state, parent, usage.inputTokens + usage.outputTokens, typeof message.model === "string" ? message.model : undefined);
       }
       const content = message.content ?? [];
       for (const part of content as Array<Record<string, unknown>>) {

@@ -12,10 +12,10 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react";
-import { newestFirst, taskHeadline } from "@myrel/client";
+import { newestFirst, type SubagentSummary, taskHeadline, taskSubagents } from "@myrel/client";
 import { clockTime, dayLabel, localDay, type Translate } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useFormat } from "../../lib/format";
 import { duration } from "../chat/message-stats";
@@ -128,6 +128,11 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
   const lastAt = lines.findLast((l) => l.at !== undefined)?.at ?? started;
   const quietMs = running ? now - lastAt : 0;
   const headline = taskHeadline(task.summary);
+  const subagents = useMemo(() => taskSubagents(lines, running), [lines, running]);
+  // A subagent picked in the list: the terminal shows only its lines.
+  const [focus, setFocus] = useState<string | null>(null);
+  const focused = subagents.find((a) => a.id === focus);
+  const shown = focused ? lines.filter((l) => l.agent?.id === focused.id) : lines;
 
   return (
     <div className="flex flex-col gap-2">
@@ -144,6 +149,12 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
           <span className="truncate font-medium">{task.title}</span>
           <span className="flex-none text-xs text-subtle">{task.harness}</span>
           {headline && <span className="min-w-0 flex-1 truncate text-xs text-muted">{headline}</span>}
+          {subagents.length > 0 && (
+            <span className="flex flex-none items-center gap-1 text-xs text-subtle">
+              <Bot size={12} aria-hidden="true" />
+              {t("tasks.subagents", { count: subagents.length })}
+            </span>
+          )}
         </button>
         <span className="flex flex-none items-center gap-1.5 text-xs tabular-nums text-subtle">
           <time dateTime={task.createdAt} title={t("tasks.startedAt", { time: `${format.dateTime(task.createdAt)} · ${format.relative(task.createdAt)}` })}>
@@ -186,10 +197,94 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
         )}
       </div>
       {stopError && running && <p className="pl-6 text-xs text-bad">{stopError}</p>}
-      {open && <Terminal lines={lines} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
+      {open && subagents.length > 0 && (
+        <Subagents agents={subagents} focus={focused?.id ?? null} onFocus={(id) => setFocus(id === focus ? null : id)} now={now} />
+      )}
+      {open && focused && (
+        <p className="flex items-center gap-2 pl-1 text-xs text-muted">
+          {t("tasks.subagentFilter", { name: focused.label })}
+          <button type="button" onClick={() => setFocus(null)} className="text-accent hover:underline">
+            {t("tasks.showAllLines")}
+          </button>
+        </p>
+      )}
+      {open && <Terminal lines={shown} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
       {quietMs > QUIET_MS && <p className="pl-6 text-xs text-muted">{t("tasks.quiet", { time: dur(quietMs) })}</p>}
     </div>
   );
+}
+
+const SUBAGENT_STATUS = {
+  running: "tasks.subagentStatusRunning",
+  done: "tasks.subagentStatusDone",
+  failed: "tasks.subagentStatusFailed",
+  stopped: "tasks.subagentStatusStopped",
+} as const;
+
+/**
+ * The task's subagents, one card each: what it is for, how it is doing and what it used. Picking
+ * one opens it (its answer, or its latest step while it runs) and narrows the terminal to its lines.
+ */
+function Subagents({ agents, focus, onFocus, now }: { agents: SubagentSummary[]; focus: string | null; onFocus: (id: string) => void; now: number }) {
+  const t = useT();
+  const format = useFormat();
+  const dur = useDuration();
+  const running = agents.filter((a) => a.status === "running").length;
+  return (
+    <section aria-label={t("tasks.subagents", { count: agents.length })} className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2 pl-1 text-xs font-medium text-muted">
+        <Bot size={13} aria-hidden="true" />
+        {t("tasks.subagents", { count: agents.length })}
+        {running > 0 && <span className="font-normal text-accent">· {t("tasks.subagentsRunning", { count: running })}</span>}
+      </div>
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {agents.map((a) => {
+          const open = a.id === focus;
+          const ms = a.ms ?? (a.status === "running" && a.startedAt !== undefined ? Math.max(0, now - a.startedAt) : undefined);
+          const meta = [
+            a.model,
+            ms !== undefined ? dur(ms) : null,
+            a.steps ? t("tasks.subagentSteps", { count: a.steps }) : null,
+            a.tokens ? t("tasks.subagentTokens", { count: format.tokens(a.tokens) }) : null,
+          ].filter(Boolean);
+          const detail = a.status === "running" ? (a.lastStep ? t("tasks.subagentNow", { step: a.lastStep }) : "") : a.answer;
+          return (
+            <li key={a.id} className={open ? "sm:col-span-2" : ""}>
+              <button
+                type="button"
+                aria-pressed={open}
+                onClick={() => onFocus(a.id)}
+                className={`flex w-full flex-col gap-0.5 rounded-lg border px-3 py-2 text-left text-[13px] hover:bg-hover ${open ? "border-accent-line bg-accent-soft" : "border-line bg-raised"}`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <SubagentStatus status={a.status} />
+                  <span className="flex-none font-medium text-fg">{a.label}</span>
+                  <span className={`min-w-0 flex-1 truncate ${a.purpose ? "text-muted" : "italic text-subtle"}`}>
+                    {a.purpose || t("tasks.subagentNoPurpose")}
+                  </span>
+                </span>
+                {meta.length > 0 && <span className="pl-5 text-xs tabular-nums text-subtle">{meta.join(" · ")}</span>}
+                {open && detail && (
+                  <span className="mt-1 whitespace-pre-wrap border-t border-line pl-5 pt-1.5 text-[13px] leading-[1.5] text-body [overflow-wrap:anywhere]">
+                    {detail}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function SubagentStatus({ status }: { status: SubagentSummary["status"] }) {
+  const t = useT();
+  const label = t(SUBAGENT_STATUS[status]);
+  if (status === "running") return <LoaderCircle size={13} className="flex-none animate-spin text-accent" aria-label={label} />;
+  if (status === "done") return <CircleCheck size={13} className="flex-none text-ok" aria-label={label} />;
+  if (status === "stopped") return <CircleSlash size={13} className="flex-none text-subtle" aria-label={label} />;
+  return <CircleAlert size={13} className="flex-none text-bad" aria-label={label} />;
 }
 
 /** Past this long without a new line, a running task says it may be stuck. */

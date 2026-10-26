@@ -275,6 +275,9 @@ export const LineAgent = z.object({
   id: z.string().min(1).max(200),
   label: z.string().max(100),
   state: z.enum(["started", "done", "failed"]).optional(),
+  /** On the ending line: the model the subagent ran on and the tokens it used, when the CLI says. */
+  model: z.string().max(200).optional(),
+  tokens: z.number().int().nonnegative().optional(),
 });
 export type LineAgent = z.infer<typeof LineAgent>;
 

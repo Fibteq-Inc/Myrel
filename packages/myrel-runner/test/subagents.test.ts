@@ -34,7 +34,10 @@ describe("Claude Code subagents", () => {
       parent_tool_use_id: null,
       message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: [{ type: "text", text: "Auth lives in auth.ts" }] }] },
     });
-    expect(state.agentNotes?.at(-1)).toMatchObject({ text: "Auth lives in auth.ts", agent: { id: "tu1", label: "Explore", state: "done" } });
+    expect(state.agentNotes?.at(-1)).toMatchObject({
+      text: "Auth lives in auth.ts",
+      agent: { id: "tu1", label: "Explore", state: "done", model: "claude-haiku-5-5", tokens: 12 },
+    });
     expect(state.agentNotes?.at(-1)?.ms).toBeGreaterThanOrEqual(0);
 
     claude(state, { type: "assistant", parent_tool_use_id: null, message: { id: "m3", content: [{ type: "text", text: "Done." }] } });
@@ -83,6 +86,7 @@ describe("Codex subagents", () => {
       senderThreadId: "main",
       receiverThreadIds: ["sub-1"],
       prompt: "Run the mobile tests\nand collect failures",
+      model: "gpt-6-mini",
       agentsStates: {},
       status: "completed",
     });
@@ -110,7 +114,7 @@ describe("Codex subagents", () => {
       agentsStates: { "sub-1": { status: "completed", message: "2 failures" } },
       status: "completed",
     });
-    expect(state.agentNotes?.at(-1)).toMatchObject({ text: "2 failures", agent: { id: "sub-1", state: "done" } });
+    expect(state.agentNotes?.at(-1)).toMatchObject({ text: "2 failures", agent: { id: "sub-1", state: "done", model: "gpt-6-mini", tokens: 55 } });
     expect(state.agentNotes).toHaveLength(2);
 
     item("main", "item/started", { type: "commandExecution", id: "e2", command: "git status" });
