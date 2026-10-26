@@ -29,12 +29,12 @@ export function PullRequestsTab({
   const current = pullRequests.find((pr) => pr.url === picked);
   return (
     <div className="@container h-full">
-      <div className="grid h-full @[720px]:grid-cols-[minmax(260px,2fr)_3fr]">
+      <div className="grid min-h-full @[720px]:h-full @[720px]:grid-cols-[minmax(260px,2fr)_3fr]">
         <ul className="flex min-w-0 flex-col gap-2 p-4 @[720px]:overflow-y-auto">
           {pullRequests.map((pr) => {
             const open = pr.url === picked;
             return (
-              <li key={pr.url} className={cn("overflow-hidden rounded-xl border bg-raised", open ? "border-edge" : "border-card")}>
+              <li key={pr.url} className={cn("overflow-hidden rounded-xl border bg-raised", open ? "border-edge @[720px]:border-accent" : "border-card")}>
                 <PullRequestRow pr={pr} open={open} onClick={() => setPicked(open ? null : pr.url)} />
                 {open && (
                   <div className="border-t border-line @[720px]:hidden">
