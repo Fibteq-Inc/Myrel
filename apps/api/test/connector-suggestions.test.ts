@@ -2,6 +2,7 @@ import { type Message, parseConnectorSuggestion } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { encryptSecret } from "../src/crypto";
 import { setExtensions } from "../src/extensions";
 import { agentProject, api, signUp, type Turn, until } from "./fake-agent";
 
@@ -47,12 +48,35 @@ async function catalogEntry() {
     .run();
 }
 
+/** The person's own OAuth connector to the example server, on in the project, with this sign-in state. */
+async function ownConnector(me: string, projectId: string, signIn: { status: "ok" | "needs_auth"; accessToken?: string; expiresAt?: number }) {
+  const id = `con_${crypto.randomUUID().replaceAll("-", "")}`;
+  const state = {
+    clientId: "client-1",
+    authorizationEndpoint: "https://suggest.example.com/authorize",
+    tokenEndpoint: "https://suggest.example.com/token",
+    resource: "https://suggest.example.com/mcp",
+    redirectUri: "http://myrel.test/api/connectors/oauth/callback",
+    ...(signIn.accessToken && { accessToken: signIn.accessToken, expiresAt: signIn.expiresAt }),
+  };
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO connectors (id, owner_id, name, slug, transport, url, auth, secret, status, created_by, created_at, updated_at)
+     VALUES (?, ?, 'Cloudflare Example', 'cloudflare-example', 'http', 'https://suggest.example.com/mcp', 'oauth', ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, me, await encryptSecret(env as unknown as Env, JSON.stringify(state), id), signIn.status, me, now, now)
+    .run();
+  await env.DB.prepare(`INSERT INTO project_connectors (project_id, connector_id) VALUES (?, ?)`).bind(projectId, id).run();
+  return id;
+}
+
 /** A project worked by `play` on a computer that passes connectors on, with one thread started. */
-async function setup(play: (turn: Turn, index: number) => Promise<string | void>) {
+async function setup(play: (turn: Turn, index: number) => Promise<string | void>, before?: (me: string, projectId: string) => Promise<unknown>) {
   await catalogEntry();
   const token = await signUp();
   const { project, turns, close } = await agentProject(token, play, { features: ["folders", "cancel", "agent", "connectors"] });
   const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+  await before?.(me, project.id);
   const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
   const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me, body: "Cloudflare'de bir DNS kaydı ekle" });
   const thread = await projectAgent.createThread(root.id, "DNS kaydı");
@@ -156,6 +180,66 @@ describe("connector suggestions", () => {
     expect(res.status).toBe(402);
     expect(await res.json()).toMatchObject({ error: "limit_reached", message: "The Free plan has 2 connectors." });
     expect((await s.card())?.suggestion.state).toBe("open");
+    await s.close();
+  }, 20_000);
+
+  it("asks to sign in again to a connector whose sign-in ended, and the next turn has it", async () => {
+    const s = await setup(
+      async (turn, index) => {
+        if (index === 0) await turn.call("reply", { text: "Cloudflare'e tekrar giriş yaparsan devam ederim." });
+        else await turn.call("reply", { text: "Kayıt eklendi." });
+      },
+      (me, projectId) => ownConnector(me, projectId, { status: "needs_auth" }),
+    );
+    const { suggestion } = await until(s.card, "the sign-in card");
+    expect(suggestion).toMatchObject({ state: "open", signIn: true, offers: [{ name: "Cloudflare Example", auth: "oauth" }] });
+    expect(suggestion.offers[0]!.id).toMatch(/^connector:con_/);
+    const first = await until(() => s.turns[0], "the first turn");
+    expect(first.start.agent?.connectors ?? []).toEqual([]);
+
+    // Only the person whose connector it is signs in to it.
+    const other = await signUp("Başka");
+    const otherId = ((await (await api("/api/auth/get-session", { token: other })).json()) as { user: { id: string } }).user.id;
+    await env.DB.prepare(`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)`).bind(s.project.id, otherId, Date.now()).run();
+    const refused = await api(`${s.base}/${suggestion.id}/connect`, { method: "POST", token: other, body: JSON.stringify({ offerId: suggestion.offers[0]!.id }) });
+    expect(refused.status).toBe(403);
+
+    const connect = await api(`${s.base}/${suggestion.id}/connect`, { method: "POST", token: s.token, body: JSON.stringify({ offerId: suggestion.offers[0]!.id }) });
+    const started = (await connect.json()) as { connected: boolean; authorizeUrl: string };
+    expect(started.connected).toBe(false);
+    const state = new URL(started.authorizeUrl).searchParams.get("state")!;
+    const back = await api(`/api/connectors/oauth/callback?code=c1&state=${encodeURIComponent(state)}`, { token: s.token, redirect: "manual" });
+    expect(back.headers.get("location")).toContain("connector=ok");
+    expect((await s.card())?.suggestion).toMatchObject({ state: "connected", connected: suggestion.offers[0]!.id });
+    expect((await s.messages()).some((m) => m.authorId === s.me && m.body.includes("tekrar giriş yaptım"))).toBe(true);
+    const second = await until(() => s.turns[1], "the turn after signing in");
+    expect(second.start.agent?.connectors?.map((c) => c.name)).toEqual(["cloudflare-example"]);
+    await s.close();
+  }, 20_000);
+
+  it("tells the agent and the person when a connector's sign-in ends during the turn", async () => {
+    let answer: { status: number; body: { error?: { message?: string } } } | null = null;
+    const s = await setup(
+      async (turn, index) => {
+        if (index > 0) return;
+        const path = `${turn.start.agent!.mcpPath}/c/cloudflare-example`;
+        const res = await api(path, {
+          method: "POST",
+          headers: { authorization: `Bearer ${turn.start.agent!.token}`, accept: "application/json, text/event-stream" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        });
+        answer = { status: res.status, body: (await res.json()) as { error?: { message?: string } } };
+        await turn.call("reply", { text: "Cloudflare oturumu bitmiş." });
+      },
+      // Expired, with no refresh token: the first call ends the sign-in.
+      (me, projectId) => ownConnector(me, projectId, { status: "ok", accessToken: "cf-token", expiresAt: Date.now() - 1000 }),
+    );
+    const first = await until(() => s.turns[0], "the first turn");
+    expect(first.start.agent?.connectors?.map((c) => c.name)).toEqual(["cloudflare-example"]);
+    await until(() => answer, "the agent's call");
+    expect(answer!.status).toBe(502);
+    expect(answer!.body.error?.message).toContain("sign-in to Cloudflare Example has ended");
+    expect((await until(s.card, "the sign-in card")).suggestion).toMatchObject({ state: "open", signIn: true });
     await s.close();
   }, 20_000);
 });

@@ -88,6 +88,11 @@ const app = new Hono<AppEnv>()
     if (!token || !threadId.success) return c.json({ error: "unauthorized" }, 401);
     const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
     const target = await thread.connectorTarget(token, c.req.param("name"));
+    if (!target.ok && target.error === "signed_out") {
+      // A JSON-RPC error the agent can read, not a 401 its CLI would answer with a sign-in of its own.
+      const message = `The sign-in to ${target.title} has ended. Myrel put a card in the thread asking the person to sign in again; carry on without it until they do.`;
+      return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message } }, 502);
+    }
     if (!target.ok) return c.json({ error: target.error }, target.error === "unauthorized" ? 401 : 404);
     return proxyMcp(c.req.raw, target);
   })

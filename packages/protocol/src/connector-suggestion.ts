@@ -36,11 +36,19 @@ export const ConnectorSuggestion = z.object({
   state: ConnectorSuggestionState.default("open"),
   /** The offer that was connected. */
   connected: z.string().optional(),
+  /**
+   * Signing in again to connectors that were added before and whose sign-in ended, rather than
+   * adding new ones; their offers' ids are CONNECTOR_OFFER_PREFIX and the connector's id.
+   */
+  signIn: z.boolean().optional(),
 });
 export type ConnectorSuggestion = z.infer<typeof ConnectorSuggestion>;
 export type ConnectorSuggestionInput = z.input<typeof ConnectorSuggestion>;
 
 export const CONNECTORS_LANG = "connectors";
+
+/** An offer that stands for a connector already added (see ConnectorSuggestion.signIn). */
+export const CONNECTOR_OFFER_PREFIX = "connector:";
 
 /** The message body for a connector suggestion card. */
 export function formatConnectorSuggestion(suggestion: ConnectorSuggestionInput): string {

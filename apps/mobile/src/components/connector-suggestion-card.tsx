@@ -67,10 +67,10 @@ export function ConnectorSuggestionCard({
         )}
         <Text style={{ fontSize: 13, color: open ? colors.accent : colors.subtle }}>
           {suggestion.state === "connected"
-            ? t("suggestion.connected", { name: connected?.name ?? "" })
+            ? t(suggestion.signIn ? "suggestion.signedInAgain" : "suggestion.connected", { name: connected?.name ?? "" })
             : suggestion.state === "dismissed"
               ? t("suggestion.dismissed")
-              : t("suggestion.title")}
+              : t(suggestion.signIn ? "suggestion.signInAgainTitle" : "suggestion.title")}
         </Text>
       </View>
       <Text style={styles.reason}>{suggestion.reason}</Text>
@@ -123,7 +123,7 @@ export function ConnectorSuggestionCard({
                 </View>
               ) : open ? (
                 <Button pending={connect.isPending && connect.variables?.offer.id === offer.id} disabled={busy} onPress={() => start(offer)}>
-                  {t("suggestion.connect")}
+                  {t(suggestion.signIn ? "suggestion.signInAgain" : "suggestion.connect")}
                 </Button>
               ) : null}
             </View>
@@ -144,7 +144,7 @@ export function ConnectorSuggestionCard({
               {error instanceof ApiError && error.status === 404 ? t("suggestion.answered") : errorMessage(error, t("common.error"))}
             </Text>
           ) : null}
-          <Text style={styles.note}>{t("suggestion.yours")}</Text>
+          <Text style={styles.note}>{t(suggestion.signIn ? "suggestion.signInAgainNote" : "suggestion.yours")}</Text>
           <Button variant="ghost" disabled={busy} onPress={() => dismiss.mutate()}>
             {t("suggestion.notNow")}
           </Button>

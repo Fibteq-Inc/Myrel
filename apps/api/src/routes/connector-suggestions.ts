@@ -1,7 +1,7 @@
-import { ConnectSuggestionInput } from "@myrel/protocol";
+import { CONNECTOR_OFFER_PREFIX, ConnectSuggestionInput } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
-import { connectOffer } from "../connectors/suggest";
+import { connectOffer, signInAgain } from "../connectors/suggest";
 import { type AppEnv, requireUser } from "../middleware";
 import { publicOrigin } from "./connectors";
 import { findMembership } from "./projects";
@@ -18,7 +18,8 @@ export const connectorSuggestionRoutes = new Hono<AppEnv>()
     const threadId = c.req.param("threadId")!;
     const suggestionId = c.req.param("suggestionId");
     const userId = c.get("user").id;
-    if (!(await findMembership(c.env, projectId, userId))) return c.json({ error: "not_found" }, 404);
+    const member = await findMembership(c.env, projectId, userId);
+    if (!member) return c.json({ error: "not_found" }, 404);
     const input = ConnectSuggestionInput.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
     const project = await getAgentByName(c.env.PROJECT_AGENT, projectId);
@@ -27,15 +28,14 @@ export const connectorSuggestionRoutes = new Hono<AppEnv>()
     // The offer is read from the card Myrel posted, never from the request: a click connects only what the agent offered.
     const offer = await thread.openOffer(suggestionId, input.data.offerId);
     if (!offer) return c.json({ error: "not_found", message: "This card was already answered." }, 404);
-    const result = await connectOffer(c.env, {
-      userId,
-      projectId,
-      offer,
-      headers: input.data.headers,
-      origin: publicOrigin(c),
-      back: { projectId, threadId, suggestionId, offerId: offer.id },
-    });
-    if (!result.ok) return c.json({ error: result.error, message: result.message }, result.error === "limit_reached" ? 402 : result.error === "failed" ? 502 : 400);
+    const back = { projectId, threadId, suggestionId, offerId: offer.id };
+    const result = offer.id.startsWith(CONNECTOR_OFFER_PREFIX)
+      ? await signInAgain(c.env, { userId, projectId, manages: member.role === "owner" || member.role === "admin", offer, origin: publicOrigin(c), back })
+      : await connectOffer(c.env, { userId, projectId, offer, headers: input.data.headers, origin: publicOrigin(c), back });
+    if (!result.ok) {
+      const status = { limit_reached: 402, failed: 502, forbidden: 403, invalid_input: 400 } as const;
+      return c.json({ error: result.error, message: result.message }, status[result.error]);
+    }
     if (!result.connected) return c.json({ connected: false, authorizeUrl: result.authorizeUrl });
     await thread.suggestionConnected(suggestionId, offer.id, userId);
     return c.json({ connected: true });

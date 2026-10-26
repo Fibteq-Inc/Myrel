@@ -107,13 +107,13 @@ export async function finishAuthorization(
   env: Env,
   params: { code?: string; state?: string; error?: string },
   fetcher: typeof fetch = fetch,
-): Promise<{ ok: true; id: string; back?: SignInReturn } | { ok: false; id: string | null; error: string; back?: SignInReturn }> {
+): Promise<{ ok: true; id: string; by?: string; back?: SignInReturn } | { ok: false; id: string | null; error: string; back?: SignInReturn }> {
   const id = params.state?.split(".")[0] ?? "";
   const [row] = id ? await createDb(env.DB).select().from(connectors).where(eq(connectors.id, id)) : [];
   if (!row) return { ok: false, id: null, error: "unknown_sign_in" };
   const state = await readOAuth(env, row);
   if (!state?.pending || state.pending.state !== params.state) return { ok: false, id, error: "unknown_sign_in" };
-  const { back } = state.pending;
+  const { back, by } = state.pending;
   if (params.error || !params.code) {
     await saveOAuth(env, id, { ...state, pending: undefined }, { status: "needs_auth", lastError: params.error ?? "Sign-in was cancelled." });
     return { ok: false, id, error: params.error ?? "cancelled", back };
@@ -126,7 +126,7 @@ export async function finishAuthorization(
       code_verifier: state.pending.verifier,
     }, fetcher);
     await saveOAuth(env, id, { ...withTokens(state, tokens), pending: undefined }, { status: "ok", lastError: null });
-    return { ok: true, id, back };
+    return { ok: true, id, by, back };
   } catch (err) {
     const message = errorText(err);
     await saveOAuth(env, id, { ...state, pending: undefined }, { status: "needs_auth", lastError: message });

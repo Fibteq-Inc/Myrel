@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { CONNECTOR_PRESETS, type ConnectorOffer, createId, OFFICIAL_CATALOG_IDS } from "@myrel/protocol";
+import { CONNECTOR_OFFER_PREFIX, CONNECTOR_PRESETS, type ConnectorOffer, createId, OFFICIAL_CATALOG_IDS } from "@myrel/protocol";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { canAddConnector } from "../extensions";
 import { searchCatalog } from "./catalog";
@@ -132,7 +132,7 @@ export async function knownConnectors(env: Env, projectId: string, userId: strin
 export type ConnectResult =
   | { ok: true; connected: true; connectorId: string }
   | { ok: true; connected: false; authorizeUrl: string }
-  | { ok: false; error: "limit_reached" | "invalid_input" | "failed"; message: string };
+  | { ok: false; error: "limit_reached" | "invalid_input" | "failed" | "forbidden"; message: string };
 
 /**
  * Connects an offer as the person's own connector and turns it on in the project: an existing one
@@ -213,4 +213,46 @@ export async function connectOffer(
   await db.update(connectors).set({ ...checked, updatedAt: new Date() }).where(eq(connectors.id, row.id));
   if (checked.status === "error") return { ok: false, error: "failed", message: checked.lastError ?? "The server did not answer." };
   return { ok: true, connected: true, connectorId: row.id };
+}
+
+/** The offer on a sign-in-again card for a connector whose sign-in ended. */
+export function signInOffer(row: Pick<ConnectorRow, "id" | "name" | "url">): ConnectorOffer {
+  return {
+    id: `${CONNECTOR_OFFER_PREFIX}${row.id}`,
+    name: row.name,
+    description: "",
+    url: row.url ?? "",
+    auth: "oauth",
+    headerHint: null,
+    iconUrl: null,
+    official: false,
+    featured: false,
+  };
+}
+
+/**
+ * Signs in again to a connector a sign-in-again card names: the person's own one, or the project's
+ * when they manage the project (as in its settings). Already signed in by someone else meanwhile
+ * counts as connected.
+ */
+export async function signInAgain(
+  env: Env,
+  input: { userId: string; projectId: string; manages: boolean; offer: ConnectorOffer; origin: string; back: SignInReturn },
+): Promise<ConnectResult> {
+  const id = input.offer.id.slice(CONNECTOR_OFFER_PREFIX.length);
+  const [row] = await createDb(env.DB).select().from(connectors).where(eq(connectors.id, id));
+  const mine = row && (row.ownerId === input.userId || (row.projectId === input.projectId && input.manages));
+  if (!row || row.auth !== "oauth" || !mine) {
+    return {
+      ok: false,
+      error: "forbidden",
+      message: row?.projectId ? "Only the project's owners and admins can sign in to its connectors." : "Only the person who added this connector can sign in to it.",
+    };
+  }
+  if (row.status === "ok") return { ok: true, connected: true, connectorId: row.id };
+  try {
+    return { ok: true, connected: false, authorizeUrl: await startAuthorization(env, row, input.origin, input.userId, fetch, input.back) };
+  } catch (err) {
+    return { ok: false, error: "failed", message: err instanceof Error ? err.message : String(err) };
+  }
 }
