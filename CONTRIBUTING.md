@@ -29,6 +29,7 @@ Useful commands:
 |---|---|
 | `pnpm typecheck` | Type-checks every package |
 | `pnpm test` | Runs the Vitest suites (the API tests run inside the Workers runtime) |
+| `pnpm check:changed` | Type-checks and tests only the packages your branch changes (against `main`, uncommitted files included) and the packages that depend on them |
 | `pnpm build` | Builds the web app and bundles the Worker |
 | `pnpm db:generate` | Creates a D1 migration after you change `packages/db/src/schema.ts` |
 
@@ -45,8 +46,10 @@ together.
 
 - Keep each pull request to one change. Small pull requests get reviewed faster.
 - Describe what a user would see before and after the change.
-- Run `pnpm typecheck` and `pnpm test` before pushing; CI runs the same checks
-  plus `pnpm build` and a secret scan.
+- Run `pnpm check:changed` before pushing. It checks the same packages CI checks
+  for a pull request (`turbo --affected`), which adds `pnpm build` and a secret
+  scan. Changes to the lockfile, root `package.json`, `turbo.json` or its
+  `globalDependencies` check everything, so expect the full run then.
 - Add or update tests for behavior you change.
 - Schema changes need a migration from `pnpm db:generate`. Migrations only
   move forward; never edit one that is already on `main`.
