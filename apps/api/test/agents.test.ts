@@ -388,6 +388,34 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("keeps a thread on its person's computer when the coordinator passes it news nobody asked for in the chat", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      if (req.prompt.includes("Requests from thread agents")) {
+        const asking = /Thread \[(thr_[0-9A-Z]{26})\] asks/.exec(req.prompt)![1];
+        // A follow-up (with a line in the project chat), though no person wrote this turn.
+        return { text: "", toolCalls: [call("message_thread", { thread_id: asking, note: "The other side agreed.", project_ack: "Passed it on." })] };
+      }
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Contract", instructions: "Agree the contract.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const play: Play = async (turn, index) => {
+      if (index === 0) await turn.call("request_coordinator", { kind: "routing", reason: "Waiting on the other thread." });
+      else await turn.call("reply", { text: "Continuing on the computer." });
+    };
+    const { ws, agent, turns } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "agree the contract" }));
+    const thread: Thread = await until(async () => (await agent.listThreads())[0], "thread");
+    const bodies = async () => ((await agent.getThreadContext(thread.id))?.messages ?? []).map((m: Message) => m.body);
+    // The forwarded news is worked on the same computer, not in the cloud for nobody.
+    await until(async () => (await bodies()).includes("Continuing on the computer."), "the follow-up turn on the computer");
+    expect(turns).toHaveLength(2);
+    expect(turns[1]!.prompt).toContain("The other side agreed.");
+    ws.close();
+  });
+
   it("opens a thread the coordinator starts on another thread's report for the person that thread works for", async () => {
     setFakeModel((req) => {
       if (req.prompt.includes("Requests from thread agents")) {

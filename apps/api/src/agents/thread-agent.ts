@@ -1944,9 +1944,12 @@ export class ThreadAgent extends Agent<Env> {
     if (!row || row.id !== taskId) return { ok: false, error: "This task is not running." };
     try {
       if (row.backend === "sandbox") {
-        // A sandbox that lost the task (restarted by a deploy) cannot stop it, so it ends here.
-        const stopped = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!).cancel(taskId);
-        if (!stopped) await this.taskEvents(taskId, [{ type: "done", ok: false, error: "Cancelled." }]);
+        // The turn ends here at once, as the person asked, whatever the container does next: a run
+        // that is slow to stop (or one the sandbox lost track of) cannot keep the thread working.
+        await this.taskEvents(taskId, [{ type: "done", ok: false, error: "Cancelled." }]);
+        await this.env.SANDBOX.getByName(this.getMeta("thread_id")!)
+          .cancel(taskId)
+          .catch((err) => console.warn("stopping a cancelled sandbox run failed", err));
         return { ok: true };
       }
       await this.backendOf(row).cancel(taskId);

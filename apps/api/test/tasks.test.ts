@@ -180,6 +180,22 @@ describe("the cloud agent", () => {
       agent.getSchedules().filter((x) => x.callback === "resumeInterrupted"),
     );
     expect(resumes.map((x) => x.payload)).toEqual([{ taskId: "task_turn" }]);
+
+    // Stopping ends the turn at once, also when the sandbox still follows a run that is slow to stop.
+    await lost("task_slow");
+    const sandbox = env.SANDBOX.getByName(thread.id);
+    await runInDurableObject(sandbox as unknown as DurableObjectStub, (instance) => {
+      (instance as unknown as { current: unknown }).current = { taskId: "task_slow", abort: new AbortController() };
+    });
+    expect(await threadAgent.cancelTask("task_slow")).toEqual({ ok: true });
+    expect(await status("task_slow")).toBe("cancelled");
+    // The run was told to stop.
+    expect(await runInDurableObject(sandbox as unknown as DurableObjectStub, (instance) => {
+      const current = (instance as unknown as { current: { abort: AbortController } | null }).current;
+      const aborted = current?.abort.signal.aborted;
+      (instance as unknown as { current: unknown }).current = null;
+      return aborted;
+    })).toBe(true);
   }, 20_000);
 
   it("opens the model proxy to a cloud turn's token only, never a local turn's", async () => {
