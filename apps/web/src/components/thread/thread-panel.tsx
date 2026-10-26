@@ -3,13 +3,14 @@ import { useT } from "@myrel/i18n/react";
 import { CLOUD_RUNNER, decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
+import { ChartColumn, CircleCheck, GitPullRequest, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, projectSettingsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import {
+  ChatSkeleton,
   Composer,
   decisionAnswers,
   EarlierMessages,
@@ -487,18 +488,29 @@ function Conversation({
 
 function PanelMissing({ loading, onClose }: { loading: boolean; onClose: () => void }) {
   const t = useT();
+  if (loading) {
+    // The thread's shape while it loads: its header, then the newest messages at the bottom.
+    return (
+      <>
+        <div aria-hidden="true" className="flex h-14 flex-none animate-pulse items-center gap-2.5 border-b border-line px-4">
+          <div className="size-4 rounded-full bg-bubble" />
+          <div className="flex flex-col gap-1.5">
+            <div className="h-3 w-48 rounded bg-bubble" />
+            <div className="h-2 w-20 rounded bg-bubble" />
+          </div>
+        </div>
+        <div className="flex flex-1 flex-col justify-end overflow-hidden px-5 py-6">
+          <ChatSkeleton />
+        </div>
+      </>
+    );
+  }
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-subtle">
-      {loading ? (
-        <LoaderCircle size={20} className="animate-spin" aria-label={t("thread.loading")} />
-      ) : (
-        <>
-          <p>{t("thread.missing")}</p>
-          <button type="button" onClick={onClose} className="text-link hover:underline">
-            {t("thread.backToChat")}
-          </button>
-        </>
-      )}
+      <p>{t("thread.missing")}</p>
+      <button type="button" onClick={onClose} className="text-link hover:underline">
+        {t("thread.backToChat")}
+      </button>
     </div>
   );
 }
