@@ -36,6 +36,8 @@ type ProjectValue = {
   projectId: string;
   state: ProjectState;
   status: SocketStatus;
+  /** The first sync has finished: the conversation is drawn whole, from its newest message. */
+  ready: boolean;
   send(body: string, threadId?: string | null, attachments?: string[], clis?: CliId[]): void;
   emit(event: ClientEventInput): void;
   /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
@@ -60,10 +62,12 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, emptyProjectState);
   const [status, setStatus] = useState<SocketStatus>("connecting");
+  const [ready, setReady] = useState(false);
   const socketRef = useRef<ProjectSocket | null>(null);
 
   useEffect(() => {
     dispatch({ type: "reset" });
+    setReady(false);
     const socket = new ProjectSocket({
       url: () => api.projectSocketUrl(projectId),
       // A sync page lands in one update instead of one per message.
@@ -79,6 +83,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         }
         dispatch(event);
       },
+      onSynced: () => setReady(true),
       onStatus: (s) => {
         setStatus(s);
         // Activity is not replayed; after reconnecting, the sync re-sends what is still running.
@@ -118,8 +123,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     [api, projectId],
   );
   const value = useMemo<ProjectValue>(
-    () => ({ projectId, state, status, send, emit, loadTasks }),
-    [projectId, state, status, send, emit, loadTasks],
+    () => ({ projectId, state, status, ready, send, emit, loadTasks }),
+    [projectId, state, status, ready, send, emit, loadTasks],
   );
   return <ProjectContext value={value}>{children}</ProjectContext>;
 }

@@ -1,6 +1,6 @@
 import { projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { type CliId, decisionPicks } from "@myrel/protocol";
+import { type CliId, decisionPicks, type Message } from "@myrel/protocol";
 import { LoaderCircle, MessagesSquare } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { api } from "../../lib/api";
@@ -15,11 +15,14 @@ import { ScrollToEnd } from "./scroll-to-end";
 import { StarterExamples, StarterList } from "./starter";
 import { ThreadCard } from "./thread-card";
 
+const NONE: Message[] = [];
+
 /** The project chat: everything said to the coordinator, with a card for each thread it opened. */
 export function ProjectChat({ me, className = "" }: { me: string; className?: string }) {
   const t = useT();
   const { project, names, state, ready, send, emit } = useProjectContext();
-  const chat = projectChat(state);
+  // Drawn once the first sync is done, so a long chat opens at its end instead of scrolling there as pages arrive.
+  const chat = ready ? projectChat(state) : NONE;
   const history = useHistoryWindow(chat);
   const choose = useCallback((label: string) => send(label), [send]);
   const roots = threadByCard(state);
