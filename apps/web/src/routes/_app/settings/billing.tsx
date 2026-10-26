@@ -2,11 +2,12 @@ import { useI18n, useT } from "@myrel/i18n/react";
 import type { BillingSummary } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, Trash2 } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { Check, Gift, Trash2 } from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Badge, List, Notice, Row, Section } from "../../../components/settings";
 import { api, billingQuery } from "../../../lib/api";
 import { useFormat } from "../../../lib/format";
+import { pendingGift, setPendingGift } from "../../../lib/gift";
 import { Button, cn, errorMessage, GhostButton, IconButton, Input } from "../../../lib/ui";
 
 export const Route = createFileRoute("/_app/settings/billing")({
@@ -103,9 +104,60 @@ function BillingSettings() {
         {portal.error && <Notice>{errorMessage(portal.error, t)}</Notice>}
       </Section>
 
+      <GiftOfferSection billing={billing} />
       {billing.plan === "free" && billing.owner && <Plans billing={billing} />}
       {billing.plan === "team" && billing.owner && <TeamMembers billing={billing} />}
     </>
+  );
+}
+
+/** A gift link opened on this device: Pro for its months, started with no card. */
+function GiftOfferSection({ billing }: { billing: BillingSummary }) {
+  const t = useT();
+  const [token, setToken] = useState(pendingGift);
+  const { data: offer } = useQuery({
+    queryKey: ["gift-offer", token],
+    queryFn: () => api.getGiftOffer(token!),
+    enabled: Boolean(token),
+  });
+  const checkout = useMutation({
+    mutationFn: () => api.startCheckout({ plan: "pro", interval: "month", gift: token! }),
+    onSuccess: ({ url }) => location.assign(url),
+  });
+  const dismiss = () => {
+    setPendingGift(null);
+    setToken(null);
+  };
+  // Done once its Pro has started.
+  const done = offer?.status === "redeemed" && billing.plan !== "free";
+  useEffect(() => {
+    if (done) setPendingGift(null);
+  }, [done]);
+  if (!token || !offer || done) return null;
+  const usable = offer.status === "open" && billing.plan === "free" && billing.owner;
+  const note =
+    offer.status === "unavailable" ? t("billing.gift.unavailable") : !usable ? t("billing.gift.hasPlan") : t("billing.gift.note");
+
+  return (
+    <Section title={t("billing.gift.title")}>
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-raised p-4">
+        <Gift size={20} className="flex-none text-accent" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          {offer.months !== null && <div className="font-medium">{t("billing.gift.offer", { count: offer.months })}</div>}
+          <div className="text-[13px] text-subtle">{note}</div>
+        </div>
+        {usable ? (
+          <Button type="button" disabled={checkout.isPending} onClick={() => checkout.mutate()}>
+            {t("billing.gift.activate")}
+          </Button>
+        ) : (
+          <GhostButton type="button" onClick={dismiss}>
+            {t("billing.gift.dismiss")}
+          </GhostButton>
+        )}
+      </div>
+      {checkout.error && <Notice>{errorMessage(checkout.error, t)}</Notice>}
+    </Section>
   );
 }
 

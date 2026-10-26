@@ -17,6 +17,7 @@ and hands everything else to the core Worker. The core never imports this packag
 | `src/store.ts` | A person's plan (their own, or the Team they belong to) and this month's usage |
 | `src/limits.ts` | The hooks: refuse a new project, a cloud turn or a coordinator turn over the plan |
 | `src/routes.ts` | `GET /api/billing`, Checkout, billing portal, Team members, the Stripe webhook |
+| `src/gifts.ts` | Gift links: Pro free for some months, made by the server's admins |
 | `src/stripe.ts` | A small fetch-based Stripe client and webhook signature check |
 | `src/revenuecat.ts` | Pro bought in the mobile app (App Store, Google Play), mirrored from RevenueCat |
 | `scripts/setup-stripe.mjs` | Creates products, prices, the portal configuration and the webhook endpoint |
@@ -116,3 +117,18 @@ Setting it up:
 ## Tests
 
 `pnpm --filter @myrel/ee-billing test` runs the hosted Worker in workerd with a fake Stripe.
+
+## Gift links
+
+A server admin makes a gift link under Settings → Server → Gift links, choosing 1 to 24 months and
+a note saying who it is for. The link (`/gift/<token>`) is shown once; only the token's SHA-256 is
+stored. It works for one account: the first person to open a Checkout with it claims it, and an
+unused link stops working after 30 days or when the admin cancels it.
+
+The person gets a Pro Checkout billed monthly with the coupon `myrel_gift_pro_<months>m` (100% off,
+repeating for that many months, Pro product only), made in Stripe on first use. It is never a
+promotion code, so nobody can type it into a Checkout. There is no trial and no card is asked for,
+since nothing is due. When the months are over the invoice is the full price: with a card it is
+charged, without one the plan ends after the usual past-due grace. Someone who already has a plan
+cannot use a gift link; to gift them, add the coupon to their subscription in the Stripe dashboard.
+

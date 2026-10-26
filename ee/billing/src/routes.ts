@@ -1,8 +1,9 @@
 import type { BillingSummary } from "@myrel/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
-import { type AppEnv, requireUser } from "../../../apps/api/src/middleware";
+import { type AppEnv, requireAdmin, requireUser } from "../../../apps/api/src/middleware";
 import { UNVERIFIED_MESSAGE } from "../../../apps/api/src/verification";
+import { claimGift, createGift, GIFT_MONTHS, giftCoupon, giftOffer, listGifts, redeemGift, revokeGift } from "./gifts";
 import { isPaid, PRICE_KEYS, planOfPrice, TEAM_MIN_SEATS, TRIAL_DAYS } from "./plans";
 import { type RevenueCatEnv, RevenueCatError, type RevenueCatEvent, eventUserIds, sellsInStores, syncStoreSubscriptions, verifyAuthorization } from "./revenuecat";
 import { standingOf, usageOf } from "./store";
@@ -23,6 +24,13 @@ const Checkout = z.object({
   plan: z.enum(["pro", "team"]),
   interval: z.enum(["month", "year"]).default("month"),
   seats: z.number().int().min(TEAM_MIN_SEATS).max(500).optional(),
+  /** A gift link's token: Pro free for its months, with no trial and no card. */
+  gift: z.string().min(1).max(100).optional(),
+});
+
+const NewGift = z.object({
+  note: z.string().trim().max(200).default(""),
+  months: z.number().int().refine((n) => (GIFT_MONTHS as readonly number[]).includes(n)).default(12),
 });
 
 const iso = (ms: number | null | undefined) => (ms ? new Date(ms).toISOString() : null);
@@ -43,6 +51,8 @@ export const billingRoutes = new Hono<BillingEnv>()
       if (event.type.startsWith("customer.subscription.")) {
         const sub = event.data.object as StripeSubscription;
         const owner = await saveSubscription(c.env, sub);
+        const gift = sub.metadata?.gift_id;
+        if (owner && gift && isPaid(sub.status)) await redeemGift(c.env, gift, owner, sub.id);
         // A plan change in the billing portal keeps the old quantity: Pro is one seat, Team follows its members.
         if (owner && sub.status !== "past_due" && isPaid(sub.status) && event.type !== "customer.subscription.deleted") {
           await fitSeats(c.env, owner, sub);
@@ -116,8 +126,9 @@ export const billingRoutes = new Hono<BillingEnv>()
   .post("/checkout", async (c) => {
     const input = Checkout.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
-    const { plan, interval } = input.data;
+    const { plan, gift: giftToken } = input.data;
     const user = c.get("user");
+    if (giftToken && plan !== "pro") return c.json({ error: "invalid_input", message: "A gift is for Pro." }, 400);
     // A trial asks for no card: one per address someone has shown is theirs.
     if (!user.verified) return c.json({ error: "email_not_verified", message: UNVERIFIED_MESSAGE }, 403);
     const standing = await standingOf(c.env, user.id);
@@ -125,35 +136,54 @@ export const billingRoutes = new Hono<BillingEnv>()
       const where = storeName(standing.subscription?.source) ?? "the billing portal";
       return c.json({ error: "already_subscribed", message: `You already have a plan. Change it from ${where}.` }, 409);
     }
+    const gift = giftToken ? await claimGift(c.env, giftToken, user.id) : null;
+    if (giftToken && !gift) return c.json({ error: "gift_unavailable", message: "This gift link has been used, has expired or was cancelled." }, 410);
+    // A gift is billed monthly: its coupon covers that many monthly invoices.
+    const interval = gift ? "month" : input.data.interval;
     const customer = await customerFor(c.env, user);
-    const prices = await stripe<{ data: { id: string }[] }>(c.env, "GET", "/prices", {
+    const prices = await stripe<{ data: { id: string; product: string }[] }>(c.env, "GET", "/prices", {
       lookup_keys: [PRICE_KEYS[plan][interval]],
       active: true,
     });
     const price = prices.data[0];
     if (!price) return c.json({ error: "not_configured", message: "This plan is not on sale yet." }, 503);
     const origin = new URL(c.req.url).origin;
-    const trial = !customer.trialUsed && !(await hadTrial(c.env, user.email));
+    const trial = !gift && !customer.trialUsed && !(await hadTrial(c.env, user.email));
     const session = await stripe<{ url: string }>(c.env, "POST", "/checkout/sessions", {
       mode: "subscription",
       customer: customer.id,
       line_items: [{ price: price.id, quantity: plan === "team" ? (input.data.seats ?? TEAM_MIN_SEATS) : 1 }],
       success_url: `${origin}/settings/billing`,
       cancel_url: `${origin}/settings/billing`,
-      allow_promotion_codes: true,
+      // Stripe takes either a set discount or the promotion code field, not both.
+      ...(gift ? { discounts: [{ coupon: await giftCoupon(c.env, gift.months, price.product) }] } : { allow_promotion_codes: true }),
       automatic_tax: { enabled: true },
       customer_update: { address: "auto", name: "auto" },
       tax_id_collection: { enabled: true },
       subscription_data: {
-        metadata: { user_id: user.id },
+        metadata: { user_id: user.id, ...(gift && { gift_id: gift.id }) },
         // A trial that ends with no card on file ends: it does not become an unpaid plan that keeps
         // its limits through the past-due grace period.
         ...(trial && { trial_period_days: TRIAL_DAYS, trial_settings: { end_behavior: { missing_payment_method: "cancel" } } }),
       },
-      // A trial starts without a card; Stripe asks for one before the first charge.
-      ...(trial && { payment_method_collection: "if_required" }),
+      // A trial, or a gift with nothing to pay, starts without a card; Stripe asks for one before the first charge.
+      ...((trial || gift) && { payment_method_collection: "if_required" }),
     });
     return c.json({ url: session.url });
+  })
+  /** What a gift link offers the person who opened it. */
+  .get("/gift/:token", async (c) => c.json(await giftOffer(c.env, c.req.param("token"), c.get("user").id)))
+  /** The server's admins make gift links; the link's token is shown only in this answer. */
+  .get("/gifts", requireAdmin, async (c) => c.json({ gifts: await listGifts(c.env) }))
+  .post("/gifts", requireAdmin, async (c) => {
+    const input = NewGift.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const token = await createGift(c.env, { createdBy: c.get("user").id, ...input.data });
+    return c.json({ url: `${new URL(c.req.url).origin}/gift/${token}` }, 201);
+  })
+  .delete("/gifts/:id", requireAdmin, async (c) => {
+    if (!(await revokeGift(c.env, c.req.param("id")))) return c.json({ error: "not_found" }, 404);
+    return c.body(null, 204);
   })
   /** Asks RevenueCat right after a purchase in the mobile app, instead of waiting for its webhook. */
   .post("/store/sync", async (c) => {

@@ -17,6 +17,7 @@ import { Route as AppArtifactsRouteImport } from './routes/_app/artifacts'
 import { Route as AppDevicesRouteImport } from './routes/_app/devices'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppUsageRouteImport } from './routes/_app/usage'
+import { Route as GiftTokenRouteImport } from './routes/gift.$token'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app/projects/$projectId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
@@ -70,6 +71,11 @@ const AppUsageRoute = AppUsageRouteImport.update({
   id: '/usage',
   path: '/usage',
   getParentRoute: () => AppRoute,
+} as any)
+const GiftTokenRoute = GiftTokenRouteImport.update({
+  id: '/gift/$token',
+  path: '/gift/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppProjectsProjectIdRoute = AppProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
@@ -156,6 +162,7 @@ export interface FileRoutesByFullPath {
   '/devices': typeof AppDevicesRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/usage': typeof AppUsageRoute
+  '/gift/$token': typeof GiftTokenRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/connectors': typeof AppSettingsConnectorsRoute
@@ -177,6 +184,7 @@ export interface FileRoutesByTo {
   '/artifacts': typeof AppArtifactsRoute
   '/devices': typeof AppDevicesRoute
   '/usage': typeof AppUsageRoute
+  '/gift/$token': typeof GiftTokenRoute
   '/': typeof AppIndexRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/connectors': typeof AppSettingsConnectorsRoute
@@ -201,6 +209,7 @@ export interface FileRoutesById {
   '/_app/devices': typeof AppDevicesRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/usage': typeof AppUsageRoute
+  '/gift/$token': typeof GiftTokenRoute
   '/_app/': typeof AppIndexRoute
   '/_app/projects/$projectId': typeof AppProjectsProjectIdRouteWithChildren
   '/_app/settings/billing': typeof AppSettingsBillingRoute
@@ -227,6 +236,7 @@ export interface FileRouteTypes {
     | '/devices'
     | '/settings'
     | '/usage'
+    | '/gift/$token'
     | '/projects/$projectId'
     | '/settings/billing'
     | '/settings/connectors'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
     | '/artifacts'
     | '/devices'
     | '/usage'
+    | '/gift/$token'
     | '/'
     | '/settings/billing'
     | '/settings/connectors'
@@ -271,6 +282,7 @@ export interface FileRouteTypes {
     | '/_app/devices'
     | '/_app/settings'
     | '/_app/usage'
+    | '/gift/$token'
     | '/_app/'
     | '/_app/projects/$projectId'
     | '/_app/settings/billing'
@@ -292,6 +304,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  GiftTokenRoute: typeof GiftTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -351,6 +364,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/usage'
       preLoaderRoute: typeof AppUsageRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/gift/$token': {
+      id: '/gift/$token'
+      path: '/gift/$token'
+      fullPath: '/gift/$token'
+      preLoaderRoute: typeof GiftTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_app/projects/$projectId': {
       id: '/_app/projects/$projectId'
@@ -525,6 +545,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  GiftTokenRoute: GiftTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
