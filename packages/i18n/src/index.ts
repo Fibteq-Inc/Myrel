@@ -75,3 +75,30 @@ export function relativeTime(t: Translate, locale: Locale, iso: string, now = Da
   if (s < 7 * 86400) return t("time.days", { count: Math.floor(s / 86400) });
   return new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
+
+/** The local calendar day a time falls on, e.g. "2026-10-26": for grouping by day. */
+export function localDay(at: string | number): string {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** "Today", "Yesterday", then a date ("Fri, Oct 24", with the year when it is not this year). */
+export function dayLabel(t: Translate, locale: Locale, at: string | number, now = Date.now()) {
+  const day = localDay(at);
+  if (day === localDay(now)) return t("time.today");
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day === localDay(yesterday.getTime())) return t("time.yesterday");
+  const d = new Date(at);
+  return d.toLocaleDateString(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== new Date(now).getFullYear() && { year: "numeric" }),
+  });
+}
+
+/** The local clock time, e.g. "14:32". */
+export function clockTime(locale: Locale, at: string | number) {
+  return new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+}

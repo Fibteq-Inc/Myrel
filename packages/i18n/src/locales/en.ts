@@ -20,6 +20,8 @@ export const en = {
   "time.minutes": { other: "{count}m" },
   "time.hours": { other: "{count}h" },
   "time.days": { other: "{count}d" },
+  "time.today": "Today",
+  "time.yesterday": "Yesterday",
 
   // Login
   "login.signInTitle": "Sign in to Myrel",
@@ -912,6 +914,7 @@ export const en = {
   "pr.showLess": "Show fewer",
   "tasks.terminalOutput": "Terminal output",
   "tasks.totalTime": "Total time",
+  "tasks.startedAt": "Started {time}",
   "tasks.stepTime": "How long this step took",
   "tasks.showMore": "Show more",
   "tasks.showLess": "Show less",

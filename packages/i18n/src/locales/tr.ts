@@ -16,6 +16,8 @@ export const tr: Catalog = {
   "time.minutes": { other: "{count} dk" },
   "time.hours": { other: "{count} sa" },
   "time.days": { other: "{count} g" },
+  "time.today": "Bugün",
+  "time.yesterday": "Dün",
 
   // Login
   "login.signInTitle": "Myrel'e giriş yap",
@@ -907,6 +909,7 @@ export const tr: Catalog = {
   "pr.showLess": "Daha az göster",
   "tasks.terminalOutput": "Terminal çıktısı",
   "tasks.totalTime": "Toplam süre",
+  "tasks.startedAt": "Başlangıç: {time}",
   "tasks.stepTime": "Bu adımın süresi",
   "tasks.showMore": "Devamını göster",
   "tasks.showLess": "Daha az göster",
