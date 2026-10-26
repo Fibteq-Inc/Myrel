@@ -1,5 +1,6 @@
 export * from "./api";
 export * from "./external-links";
+export * from "./highlight";
 export * from "./onboarding";
 export * from "./platform";
 export * from "./project-state";

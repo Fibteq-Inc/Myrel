@@ -67,6 +67,17 @@
   --color-danger: #e5484d;
   --color-danger-hover: #d93f44;
   --color-shadow: rgb(0 0 0 / 0.5);
+  /* Syntax colors in code blocks and file previews (see @myrel/client highlight.ts). */
+  --color-syn-comment: #8b8b94;
+  --color-syn-keyword: #ff8f86;
+  --color-syn-string: #a5d6ff;
+  --color-syn-number: #79c0ff;
+  --color-syn-title: #d2a8ff;
+  --color-syn-type: #ffa657;
+  --color-syn-attr: #7ee0c3;
+  --color-syn-meta: #b4beff;
+  --color-syn-added: #4fcb8d;
+  --color-syn-removed: #ff7b72;
 }
 
 :root[data-theme="light"] {
@@ -122,6 +133,16 @@
   --color-danger: #d1343a;
   --color-danger-hover: #b92c32;
   --color-shadow: rgb(20 20 30 / 0.14);
+  --color-syn-comment: #686872;
+  --color-syn-keyword: #cf222e;
+  --color-syn-string: #0a3069;
+  --color-syn-number: #0550ae;
+  --color-syn-title: #8250df;
+  --color-syn-type: #953800;
+  --color-syn-attr: #116329;
+  --color-syn-meta: #3a45c4;
+  --color-syn-added: #15713f;
+  --color-syn-removed: #bf2e29;
 }
 
 html,

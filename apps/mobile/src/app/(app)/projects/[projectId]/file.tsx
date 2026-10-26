@@ -11,10 +11,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { MessageMarkdown } from "../../../../components/markdown";
+import { HighlightedCode } from "../../../../components/code";
 import { Empty } from "../../../../components/project/empty";
 import { Button, errorMessage, Spinner } from "../../../../components/ui";
 import { displayName, type FileKind, fileKind } from "../../../../lib/files";
@@ -106,9 +106,7 @@ export default function FileScreen() {
         </ScrollView>
       ) : preview.data.kind === "text" ? (
         <ScrollView contentContainerStyle={{ padding: 16 }}>
-          <Text selectable style={styles.code}>
-            {preview.data.text}
-          </Text>
+          <HighlightedCode code={preview.data.text ?? ""} language={path} style={styles.code} />
         </ScrollView>
       ) : preview.data.kind === "image" ? (
         <ZoomableImage uri={preview.data.dataUrl} label={name} onOpen={() => void open()} />

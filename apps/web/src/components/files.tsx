@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
+import { HighlightedCode } from "./code";
 import { IconButton } from "../lib/ui";
 import { useProjectView } from "./project-view";
 
@@ -28,7 +29,12 @@ function kindOf(path: string, contentType: string): Kind {
   if (contentType.startsWith("image/")) return "image";
   if (contentType === "application/pdf") return "pdf";
   if (/\.(md|markdown)$/i.test(path) || contentType.startsWith("text/markdown")) return "markdown";
-  if (contentType.startsWith("text/") || /json|xml|javascript|yaml/.test(contentType)) return "text";
+  if (
+    contentType.startsWith("text/") ||
+    /json|xml|javascript|typescript|yaml|toml|csv|sql/.test(contentType) ||
+    /\.(txt|json|ya?ml|toml|csv|tsx?|jsx?|py|go|rs|sh|html?|css|sql)$/i.test(path)
+  )
+    return "text";
   return "other";
 }
 
@@ -192,7 +198,9 @@ export function FilePreview({
           </div>
         )}
         {text !== null && kind === "text" && (
-          <pre className="whitespace-pre-wrap break-words p-5 font-mono text-[12.5px] text-body">{text}</pre>
+          <pre className="whitespace-pre-wrap break-words p-5 font-mono text-[12.5px] text-body">
+            <HighlightedCode code={text} language={path} />
+          </pre>
         )}
         {blob.data && kind === "other" && (
           <p className="p-5 text-[13px] text-subtle">{t("files.noPreview")}</p>

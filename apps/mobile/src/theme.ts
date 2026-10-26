@@ -41,6 +41,17 @@ export const darkColors = {
   accentWash: "rgba(30,33,66,0.35)",
   /** Dims the screen behind a bottom sheet. */
   scrim: "rgba(0,0,0,0.5)",
+  // Syntax colors in code blocks and file previews (see @myrel/client highlight.ts).
+  synComment: "#8b8b94",
+  synKeyword: "#ff8f86",
+  synString: "#a5d6ff",
+  synNumber: "#79c0ff",
+  synTitle: "#d2a8ff",
+  synType: "#ffa657",
+  synAttr: "#7ee0c3",
+  synMeta: "#b4beff",
+  synAdded: "#4fcb8d",
+  synRemoved: "#ff7b72",
 };
 
 export type Colors = { [K in keyof typeof darkColors]: string };
@@ -80,6 +91,16 @@ export const lightColors: Colors = {
   accentBorderSoft: "rgba(74,85,214,0.35)",
   accentWash: "rgba(236,238,255,0.6)",
   scrim: "rgba(17,17,20,0.3)",
+  synComment: "#686872",
+  synKeyword: "#cf222e",
+  synString: "#0a3069",
+  synNumber: "#0550ae",
+  synTitle: "#8250df",
+  synType: "#953800",
+  synAttr: "#116329",
+  synMeta: "#3a45c4",
+  synAdded: "#15713f",
+  synRemoved: "#bf2e29",
 };
 
 export const palettes: Record<Theme, Colors> = { dark: darkColors, light: lightColors };

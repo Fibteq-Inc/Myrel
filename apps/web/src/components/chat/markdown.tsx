@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { filesQuery, runnersQuery, workspaceQuery } from "../../lib/api";
+import { HighlightedCode } from "../code";
 import { FilePreview } from "../files";
 import { DecisionCard } from "./decision-card";
 
@@ -211,7 +212,7 @@ function CodeBlock({ lang, children }: { lang?: string; children: string }) {
         <CopyButton text={children} className="ml-auto" />
       </div>
       <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-body">
-        <code>{children}</code>
+        <HighlightedCode code={children} language={lang} />
       </pre>
     </div>
   );

@@ -12,7 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@myrel/protocol": "workspace:*"
+    "@myrel/protocol": "workspace:*",
+    "lowlight": "3.3.0"
   },
   "devDependencies": {
     "vitest": "5.0.5"

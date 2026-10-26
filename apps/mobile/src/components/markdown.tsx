@@ -9,6 +9,7 @@ import { DECISION_LANG, parseDecision } from "../lib/decision";
 import { useFileRefContext } from "../lib/file-refs";
 import { unwrapHref, wrapHref } from "../lib/raw-href";
 import { makeStyles, mono, radius, useColors, useTheme } from "../theme";
+import { HighlightedCode } from "./code";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
@@ -116,9 +117,7 @@ function CodeBlock({
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12 }}>
-        <Text selectable style={[textStyle, styles.codeText]}>
-          {text}
-        </Text>
+        <HighlightedCode code={text} language={language} style={[textStyle ?? {}, styles.codeText]} />
       </ScrollView>
     </View>
   );
