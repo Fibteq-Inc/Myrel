@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { decryptSecret, encryptSecret } from "../crypto";
 import { blockedUrl } from "./client";
 import type { ConnectorRow } from "./store";
@@ -136,33 +136,58 @@ export async function finishAuthorization(
 
 /**
  * A valid access token for the connector, refreshed when it is about to expire. Null when the
- * person has to sign in again (the connector is marked so).
+ * person has to sign in again (the connector is marked so), or when the server could not be reached
+ * to renew it (the next call tries again).
  */
 export async function accessToken(env: Env, row: ConnectorRow, fetcher: typeof fetch = fetch): Promise<string | null> {
   const state = await readOAuth(env, row);
   if (!state?.accessToken) return null;
   if (!state.expiresAt || state.expiresAt > Date.now() + 60_000) return state.accessToken;
+  // A turn's first calls (the CLI's and the tool-list check) come at once: they share one renewal.
+  let renewal = renewals.get(row.id);
+  if (!renewal) {
+    renewal = renew(env, row, state, fetcher).finally(() => renewals.delete(row.id));
+    renewals.set(row.id, renewal);
+  }
+  return renewal;
+}
+
+const renewals = new Map<string, Promise<string | null>>();
+
+async function renew(env: Env, row: ConnectorRow, state: OAuthState, fetcher: typeof fetch): Promise<string | null> {
+  const db = createDb(env.DB);
   if (!state.refreshToken) {
-    await createDb(env.DB).update(connectors).set({ status: "needs_auth", lastError: "The sign-in expired." }).where(eq(connectors.id, row.id));
+    await db.update(connectors).set({ status: "needs_auth", lastError: "The sign-in expired." }).where(eq(connectors.id, row.id));
     return null;
   }
   try {
     const tokens = await tokenRequest(state, { grant_type: "refresh_token", refresh_token: state.refreshToken }, fetcher);
     const next = withTokens(state, tokens);
-    await saveOAuth(env, row.id, next);
+    await saveOAuth(env, row.id, next, { status: "ok", lastError: null });
     return next.accessToken!;
   } catch (err) {
-    // Another call may have refreshed it first, and the server only honours a refresh token once.
-    const [fresh] = await createDb(env.DB).select().from(connectors).where(eq(connectors.id, row.id));
-    const now = fresh ? await readOAuth(env, fresh) : null;
-    if (now?.accessToken && now.accessToken !== state.accessToken && (now.expiresAt ?? Infinity) > Date.now()) return now.accessToken;
-    await createDb(env.DB)
-      .update(connectors)
-      .set({ status: "needs_auth", lastError: `The sign-in could not be renewed: ${errorText(err)}` })
-      .where(eq(connectors.id, row.id));
+    // Another thread's call may be renewing it at the same time, and the server honours a refresh
+    // token only once: wait a little for its new token before calling the sign-in gone.
+    for (let i = 0; i < 4; i++) {
+      const [fresh] = await db.select().from(connectors).where(eq(connectors.id, row.id));
+      const now = fresh ? await readOAuth(env, fresh) : null;
+      if (now?.accessToken && now.accessToken !== state.accessToken && (now.expiresAt ?? Infinity) > Date.now()) return now.accessToken;
+      if (!(err instanceof Refused) || !fresh || fresh.secret !== row.secret) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    // Only the server saying no ends the sign-in; an outage or a timeout does not.
+    if (err instanceof Refused) {
+      await db
+        .update(connectors)
+        .set({ status: "needs_auth", lastError: `The sign-in could not be renewed: ${errorText(err)}` })
+        .where(and(eq(connectors.id, row.id), row.secret ? eq(connectors.secret, row.secret) : undefined));
+    }
     return null;
   }
 }
+
+/** The token endpoint turned the request down (as opposed to not answering). */
+class Refused extends Error {}
 
 type TokenAnswer = { access_token: string; refresh_token?: string; expires_in?: number };
 
@@ -186,7 +211,7 @@ async function tokenRequest(state: OAuthState, params: Record<string, string>, f
   });
   const answer = (await res.json().catch(() => ({}))) as Partial<TokenAnswer> & { error?: string; error_description?: string };
   if (!res.ok || typeof answer.access_token !== "string") {
-    throw new Error(answer.error_description ?? answer.error ?? `The token endpoint answered HTTP ${res.status}.`);
+    throw new (res.status >= 400 && res.status < 500 ? Refused : Error)(answer.error_description ?? answer.error ?? `The token endpoint answered HTTP ${res.status}.`);
   }
   return answer as TokenAnswer;
 }
@@ -216,8 +241,11 @@ async function register(resource: string, redirectUri: string, fetcher: typeof f
   }
   if (!authorizationEndpoint || !tokenEndpoint) throw new Error("This server's sign-in settings are incomplete.");
   if (!registration) throw new Error("This server does not let new apps register for sign-in. Add it with a header (an API key) instead.");
-  const scopes = stringList(metadata?.scopes_supported) ?? stringList(server.scopes_supported);
-  const scope = scopes?.join(" ") || undefined;
+  const scopes = stringList(metadata?.scopes_supported) ?? stringList(server.scopes_supported) ?? [];
+  // Servers that hand out refresh tokens only for offline_access list it on the authorization
+  // server, not the resource: without it the sign-in ends with the first access token.
+  if (stringList(server.scopes_supported)?.includes("offline_access") && !scopes.includes("offline_access")) scopes.push("offline_access");
+  const scope = scopes.join(" ") || undefined;
   const res = await fetcher(registration, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
