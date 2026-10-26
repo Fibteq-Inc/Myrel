@@ -187,6 +187,17 @@ export type ThreadRunner = z.infer<typeof ThreadRunner>;
 export const ThreadCloseReason = z.enum(["duplicate", "misrouted", "cancelled"]);
 export type ThreadCloseReason = z.infer<typeof ThreadCloseReason>;
 
+/** What a thread's messages add up to, kept by the server so clients need not hold every message. */
+export const ThreadSummary = z.object({
+  /** Messages in the thread, not counting the agent's plan cards and plan update notes. */
+  replies: Count,
+  /** The stats lines of its messages, summed: null when none carries stats. Cost is null when any part has no price. */
+  usage: z.object({ tokens: Count, durationMs: Count, costMicros: Count.nullable() }).nullable(),
+  /** The newest plan card, the one the agent is moving along. */
+  planMessageId: MessageId.nullable(),
+});
+export type ThreadSummary = z.infer<typeof ThreadSummary>;
+
 export const Thread = z.object({
   id: ThreadId,
   projectId: ProjectId,
@@ -217,6 +228,8 @@ export const Thread = z.object({
    * is working, waits for the agent: clients show it as queued. Null: not known (older servers).
    */
   seenSeq: z.number().int().nonnegative().nullable().default(null),
+  /** Null from older servers: clients add it up from the messages they have. */
+  summary: ThreadSummary.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

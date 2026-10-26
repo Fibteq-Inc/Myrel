@@ -36,6 +36,8 @@ import {
   type ThreadModel,
   type ThreadCloseReason,
   type ThreadStatus,
+  type ThreadSummary,
+  summarizeThread,
   type UpdateRoutineInput,
 } from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
@@ -198,6 +200,8 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Agents currently working (null = coordinator, otherwise a thread id) and what they are doing. In memory only. */
   private active = new Map<string | null, string | undefined>();
+  /** Each thread's summary, added up from its messages when first asked for and kept up as they change. */
+  private summaries = new Map<string, ThreadSummary>();
 
   /** Activity counts last written to D1 for the project list, and the write in flight. */
   private syncedActivity: string | null = null;
@@ -238,6 +242,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "clis")) this.sql`ALTER TABLE messages ADD COLUMN clis TEXT`;
     // Added with people editing their messages.
     if (!columns.some((c) => c.name === "edited_at")) this.sql`ALTER TABLE messages ADD COLUMN edited_at TEXT`;
+    // A thread's messages, for its summary and (later) for paging a thread from its newest message.
+    this.sql`CREATE INDEX IF NOT EXISTS messages_thread ON messages (thread_id, seq)`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       root_message_id TEXT NOT NULL UNIQUE,
@@ -511,6 +517,7 @@ export class ProjectAgent extends Agent<Env> {
       createdAt,
     };
     this.emit({ type: "message.created", message });
+    if (message.threadId) this.threadMessageAdded(message);
     if (this.observable(message)) this.ctx.waitUntil(this.observeThread(message));
     return message;
   }
@@ -558,6 +565,7 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`UPDATE messages SET body = ${body} WHERE id = ${id}`;
     const message = this.getMessage(id);
     if (message) this.emit({ type: "message.updated", message });
+    this.threadMessageChanged(message?.threadId ?? null);
     return message;
   }
 
@@ -574,6 +582,7 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`UPDATE messages SET body = ${body}, edited_at = ${editedAt} WHERE id = ${id}`;
     const message = this.getMessage(id)!;
     this.emit({ type: "message.updated", message });
+    this.threadMessageChanged(message.threadId);
     if (message.threadId) {
       // A finished thread is not woken for a changed word; its agent sees the edit when it works again.
       const thread = this.getThread(message.threadId);
@@ -590,7 +599,58 @@ export class ProjectAgent extends Agent<Env> {
     this.sql`UPDATE messages SET stats = ${JSON.stringify(stats)} WHERE id = ${id}`;
     const message = this.getMessage(id);
     if (message) this.emit({ type: "message.updated", message });
+    this.threadMessageChanged(message?.threadId ?? null);
     return message;
+  }
+
+  // ---- Thread summaries ----------------------------------------------------
+
+  /** What a thread's messages add up to (replies, usage, its plan card), so clients need not hold them all. */
+  private threadSummary(threadId: string): ThreadSummary {
+    let summary = this.summaries.get(threadId);
+    if (!summary) {
+      const rows = this.sql<Pick<MessageRow, "id" | "author_kind" | "body" | "stats">>`
+        SELECT id, author_kind, body, stats FROM messages WHERE thread_id = ${threadId} ORDER BY seq`;
+      summary = summarizeThread(
+        rows.map((r) => ({ id: r.id, authorKind: r.author_kind, body: r.body, stats: r.stats ? (JSON.parse(r.stats) as MessageStats) : undefined })),
+      );
+      this.summaries.set(threadId, summary);
+    }
+    return summary;
+  }
+
+  /** A new message in a thread adds to its summary, and clients get the thread with it. */
+  private threadMessageAdded(message: Message) {
+    const threadId = message.threadId!;
+    const current = this.summaries.get(threadId);
+    if (current) {
+      const added = summarizeThread([message]);
+      const usage =
+        current.usage && added.usage
+          ? {
+              tokens: current.usage.tokens + added.usage.tokens,
+              durationMs: current.usage.durationMs + added.usage.durationMs,
+              costMicros:
+                current.usage.costMicros === null || added.usage.costMicros === null ? null : current.usage.costMicros + added.usage.costMicros,
+            }
+          : (current.usage ?? added.usage);
+      this.summaries.set(threadId, {
+        replies: current.replies + added.replies,
+        usage,
+        planMessageId: added.planMessageId ?? current.planMessageId,
+      });
+    }
+    const thread = this.getThread(threadId);
+    if (thread) this.emit({ type: "thread.updated", thread });
+  }
+
+  /** A message in a thread changed (its text or stats): the summary is added up again, and clients hear when it moved. */
+  private threadMessageChanged(threadId: string | null) {
+    if (!threadId) return;
+    const before = this.summaries.get(threadId);
+    this.summaries.delete(threadId);
+    const thread = this.getThread(threadId);
+    if (thread && JSON.stringify(thread.summary) !== JSON.stringify(before)) this.emit({ type: "thread.updated", thread });
   }
 
   addReaction(reaction: Reaction): void {
@@ -1704,6 +1764,7 @@ export class ProjectAgent extends Agent<Env> {
       runner: r.runner ? (JSON.parse(r.runner) as ThreadRunner) : null,
       model: r.model ? (JSON.parse(r.model) as ThreadModel) : null,
       seenSeq: r.seen_seq ?? null,
+      summary: this.threadSummary(r.id),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

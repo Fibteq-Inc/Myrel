@@ -1,15 +1,15 @@
 import {
   type Artifact,
   type Message,
-  type MessageStats,
-  isPlanMessage,
   type PullRequest,
   type Reaction,
   type Routine,
   type ServerEvent,
+  summarizeThread,
   type Task,
   type TerminalLine,
   type Thread,
+  type ThreadSummary,
 } from "@myrel/protocol";
 
 /**
@@ -204,35 +204,25 @@ export const projectChat = (s: ProjectState) => messagesByThread(s.messages).get
 /** One thread's messages. The same array comes back until the messages change. */
 export const threadMessages = (s: ProjectState, threadId: string) => messagesByThread(s.messages).get(threadId) ?? EMPTY;
 
-/** What one message's stats line counts, its task included. Cost is null when any part has no price. */
-export function messageUsage(st: MessageStats): { inputTokens: number; outputTokens: number; durationMs: number; costMicros: number | null } {
-  const { task } = st;
-  return {
-    inputTokens: st.inputTokens + (task?.inputTokens ?? 0),
-    outputTokens: st.outputTokens + (task?.outputTokens ?? 0),
-    durationMs: st.durationMs + (task?.durationMs ?? 0),
-    // A person's own CLI is unpriced on purpose; it counts as free rather than unknown.
-    costMicros:
-      st.runtime === "local" && st.harness
-        ? 0
-        : st.costMicros === null || task?.costMicros === null
-          ? null
-          : st.costMicros + (task?.costMicros ?? 0),
-  };
+export { messageUsage } from "@myrel/protocol";
+
+/** What a thread's messages add up to: the server's summary, or added up here for an older server's thread. */
+export function threadSummary(s: ProjectState, threadId: string): ThreadSummary {
+  const fromServer = s.threads[threadId]?.summary;
+  if (fromServer) return fromServer;
+  const messages = threadMessages(s, threadId);
+  let summary = summaryCache.get(messages);
+  if (!summary) {
+    summary = summarizeThread(messages);
+    summaryCache.set(messages, summary);
+  }
+  return summary;
 }
+const summaryCache = new WeakMap<Message[], ThreadSummary>();
 
 /** What a thread's messages say they used, summed: null when none of them carries stats. Cost is null when any part has no price. */
-export function threadUsage(s: ProjectState, threadId: string): { tokens: number; durationMs: number; costMicros: number | null } | null {
-  let total: { tokens: number; durationMs: number; costMicros: number | null } | null = null;
-  for (const m of threadMessages(s, threadId)) {
-    if (!m.stats) continue;
-    const u = messageUsage(m.stats);
-    total ??= { tokens: 0, durationMs: 0, costMicros: 0 };
-    total.tokens += u.inputTokens + u.outputTokens;
-    total.durationMs += u.durationMs;
-    total.costMicros = total.costMicros === null || u.costMicros === null ? null : total.costMicros + u.costMicros;
-  }
-  return total;
+export function threadUsage(s: ProjectState, threadId: string): ThreadSummary["usage"] {
+  return threadSummary(s, threadId).usage;
 }
 
 /**
@@ -250,15 +240,8 @@ export function workingCount(s: ProjectState): number {
 
 /** How many replies a thread has, not counting the agent's plan cards and plan update notes. */
 export function threadReplyCount(s: ProjectState, threadId: string): number {
-  const messages = threadMessages(s, threadId);
-  let count = replyCountCache.get(messages);
-  if (count === undefined) {
-    count = messages.filter((m) => !isPlanMessage(m.body)).length;
-    replyCountCache.set(messages, count);
-  }
-  return count;
+  return threadSummary(s, threadId).replies;
 }
-const replyCountCache = new WeakMap<Message[], number>();
 
 export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
