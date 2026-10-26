@@ -239,6 +239,8 @@ describe("local workspace", () => {
     // The first turn runs on the default computer, and the thread stays with it.
     const { projectAgent, threadAgent, thread, author } = await startThread(project.id, user);
     const first = await until(() => starts(sideA)[0], "task.start on the default computer");
+    // Stored as the task goes out, so under load it can land just after task.start.
+    await until(async () => (await projectAgent.getThread(thread.id))?.runner, "stuck to the default computer");
     expect((await projectAgent.getThread(thread.id))?.runner).toEqual({ id: a.runner.id, by: "auto", reason: null });
     sideA.send({ type: "task.done", taskId: first.taskId, ok: true, result: "Done." });
     await until(async () => (await threadAgent.getTasks())[0]?.status === "done", "first turn done");
@@ -260,6 +262,7 @@ describe("local workspace", () => {
     await until(async () => !(await listRunners(user)).find((r) => r.id === a.runner.id)?.online, "default offline");
     const other = await startThread(project.id, user);
     await until(() => starts(sideB)[1], "task.start on the other computer");
+    await until(async () => (await other.projectAgent.getThread(other.thread.id))?.runner, "stuck to the other computer");
     expect((await other.projectAgent.getThread(other.thread.id))?.runner).toEqual({ id: b.runner.id, by: "auto", reason: null });
     chat.close();
     sideB.ws.close();
