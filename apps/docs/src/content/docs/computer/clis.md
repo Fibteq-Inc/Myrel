@@ -8,7 +8,7 @@ On your computer, tasks run through a coding CLI you already have.
 | CLI | Command | Can ask you mid-task | Notes |
 |---|---|---|---|
 | Claude Code | `claude` | Yes | Asks before opening other folders or running commands it isn't allowed to |
-| Codex CLI | `codex` | No | |
+| Codex CLI | `codex` | Yes | Asks before a command or file its sandbox doesn't allow (for example `git push`). Needs a Codex with `codex app-server` |
 | Antigravity CLI | `agy` | No | A step that needs approval ends the run, which then says what stopped it |
 | OpenCode | `opencode` | No | Doesn't run shell commands below **Full access** |
 | Hermes Agent | `hermes` | No | Needs `hermes pm install --extra acp` once |

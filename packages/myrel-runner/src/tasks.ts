@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
-import { ADAPTERS, type CliAdapter, modelFlags, type ParseState, safeModel } from "./clis";
+import { type AppServerAsk, AppServerTurn, type AppServerTurnOptions, approveAccess } from "./app-server";
+import { ADAPTERS, type CliAdapter, hasAppServer, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { GitCredentials } from "./github";
 import { downloadSkills, type RunSkills } from "./skills";
@@ -32,11 +33,15 @@ export type TaskRunnerOptions = {
   log?: (line: string) => void;
   /** The subscription limits a CLI reported during or after a run. */
   onLimits?: (cli: CliId, limits: CliLimits) => void;
+  /** This runner's version, which it gives the CLIs that ask (Codex's app server). */
+  version?: string;
 };
 
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
 export class TaskRunner {
   private readonly running = new Map<string, ChildProcess>();
+  /** Running tasks' app server turns, which stop by interrupting the turn. */
+  private readonly turns = new Map<string, AppServerTurn>();
   /** The worktree each running task works in. */
   private readonly worktrees = new Map<string, string>();
   /** Tasks the server asked to stop. */
@@ -104,9 +109,11 @@ export class TaskRunner {
     let agentDir: string | undefined;
     let agent: { args: string[]; env?: Record<string, string>; mcpServers?: AcpMcpServer[] } = { args: [] };
     let skills: RunSkills | null = null;
+    let ask: AppServerAsk | undefined;
     if (task.agent && config.server) {
       agentDir = await mkdtemp(join(tmpdir(), "myrel-agent-"));
       const origin = config.server.replace(/\/$/, "");
+      ask = approveAccess(`${origin}${task.agent.mcpPath}`, task.agent.token);
       const connectors = (task.agent.connectors ?? []).map((c) =>
         c.transport === "http" ? { transport: c.transport, name: c.name, url: `${origin}${c.path}` } : c,
       );
@@ -137,7 +144,10 @@ export class TaskRunner {
     // Git clones and pushes the project's repositories with the turn's GitHub token, lent only for this run.
     const env = task.github ? { ...agent.env, ...(await this.git.lend(task.taskId, task.github)) } : agent.env;
     try {
-      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup };
+      // Codex runs as its app server where it has one, which can ask the person about a step.
+      const appServer = adapter.appServer && (await hasAppServer(adapter.bin)) ? { ...adapter.appServer({ access: config.access, dirs, asks: !!ask }), ask } : undefined;
+      if (appServer) log("  as its app server");
+      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup, appServer };
       const retry = await this.attempt(task, run, session?.id, short ?? task.prompt);
       if (retry) {
         log(`  could not resume the ${adapter.id} session; starting a new one`);
@@ -167,6 +177,8 @@ export class TaskRunner {
       skills: RunSkills | null;
       where: string;
       cleanup: () => Promise<unknown>;
+      /** How to run the CLI as Codex's app server, instead of args(). */
+      appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config" | "ask">;
     },
     resume: string | undefined,
     prompt: string,
@@ -181,8 +193,9 @@ export class TaskRunner {
     const promptDir = adapter.promptFile ? await mkdtemp(join(tmpdir(), "myrel-prompt-")) : undefined;
     const promptFile = promptDir ? join(promptDir, "prompt.md") : undefined;
     if (promptFile) await writeFile(promptFile, input, { mode: 0o600 });
-    const extra = [...modelFlags(adapter, task.model), ...agent.args];
-    const args = adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile });
+    // The app server takes the model in the session; its flags are agent()'s config overrides.
+    const extra = [...(run.appServer ? [] : modelFlags(adapter, task.model)), ...agent.args];
+    const args = run.appServer ? ["app-server", ...agent.args] : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: childEnv(run.env),
@@ -255,6 +268,12 @@ export class TaskRunner {
       const session = { cwd, prompt: input, mcpServers: agent.mcpServers ?? [], resume, dirs, ...adapter.acp(config.access, safeModel(task.model)) };
       state.acp = new AcpTurn(io, session, state);
       state.acp.start();
+    } else if (run.appServer) {
+      const io = { write: (line: string) => void child.stdin!.write(line), end: () => child.stdin!.end() };
+      const options = { cwd, prompt: input, resume, model: safeModel(task.model), clientVersion: this.opts.version ?? "0", ...run.appServer };
+      state.appServer = new AppServerTurn(io, options, state);
+      this.turns.set(task.taskId, state.appServer);
+      state.appServer.start();
     } else child.stdin!.end(promptFile ? "" : input);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
@@ -267,6 +286,7 @@ export class TaskRunner {
         clearTimeout(timer);
         void cleanup();
         this.running.delete(task.taskId);
+        this.turns.delete(task.taskId);
         this.worktrees.delete(task.taskId);
         this.opts.onChange?.(this.runningIds());
         // The next runner reports it as interrupted; a failure sent now would end the turn instead.
@@ -311,6 +331,7 @@ export class TaskRunner {
           done = true;
           clearTimeout(timer);
           this.running.delete(task.taskId);
+          this.turns.delete(task.taskId);
           // Stopping now: the new session would only be killed too.
           if (this.interrupted.has(task.taskId)) {
             this.interrupted.delete(task.taskId);
@@ -338,8 +359,15 @@ export class TaskRunner {
     const child = this.running.get(taskId);
     if (!child) return;
     this.cancelled.add(taskId);
-    child.kill("SIGTERM");
-    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 5000).unref();
+    // An app server turn is interrupted first, which ends it with its session whole; killed if it does not end.
+    const graceMs = this.turns.get(taskId)?.interrupt() ? 5000 : 0;
+    const kill = () => {
+      if (child.exitCode !== null) return;
+      child.kill("SIGTERM");
+      setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 5000).unref();
+    };
+    if (graceMs) setTimeout(kill, graceMs).unref();
+    else kill();
   }
 
   /**
