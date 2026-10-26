@@ -1,6 +1,5 @@
 import { useT } from "@myrel/i18n/react";
 import { ApiError, codeLanguage } from "@myrel/client";
-import type { CodeLine, TokenKind } from "@myrel/client/highlight";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
@@ -8,6 +7,7 @@ import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
+import { CodeTokens, lineClass, useCodeLines } from "../lib/highlight";
 import { IconButton } from "../lib/ui";
 import { useProjectView } from "./project-view";
 
@@ -204,43 +204,18 @@ export function FilePreview({
 /** Past this many lines a code file is shown without line numbers, like other text. */
 const CODE_LINE_LIMIT = 5_000;
 
-const TOKEN_CLASS: Record<TokenKind, string> = {
-  keyword: "text-accent",
-  string: "text-ok",
-  number: "text-warn",
-  comment: "italic text-subtle",
-  name: "text-link",
-  type: "text-merged",
-  meta: "text-muted",
-  addition: "text-ok",
-  deletion: "text-bad",
-};
-
 /**
  * A text file: code (a known grammar) with syntax colors and line numbers, other text as it is.
- * The grammars load on first use so they stay out of the main bundle.
  */
 function TextView({ text, language }: { text: string; language?: string }) {
-  const [lines, setLines] = useState<CodeLine[] | null>(null);
-  useEffect(() => {
-    setLines(null);
-    if (!language || text.split("\n", CODE_LINE_LIMIT + 1).length > CODE_LINE_LIMIT) return;
-    let live = true;
-    void import("@myrel/client/highlight").then(({ highlightLines }) => live && setLines(highlightLines(text, language)));
-    return () => {
-      live = false;
-    };
-  }, [text, language]);
-
+  const short = text.split("\n", CODE_LINE_LIMIT + 1).length <= CODE_LINE_LIMIT;
+  const lines = useCodeLines(text, short ? language : undefined);
   if (!lines) return <pre className="whitespace-pre-wrap break-words p-5 font-mono text-[12.5px] text-body">{text}</pre>;
   const digits = String(lines.length).length;
   return (
     <pre className="py-4 font-mono text-[12.5px] leading-[1.6] text-body">
       {lines.map((line, i) => (
-        <div
-          key={i}
-          className={`flex ${line[0]?.kind === "addition" ? "bg-ok-soft" : line[0]?.kind === "deletion" ? "bg-bad-soft" : ""}`}
-        >
+        <div key={i} className={`flex ${lineClass(line)}`}>
           <span
             aria-hidden="true"
             className="flex-none select-none pl-4 pr-4 text-right text-subtle"
@@ -249,15 +224,7 @@ function TextView({ text, language }: { text: string; language?: string }) {
             {i + 1}
           </span>
           <code className="min-h-[1.6em] min-w-0 flex-1 whitespace-pre-wrap break-words pr-5">
-            {line.map((token, j) =>
-                  token.kind ? (
-                    <span key={j} className={TOKEN_CLASS[token.kind]}>
-                      {token.text}
-                    </span>
-                  ) : (
-                    token.text
-              ),
-            )}
+            <CodeTokens line={line} />
           </code>
         </div>
       ))}

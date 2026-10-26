@@ -1,3 +1,5 @@
+import { fenceLanguage } from "@myrel/client";
+import { highlightLines } from "@myrel/client/highlight";
 import { useT } from "@myrel/i18n/react";
 import { mayBeFileName, resolveFileCode } from "@myrel/protocol";
 import * as Clipboard from "expo-clipboard";
@@ -9,6 +11,7 @@ import { DECISION_LANG, parseDecision } from "../lib/decision";
 import { useFileRefContext } from "../lib/file-refs";
 import { unwrapHref, wrapHref } from "../lib/raw-href";
 import { makeStyles, mono, radius, useColors, useTheme } from "../theme";
+import { CodeLines } from "./code-view";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
@@ -102,6 +105,8 @@ function CodeBlock({
   const t = useT();
   const colors = useColors();
   const styles = useStyles();
+  const grammar = language ? fenceLanguage(language) : undefined;
+  const lines = useMemo(() => (grammar ? highlightLines(text, grammar) : null), [text, grammar]);
   return (
     <View style={[containerStyle, styles.code]}>
       <View style={styles.codeHead}>
@@ -117,7 +122,7 @@ function CodeBlock({
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12 }}>
         <Text selectable style={[textStyle, styles.codeText]}>
-          {text}
+          {lines ? <CodeLines lines={lines} /> : text}
         </Text>
       </ScrollView>
     </View>

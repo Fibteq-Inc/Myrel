@@ -98,7 +98,8 @@ function kindOf(node: Element, inherited?: TokenKind): TokenKind | undefined {
   const names = node.properties.className;
   if (!Array.isArray(names)) return inherited;
   for (const name of names) {
-    const kind = KINDS[String(name).replace(/^hljs-/, "")];
+    const scope = String(name).replace(/^hljs-/, "");
+    const kind = Object.hasOwn(KINDS, scope) ? KINDS[scope] : undefined;
     if (kind) return kind;
   }
   return inherited;

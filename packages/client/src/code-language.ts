@@ -46,10 +46,36 @@ const BY_EXTENSION: Record<string, string> = {
 
 const BY_NAME: Record<string, string> = { dockerfile: "dockerfile", makefile: "makefile" };
 
+/** Own keys only, so names like "constructor" do not hit Object.prototype. */
+const own = (map: Record<string, string>, key: string) => (Object.hasOwn(map, key) ? map[key] : undefined);
+
 /** The grammar for a file path, or undefined when it is not code we highlight. */
 export function codeLanguage(path: string): string | undefined {
   const name = (path.split("/").at(-1) ?? path).toLowerCase();
-  if (BY_NAME[name]) return BY_NAME[name];
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? BY_EXTENSION[name.slice(dot + 1)] : undefined;
+  return own(BY_NAME, name) ?? (dot > 0 ? own(BY_EXTENSION, name.slice(dot + 1)) : undefined);
+}
+
+const GRAMMARS = new Set([...Object.values(BY_EXTENSION), ...Object.values(BY_NAME)]);
+
+/** Fence names that are neither a grammar nor an extension. */
+const FENCE_ALIASES: Record<string, string> = {
+  shell: "bash",
+  console: "bash",
+  shellsession: "bash",
+  golang: "go",
+  "c++": "cpp",
+  "c#": "csharp",
+  docker: "dockerfile",
+  make: "makefile",
+  postgresql: "sql",
+  postgres: "sql",
+  mysql: "sql",
+  sqlite: "sql",
+};
+
+/** The grammar for a Markdown code fence's language (```sql, ```ts, ```shell), or undefined. */
+export function fenceLanguage(name: string): string | undefined {
+  const lang = name.toLowerCase();
+  return GRAMMARS.has(lang) ? lang : (own(FENCE_ALIASES, lang) ?? own(BY_EXTENSION, lang));
 }

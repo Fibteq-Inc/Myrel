@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeLanguage } from "../src/code-language";
+import { codeLanguage, fenceLanguage } from "../src/code-language";
 import { HIGHLIGHT_LIMIT, highlightLines } from "../src/highlight";
 
 describe("codeLanguage", () => {
@@ -13,6 +13,19 @@ describe("codeLanguage", () => {
     expect(codeLanguage("notes/plan.md")).toBeUndefined();
     expect(codeLanguage("notes.txt")).toBeUndefined();
     expect(codeLanguage(".bashrc")).toBeUndefined();
+    expect(codeLanguage("a.constructor")).toBeUndefined();
+  });
+});
+
+describe("fenceLanguage", () => {
+  it("takes grammar names, extensions and common aliases", () => {
+    expect(fenceLanguage("SQL")).toBe("sql");
+    expect(fenceLanguage("ts")).toBe("typescript");
+    expect(fenceLanguage("typescript")).toBe("typescript");
+    expect(fenceLanguage("shell")).toBe("bash");
+    expect(fenceLanguage("html")).toBe("xml");
+    expect(fenceLanguage("text")).toBeUndefined();
+    expect(fenceLanguage("constructor")).toBeUndefined();
   });
 });
 
