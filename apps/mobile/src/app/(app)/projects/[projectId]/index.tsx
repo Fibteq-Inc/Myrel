@@ -1,10 +1,11 @@
 import { conversationState, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { type Href, Stack, useRouter } from "expo-router";
+import { Settings } from "lucide-react-native";
 import type { CliId } from "@myrel/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AskCliPicker, OfferedClis, usePickableClis } from "../../../../components/cli-picker";
 import type { ComposerHandle } from "../../../../components/composer";
 import { Conversation } from "../../../../components/conversation";
@@ -18,7 +19,7 @@ import { ThreadCard } from "../../../../components/thread-card";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
 import { useNames } from "../../../../lib/use-names";
-import { makeStyles } from "../../../../theme";
+import { makeStyles, useColors } from "../../../../theme";
 
 type Tab = "chat" | "threads" | "artifacts" | "files" | "usage";
 
@@ -26,6 +27,8 @@ type Tab = "chat" | "threads" | "artifacts" | "files" | "usage";
 export default function ProjectScreen() {
   const t = useT();
   const styles = useStyles();
+  const colors = useColors();
+  const router = useRouter();
   const { api, server } = useSession();
   const { projectId, status } = useProject();
   const project = useQuery({ queryKey: ["projects", server, projectId], queryFn: () => api.getProject(projectId) });
@@ -46,6 +49,16 @@ export default function ProjectScreen() {
                 </Text>
               )}
             </View>
+          ),
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("mobile.projectSettings")}
+              hitSlop={10}
+              onPress={() => router.push(`/projects/${projectId}/settings` as Href)}
+            >
+              <Settings size={20} color={colors.subtle} />
+            </Pressable>
           ),
         }}
       />
