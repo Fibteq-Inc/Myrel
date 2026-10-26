@@ -67,6 +67,8 @@ export function threadPrompt(input: {
   lastSeenSeq: number;
   /** When the agent's last turn began: a message a person edited after it is new again. */
   lastSeenAt?: string;
+  /** Edits the last turn already took in while it ran (message id → editedAt): not new again. */
+  editsTaken?: Record<string, string>;
   notes: CoordinatorNote[];
   knowledge: KnowledgeSnapshot;
   repos: ProjectRepo[];
@@ -93,7 +95,8 @@ export function threadPrompt(input: {
   budget?: number;
 }): string {
   const lasting = input.lasting ?? ((section: string) => section);
-  const isNew = (m: Message) => m.seq > input.lastSeenSeq || editedSince(m, input.lastSeenAt);
+  const isNew = (m: Message) =>
+    m.seq > input.lastSeenSeq || (editedSince(m, input.lastSeenAt) && input.editsTaken?.[m.id] !== m.editedAt);
   const shown = input.followUp ? input.messages.filter(isNew) : input.messages;
   const history = shown.map((m) => renderMessage(m, input.names, { isNew: isNew(m) }));
   const notes = input.notes.map((n) => `- ${n.createdAt}${n.isNew ? " · NEW" : ""}: ${n.body}`);
@@ -394,11 +397,21 @@ export function editedSince(m: Message, since: string | undefined): boolean {
  * People's messages that arrived while the turn runs, added to the result of its next Myrel tool
  * call. People see them as delivered from then on, and the next turn does not show them as NEW.
  */
-export function newsNote(messages: Message[], names: Record<string, string>): string {
+export function newsNote(messages: Message[], names: Record<string, string>, edited: Message[] = []): string {
   const many = messages.length > 1;
-  return [
-    `## ${many ? "New messages" : "A new message"} in this thread while you work`,
-    `${many ? "They arrived" : "It arrived"} after this turn started; people see ${many ? "them" : "it"} as delivered to you now. Take ${many ? "them" : "it"} into account from here on: ${many ? "they" : "it"} may change, add to or stop the work. When ${many ? "they ask" : "it asks"} something, answer with reply.`,
-    ...messages.map((m) => renderMessage(m, names, { isNew: true })),
-  ].join("\n\n");
+  const news = messages.length
+    ? [
+        `## ${many ? "New messages" : "A new message"} in this thread while you work`,
+        `${many ? "They arrived" : "It arrived"} after this turn started; people see ${many ? "them" : "it"} as delivered to you now. Take ${many ? "them" : "it"} into account from here on: ${many ? "they" : "it"} may change, add to or stop the work. When ${many ? "they ask" : "it asks"} something, answer with reply.`,
+        ...messages.map((m) => renderMessage(m, names, { isNew: true })),
+      ]
+    : [];
+  const changed = edited.length
+    ? [
+        `## ${edited.length > 1 ? "Messages" : "A message"} edited in this thread while you work`,
+        `A person changed ${edited.length > 1 ? "these earlier messages" : "this earlier message"} after this turn started; the new text replaces the old. Take it into account from here on.`,
+        ...edited.map((m) => renderMessage(m, names, { isNew: true })),
+      ]
+    : [];
+  return [...news, ...changed].join("\n\n");
 }
