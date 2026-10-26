@@ -677,7 +677,7 @@ export class ThreadAgent extends Agent<Env> {
         await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
         // Its CLI session and uncommitted work are on this computer now: later turns stay here.
-        if (input.threadRunner !== workspace.runnerId) await project.updateThread(threadId, { runner: { id: workspace.runnerId, by: "auto" } });
+        if (input.threadRunner !== workspace.runnerId) await project.updateThread(threadId, { runner: { id: workspace.runnerId, by: "auto", reason: null } });
         if (github && this.runningTask()?.id === taskId) await this.schedule(GITHUB_RENEW_SEC, "renewGithub", { taskId, requester: input.requester });
       } else {
         // The sandbox costs the service and holds the project's tokens: not for an address nobody has shown is theirs.

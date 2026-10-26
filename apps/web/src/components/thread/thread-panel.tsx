@@ -1,10 +1,11 @@
 import { threadMessages, threadPullRequests, threadTasks, threadUsage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
+import { CLOUD_RUNNER, decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, LoaderCircle, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../../lib/api";
+import { api, projectSettingsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { ArtifactCards, ThreadOutputs } from "../artifacts";
@@ -22,7 +23,7 @@ import {
   Thinking,
   useHistoryWindow,
 } from "../chat";
-import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, ThreadRunnerPicker, useOwnWorkspaces, usePickableClis } from "../chat/cli-picker";
+import { ThreadCliNote, ThreadCliPicker, ThreadModelPicker, ThreadRunnerNote, ThreadRunnerPicker, useOwnWorkspaces, usePickableClis } from "../chat/cli-picker";
 import { ThreadUsageLabel } from "../chat/message-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
@@ -339,6 +340,8 @@ function Conversation({
   const thread = state.threads[threadId]!;
   const pickable = usePickableClis(project, thread.runner?.id);
   const ownWorkspaces = useOwnWorkspaces(project);
+  // A project that always works in the cloud has nothing to place.
+  const placeable = useQuery(projectSettingsQuery(project.id)).data?.taskTarget !== "cloud";
   const root = state.messages.find((m) => m.id === thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
   const history = useHistoryWindow(messages);
@@ -394,6 +397,7 @@ function Conversation({
               onEdit={(body) => emit({ type: "message.edit", messageId: root.id, body })}
             />
           )}
+          {!history.hidden && <ThreadRunnerNote thread={thread} />}
           {!history.hidden && <ThreadCliNote thread={thread} />}
           <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
           {history.visible.map((m) => {
@@ -453,7 +457,8 @@ function Conversation({
           tools={
             pickable && (
               <>
-                {!pickable.cloud && ownWorkspaces.length > 1 && (
+                {/* The cloud or a computer, for someone with the project on one of theirs (else their turns work in the cloud anyway). */}
+                {placeable && (ownWorkspaces.length > 0 || thread.runner?.id === CLOUD_RUNNER) && (
                   <ThreadRunnerPicker
                     workspaces={ownWorkspaces}
                     thread={thread}

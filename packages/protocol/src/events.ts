@@ -4,7 +4,7 @@ import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
 import { CliId, RunnerId } from "./runner";
-import { MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
+import { CLOUD_RUNNER, MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
@@ -46,13 +46,13 @@ export const ClientEvent = z.discriminatedUnion("type", [
     cli: CliId.nullable(),
   }),
   /**
-   * The owner of one of the project's computers sets a thread to work there from its next turn;
-   * null: the project's default computer again.
+   * The owner of one of the project's computers sets a thread to work there from its next turn, or
+   * any member sets it to the cloud (CLOUD_RUNNER); null: the project's default computer again.
    */
   z.object({
     type: z.literal("thread.runner"),
     threadId: ThreadId,
-    runnerId: RunnerId.nullable(),
+    runnerId: z.union([RunnerId, z.literal(CLOUD_RUNNER)]).nullable(),
   }),
   /**
    * Someone who can pick the thread's CLI picks its model and effort for that CLI; null for both:

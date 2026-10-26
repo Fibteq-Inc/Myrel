@@ -1,8 +1,8 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Check, ChevronDown, Laptop, Sparkles, SquareTerminal } from "lucide-react-native";
+import { Brain, Check, ChevronDown, Cloud, Laptop, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -41,7 +41,7 @@ export function useOwnWorkspaces(projectId: string): ProjectWorkspace[] {
   return workspaces.filter((w) => runners?.some((r) => r.id === w.runnerId));
 }
 
-/** `runnerId`: the computer the thread works on, when it was set to or started on one. */
+/** `runnerId`: the computer the thread works on, when it was set to or started on one, or CLOUD_RUNNER. */
 export function usePickableClis(projectId: string, runnerId?: string | null): Pickable | null {
   const { api, server } = useSession();
   const { data: default_, isPending } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
@@ -52,6 +52,7 @@ export function usePickableClis(projectId: string, runnerId?: string | null): Pi
   });
   const own = useOwnWorkspaces(projectId);
   if (isPending || !settings) return null;
+  if (runnerId === CLOUD_RUNNER) return { clis: CLOUD_CLIS, folderCli: settings.cloudCli, defaults: {}, cloud: true };
   // The thread's computer, else the person's own (the default first), as the server picks it.
   const workspace = own.find((w) => w.runnerId === runnerId) ?? own[0] ?? default_;
   // Only your own computers are listed, so finding it means it is yours.
@@ -110,7 +111,14 @@ export function ThreadCliPicker({ pickable, thread, onChange }: { pickable: Pick
   );
 }
 
-/** Thread, with the project on several of the person's computers: the one it works on from its next turn. */
+/** Whether a thread can be placed at all: a project that always works in the cloud has nothing to place. */
+export function usePlaceable(projectId: string): boolean {
+  const { api, server } = useSession();
+  const { data: settings } = useQuery({ queryKey: ["project-settings", server, projectId], queryFn: () => api.getProjectSettings(projectId) });
+  return settings?.taskTarget !== "cloud";
+}
+
+/** Thread: where it works from its next turn, the cloud or one of the person's computers in the project. */
 export function ThreadRunnerPicker({
   workspaces,
   thread,
@@ -122,26 +130,39 @@ export function ThreadRunnerPicker({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const picked = thread.runner?.by === "person" ? thread.runner.id : null;
-  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0]!;
+  const cloud = thread.runner?.id === CLOUD_RUNNER;
+  // The coordinator's cloud counts as picked too: the default sends the thread back to a computer.
+  const picked = thread.runner && thread.runner.by !== "auto" ? thread.runner.id : null;
+  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0];
   const pick = (runnerId: string | null) => {
     if (runnerId !== picked) onChange(runnerId);
     setOpen(false);
   };
   return (
     <>
-      <Chip label={current.runnerName} active={!!picked} several={false} computer title={t("runnerPicker.title")} onPress={() => setOpen(true)} />
+      <Chip
+        label={cloud || !current ? t("runnerPicker.cloud") : current.runnerName}
+        active={!!picked}
+        several={false}
+        computer={!cloud}
+        cloud={cloud}
+        title={t("runnerPicker.title")}
+        onPress={() => setOpen(true)}
+      />
       <Sheet open={open} onClose={() => setOpen(false)} title={t("runnerPicker.title")} hint={t("runnerPicker.hint")}>
         <Option
           kind="radio"
           checked={!picked}
           title={
-            thread.runner?.by === "auto"
+            thread.runner?.by === "auto" && current
               ? t("runnerPicker.started", { computer: current.runnerName })
-              : t("cliPicker.default", { cli: workspaces[0]!.runnerName })
+              : workspaces[0]
+                ? t("cliPicker.default", { cli: workspaces[0].runnerName })
+                : t("runnerPicker.auto")
           }
           onPress={() => pick(null)}
         />
+        <Option kind="radio" checked={cloud} title={t("runnerPicker.cloud")} onPress={() => pick(CLOUD_RUNNER)} />
         {workspaces.map((w) => (
           <Option
             key={w.runnerId}
@@ -256,6 +277,24 @@ export function ThreadCliNote({ thread }: { thread: Thread }) {
   );
 }
 
+/** The line at the top of a thread Myrel opened in the cloud, saying why. */
+export function ThreadRunnerNote({ thread }: { thread: Thread }) {
+  const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
+  const runner = thread.runner;
+  if (runner?.id !== CLOUD_RUNNER || runner.by !== "coordinator") return null;
+  return (
+    <View style={styles.note}>
+      <Cloud size={15} color={colors.accent} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.noteText}>{t("runnerPicker.coordinator")}</Text>
+        {runner.reason && <Text style={styles.noteReason}>{runner.reason}</Text>}
+      </View>
+    </View>
+  );
+}
+
 /** Under a person's ask in the project chat: the CLIs they offered for it. */
 export function OfferedClis({ clis }: { clis: string[] }) {
   const t = useT();
@@ -277,6 +316,7 @@ function Chip({
   several,
   model,
   computer,
+  cloud,
   title,
   onPress,
 }: {
@@ -285,6 +325,7 @@ function Chip({
   several: boolean;
   model?: boolean;
   computer?: boolean;
+  cloud?: boolean;
   title: string;
   onPress: () => void;
 }) {
@@ -304,6 +345,8 @@ function Chip({
         <Brain size={14} color={active ? colors.accent : colors.muted} />
       ) : computer ? (
         <Laptop size={14} color={active ? colors.accent : colors.muted} />
+      ) : cloud ? (
+        <Cloud size={14} color={active ? colors.accent : colors.muted} />
       ) : (
         <SquareTerminal size={14} color={active ? colors.accent : colors.muted} />
       )}

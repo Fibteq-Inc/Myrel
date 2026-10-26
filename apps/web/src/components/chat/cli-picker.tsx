@@ -2,6 +2,7 @@ import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import {
   CLI_NAMES,
+  CLOUD_RUNNER,
   type CliId,
   type CliModelDefaults,
   CloudCli,
@@ -13,7 +14,7 @@ import {
   type Thread,
 } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Check, ChevronDown, Laptop, Sparkles, SquareTerminal } from "lucide-react";
+import { Brain, Check, ChevronDown, Cloud, Laptop, Sparkles, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 import { projectSettingsQuery, runnersQuery, workspaceQuery, workspacesQuery } from "../../lib/api";
 import { cn } from "../../lib/ui";
@@ -45,13 +46,14 @@ export function useOwnWorkspaces(project: Project): ProjectWorkspace[] {
   return workspaces.filter((w) => runners?.some((r) => r.id === w.runnerId));
 }
 
-/** `runnerId`: the computer the thread works on, when it was set to or started on one. */
+/** `runnerId`: the computer the thread works on, when it was set to or started on one, or CLOUD_RUNNER. */
 export function usePickableClis(project: Project, runnerId?: string | null): PickableClis | null {
   const { data: default_, isPending } = useQuery(workspaceQuery(project.id));
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!default_ });
   const { data: settings } = useQuery(projectSettingsQuery(project.id));
   const own = useOwnWorkspaces(project);
   if (isPending || !settings) return null;
+  if (runnerId === CLOUD_RUNNER) return { clis: CLOUD_CLIS, folderCli: settings.cloudCli, defaults: {}, cloud: true };
   // The thread's computer, else the person's own (the default first), as the server picks it.
   const workspace = own.find((w) => w.runnerId === runnerId) ?? own[0] ?? default_;
   // Only your own computers are listed, so finding it means it is yours.
@@ -176,8 +178,8 @@ export function ThreadCliPicker({
 }
 
 /**
- * Composer control in a thread, when the person has the project on several of their computers: the
- * one it works on from its next turn. None picked: the computer it started on, else the default.
+ * Composer control in a thread: where it works from its next turn, the cloud or one of the person's
+ * computers in the project. None picked: the computer it started on, else the default.
  */
 export function ThreadRunnerPicker({
   workspaces,
@@ -189,16 +191,19 @@ export function ThreadRunnerPicker({
   onChange: (runnerId: string | null) => void;
 }) {
   const t = useT();
-  const picked = thread.runner?.by === "person" ? thread.runner.id : null;
-  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0]!;
+  const cloud = thread.runner?.id === CLOUD_RUNNER;
+  // The coordinator's cloud counts as picked too: the default sends the thread back to a computer.
+  const picked = thread.runner && thread.runner.by !== "auto" ? thread.runner.id : null;
+  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0];
+  const Icon = cloud ? Cloud : Laptop;
   return (
     <Menu
       label={t("runnerPicker.title")}
       side="top"
       trigger={
         <>
-          <Laptop size={14} className={cn("flex-none", picked && "text-accent")} aria-hidden="true" />
-          <span className={cn("truncate", picked && "text-fg")}>{current.runnerName}</span>
+          <Icon size={14} className={cn("flex-none", picked && "text-accent")} aria-hidden="true" />
+          <span className={cn("truncate", picked && "text-fg")}>{cloud ? t("runnerPicker.cloud") : (current?.runnerName ?? t("runnerPicker.cloud"))}</span>
           <ChevronDown size={12} className="flex-none text-subtle" aria-hidden="true" />
         </>
       }
@@ -216,12 +221,23 @@ export function ThreadRunnerPicker({
               close();
             }}
             title={
-              thread.runner && thread.runner.by === "auto"
+              thread.runner?.by === "auto" && current
                 ? t("runnerPicker.started", { computer: current.runnerName })
-                : t("cliPicker.default", { cli: workspaces[0]!.runnerName })
+                : workspaces[0]
+                  ? t("cliPicker.default", { cli: workspaces[0].runnerName })
+                  : t("runnerPicker.auto")
             }
           />
           <MenuSeparator />
+          <Option
+            role="menuitemradio"
+            checked={cloud}
+            onSelect={() => {
+              if (!cloud) onChange(CLOUD_RUNNER);
+              close();
+            }}
+            title={t("runnerPicker.cloud")}
+          />
           {workspaces.map((w) => (
             <Option
               key={w.runnerId}
@@ -358,6 +374,22 @@ export function ThreadCliNote({ thread }: { thread: Thread }) {
       <p className="min-w-0 text-body">
         {t("cliPicker.picked", { cli: cliName(cli.id), options: cli.options.map(cliName).join(", ") })}
         {cli.reason && <span className="block text-subtle">{cli.reason}</span>}
+      </p>
+    </div>
+  );
+}
+
+/** The line at the top of a thread Myrel opened in the cloud, saying why. */
+export function ThreadRunnerNote({ thread }: { thread: Thread }) {
+  const t = useT();
+  const runner = thread.runner;
+  if (runner?.id !== CLOUD_RUNNER || runner.by !== "coordinator") return null;
+  return (
+    <div className="flex gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[13px]">
+      <Cloud size={15} className="mt-0.5 flex-none text-accent" aria-hidden="true" />
+      <p className="min-w-0 text-body">
+        {t("runnerPicker.coordinator")}
+        {runner.reason && <span className="block text-subtle">{runner.reason}</span>}
       </p>
     </div>
   );
