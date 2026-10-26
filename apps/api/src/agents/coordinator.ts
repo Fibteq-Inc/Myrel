@@ -16,6 +16,7 @@ import { z } from "zod";
 import { type Tool, tool } from "../llm";
 import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeTools, renderKnowledge } from "./knowledge";
 import { authorLabel, renderMessage, renderThread } from "./render";
+import { GOAL_GUIDE, GOAL_MAX_IDLE, type Goal, renderGoal } from "./goal";
 import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
 
 /** Something the coordinator has not seen yet. */
@@ -32,7 +33,12 @@ export type InboxItem =
   /** Someone wrote in a thread (a person's decision, or the thread agent's reply) while other threads are open. */
   | { kind: "thread"; threadId: string; messageId: string }
   /** A thread was resolved (by its agent, a person, or its pull requests settling) while other threads are open. */
-  | { kind: "finished"; threadId: string };
+  | { kind: "finished"; threadId: string }
+  /**
+   * The standing goal wakes the coordinator: idle when no thread is open any more (the last one
+   * finished, or the fallback check found none), end when its time ran out.
+   */
+  | { kind: "goal"; reason: "idle" | "end" };
 
 /** Items the coordinator only looks at for links between threads; a turn with nothing else may only relay. */
 export function onlyObserving(inbox: InboxItem[]): boolean {
@@ -115,6 +121,8 @@ Several unrelated asks in one message: start a thread on that message for the fi
 
 ${ROUTINE_GUIDE} A routine that targets the project chat posts its prompt there as a ⏰ notice when it runs; treat that notice as a new ask and start a thread on it. Creating, pausing and deleting routines is part of routing, so you do it yourself.
 
+${GOAL_GUIDE}
+
 Requests from thread agents (permission, routing, handoff) arrive in your inbox. Answer each with message_thread: grant or refuse it, point the thread elsewhere, or, when only a person can decide (anything irreversible, spending, deleting, sending outside the project), tell the thread to ask the person in its thread. For a request to independently review the asking thread's work, apply the same separate-review rule: open a review thread on a post of your own (or use the thread already doing that review), then answer the asking thread with its link. Do not hand the review back to the implementation thread as its own task. You never approve irreversible steps on a person's behalf.
 
 A completed review's handoff is work to route, not just a request to acknowledge. Pass its actionable findings, reviewed PR/commit, report and evidence links, and explicit fix request to the implementation thread, then confirm the delivery to the review thread. Use relay_to_thread for an open implementation thread. If it is resolved and the review requests fixes within that thread's existing scope, use message_thread to reopen it for those fixes; a no-findings result alone does not reopen it. Keep the independent re-check with the review thread. Do not ask the person to repeat or forward an already authorized fix request, and do not claim delivery until the tool succeeds. If information is missing or delivery fails, tell the review thread what remains to be handed off; do not silently treat it as finished.
@@ -145,6 +153,10 @@ export function coordinatorPrompt(input: {
   chat: Message[];
   threads: Thread[];
   routines: Routine[];
+  /** The standing goal, when a person set one. */
+  goal?: Goal | null;
+  /** How this turn's goal wake is to be handled: idle (move the goal forward) or end (wrap it up). */
+  goalWake?: "idle" | "end" | null;
   inbox: InboxItem[];
   /** New messages inside threads, for the thread items in the inbox. */
   threadUpdates?: { thread: Thread; message: Message }[];
@@ -217,6 +229,7 @@ export function coordinatorPrompt(input: {
     `Project: ${input.projectName}`,
     renderKnowledge(input.knowledge),
     `## Routines\n${input.routines.map(renderRoutine).join("\n") || "(none)"}`,
+    input.goal ? `## Standing goal (open; you keep working toward it)\n${renderGoal(input.goal, input.names)}` : "",
     `## Threads (open ones with their current plan)\n${input.threads.map(renderThreadWithPlan).join("\n") || "(none yet)"}`,
     choosing ? `## The computer's CLIs\n${(input.computerClis ?? []).map(renderCli).join("\n") || "(not reported)"}` : "",
     `## Project chat, oldest first (messages marked NEW arrived since your last turn)\n${chat.join("\n\n") || "(empty)"}`,
@@ -234,6 +247,11 @@ export function coordinatorPrompt(input: {
       : "",
     relays.length ? `## Notes already relayed between threads, newest last\n${relays.join("\n")}` : "",
     `Current time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
+    input.goal && input.goalWake === "end"
+      ? "The standing goal's time or its limit of automatic turns ran out. Start no new work for it: call finish_goal with a short summary of what got done (with thread links) and what is left."
+      : input.goal && input.goalWake === "idle"
+        ? `No thread is open and the standing goal is still open, so nobody else will move it forward. Look at what the finished threads delivered and what the goal still needs, then start the next piece of work now (post_message one line naming it, then start_thread on that post) or call finish_goal with a short summary when it is reached or nothing useful is left. After ${GOAL_MAX_IDLE} such turns in a row that start nothing, the goal ends on its own.`
+        : "",
     onlyThreadUpdates
       ? `Nothing new in the project chat. Relay only what changes another open thread's work${finished.length ? ", deliver completed review findings and report/evidence links to the implementation thread even if it never said it was waiting, and tell threads waiting on a finished one that it is done" : ""}; otherwise call no tools.`
       : newChat.length

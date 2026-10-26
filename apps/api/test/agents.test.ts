@@ -787,6 +787,105 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("keeps working toward a standing goal after the last thread finishes, until it finishes the goal", async () => {
+    const prompts: string[] = [];
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      // The next piece of work hangs under the coordinator's own post, started in the same turn.
+      const posted = /Posted (cmsg_[0-9A-Z]{26})/.exec(req.last)?.[1];
+      if (req.turns > 1) {
+        return posted
+          ? { text: "", toolCalls: [call("start_thread", { message_id: posted, title: "Part two", instructions: "Part two." })] }
+          : { text: "", toolCalls: [] };
+      }
+      prompts.push(req.prompt);
+      const id = newMessageId(req.prompt);
+      if (id) {
+        return {
+          text: "",
+          toolCalls: [
+            call("set_goal", { message_id: id, goal: "Finish the docs, part one then part two.", line: "Sabaha kadar devam ediyorum." }),
+            call("start_thread", { message_id: id, title: "Part one", instructions: "Part one.", project_ack: "Başlıyorum." }),
+          ],
+        };
+      }
+      if (req.prompt.includes("No thread is open and the standing goal is still open")) {
+        return req.prompt.includes('"Part two"')
+          ? { text: "", toolCalls: [call("finish_goal", { summary: "İki bölüm de bitti." })] }
+          : { text: "", toolCalls: [call("post_message", { text: "Sırada ikinci bölüm var." })] };
+      }
+      return { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup(async (turn) => {
+      await turn.call("reply", { text: "Done." });
+    });
+    const byTitle = async (title: string) => ((await agent.listThreads()) as Thread[]).find((t) => t.title === title) ?? null;
+    const finish = async (thread: Thread) => {
+      await until(async () => ((await agent.getThread(thread.id))?.status === "review_ready" ? true : null), "turn over");
+      ws.send(JSON.stringify({ type: "thread.resolve", threadId: thread.id, resolved: true }));
+      await until(async () => (await agent.getThread(thread.id))?.resolved || null, "resolved");
+    };
+
+    ws.send(JSON.stringify({ type: "message.send", body: "Dokümanları sabaha kadar devam et, işi bitir" }));
+    const one = await until(() => byTitle("Part one"), "first thread");
+    const goal = await agent.getGoal();
+    expect(goal).toMatchObject({ text: "Finish the docs, part one then part two.", wakes: 0, threads: 1 });
+    // Without a time named, it runs until the next 08:00, never more than a day.
+    expect(new Date(goal!.until).getUTCHours()).toBe(8);
+
+    // The only thread finishing wakes the coordinator with its full tools, which no plain finished look gets.
+    await finish(one);
+    await agent.coordinatorTurn();
+    expect(prompts.at(-1)).toContain("## Standing goal");
+    expect(prompts.at(-1)).toContain("No thread is open and the standing goal is still open");
+    expect(prompts.at(-1)).toContain(`- Thread [${one.id}] "Part one" finished at`);
+    const chat = async () => (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+    expect((await chat()).map((m: Message) => m.body)).toContain("Sırada ikinci bölüm var.");
+    const two = await until(() => byTitle("Part two"), "second thread");
+    expect(await agent.getGoal()).toMatchObject({ wakes: 1, threads: 2, idle: 0 });
+
+    await finish(two);
+    await agent.coordinatorTurn();
+    expect(await agent.getGoal()).toBeNull();
+    expect((await chat()).map((m: Message) => m.body)).toContain("İki bölüm de bitti.");
+    ws.close();
+  }, 30_000);
+
+  it("ends a standing goal after wakes that start no work", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id
+        ? {
+            text: "",
+            toolCalls: [
+              call("set_goal", { message_id: id, goal: "Keep going.", line: "Devam ediyorum." }),
+              call("start_thread", { message_id: id, title: "Solo", instructions: "Solo", project_ack: "On it." }),
+            ],
+          }
+        : { text: "", toolCalls: [] };
+    });
+    const { ws, agent } = await setup(async (turn) => {
+      await turn.call("reply", { text: "Done." });
+    });
+    ws.send(JSON.stringify({ type: "message.send", body: "Keep going until morning" }));
+    const solo = await until(async () => (await agent.listThreads())[0] ?? null, "thread");
+    await until(async () => ((await agent.getThread(solo.id))?.status === "review_ready" ? true : null), "turn over");
+    ws.send(JSON.stringify({ type: "thread.resolve", threadId: solo.id, resolved: true }));
+    await until(async () => (await agent.getThread(solo.id))?.resolved || null, "resolved");
+
+    await agent.coordinatorTurn();
+    expect(await agent.getGoal()).toMatchObject({ wakes: 1, idle: 1 });
+    // The fallback look finds no open thread and wakes it again; a second idle wake ends the goal.
+    const { createdAt } = (await agent.getGoal())!;
+    await agent.goalCheck({ createdAt, repeat: true });
+    await agent.coordinatorTurn();
+    expect(await agent.getGoal()).toBeNull();
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+    expect(chat.at(-1)!.body).toContain("The standing goal ended");
+    ws.close();
+  }, 20_000);
+
   it("keeps a person's message for the retry when a coordinator turn dies before answering", async () => {
     const prompts: string[] = [];
     setFakeModel((req) => {
