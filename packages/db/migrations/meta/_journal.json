@@ -232,6 +232,13 @@
       "when": 1793008253312,
       "tag": "0032_pull_opened_by_thread",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1793014727132,
+      "tag": "0033_pull_size",
+      "breakpoints": true
     }
   ]
 }

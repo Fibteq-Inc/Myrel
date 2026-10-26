@@ -360,6 +360,10 @@ export const pullRequests = sqliteTable(
     review: text("review", { enum: ["approved", "changes_requested"] }),
     /** The branch no longer merges cleanly into its base. */
     conflict: integer("conflict", { mode: "boolean" }).notNull().default(false),
+    /** Lines added and removed and files changed, as GitHub last reported them; null until it did. */
+    additions: integer("additions"),
+    deletions: integer("deletions"),
+    changedFiles: integer("changed_files"),
     ...timestamps,
   },
   (t) => [primaryKey({ columns: [t.repoId, t.number] }), index("pull_requests_project_id_idx").on(t.projectId, t.threadId)],

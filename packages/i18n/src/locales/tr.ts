@@ -904,6 +904,8 @@ export const tr: Catalog = {
   "pr.more": { other: "{count} pull request daha" },
   "pr.mergedCount": { other: "{count} birleştirildi" },
   "pr.closedCount": { other: "{count} kapatıldı" },
+  "pr.files": { other: "{count} dosya" },
+  "pr.size": "{additions} satır eklendi, {deletions} silindi",
   "pr.showLess": "Daha az göster",
   "tasks.terminalOutput": "Terminal çıktısı",
   "tasks.totalTime": "Toplam süre",

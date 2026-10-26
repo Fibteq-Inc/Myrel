@@ -909,6 +909,8 @@ export const en = {
   "pr.more": { one: "1 more pull request", other: "{count} more pull requests" },
   "pr.mergedCount": { other: "{count} merged" },
   "pr.closedCount": { other: "{count} closed" },
+  "pr.files": { one: "1 file", other: "{count} files" },
+  "pr.size": "{additions} lines added, {deletions} removed",
   "pr.showLess": "Show fewer",
   "tasks.terminalOutput": "Terminal output",
   "tasks.totalTime": "Total time",

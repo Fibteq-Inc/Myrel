@@ -13,7 +13,7 @@ import {
 } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { makeStyles, radius, useColors } from "../../theme";
+import { makeStyles, mono, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
 import { Spinner } from "../ui";
 
@@ -73,6 +73,17 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
             {pr.repo}#{pr.number}
           </Text>
           <Text style={[styles.metaText, { color: state.color }]}>{state.label}</Text>
+          {!!pr.branch && (
+            <Text style={[styles.metaText, styles.branch]} numberOfLines={1}>
+              {pr.branch}
+            </Text>
+          )}
+          {pr.additions !== null && pr.deletions !== null && (
+            <Text style={styles.metaText} accessibilityLabel={t("pr.size", { additions: pr.additions, deletions: pr.deletions })}>
+              <Text style={{ color: colors.ok }}>+{pr.additions}</Text> <Text style={{ color: colors.bad }}>−{pr.deletions}</Text>
+              {pr.changedFiles !== null && ` · ${t("pr.files", { count: pr.changedFiles })}`}
+            </Text>
+          )}
           {open && pr.checks === "pending" && (
             <Badge icon={<Spinner size={12} color={colors.warn} />} color={colors.warn} label={t("pr.checksPending")} />
           )}
@@ -139,6 +150,7 @@ const useStyles = makeStyles((colors) =>
     title: { color: colors.fg, fontSize: 14, fontWeight: "600" },
     meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 2 },
     metaText: { color: colors.subtle, fontSize: 12 },
+    branch: { maxWidth: 200, fontFamily: mono },
     badge: { flexDirection: "row", alignItems: "center", gap: 4 },
   }),
 );

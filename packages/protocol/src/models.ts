@@ -393,6 +393,12 @@ export const PullRequest = z.object({
   review: z.enum(["approved", "changes_requested"]).nullable(),
   /** The branch conflicts with its base and cannot be merged until that is resolved. */
   conflict: z.boolean().default(false),
+  /** The pull request's branch. */
+  branch: z.string().default(""),
+  /** Lines added and removed and files changed; null until GitHub reported them. */
+  additions: z.number().int().nullable().default(null),
+  deletions: z.number().int().nullable().default(null),
+  changedFiles: z.number().int().nullable().default(null),
   updatedAt: Timestamp,
 });
 export type PullRequest = z.infer<typeof PullRequest>;

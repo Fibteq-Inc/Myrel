@@ -355,6 +355,19 @@ describe("pull requests", () => {
     // The fix is pushed: CI starts again, which wakes nobody.
     await hook("pull_request", { action: "synchronize", pull_request: pull({ head: { sha: "sha-2", ref: "myrel/fix-login" } }) });
     expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.checks).toBe("pending");
+    // The size of the change comes with the event; one that leaves it out keeps the last.
+    await hook("pull_request", {
+      action: "synchronize",
+      pull_request: pull({ head: { sha: "sha-2", ref: "myrel/fix-login" }, additions: 12, deletions: 3, changed_files: 2 }),
+    });
+    expect((await listPullRequests(env.DB, project.id, thread.id))[0]).toMatchObject({
+      branch: "myrel/fix-login",
+      additions: 12,
+      deletions: 3,
+      changedFiles: 2,
+    });
+    await hook("pull_request", { action: "edited", pull_request: pull({ head: { sha: "sha-2", ref: "myrel/fix-login" } }) });
+    expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.additions).toBe(12);
     fakeGithub.checks["sha-2"] = { check_runs: [{ name: "test", status: "completed", conclusion: "success" }], statuses: [] };
     await hook("check_run", { action: "completed", check_run: { head_sha: "sha-2" } });
     expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.checks).toBe("success");

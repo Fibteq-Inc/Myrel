@@ -38,6 +38,10 @@ type ApiPull = {
   base: { ref: string };
   /** Whether the branch merges cleanly into its base; null while GitHub is still working it out. */
   mergeable?: boolean | null;
+  /** The size of the change; only on a single pull request and its webhook events, not in lists. */
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
 };
 type ApiCheckRun = { name: string; status: string; conclusion: string | null };
 
@@ -61,6 +65,10 @@ export function toPullRequest(row: Row): PullRequest {
     checks: row.checks,
     review: row.review,
     conflict: row.conflict,
+    branch: row.headRef,
+    additions: row.additions,
+    deletions: row.deletions,
+    changedFiles: row.changedFiles,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -131,6 +139,7 @@ export async function trackPullRequest(
     headRef: pull.head.ref,
     checks: checks.state,
     conflict: pull.mergeable === false,
+    ...pullSize(pull),
     // Following a pull request never takes it away from the thread that opened it.
     ...(own && { openedByThread: threadId }),
   };
@@ -350,6 +359,15 @@ export async function checkConflict(env: PullsEnv, repoId: number, number: numbe
   if (conflict) await wake(env, row, `has merge conflicts with its base branch ${pull.base.ref} and cannot be merged until they are resolved.`);
 }
 
+/** The size GitHub reported, leaving out what it did not send. */
+function pullSize(pull: Pick<ApiPull, "additions" | "deletions" | "changed_files">): Partial<Pick<Row, "additions" | "deletions" | "changedFiles">> {
+  return {
+    ...(pull.additions !== undefined && { additions: pull.additions }),
+    ...(pull.deletions !== undefined && { deletions: pull.deletions }),
+    ...(pull.changed_files !== undefined && { changedFiles: pull.changed_files }),
+  };
+}
+
 function pullState(pull: Pick<ApiPull, "state" | "merged" | "merged_at">): Row["state"] {
   return pull.merged || pull.merged_at ? "merged" : pull.state;
 }
@@ -397,6 +415,7 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
       draft: pull.draft ?? false,
       headSha: pull.head.sha,
       headRef: pull.head.ref,
+      ...pullSize(pull),
       // New commits start a new CI run; an earlier review may no longer apply either.
       ...(moved ? { checks: row.checks === null ? null : ("pending" as const) } : {}),
     });

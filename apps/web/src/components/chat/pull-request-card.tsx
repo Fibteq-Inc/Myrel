@@ -28,8 +28,17 @@ export function mentionedPullRequests(body: string, pullRequests: PullRequest[])
  * merged or closed, CI and review. The webhook keeps them current. In the
  * conversation a run of several folds the finished ones behind one line, so
  * they do not stack up under the last reply; `fold={false}` lists them all.
+ * `wide`: fill the width (the PR tab), with the whole title and the branch.
  */
-export function PullRequestCards({ pullRequests, fold = true }: { pullRequests: PullRequest[]; fold?: boolean }) {
+export function PullRequestCards({
+  pullRequests,
+  fold = true,
+  wide = false,
+}: {
+  pullRequests: PullRequest[];
+  fold?: boolean;
+  wide?: boolean;
+}) {
   const t = useT();
   const [open, setOpen] = useState(false);
   if (pullRequests.length === 0) return null;
@@ -39,7 +48,7 @@ export function PullRequestCards({ pullRequests, fold = true }: { pullRequests: 
   return (
     <div className="flex flex-col gap-2">
       {(open ? pullRequests : shown).map((pr) => (
-        <PullRequestCard key={pr.url} pr={pr} />
+        <PullRequestCard key={pr.url} pr={pr} wide={wide} />
       ))}
       {folded.length > 0 && (
         <button
@@ -64,7 +73,7 @@ export function PullRequestCards({ pullRequests, fold = true }: { pullRequests: 
   );
 }
 
-function PullRequestCard({ pr }: { pr: PullRequest }) {
+function PullRequestCard({ pr, wide }: { pr: PullRequest; wide: boolean }) {
   const t = useT();
   const state =
     pr.state === "merged"
@@ -80,18 +89,23 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
       href={pr.url}
       target="_blank"
       rel="noreferrer"
-      className="group flex max-w-md items-center gap-3 rounded-xl border border-card bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover"
+      className={cn(
+        "group flex items-center gap-3 rounded-xl border border-card bg-raised px-3 py-2.5 text-fg hover:border-edge hover:bg-hover",
+        !wide && "max-w-md",
+      )}
     >
       <span className={cn("flex size-9 flex-none items-center justify-center rounded-lg border border-edge bg-panel", state.className)}>
         <StateIcon size={17} aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-semibold">{pr.title}</span>
+        <span className={cn("block text-[13.5px] font-semibold", wide ? "line-clamp-2" : "truncate")}>{pr.title}</span>
         <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-subtle">
           <span className="truncate">
             {pr.repo}#{pr.number}
           </span>
           <span className={state.className}>{state.label}</span>
+          {wide && pr.branch && <span className="max-w-[16rem] truncate font-mono text-[11px]">{pr.branch}</span>}
+          <Size pr={pr} />
           {pr.state === "open" && <Checks checks={pr.checks} />}
           {pr.state === "open" && pr.conflict && (
             <span className="flex items-center gap-1 text-bad">
@@ -113,6 +127,19 @@ function PullRequestCard({ pr }: { pr: PullRequest }) {
       </span>
       <ExternalLink size={14} className="flex-none text-subtle group-hover:text-muted" aria-hidden="true" />
     </a>
+  );
+}
+
+/** Lines added and removed, and how many files, once GitHub reported them. */
+function Size({ pr }: { pr: PullRequest }) {
+  const t = useT();
+  if (pr.additions === null || pr.deletions === null) return null;
+  return (
+    <span className="flex items-center gap-1.5 tabular-nums" title={t("pr.size", { additions: pr.additions, deletions: pr.deletions })}>
+      <span className="text-ok">+{pr.additions}</span>
+      <span className="text-bad">−{pr.deletions}</span>
+      {pr.changedFiles !== null && <span>· {t("pr.files", { count: pr.changedFiles })}</span>}
+    </span>
   );
 }
 
