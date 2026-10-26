@@ -20,6 +20,10 @@ export const fakeGithub = {
   pulls: {} as Record<string, unknown>,
   /** A pull request's changed files by "owner/name#number", in GitHub's REST shape. */
   pullFiles: {} as Record<string, unknown[]>,
+  /** What each GitHub login may do in a repository, by "owner/name#login"; read when not listed. */
+  permissions: {} as Record<string, string>,
+  /** Repository settings GitHub reports, by "owner/name". */
+  repoSettings: {} as Record<string, Record<string, unknown>>,
   /** Branches by "owner/name#branch"; one not listed exists unprotected unless `deleted`. */
   branches: {} as Record<string, { protected?: boolean; deleted?: boolean }>,
   /** CI on a commit, by sha. */
@@ -152,6 +156,24 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       entries.set(name!, { type: rest.length ? "dir" : "file", name: name!, path: prefix + name, size: rest.length ? 0 : text.length });
     }
     return entries.size ? Response.json([...entries.values()]) : new Response("{}", { status: 404 });
+  }
+  const userById = url.pathname.match(/^\/user\/(\d+)$/);
+  if (userById) return Number(userById[1]) === 9001 ? Response.json({ id: 9001, login: "octo" }) : new Response("{}", { status: 404 });
+  const permission = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/collaborators\/([^/]+)\/permission$/);
+  if (permission) return Response.json({ permission: fakeGithub.permissions[`${permission[1]}#${decodeURIComponent(permission[2]!)}`] ?? "read" });
+  const merge = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/merge$/);
+  if (merge && method === "PUT") {
+    const key = `${merge[1]}#${merge[2]}`;
+    const p = fakeGithub.pulls[key] as { head: { sha: string } } | undefined;
+    if (!p) return new Response("{}", { status: 404 });
+    if (body.sha && body.sha !== p.head.sha) return new Response(JSON.stringify({ message: "Head branch was modified" }), { status: 409 });
+    fakeGithub.pulls[key] = { ...p, state: "closed", merged: true };
+    return Response.json({ merged: true, sha: "merge-sha" });
+  }
+  const repoMatch = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)$/);
+  if (repoMatch && method === "GET") {
+    const repo = fakeGithub.repos.find((r) => r.full_name === repoMatch[1]);
+    return repo ? Response.json({ ...repo, ...fakeGithub.repoSettings[repo.full_name] }) : new Response("{}", { status: 404 });
   }
   return new Response(JSON.stringify({ message: "not faked" }), { status: 404 });
 }) as typeof fetch;

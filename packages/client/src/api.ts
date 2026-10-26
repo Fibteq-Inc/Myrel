@@ -36,7 +36,10 @@ import type {
   ProjectWorkspace,
   ProviderId,
   ProviderInfo,
+  MergePullInput,
+  MergePullResult,
   PullFiles,
+  PullMergeState,
   PullRequest,
   PutMemoryInput,
   PairRunnerResult,
@@ -624,6 +627,18 @@ export class ApiClient {
   pullRequestFiles(projectId: string, threadId: string, repo: string, number: number) {
     const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests/${number}/files`;
     return this.request<PullFiles>(`${base}?repo=${encodeURIComponent(repo)}`);
+  }
+
+  /** Whether the signed-in person may merge a thread's pull request from Myrel, and why not right now. */
+  pullRequestMergeState(projectId: string, threadId: string, repo: string, number: number) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests/${number}/merge`;
+    return this.request<PullMergeState>(`${base}?repo=${encodeURIComponent(repo)}`);
+  }
+
+  /** Merges a thread's pull request at the commit the person saw. */
+  mergePullRequest(projectId: string, threadId: string, repo: string, number: number, input: MergePullInput) {
+    const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests/${number}/merge`;
+    return this.request<MergePullResult>(`${base}?repo=${encodeURIComponent(repo)}`, { method: "POST", body: input });
   }
 
   /** What the thread's cloud tasks saved: history and the folder or file at `path`. Null when nothing was saved. */

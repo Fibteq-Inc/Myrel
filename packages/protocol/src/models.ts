@@ -420,6 +420,41 @@ export type PullFile = z.infer<typeof PullFile>;
 export const PullFiles = z.object({ files: z.array(PullFile), truncated: z.boolean() });
 export type PullFiles = z.infer<typeof PullFiles>;
 
+export const MergeMethod = z.enum(["merge", "squash", "rebase"]);
+export type MergeMethod = z.infer<typeof MergeMethod>;
+
+/**
+ * Whether the signed-in person may merge a thread's pull request from Myrel. `permitted`: their
+ * own GitHub account can write to the repository (the button shows only then). `blocked`: why it
+ * cannot be merged right now, or null when it can. `sha`: the head commit the dialog shows; the
+ * merge is refused if the branch moved past it.
+ */
+export const PullMergeState = z.object({
+  permitted: z.boolean(),
+  blocked: z
+    .enum(["closed", "draft", "conflict", "checks_failed", "checks_pending", "changes_requested", "protected", "checking"])
+    .nullable(),
+  methods: z.array(MergeMethod),
+  sha: z.string(),
+});
+export type PullMergeState = z.infer<typeof PullMergeState>;
+
+export const MergePullInput = z.object({
+  method: MergeMethod,
+  /** The head commit the person saw. */
+  sha: z.string().min(1),
+  deleteBranch: z.boolean().default(false),
+});
+export type MergePullInput = z.infer<typeof MergePullInput>;
+
+/** What merging did: the branch is deleted only when asked and allowed (see BranchBlock kinds). */
+export const MergePullResult = z.object({
+  merged: z.literal(true),
+  branchDeleted: z.boolean(),
+  branchKept: z.enum(["fork", "default", "protected", "gone", "in_use", "reopened", "failed"]).nullable(),
+});
+export type MergePullResult = z.infer<typeof MergePullResult>;
+
 export const AddProjectRepoInput = z.object({
   installationId: z.number().int().positive(),
   repoId: z.number().int().positive(),
