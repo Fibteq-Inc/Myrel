@@ -851,6 +851,28 @@ describe("coordinator and thread agent", () => {
     ws.close();
   }, 30_000);
 
+  it("shows the standing goal to clients and lets a member stop it", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };
+      const id = newMessageId(req.prompt);
+      return id ? { text: "", toolCalls: [call("set_goal", { message_id: id, goal: "Keep going.", line: "Devam ediyorum." })] } : { text: "", toolCalls: [] };
+    });
+    const { ws, events, agent } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "Keep going until morning" }));
+    await until(() => events.some((e) => e.type === "goal.updated" && e.goal?.text === "Keep going.") || null, "goal shown");
+
+    ws.send(JSON.stringify({ type: "sync", afterSeq: 0 }));
+    const synced = await until(() => events.find((e) => e.type === "sync.result" && e.goal) ?? null, "sync with goal");
+    expect(synced).toMatchObject({ goal: { text: "Keep going.", threads: 0 } });
+
+    ws.send(JSON.stringify({ type: "goal.stop" }));
+    await until(() => events.some((e) => e.type === "goal.updated" && e.goal === null) || null, "goal stopped");
+    expect(await agent.getGoal()).toBeNull();
+    const chat = (await agent.getMessagesAfter(0)).messages.filter((m: Message) => m.threadId === null);
+    expect(chat.at(-1)!.body).toContain("stopped the standing goal");
+    ws.close();
+  });
+
   it("ends a standing goal after wakes that start no work", async () => {
     setFakeModel((req) => {
       if (req.turns > 1 || !isCoordinator(req)) return { text: "", toolCalls: [] };

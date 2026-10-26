@@ -9,6 +9,7 @@ import { cn } from "../../lib/ui";
 import { ArtifactCards } from "../artifacts";
 import { AskCliPicker, OfferedClis, usePickableClis } from "./cli-picker";
 import { Composer, type ComposerHandle } from "./composer";
+import { GoalBanner } from "./goal-banner";
 import { EarlierMessages, useHistoryWindow } from "./history";
 import { decisionAnswers, MessageView, Thinking } from "./message";
 import { ScrollToEnd } from "./scroll-to-end";
@@ -46,6 +47,11 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
       {asked && (
         <div className="flex justify-center px-4 pt-3 sm:px-6">
           <StarterList project={project} asked folded />
+        </div>
+      )}
+      {state.goal && (
+        <div className="mx-auto w-full max-w-[760px] px-4 pt-3 sm:px-6">
+          <GoalBanner goal={state.goal} onStop={() => emit({ type: "goal.stop" })} />
         </div>
       )}
       <ScrollToEnd

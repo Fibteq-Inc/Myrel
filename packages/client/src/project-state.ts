@@ -1,6 +1,7 @@
 import {
   type Artifact,
   type ConversationPage,
+  type Goal,
   type Message,
   type PullRequest,
   type Reaction,
@@ -33,6 +34,8 @@ export type ProjectState = {
   reactions: Record<string, Reaction[]>;
   artifacts: Record<string, Artifact>;
   routines: Record<string, Routine>;
+  /** The project's standing goal, while the coordinator keeps working toward it by itself. */
+  goal: Goal | null;
   /** Agents working right now: "" is the coordinator, otherwise a thread id. */
   active: Record<string, true>;
   /** What an active agent is doing, when it said (e.g. a task on the person's computer). */
@@ -54,6 +57,7 @@ export const emptyProjectState: ProjectState = {
   reactions: {},
   artifacts: {},
   routines: {},
+  goal: null,
   active: {},
   progress: {},
   tasks: {},
@@ -163,6 +167,8 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
       return { ...state, artifacts: { ...state.artifacts, [event.artifact.id]: event.artifact } };
     case "routine.updated":
       return { ...state, routines: { ...state.routines, [event.routine.id]: event.routine } };
+    case "goal.updated":
+      return { ...state, goal: event.goal };
     case "routine.deleted": {
       const { [event.routineId]: _, ...routines } = state.routines;
       return { ...state, routines };
@@ -206,6 +212,7 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
         threads,
         artifacts,
         routines,
+        goal: event.goal === undefined ? state.goal : event.goal,
         reactions: addReactions(state.reactions, event.reactions),
         active: {},
         progress: {},

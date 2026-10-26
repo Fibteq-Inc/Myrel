@@ -167,6 +167,13 @@ export const en = {
   "starter.step.github": "Connect GitHub",
   "starter.step.githubHint": "Agents open branches and pull requests",
 
+  // Standing goal
+  "goal.until": "The coordinator keeps going · ends {time}",
+  "goal.threads": "{count} of {max} threads used",
+  "goal.stop": "Stop",
+  "goal.stopTitle": "Stop the goal?",
+  "goal.stopConfirm": "The coordinator stops starting new work by itself. Threads that are already running carry on.",
+
   // Messages
   "message.copy": "Copy message",
   "message.edit": "Edit message",

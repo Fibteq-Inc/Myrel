@@ -101,6 +101,21 @@ describe("project state", () => {
     ]);
   });
 
+  it("keeps the standing goal from events, and from a sync only when the server sends one", () => {
+    const goal = { text: "Keep going.", until: now, createdBy: "u1", createdAt: now, wakes: 0, threads: 1, idle: 0 };
+    const sync = { type: "sync.result" as const, messages: [], hasMore: false, threads: [], reactions: [], artifacts: [], routines: [] };
+    let s = applyEvent(emptyProjectState, { type: "goal.updated", goal });
+    expect(s.goal).toEqual(goal);
+    // An older server says nothing about goals: what the client holds stays.
+    s = applyEvent(s, sync);
+    expect(s.goal).toEqual(goal);
+    s = applyEvent(s, { ...sync, goal: null });
+    expect(s.goal).toBeNull();
+    s = applyEvent(s, { ...sync, goal });
+    s = applyEvent(s, { type: "goal.updated", goal: null });
+    expect(s.goal).toBeNull();
+  });
+
   it("splits project chat from threads and tracks thread updates, reactions and activity", () => {
     const root = msg(1);
     const t = thread(root.id);
