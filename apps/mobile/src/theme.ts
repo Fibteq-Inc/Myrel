@@ -22,6 +22,9 @@ export const darkColors = {
   warnSoft: "#17150f",
   warnLine: "#3b3218",
   bad: "#ff7b72",
+  /** Added and removed lines in a diff. */
+  okSoft: "#0f1713",
+  badSoft: "#1f1212",
   // Surfaces and lines between the base steps above.
   sunken: "#0b0b0d",
   console: "#08080a",
@@ -65,6 +68,8 @@ export const lightColors: Colors = {
   warnSoft: "#fff8e8",
   warnLine: "#eed49b",
   bad: "#bf2e29",
+  okSoft: "#edf8f2",
+  badSoft: "#fff1f0",
   sunken: "#f6f6f8",
   console: "#f3f3f6",
   merged: "#7a3fd1",

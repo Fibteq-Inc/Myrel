@@ -1,3 +1,4 @@
+import { codeLanguage } from "@myrel/client";
 import { useI18n } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
@@ -14,6 +15,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { CodeView } from "../../../../components/code-view";
 import { MessageMarkdown } from "../../../../components/markdown";
 import { Empty } from "../../../../components/project/empty";
 import { Button, errorMessage, Spinner } from "../../../../components/ui";
@@ -42,10 +44,11 @@ function readBlob(blob: Blob, as: "text" | "dataURL") {
 
 /**
  * A preview of one project file, or with `local`, one in the project's folder on this person's
- * computer (an agent's message pointed to it; `thread` is where its worktree is): text, Markdown
- * drawn like agent messages (links and file paths open as they do there), and images
- * that pinch to zoom on iOS. The header button hands any file to the phone (Quick Look on iOS,
- * a viewer app on Android) to zoom, share or save it; files with no preview offer that in place.
+ * computer (an agent's message pointed to it; `thread` is where its worktree is): text (code
+ * with syntax colors and line numbers), Markdown drawn like agent messages (links and file paths
+ * open as they do there), and images that pinch to zoom on iOS. The header button hands any file
+ * to the phone (Quick Look on iOS, a viewer app on Android) to zoom, share or save it; files with
+ * no preview offer that in place.
  */
 export default function FileScreen() {
   const { t } = useI18n();
@@ -67,6 +70,7 @@ export default function FileScreen() {
   });
   const openLink = useOpenLink(projectId, thread);
   const name = displayName(path);
+  const language = codeLanguage(path);
   const [opening, setOpening] = useState(false);
 
   const open = async () => {
@@ -104,6 +108,8 @@ export default function FileScreen() {
         <ScrollView contentContainerStyle={{ padding: 16 }}>
           <MessageMarkdown body={preview.data.text ?? ""} onLink={openLink} />
         </ScrollView>
+      ) : preview.data.kind === "text" && language ? (
+        <CodeView text={preview.data.text ?? ""} language={language} />
       ) : preview.data.kind === "text" ? (
         <ScrollView contentContainerStyle={{ padding: 16 }}>
           <Text selectable style={styles.code}>

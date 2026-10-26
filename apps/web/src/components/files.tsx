@@ -1,5 +1,6 @@
 import { useT } from "@myrel/i18n/react";
-import { ApiError } from "@myrel/client";
+import { ApiError, codeLanguage } from "@myrel/client";
+import type { CodeLine, TokenKind } from "@myrel/client/highlight";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
@@ -28,7 +29,7 @@ function kindOf(path: string, contentType: string): Kind {
   if (contentType.startsWith("image/")) return "image";
   if (contentType === "application/pdf") return "pdf";
   if (/\.(md|markdown)$/i.test(path) || contentType.startsWith("text/markdown")) return "markdown";
-  if (contentType.startsWith("text/") || /json|xml|javascript|yaml/.test(contentType)) return "text";
+  if (contentType.startsWith("text/") || /json|xml|javascript|yaml|sql/.test(contentType) || codeLanguage(path)) return "text";
   return "other";
 }
 
@@ -191,14 +192,76 @@ export function FilePreview({
             <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
           </div>
         )}
-        {text !== null && kind === "text" && (
-          <pre className="whitespace-pre-wrap break-words p-5 font-mono text-[12.5px] text-body">{text}</pre>
-        )}
+        {text !== null && kind === "text" && <TextView text={text} language={codeLanguage(path)} />}
         {blob.data && kind === "other" && (
           <p className="p-5 text-[13px] text-subtle">{t("files.noPreview")}</p>
         )}
       </div>
     </div>
+  );
+}
+
+/** Past this many lines a code file is shown without line numbers, like other text. */
+const CODE_LINE_LIMIT = 5_000;
+
+const TOKEN_CLASS: Record<TokenKind, string> = {
+  keyword: "text-accent",
+  string: "text-ok",
+  number: "text-warn",
+  comment: "italic text-subtle",
+  name: "text-link",
+  type: "text-merged",
+  meta: "text-muted",
+  addition: "text-ok",
+  deletion: "text-bad",
+};
+
+/**
+ * A text file: code (a known grammar) with syntax colors and line numbers, other text as it is.
+ * The grammars load on first use so they stay out of the main bundle.
+ */
+function TextView({ text, language }: { text: string; language?: string }) {
+  const [lines, setLines] = useState<CodeLine[] | null>(null);
+  useEffect(() => {
+    setLines(null);
+    if (!language || text.split("\n", CODE_LINE_LIMIT + 1).length > CODE_LINE_LIMIT) return;
+    let live = true;
+    void import("@myrel/client/highlight").then(({ highlightLines }) => live && setLines(highlightLines(text, language)));
+    return () => {
+      live = false;
+    };
+  }, [text, language]);
+
+  if (!lines) return <pre className="whitespace-pre-wrap break-words p-5 font-mono text-[12.5px] text-body">{text}</pre>;
+  const digits = String(lines.length).length;
+  return (
+    <pre className="py-4 font-mono text-[12.5px] leading-[1.6] text-body">
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className={`flex ${line[0]?.kind === "addition" ? "bg-ok-soft" : line[0]?.kind === "deletion" ? "bg-bad-soft" : ""}`}
+        >
+          <span
+            aria-hidden="true"
+            className="flex-none select-none pl-4 pr-4 text-right text-subtle"
+            style={{ width: `${digits + 3}ch` }}
+          >
+            {i + 1}
+          </span>
+          <code className="min-h-[1.6em] min-w-0 flex-1 whitespace-pre-wrap break-words pr-5">
+            {line.map((token, j) =>
+                  token.kind ? (
+                    <span key={j} className={TOKEN_CLASS[token.kind]}>
+                      {token.text}
+                    </span>
+                  ) : (
+                    token.text
+              ),
+            )}
+          </code>
+        </div>
+      ))}
+    </pre>
   );
 }
 

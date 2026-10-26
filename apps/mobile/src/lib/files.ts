@@ -1,3 +1,5 @@
+import { codeLanguage } from "@myrel/client";
+
 export type FileKind = "image" | "markdown" | "text" | "other";
 
 /** Upload names start with a time stamp so they stay unique; people only need the original name. */
@@ -13,7 +15,8 @@ export function fileKind(type: string, path: string): FileKind {
   if (
     type.startsWith("text/") ||
     /json|xml|javascript|typescript|yaml|toml|csv|markdown/.test(type) ||
-    /\.(md|txt|json|ya?ml|toml|csv|tsx?|jsx?|py|go|rs|sh|html?|css|sql)$/i.test(path)
+    /\.(txt|csv|tsv|log)$/i.test(path) ||
+    codeLanguage(path)
   )
     return "text";
   return "other";
