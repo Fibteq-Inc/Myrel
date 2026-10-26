@@ -113,15 +113,61 @@ Use them when the work is in that service instead of asking people to do it by h
 ${offer}`;
 }
 
-/** The agent's full prompt: Myrel's instructions, its connectors and skills, then the thread. */
+/**
+ * The agent's full prompt: Myrel's instructions, its connectors and skills, then the thread.
+ * `lasting` passes the instructions part like the thread's lasting sections (see unchangedSections).
+ */
 export function agentPrompt(
   place: AgentPlace,
   threadPrompt: string,
   connectors: AgentConnectorInfo[] = [],
   skills: AgentSkillInfo[] = [],
+  lasting: (section: string) => string = (section) => section,
 ): string {
   const guides = [connectorsGuide(connectors), skillsGuide(place, skills)].filter(Boolean);
-  return `${agentSystem(place)}${guides.map((g) => `\n\n${g}`).join("")}\n\n---\n\n${threadPrompt}`;
+  const instructions = lasting(`${agentSystem(place)}${guides.map((g) => `\n\n${g}`).join("")}`);
+  return instructions ? `${instructions}\n\n---\n\n${threadPrompt}` : threadPrompt;
+}
+
+/** Opens a resumed session's prompt when it leaves sections out. */
+export const UNCHANGED_NOTE =
+  "(A new turn in this session. Myrel's instructions and the parts of the thread's context that did not change since your last turn (project memory, the brief, repositories and the like) are earlier in this session and still apply; only what changed follows.)";
+
+/**
+ * For a CLI session that continues the thread: leaves out the sections it already holds unchanged
+ * from its last turn, whose hashes are `seen`. Each turn repeated Myrel's instructions, memory and
+ * brief (about 5,000 tokens) in the session, which every later model call read again. `hashes`
+ * are this turn's sections, for the next turn to compare with.
+ */
+export function unchangedSections(seen: readonly string[]): { lasting: (section: string) => string; hashes: string[]; left: () => number } {
+  const known = new Set(seen);
+  const hashes: string[] = [];
+  let left = 0;
+  return {
+    lasting: (section) => {
+      const hash = sectionHash(section);
+      hashes.push(hash);
+      if (!known.has(hash)) return section;
+      left++;
+      return "";
+    },
+    hashes,
+    left: () => left,
+  };
+}
+
+/** A short hash of a prompt section (cyrb53): only compared with the thread's own earlier turns. */
+export function sectionHash(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${(h2 >>> 0).toString(36)}${(h1 >>> 0).toString(36)}:${text.length}`;
 }
 
 /** Where a cloud turn finds its skills (see MYREL_SKILLS_URL in runner-core's task script). */

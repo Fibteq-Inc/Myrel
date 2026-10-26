@@ -3,6 +3,7 @@ import { RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
+import { UNCHANGED_NOTE } from "../src/agents/harness-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetFakeModel } from "./fake-llm";
 
@@ -422,6 +423,16 @@ describe("local workspace", () => {
     const next = await until(() => starts()[1], "next agent turn");
     expect(next.prompt).toContain("kısa tut");
     expect(next.agent?.token).not.toBe(start.agent!.token);
+    // The session that continues gets only what changed: not Myrel's instructions or the brief again.
+    expect(next.prompt).toContain("You are Myrel");
+    expect(next.prompt).toContain("## Brief from the coordinator");
+    expect(next.agent?.resume?.after).toBe(start.taskId);
+    const short = next.agent!.resume!.prompt;
+    expect(short.startsWith(UNCHANGED_NOTE)).toBe(true);
+    expect(short).toContain("kısa tut");
+    expect(short).toContain("Current time:");
+    expect(short).not.toContain("You are Myrel");
+    expect(short).not.toContain("## Brief from the coordinator");
     // It replied itself, so its final message is not posted again.
     expect((await bodies()).filter((b) => b === "Summary posted.")).toHaveLength(0);
 

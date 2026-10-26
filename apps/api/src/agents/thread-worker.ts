@@ -85,7 +85,10 @@ export function threadPrompt(input: {
   resumeNote?: string;
   /** The thread's plan belongs to a round that finished before the thread was reopened. */
   planFinished?: boolean;
+  /** Passes each section that stays the same from turn to turn (memory, brief, repositories…); "" leaves it out. */
+  lasting?: (section: string) => string;
 }): string {
+  const lasting = input.lasting ?? ((section: string) => section);
   const isNew = (m: Message) => m.seq > input.lastSeenSeq || editedSince(m, input.lastSeenAt);
   const shown = input.followUp ? input.messages.filter(isNew) : input.messages;
   const history = shown.map((m) => renderMessage(m, input.names, { isNew: isNew(m) }));
@@ -96,27 +99,31 @@ export function threadPrompt(input: {
   const mine = input.routines.filter((r) => r.target.kind === "thread" && r.target.threadId === input.thread.id);
   return [
     `Project: ${input.projectName}\nThread: "${input.thread.title}"${input.thread.resolved ? " (resolved)" : ""}\nCurrent time: ${input.now.toISOString()} (default time zone ${input.defaultTimezone})`,
-    renderKnowledge(input.knowledge),
-    `## Brief from the coordinator\n${input.brief}`,
-    input.repos.length
-      ? `## GitHub repositories connected to this project\n${input.repos
-          .map((r) => `- ${r.fullName} (default branch ${r.defaultBranch}${r.private ? ", private" : ""})`)
-          .join("\n")}`
-      : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
+    lasting(renderKnowledge(input.knowledge)),
+    lasting(`## Brief from the coordinator\n${input.brief}`),
+    lasting(
+      input.repos.length
+        ? `## GitHub repositories connected to this project\n${input.repos
+            .map((r) => `- ${r.fullName} (default branch ${r.defaultBranch}${r.private ? ", private" : ""})`)
+            .join("\n")}`
+        : "## GitHub repositories connected to this project\nNone. A project owner can connect one in the project settings.",
+    ),
     input.followUp ? "" : `## The message this thread started from\n${renderMessage(input.root, input.names)}`,
     input.followUp
       ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already; one marked edited is an earlier message a person changed, so its new text replaces the old)\n${history.join("\n\n") || "(no new messages)"}`
       : `## Thread so far, oldest first (NEW = arrived, or edited by its author, since your last turn)\n${history.join("\n\n") || "(no messages yet)"}`,
     notes.length ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${notes.join("\n")}` : "",
-    pulls.length ? `## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}` : "",
+    pulls.length ? lasting(`## Pull requests this thread opened (live from GitHub)\n${pulls.join("\n")}`) : "",
     github.length ? `## GitHub events on those pull requests (NEW = since your last turn)\n${github.join("\n\n")}` : "",
     input.artifacts?.length
-      ? `## Artifacts in this project (newest first; pass artifact_id to update one)\n${input.artifacts
-          .map((a) => `- [${a.id}] "${a.title}" · v${a.version}${a.threadId === input.thread.id ? " · from this thread" : ""}`)
-          .join("\n")}`
+      ? lasting(
+          `## Artifacts in this project (newest first; pass artifact_id to update one)\n${input.artifacts
+            .map((a) => `- [${a.id}] "${a.title}" · v${a.version}${a.threadId === input.thread.id ? " · from this thread" : ""}`)
+            .join("\n")}`,
+        )
       : "",
     runs.length ? `## Routine runs (scheduled tasks; do the NEW ones now)\n${runs.join("\n")}` : "",
-    mine.length ? `## Routines that wake this thread\n${mine.map(renderRoutine).join("\n")}` : "",
+    mine.length ? lasting(`## Routines that wake this thread\n${mine.map(renderRoutine).join("\n")}`) : "",
     input.thread.statusText
       ? input.planFinished
         ? `## Your plan from the earlier round (finished before this thread was reopened)\n${input.thread.statusText}\n\nThis is new work: set a new plan with update_plan for it rather than adding steps to this one.`
