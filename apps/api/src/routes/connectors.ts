@@ -259,9 +259,11 @@ async function finish(c: Context<AppEnv>, params: { code?: string; state?: strin
   // Started from a card in a thread: the card learns the result, and the person goes back to the thread.
   if (result.back) {
     const { projectId, threadId, suggestionId, offerId } = result.back;
-    if (result.ok && row?.ownerId) {
+    // A project's connector has no owner: the line in the thread is from whoever signed in.
+    const by = row?.ownerId ?? (result.ok ? result.by : undefined);
+    if (result.ok && by) {
       const thread = await getAgentByName(c.env.THREAD_AGENT, threadId);
-      await thread.suggestionConnected(suggestionId, offerId, row.ownerId).catch((err) => console.error("suggestion connected", err));
+      await thread.suggestionConnected(suggestionId, offerId, by).catch((err) => console.error("suggestion connected", err));
     }
     const to = new URL(`/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`, publicOrigin(c));
     to.searchParams.set("connector", result.ok ? "ok" : "error");

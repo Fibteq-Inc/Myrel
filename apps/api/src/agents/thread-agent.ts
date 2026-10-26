@@ -39,8 +39,8 @@ import { createDb, schema } from "@myrel/db";
 import { Agent, getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
-import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest";
+import { type ConnectorRow, readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
+import { findOffers, knownConnectors, searchOffers, signInOffer } from "../connectors/suggest";
 import { fromBase64, readBundle, tameSkillMd, toBase64, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
@@ -1024,10 +1024,12 @@ export class ThreadAgent extends Agent<Env> {
     const { projectId } = this.ids();
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "connectors"))) return [];
     const runnerId = place.kind === "local" ? place.workspace.runnerId : undefined;
-    const connectors = await turnConnectors(this.env, { projectId, userId: requester, place: place.kind, runnerId }).catch((err) => {
+    const signedOut: ConnectorRow[] = [];
+    const connectors = await turnConnectors(this.env, { projectId, userId: requester, place: place.kind, runnerId }, signedOut).catch((err) => {
       console.error("connectors", err);
       return [];
     });
+    if (signedOut.length) await this.askToSignIn(signedOut).catch((err) => console.error("sign-in card", err));
     this.setMeta("agent_connectors", JSON.stringify(connectors.map((c) => ({ id: c.id, name: c.name, transport: c.transport }))));
     // Servers gain tools over time; keep the list settings show current without holding up the turn.
     const remote = connectors.filter((c) => c.transport === "http").map((c) => c.id);
@@ -1083,13 +1085,22 @@ export class ThreadAgent extends Agent<Env> {
   async connectorTarget(
     token: string,
     name: string,
-  ): Promise<{ ok: true; url: string; headers: Record<string, string> } | { ok: false; error: "unauthorized" | "not_found" }> {
+  ): Promise<
+    { ok: true; url: string; headers: Record<string, string> } | { ok: false; error: "unauthorized" | "not_found" } | { ok: false; error: "signed_out"; title: string }
+  > {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false, error: "unauthorized" };
     const given = JSON.parse(this.getMeta("agent_connectors") ?? "[]") as { id: string; name: string; transport: string }[];
     const connector = given.find((c) => c.name === name && c.transport === "http");
     const target = connector ? await remoteTarget(this.env, connector.id) : null;
-    return target ? { ok: true, ...target } : { ok: false, error: "not_found" };
+    if (target) return { ok: true, ...target };
+    // Its sign-in ended during the turn: the person gets a card to sign in again, the agent a reason.
+    const [row] = connector ? await createDb(this.env.DB).select().from(schema.connectors).where(eq(schema.connectors.id, connector.id)) : [];
+    if (row?.enabled && row.auth === "oauth" && row.status === "needs_auth") {
+      this.ctx.waitUntil(this.askToSignIn([row]).catch((err) => console.error("sign-in card", err)));
+      return { ok: false, error: "signed_out", title: row.name };
+    }
+    return { ok: false, error: "not_found" };
   }
 
   /**
@@ -1360,18 +1371,45 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /** Posts a connector card for the person; false while another one waits for an answer. */
-  private async postSuggestion(reason: string, offers: ConnectorOffer[]): Promise<boolean> {
+  private async postSuggestion(reason: string, offers: ConnectorOffer[], signIn = false): Promise<boolean> {
     const all = this.suggestions();
     if (all.some((s) => s.state === "open")) return false;
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const suggestion: ConnectorSuggestion = { id: createId("suggestion"), reason, offers, state: "open" };
+    const suggestion: ConnectorSuggestion = { id: createId("suggestion"), reason, offers, state: "open", ...(signIn && { signIn }) };
     const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatConnectorSuggestion(suggestion) });
     // Not news for the next turn, unless someone wrote in between.
     if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
     // Older answered cards are kept only as far as the card's message needs them.
     this.setMeta("connector_suggestions", JSON.stringify([...all.slice(-19), { ...suggestion, messageId: m.id }]));
     return true;
+  }
+
+  /**
+   * A card asking to sign in again to connectors whose sign-in ended, unless one already waits or
+   * the person said not now to them in this thread.
+   */
+  private async askToSignIn(rows: Pick<ConnectorRow, "id" | "name" | "url">[]): Promise<void> {
+    // A turn's calls to a signed-out connector come many at once: one card for them.
+    if (this.askingToSignIn) return this.askingToSignIn;
+    this.askingToSignIn = this.postSignInCard(rows).finally(() => {
+      this.askingToSignIn = null;
+    });
+    return this.askingToSignIn;
+  }
+
+  private askingToSignIn: Promise<void> | null = null;
+
+  private async postSignInCard(rows: Pick<ConnectorRow, "id" | "name" | "url">[]): Promise<void> {
+    const declined = new Set(JSON.parse(this.getMeta("declined_connectors") ?? "[]") as string[]);
+    const offers = rows.map(signInOffer).filter((o) => !declined.has(o.id)).slice(0, 3);
+    if (!offers.length) return;
+    const tr = (this.getMeta("language") ?? "").startsWith("tr");
+    const names = offers.map((o) => o.name).join(", ");
+    const reason = tr
+      ? `${names} oturumu sona erdi. Tekrar giriş yapınca ajan onu yeniden kullanabilir.`
+      : `The sign-in to ${names} ended. Sign in again and the agent can use it again.`;
+    await this.postSuggestion(reason, offers, true);
   }
 
   /** One offer of a card still waiting for an answer, for the person to connect. Callable over RPC. */
@@ -1392,7 +1430,14 @@ export class ThreadAgent extends Agent<Env> {
     const tr = this.getMeta("language") === "tr";
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    await project.sendAsUser(threadId, userId, tr ? `${offer.name} bağlandı, devam edebilirsin.` : `I connected ${offer.name}. Carry on.`);
+    const line = s.signIn
+      ? tr
+        ? `${offer.name} için tekrar giriş yaptım, devam edebilirsin.`
+        : `I signed in to ${offer.name} again. Carry on.`
+      : tr
+        ? `${offer.name} bağlandı, devam edebilirsin.`
+        : `I connected ${offer.name}. Carry on.`;
+    await project.sendAsUser(threadId, userId, line);
   }
 
   /** Not now: the card closes, its offers are not made again in this thread, and the agent carries on without them. Callable over RPC. */

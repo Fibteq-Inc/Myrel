@@ -14,6 +14,7 @@ import { OfferIcon, OfficialBadge } from "../connectors";
  * The thread agent's offer of a connector it needs: one to three services, connected with a click
  * (a sign-in in the browser when the service asks for one) as the viewer's own connector, on in
  * this project. Once connected, the agent carries on with it; "Not now" lets it carry on without.
+ * A sign-in-again card (suggestion.signIn) signs in to connectors already added whose sign-in ended.
  */
 export function ConnectorSuggestionCard({
   suggestion,
@@ -79,10 +80,10 @@ export function ConnectorSuggestionCard({
           <Plug size={14} aria-hidden="true" />
         )}
         {suggestion.state === "connected"
-          ? t("suggestion.connected", { name: connected?.name ?? "" })
+          ? t(suggestion.signIn ? "suggestion.signedInAgain" : "suggestion.connected", { name: connected?.name ?? "" })
           : suggestion.state === "dismissed"
             ? t("suggestion.dismissed")
-            : t("suggestion.title")}
+            : t(suggestion.signIn ? "suggestion.signInAgainTitle" : "suggestion.title")}
       </div>
       <div id={titleId} className="text-[13px] text-body">
         {suggestion.reason}
@@ -120,7 +121,7 @@ export function ConnectorSuggestionCard({
                     ) : (
                       <LogIn size={14} aria-hidden="true" />
                     )}
-                    {pending ? t("suggestion.connecting") : t("suggestion.connect")}
+                    {pending ? t("suggestion.connecting") : t(suggestion.signIn ? "suggestion.signInAgain" : "suggestion.connect")}
                   </Button>
                 )}
                 {picked && <CircleCheck size={16} className="flex-none text-accent" aria-hidden="true" />}
@@ -162,7 +163,7 @@ export function ConnectorSuggestionCard({
             <p className="text-[13px] text-warn">{t("suggestion.signInFailed")}</p>
           ) : null}
           <div className="flex items-center gap-3">
-            <p className="min-w-0 flex-1 text-xs text-subtle">{t("suggestion.yours")}</p>
+            <p className="min-w-0 flex-1 text-xs text-subtle">{t(suggestion.signIn ? "suggestion.signInAgainNote" : "suggestion.yours")}</p>
             <GhostButton type="button" className="flex-none" disabled={busy} onClick={() => dismiss.mutate()}>
               {t("suggestion.notNow")}
             </GhostButton>

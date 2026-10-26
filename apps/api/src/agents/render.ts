@@ -23,7 +23,8 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
         : card.state === "dismissed"
           ? "the person said not now"
           : "waiting for the person";
-    return `${head}\n${indent(`(connector card offering ${names}: ${state})`)}`;
+    const what = card.signIn ? `sign-in-again card for ${names}, whose sign-in ended` : `connector card offering ${names}`;
+    return `${head}\n${indent(`(${what}: ${state})`)}`;
   }
   // The note itself is in the prompt already (the brief, or the coordinator's notes).
   if (m.relay) return `${head}\n${indent(`${m.body}\n(marker for a coordinator note people can open)`)}`;
