@@ -43,3 +43,7 @@ A thread runs only on a computer that belongs to the person it works for. When a
 ## Git repositories
 
 When the folder is a git repository, each thread works in its own copy (a git worktree) on a branch named `myrel/thr-…`. Threads running at the same time never change the same files, and your own checkout stays as you left it. You can turn this off in the [runner settings](/computer/runner/) with **Each thread in its own copy**.
+
+### Cloning and pushing
+
+Your computer does not need a GitHub login of its own for the project's [connected repositories](/github/connect/). For each turn, Myrel lends git on your computer a short-lived token for them, the same one cloud turns use: only those repositories, only to clone and push, and never saved to disk. It is renewed during long turns and revoked when the turn ends. Their SSH addresses (`git@github.com:…`) go over HTTPS for the turn, and every other repository keeps using your own git login. It needs myrel-runner 0.21.0 or later, and only works on your own computer for repositories the person who connected them can push to.

@@ -10,6 +10,10 @@ Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code or Kimi Code.
 - The CLI runs with **your own login on your computer**. myrel-runner never reads, sends or stores your Claude,
   OpenAI or Google credentials. The only secret it keeps is its own Myrel runner token, in
   `~/.myrel-runner/config.json` (readable by you only).
+- For the project's connected GitHub repositories, git gets a short-lived token of the turn's own (0.21.0+), so
+  cloning and pushing work without a GitHub login on the computer. It is kept in memory only: a git credential helper
+  fetches it from the runner on `127.0.0.1` (the only port it opens, and only while such a turn runs), at an address
+  only that run knows. It covers only those repositories; everything else uses your own git login.
 - It only works in folders you shared, from Myrel > Devices or with `myrel-runner share`. A path from the server that is not one of them
   (after resolving symlinks) is refused.
 

@@ -139,6 +139,28 @@ export async function installationToken(
   return res;
 }
 
+/**
+ * A new installation token of its own, never cached: one that is handed out and revoked when its
+ * work ends (revokeInstallationToken), so revoking it never breaks a token other work shares.
+ */
+export async function freshInstallationToken(
+  env: GithubEnv,
+  installationId: number,
+  scope: { repositoryIds: number[]; permissions: RepoPermissions },
+): Promise<AccessToken> {
+  return githubFetch<AccessToken>(await appJwt(env), `/app/installations/${installationId}/access_tokens`, {
+    method: "POST",
+    body: { repository_ids: scope.repositoryIds, permissions: scope.permissions },
+  });
+}
+
+/** Ends an installation token before it expires. One already expired or revoked is fine. */
+export async function revokeInstallationToken(token: string): Promise<void> {
+  await githubFetch(token, "/installation/token", { method: "DELETE" }).catch((err: unknown) => {
+    if (!(err instanceof GithubError && err.status === 401)) throw err;
+  });
+}
+
 /** Every repository an installation can reach (GitHub caps a page at 100). */
 export async function installationRepos(env: GithubEnv, installationId: number): Promise<GithubApiRepo[]> {
   const { token } = await installationToken(env, installationId);

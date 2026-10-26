@@ -41,6 +41,7 @@ import { readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnC
 import { findOffers, knownConnectors, searchOffers } from "../connectors/suggest";
 import { fromBase64, readBundle, tameSkillMd, toBase64, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
+import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
 import type { PullCredit } from "../github/attribution";
 import { CONFLICT_RETRY_SEC, type ConflictCheck, checkConflict, listPullRequests, openPullRequest, trackPullRequest } from "../github/pulls";
@@ -48,7 +49,7 @@ import { connectRepoByName, githubLogin, listProjectRepos } from "../github/stor
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
-import { cloudHarness, localBackend, localCanceller, ownsComputer, projectCloudCli, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
+import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { projectCliModels, resolveTaskModel } from "../task-model";
@@ -176,6 +177,8 @@ function saveBranch(threadId: string): string {
 const MAX_AGENT_PROMPT = 90_000;
 /** How long one agent turn may run. */
 const AGENT_TURN_SEC = 3600;
+/** A turn on a person's computer gets a new GitHub token this often; each lasts an hour. */
+const GITHUB_RENEW_SEC = 45 * 60;
 /**
  * After the agent replied with its plan done, how long its harness may keep going before the turn
  * is ended for it (some models keep calling tools after their last reply).
@@ -217,6 +220,12 @@ const SANDBOX_LOST = "The sandbox stopped while working, most likely because a n
  * the sandbox) with its progress and terminal output.
  */
 export class ThreadAgent extends Agent<Env> {
+  /**
+   * The GitHub tokens each running local turn was handed, to revoke when it ends. Only in memory:
+   * after a restart a token is not revoked early, and it still expires within the hour.
+   */
+  private readonly githubTokens = new Map<string, string[]>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`;
@@ -568,6 +577,8 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const { place, language } = input;
     const { token, hash } = await newAgentToken();
+    // Git on the person's computer clones and pushes the project's repositories with a token of the turn's own.
+    const github = place.kind === "local" ? await localGithubToken(this.env, projectId, place.workspace.runnerId, input.requester) : null;
     const agentPlace: AgentPlace =
       place.kind === "local"
         ? {
@@ -577,11 +588,13 @@ export class ThreadAgent extends Agent<Env> {
             folders: place.workspace.folders,
             computer: place.workspace.runnerName,
             asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
+            github: !!github,
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     // A very long thread keeps its newest part; a resumed CLI session remembers the rest.
     const context = input.prompt.length > MAX_AGENT_PROMPT ? `(older context cut)\n${input.prompt.slice(-MAX_AGENT_PROMPT)}` : input.prompt;
     const taskId = createId("task");
+    if (github) this.githubTokens.set(taskId, [github.token]);
     // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
     const previousTask = this.getMeta("agent_last_task");
     this.setMeta("agent_last_task", taskId);
@@ -634,7 +647,7 @@ export class ThreadAgent extends Agent<Env> {
         };
         const installed = (await workspaceClis(this.env, projectId, { runnerId: workspace.runnerId }))?.clis.find((c) => c.id === workspace.cli);
         const model = resolveTaskModel(workspace.cli, input.threadModel, await projectCliModels(this.env, projectId), installed);
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model });
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
@@ -643,6 +656,7 @@ export class ThreadAgent extends Agent<Env> {
         await this.taskEvents(taskId, LOCAL_PHASES);
         // Its CLI session and uncommitted work are on this computer now: later turns stay here.
         if (input.threadRunner !== workspace.runnerId) await project.updateThread(threadId, { runner: { id: workspace.runnerId, by: "auto" } });
+        if (github && this.runningTask()?.id === taskId) await this.schedule(GITHUB_RENEW_SEC, "renewGithub", { taskId, requester: input.requester });
       } else {
         // The sandbox costs the service and holds the project's tokens: not for an address nobody has shown is theirs.
         if (input.requester && !(await userVerified(this.env, input.requester))) throw new Error(UNVERIFIED_MESSAGE);
@@ -714,6 +728,7 @@ export class ThreadAgent extends Agent<Env> {
     } catch (err) {
       // Once recorded, launch() finished the run as failed and finishAgentTurn reported it.
       if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
+        await this.revokeGithub(taskId);
         this.deleteMeta("agent_token");
         this.deleteMeta("agent_turn");
         this.deleteMeta("agent_connectors");
@@ -757,6 +772,7 @@ export class ThreadAgent extends Agent<Env> {
     const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
     if (!row) return;
     this.sql`UPDATE tasks SET reported = 1 WHERE id = ${taskId}`;
+    await this.revokeGithub(taskId);
     const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
     this.deleteMeta("agent_token");
     this.deleteMeta("agent_turn");
@@ -1787,6 +1803,30 @@ export class ThreadAgent extends Agent<Env> {
   async resumeInterrupted(_payload: { taskId: string }): Promise<void> {
     if (!this.getMeta("resume_pending")) return;
     await this.markDirty();
+  }
+
+  /** While a turn runs on a person's computer: hands its runner a new GitHub token before the last one expires. */
+  async renewGithub(payload: { taskId: string; requester: string | null }): Promise<void> {
+    const row = this.runningTask();
+    if (!row || row.id !== payload.taskId || row.backend !== "local") return;
+    const { runnerId } = JSON.parse(row.spec) as StoredSpec;
+    if (!runnerId) return;
+    // Null when the repositories were disconnected meanwhile: the last token then runs out by itself.
+    const github = await localGithubToken(this.env, this.ids().projectId, runnerId, payload.requester);
+    if (!github) return;
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, runnerId);
+    const sent = await runner.renewGithub(row.id, github);
+    if (!sent.ok) return void (await revokeInstallationToken(github.token).catch(() => {}));
+    // The last one stays valid until the turn ends or it expires, so a push already under way finishes.
+    this.githubTokens.set(row.id, [...(this.githubTokens.get(row.id) ?? []), github.token]);
+    await this.schedule(GITHUB_RENEW_SEC, "renewGithub", payload);
+  }
+
+  /** The turn ended: its GitHub tokens stop working now rather than within the hour. */
+  private async revokeGithub(taskId: string) {
+    const tokens = this.githubTokens.get(taskId) ?? [];
+    this.githubTokens.delete(taskId);
+    await Promise.all(tokens.map((t) => revokeInstallationToken(t).catch((err) => console.warn("revoking a turn's GitHub token failed", err))));
   }
 
   async taskWatchdog(payload: { taskId: string }): Promise<void> {

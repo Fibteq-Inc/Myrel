@@ -1,4 +1,4 @@
-import type { GithubRepo, GithubStatus, Project, ProjectRepo, PullRequest, ServerEvent } from "@myrel/protocol";
+import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, type ServerToRunner } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { runInDurableObject, env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -538,3 +538,94 @@ describe("pull requests", () => {
     expect(await githubEvents(thread.id)).toEqual([]);
   });
 });
+
+describe("GitHub on the person's computer", () => {
+  type Start = Extract<ServerToRunner, { type: "task.start" }>;
+
+  /** A project with acme/app connected, worked on by `user`'s paired computer, whose runner announces `features`. */
+  async function localProject(features: string[]) {
+    const user = await signUp();
+    await connect(user);
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/repos`, { method: "POST", token: user, body: JSON.stringify({ installationId: 42, repoId: 7 }) });
+    const { code } = (await (await api("/api/runners/pairing", { method: "POST", token: user })).json()) as { code: string };
+    const paired = (await (await api("/api/runner/pair", { method: "POST", body: JSON.stringify({ code, name: "Laptop" }) })).json()) as {
+      runner: { id: string };
+      token: string;
+    };
+    const ws = (await api("/api/runner/connect", { token: paired.token, headers: { upgrade: "websocket" } })).webSocket!;
+    const frames: ServerToRunner[] = [];
+    ws.addEventListener("message", (e) => frames.push(JSON.parse(e.data as string) as ServerToRunner));
+    ws.accept();
+    const send = (frame: unknown) => ws.send(JSON.stringify(frame));
+    send({
+      type: "hello",
+      protocol: RUNNER_PROTOCOL_VERSION,
+      version: "0.21.0",
+      hostname: "mbp",
+      platform: "darwin",
+      folders: [{ path: "/Users/ismail/code/app", name: "app" }],
+      clis: [{ id: "claude", version: "2.1.0" }],
+      features,
+      running: [],
+    });
+    await until(async () => {
+      const res = await api("/api/runners", { token: user });
+      return ((await res.json()) as { runners: { folders: unknown[] }[] }).runners[0]?.folders.length;
+    }, "hello");
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: paired.runner.id, path: "/Users/ismail/code/app", cli: "claude" }),
+    });
+    const author = ((await (await api("/api/auth/get-session", { token: user })).json()) as { user: { id: string } }).user.id;
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "Klonla" });
+    const thread = await projectAgent.createThread(root.id, "Klon");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Clone acme/app." });
+    const start = await until(() => frames.find((f): f is Start => f.type === "task.start"), "task.start");
+    return { frames, send, ws, start, threadAgent, author };
+  }
+
+  const revoked = () => fakeGithub.requests.filter((r) => r.method === "DELETE" && r.url.endsWith("/installation/token"));
+
+  it("lends a local turn a token of its own for the project's repositories, renews it and revokes it when the turn ends", { timeout: 30_000 }, async () => {
+    const before = revoked().length;
+    const { frames, send, ws, start, threadAgent, author } = await localProject(["cancel", "agent", "github-token"]);
+    expect(start.github).toMatchObject({ token: "inst-token", repos: ["acme/app"] });
+    expect(Date.parse(start.github!.expiresAt)).toBeGreaterThan(Date.now());
+    expect(start.prompt).toContain("Myrel lent git a short-lived token");
+    // The same repositories and permissions as a cloud turn's.
+    const minted = fakeGithub.requests.findLast((r) => r.url.endsWith("/access_tokens"));
+    expect(minted?.body).toEqual({ repository_ids: [7], permissions: { contents: "write", pull_requests: "write", metadata: "read" } });
+
+    // A long turn gets a new one before the last expires; both stop working when the turn ends.
+    await threadAgent.renewGithub({ taskId: start.taskId, requester: author });
+    const renewed = await until(() => frames.find((f) => f.type === "task.github"), "task.github");
+    expect(renewed).toMatchObject({ taskId: start.taskId, github: { token: "inst-token", repos: ["acme/app"] } });
+    expect(revoked().length).toBe(before);
+
+    send({ type: "task.done", taskId: start.taskId, ok: true, result: "Cloned." });
+    await until(() => revoked().length === before + 2, "tokens revoked at the end of the turn");
+    expect(revoked().at(-1)?.auth).toBe("inst-token");
+    ws.close();
+  });
+
+  it("gives a runner that cannot keep the token out of files none", { timeout: 30_000 }, async () => {
+    const { send, ws, start } = await localProject(["cancel", "agent"]);
+    expect(start.github).toBeUndefined();
+    expect(start.prompt).not.toContain("Myrel lent git");
+    send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+    ws.close();
+  });
+});
+
+async function until<T>(fn: () => T | Promise<T>, what: string): Promise<NonNullable<T>> {
+  for (let i = 0; i < 160; i++) {
+    const v = await fn();
+    if (v) return v as NonNullable<T>;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`Timed out waiting for ${what}`);
+}

@@ -13,9 +13,10 @@ import { ROUTINE_GUIDE } from "./routine-tools";
 export type AgentPlace =
   /**
    * folders: the project's other folders on that computer. asks: Claude Code asks the person
-   * through Myrel before reaching outside them (a runner with feature "project-folders").
+   * through Myrel before reaching outside them (a runner with feature "project-folders"). github: git
+   * has a token of the turn's own for the project's repositories (task.start's `github`).
    */
-  | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean }
+  | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean; github?: boolean }
   /**
    * images: its model reads images, so it can look at screenshots itself. saveBranch: where unpushed
    * work in its cloned repositories is kept on GitHub between turns. harness: the CLI it runs as
@@ -56,6 +57,12 @@ function localFolders(place: Extract<AgentPlace, { kind: "local" }>): string {
   return `${list} ${outside}`;
 }
 
+/** How git reaches GitHub from the person's computer. */
+function localGit(place: Extract<AgentPlace, { kind: "local" }>): string {
+  if (!place.github) return "For a pull request, push the branch with git and open it with open_pull_request; gh is not needed.";
+  return "Git can clone and push the project's connected GitHub repositories this turn even when this computer has no GitHub login of its own: Myrel lent git a short-lived token for them over HTTPS (`https://github.com/<owner>/<name>.git`; their SSH addresses are sent there too), and the computer's own login, if it has one, is still asked first. gh is not signed in by it and not needed: for a pull request, push the branch with git and open it with open_pull_request. A repository that is not listed as connected cannot be pushed to that way: ask for it with request_repo_connection.";
+}
+
 /** Folder in the sandbox for repositories, next to (not inside) the folder saved between turns. */
 export const SANDBOX_REPOS = "/workspace/repos";
 
@@ -63,7 +70,7 @@ export const SANDBOX_REPOS = "/workspace/repos";
 export function agentSystem(place: AgentPlace): string {
   const where =
     place.kind === "local"
-      ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${localFolders(place)} A file in these folders you mention in a reply opens in a preview when you link it with its path, relative to the folder or absolute ([sonuc.json](out/sonuc.json)), but only for the person whose computer this is: put anything others in the project need to see in the project files too (never one holding secrets). For a pull request, push the branch with git and open it with open_pull_request; gh is not needed. Name the repository as it is listed as connected (an old name in the folder's git remote still works for pushing, since GitHub redirects renamed repositories).`
+      ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${localFolders(place)} A file in these folders you mention in a reply opens in a preview when you link it with its path, relative to the folder or absolute ([sonuc.json](out/sonuc.json)), but only for the person whose computer this is: put anything others in the project need to see in the project files too (never one holding secrets). ${localGit(place)} Name the repository as it is listed as connected (an old name in the folder's git remote still works for pushing, since GitHub redirects renamed repositories).`
       : `You run as ${CLOUD_LABELS[place.harness ?? "opencode"]} in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead, over HTTPS and without old file versions, which makes a large repository clone several times faster (\`git clone --filter=blob:none https://github.com/<owner>/<name>.git\`; git fetches an old version when a command needs it): git and gh already have access to the connected ones, and there is no SSH key. A repository that is not listed as connected cannot be pushed to (and a private one not even cloned): ask for it with request_repo_connection, which puts a one-tap card to the person, and end your turn rather than waiting. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends. As a safety net, when a turn ends Myrel pushes whatever you left uncommitted or unpushed in each repository there to the branch ${place.saveBranch} on GitHub, as one commit on top of where you were. To pick that work up in a later turn, clone again, run \`git fetch origin ${place.saveBranch}\`, then \`git checkout -B <the branch its commit message names> FETCH_HEAD && git reset --soft HEAD~1\`.`;
   return `You are Myrel, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Myrel.
 
