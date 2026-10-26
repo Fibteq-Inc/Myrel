@@ -121,6 +121,7 @@ export const tr: Catalog = {
   // Project chat
   "chat.membersLabel": { other: "{count} üye" },
   "chat.earlier": { other: "Önceki {count} mesajı göster" },
+  "chat.earlierMore": "Önceki mesajları göster",
   "chat.loading": "Mesajlar yükleniyor",
   "chat.toEnd": "En alta in",
   "chat.placeholder": "Myrel'e bir görev ver",

@@ -1,5 +1,6 @@
 import {
   type Artifact,
+  type ConversationPage,
   type Message,
   type PullRequest,
   type Reaction,
@@ -17,8 +18,17 @@ import {
  * mobile share one reducer: feed it `ProjectSocket`'s messages and events.
  */
 export type ProjectState = {
-  /** Every message, project chat and threads, in seq order. */
+  /** The messages held, project chat and threads, in seq order: all of them, or (`windowed`) the newest of each conversation loaded. */
   messages: Message[];
+  /**
+   * The server sent only the newest messages: a conversation is held from its newest message back as
+   * far as `windows` says, and one not in `windows` (a thread not opened yet) only has what arrived live.
+   */
+  windowed: boolean;
+  /** Per conversation ("" is the project chat, otherwise a thread id): whether older messages are left on the server. */
+  windows: Record<string, { hasEarlier: boolean }>;
+  /** Messages held outside their conversation's list: the project-chat messages threads opened from, by id. */
+  loose: Record<string, Message>;
   threads: Record<string, Thread>;
   reactions: Record<string, Reaction[]>;
   artifacts: Record<string, Artifact>;
@@ -37,6 +47,9 @@ export type ProjectState = {
 
 export const emptyProjectState: ProjectState = {
   messages: [],
+  windowed: false,
+  windows: {},
+  loose: {},
   threads: {},
   reactions: {},
   artifacts: {},
@@ -103,11 +116,47 @@ export function applyMessages(state: ProjectState, messages: Message[]): Project
   return { ...state, messages: state.messages.concat(messages) };
 }
 
+/**
+ * Adds a page of one conversation fetched from the server (null: the project chat): its messages go
+ * into place by seq, skipping any already held, and the conversation now reaches as far back as the page.
+ */
+export function applyConversationPage(state: ProjectState, threadId: string | null, page: ConversationPage): ProjectState {
+  const held = new Set(state.messages.map((m) => m.id));
+  const fresh = page.messages.filter((m) => !held.has(m.id));
+  const messages = fresh.length ? [...fresh, ...state.messages].sort((a, b) => a.seq - b.seq) : state.messages;
+  return {
+    ...state,
+    messages,
+    windows: { ...state.windows, [threadId ?? ""]: { hasEarlier: page.hasEarlier } },
+    loose: page.root ? { ...state.loose, [page.root.id]: page.root } : state.loose,
+    reactions: addReactions(state.reactions, page.reactions),
+  };
+}
+
+/**
+ * How much of a conversation is held (null: the project chat). Not `loaded`: a thread the server
+ * has not sent yet, to fetch with `GET messages?conversation`. `hasEarlier`: older messages are left on the server.
+ */
+export function conversationState(s: ProjectState, threadId: string | null): { loaded: boolean; hasEarlier: boolean } {
+  if (!s.windowed) return { loaded: true, hasEarlier: false };
+  const window = s.windows[threadId ?? ""];
+  return window ? { loaded: true, hasEarlier: window.hasEarlier } : { loaded: false, hasEarlier: true };
+}
+
+/** A message by id, wherever it is held (e.g. the project-chat message a thread opened from). */
+export function findMessage(s: ProjectState, id: string): Message | undefined {
+  return s.loose[id] ?? s.messages.find((m) => m.id === id);
+}
+
 /** Applies the non-message parts of a server event (messages arrive through `applyMessage`). */
 export function applyEvent(state: ProjectState, event: ServerEvent): ProjectState {
   switch (event.type) {
     case "message.updated":
-      return { ...state, messages: state.messages.map((m) => (m.id === event.message.id ? event.message : m)) };
+      return {
+        ...state,
+        messages: state.messages.map((m) => (m.id === event.message.id ? event.message : m)),
+        loose: state.loose[event.message.id] ? { ...state.loose, [event.message.id]: event.message } : state.loose,
+      };
     case "thread.updated":
       return { ...state, threads: { ...state.threads, [event.thread.id]: event.thread } };
     case "artifact.updated":
@@ -145,9 +194,15 @@ export function applyEvent(state: ProjectState, event: ServerEvent): ProjectStat
       for (const a of event.artifacts) artifacts[a.id] = a;
       // The sync carries every routine, so it replaces the list (deletions while offline drop out).
       const routines = Object.fromEntries(event.routines.map((r) => [r.id, r]));
+      // A sync with only the newest messages starts the conversations it holds over (and, after a reset, all of them).
+      const windows = event.windows ? { ...(event.reset ? {} : state.windows) } : state.windows;
+      for (const w of event.windows ?? []) windows[w.threadId ?? ""] = { hasEarlier: w.hasEarlier };
       // Agents still working are sent again right after the sync, so any other "thinking" is stale.
       return {
         ...state,
+        ...(event.reset && { messages: [], loose: {} }),
+        windowed: state.windowed || !!event.windows,
+        windows,
         threads,
         artifacts,
         routines,

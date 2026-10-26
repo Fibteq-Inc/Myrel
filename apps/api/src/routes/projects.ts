@@ -19,6 +19,9 @@ import {
   CloudCli,
   TaskTarget,
   UpdateProjectSettingsInput,
+  CONVERSATION_PAGE_SIZE,
+  SYNC_PAGE_SIZE,
+  ThreadId,
 } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
@@ -343,9 +346,25 @@ export const projectRoutes = new Hono<AppEnv>()
   .get("/:id/messages", async (c) => {
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
-    const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
     const agent = await getAgentByName(c.env.PROJECT_AGENT, id);
+    // One page of a conversation, from its newest message back: `conversation` is "chat" or a thread id.
+    const conversation = c.req.query("conversation");
+    if (conversation !== undefined) {
+      const threadId = conversation === "chat" ? null : conversation;
+      if (threadId !== null && !ThreadId.safeParse(threadId).success) return c.json({ error: "invalid_input" }, 400);
+      const before = Number(c.req.query("before"));
+      const limit = Math.min(SYNC_PAGE_SIZE, Math.max(1, Number(c.req.query("limit")) || CONVERSATION_PAGE_SIZE));
+      return c.json(await agent.getConversationPage(threadId, Number.isInteger(before) && before > 0 ? before : null, limit));
+    }
+    const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
     return c.json(await agent.getMessagesAfter(after));
+  })
+  // A thread's replies with a stats line, for its usage breakdown (the conversation itself is paged).
+  .get("/:id/threads/:threadId/usage", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.PROJECT_AGENT, c.req.param("id"));
+    return c.json({ messages: await agent.threadStatsMessages(c.req.param("threadId")) });
   })
   .get("/:id/threads/:threadId/tasks", async (c) => {
     const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);

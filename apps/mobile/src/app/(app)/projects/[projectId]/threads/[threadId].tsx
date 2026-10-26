@@ -1,4 +1,12 @@
-import { threadMessages, threadPullRequests, threadSummary, threadTasks, threadUsage } from "@myrel/client";
+import {
+  conversationState,
+  findMessage,
+  threadMessages,
+  threadPullRequests,
+  threadSummary,
+  threadTasks,
+  threadUsage,
+} from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { CLOUD_RUNNER, waitsForAgent } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
@@ -43,7 +51,7 @@ export default function ThreadScreen() {
   const t = useT();
   const { threadId } = useLocalSearchParams<{ threadId: string }>();
   const { user, api } = useSession();
-  const { projectId, state, status, ready, send, emit, loadTasks } = useProject();
+  const { projectId, state, status, ready, send, emit, loadTasks, loadConversation } = useProject();
   const names = useNames(projectId);
   const thread = state.threads[threadId];
   const { locale } = useI18n();
@@ -55,12 +63,17 @@ export default function ThreadScreen() {
           .join(" · ")
       : null;
 
-  // The message that opened the thread leads the conversation.
+  // A thread the first sync did not bring (it brings only the project chat) is fetched when opened.
+  const held = conversationState(state, threadId);
+  useEffect(() => {
+    if (ready && !held.loaded && status === "open") loadConversation(threadId).catch(() => {});
+  }, [ready, held.loaded, threadId, status, loadConversation]);
+  const replies = threadMessages(state, threadId);
+  // The message that opened the thread leads the conversation, once it is scrolled back to.
   const messages = useMemo(() => {
-    const root = thread && state.messages.find((m) => m.id === thread.rootMessageId);
-    const replies = threadMessages(state, threadId);
+    const root = thread && !held.hasEarlier ? findMessage(state, thread.rootMessageId) : undefined;
     return root ? [root, ...replies] : replies;
-  }, [state, thread, threadId]);
+  }, [state, thread, held.hasEarlier, replies]);
   // Messages the working agent has not taken in yet: the newest says so, with a way to send them now.
   const waiting = thread ? messages.findLast((m) => waitsForAgent(m, thread)) : undefined;
   const onSend = useCallback(
@@ -174,7 +187,9 @@ export default function ThreadScreen() {
         <Conversation
           threadId={threadId}
           messages={messages}
-          loading={!ready}
+          loading={!ready || !held.loaded}
+          hasEarlier={held.hasEarlier}
+          onLoadEarlier={() => loadConversation(threadId, replies[0]?.seq)}
           me={user?.id ?? ""}
           names={names}
           reactions={state.reactions}
@@ -214,7 +229,13 @@ export default function ThreadScreen() {
       ) : current === "outputs" ? (
         <OutputsTab projectId={projectId} artifacts={outputs} />
       ) : current === "usage" ? (
-        <ThreadUsageTab messages={messages} />
+        <ThreadUsageTab
+          projectId={projectId}
+          threadId={threadId}
+          messages={messages}
+          complete={!held.hasEarlier}
+          version={JSON.stringify(thread?.summary?.usage ?? null)}
+        />
       ) : null}
     </>
   );

@@ -7,6 +7,11 @@ export type ProjectSocketOptions = {
   url: () => string | Promise<string>;
   /** Highest seq the caller already has (e.g. from a local cache). */
   lastSeq?: number;
+  /**
+   * Ask for only the newest this many messages of the project chat on a first sync (or after a
+   * long time away) instead of the whole history; threads are then fetched when opened.
+   */
+  recent?: number;
   onMessage?: (message: Message) => void;
   /**
    * Called instead of `onMessage` with each run of new messages (a whole sync
@@ -130,7 +135,11 @@ export class ProjectSocket {
     } else if (event.type === "sync.result") {
       // A streamed sync is still running until its last page.
       if (!event.streamed || !event.hasMore) this.syncing = false;
+      // Too far behind: the server starts over from the newest messages, which the caller drops its own for.
+      if (event.reset) this.lastSeq = 0;
       this.deliver(...event.messages);
+      // Caught up to the project's newest message, even when the messages sent (only the newest of the chat) stop earlier.
+      if (event.lastSeq !== undefined && event.lastSeq > this.lastSeq) this.lastSeq = event.lastSeq;
       if (!event.hasMore) this.opts.onSynced?.();
       else if (!event.streamed) this.requestSync();
     }
@@ -139,7 +148,8 @@ export class ProjectSocket {
   private requestSync() {
     if (this.syncing || this.ws?.readyState !== 1) return;
     this.syncing = true;
-    this.ws.send(JSON.stringify({ type: "sync", afterSeq: this.lastSeq, all: true } satisfies ClientEventInput));
+    const recent = this.opts.recent ? { recent: this.opts.recent } : {};
+    this.ws.send(JSON.stringify({ type: "sync", afterSeq: this.lastSeq, all: true, ...recent } satisfies ClientEventInput));
   }
 
   private deliver(...messages: Message[]) {

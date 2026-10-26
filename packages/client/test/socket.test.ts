@@ -47,6 +47,30 @@ afterEach(() => {
 });
 
 describe("ProjectSocket", () => {
+  it("asks for the newest messages, catches up to the project's last seq, and starts over on a reset", async () => {
+    vi.useFakeTimers();
+    const received: number[] = [];
+    new ProjectSocket({
+      url: () => "ws://test",
+      WebSocket: FakeWebSocket as unknown as typeof WebSocket,
+      recent: 60,
+      onMessage: (m) => received.push(m.seq),
+    }).connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    expect(ws.sent).toEqual([{ type: "sync", afterSeq: 0, all: true, recent: 60 }]);
+
+    // The chat's newest is 4; a thread's message 9 is newer: the next live message follows on from 9.
+    ws.receive({ type: "sync.result", messages: [msg(3), msg(4)], hasMore: false, lastSeq: 9 });
+    ws.receive({ type: "message.created", message: msg(10) });
+    expect(ws.sent).toHaveLength(1);
+
+    ws.receive({ type: "sync.result", messages: [msg(2)], hasMore: false, reset: true, lastSeq: 12 });
+    ws.receive({ type: "message.created", message: msg(13) });
+    expect(received).toEqual([3, 4, 10, 2, 13]);
+  });
+
   it("syncs on open, fills gaps and resumes from the last seq after reconnect", async () => {
     vi.useFakeTimers();
     const received: number[] = [];

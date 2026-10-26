@@ -12,6 +12,9 @@ const ROWS: ({ agent: DimensionValue[] } | { bubble: DimensionValue })[] = [
   { agent: ["85%", "50%"] },
 ];
 
+/** Enough rows to fill a tall screen; the view they sit in clips the oldest at its top. */
+const FILL = Array.from({ length: 14 }, (_, i) => ROWS[i % ROWS.length]!);
+
 /** The shape of a conversation while its messages load, in place of a spinner. Pulses like `animate-pulse` on web. */
 export function ChatSkeleton() {
   const t = useT();
@@ -30,7 +33,7 @@ export function ChatSkeleton() {
   }, [pulse]);
   return (
     <Animated.View accessible accessibilityRole="progressbar" accessibilityLabel={t("chat.loading")} style={[styles.rows, { opacity: pulse }]}>
-      {ROWS.map((row, i) =>
+      {FILL.map((row, i) =>
         "bubble" in row ? (
           <View key={i} style={[styles.bubble, { width: row.bubble }]} />
         ) : (
@@ -50,7 +53,7 @@ export function ChatSkeleton() {
 
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
-    rows: { gap: 22 },
+    rows: { gap: 22, flexShrink: 0 },
     agent: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
     mark: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.bubble },
     lines: { flex: 1, gap: 10, paddingTop: 6 },

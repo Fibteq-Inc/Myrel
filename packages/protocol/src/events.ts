@@ -6,6 +6,29 @@ import { Routine, RoutineId } from "./routines";
 import { CliId, RunnerId } from "./runner";
 import { CLOUD_RUNNER, MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
+export const SYNC_PAGE_SIZE = 200;
+
+/** How much of one conversation (the project chat, or a thread) a client holds, from its newest message. */
+export const ConversationWindow = z.object({
+  /** null: the project chat. */
+  threadId: ThreadId.nullable(),
+  /** Older messages are left on the server (GET /projects/:id/messages?thread&before). */
+  hasEarlier: z.boolean(),
+});
+export type ConversationWindow = z.infer<typeof ConversationWindow>;
+
+/** Messages a conversation page holds, newest page first: `GET /projects/:id/messages?thread=…&before=…`. */
+export const CONVERSATION_PAGE_SIZE = 60;
+
+/** One page of a conversation, oldest first, ending just before the `before` seq asked for (or at the newest). */
+export type ConversationPage = {
+  messages: Message[];
+  hasEarlier: boolean;
+  reactions: Reaction[];
+  /** A thread's first page (its oldest): the project-chat message it opened from, if asked for one. */
+  root?: Message;
+};
+
 /** Events the client sends over the project WebSocket. */
 export const ClientEvent = z.discriminatedUnion("type", [
   z.object({
@@ -74,6 +97,12 @@ export const ClientEvent = z.discriminatedUnion("type", [
      * history arrives without a round trip per page. The last page has hasMore false.
      */
     all: z.boolean().optional(),
+    /**
+     * Send only the newest this many messages of the project chat (with the messages thread cards
+     * hang under) instead of the whole history; threads are loaded when opened (`ConversationPage`).
+     * Also used after a long time away, when catching up would mean too many messages.
+     */
+    recent: z.number().int().positive().max(SYNC_PAGE_SIZE).optional(),
   }),
 ]);
 export type ClientEvent = z.infer<typeof ClientEvent>;
@@ -105,6 +134,15 @@ export const ServerEvent = z.discriminatedUnion("type", [
     artifacts: z.array(Artifact).default([]),
     /** Every routine in the project, current state. */
     routines: z.array(Routine).default([]),
+    /**
+     * Set when the sync answered `recent` with only the newest messages: the conversations it holds
+     * from their newest message, each saying whether older ones are left on the server.
+     */
+    windows: z.array(ConversationWindow).optional(),
+    /** The client should drop the messages it holds first: they are too far behind to catch up. */
+    reset: z.boolean().optional(),
+    /** The project's newest seq: the client is caught up to it even when the messages it holds stop earlier. */
+    lastSeq: z.number().int().nonnegative().optional(),
   }),
   /** A thread was created or changed (title, status, checklist, resolved). */
   z.object({ type: z.literal("thread.updated"), thread: Thread }),
@@ -139,4 +177,3 @@ export const ServerEvent = z.discriminatedUnion("type", [
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
-export const SYNC_PAGE_SIZE = 200;

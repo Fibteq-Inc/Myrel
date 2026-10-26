@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import { ArrowDown } from "lucide-react-native";
 import { type ComponentRef, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
@@ -20,6 +20,8 @@ import { MessageView, type Names, Thinking } from "./message";
 export function Conversation({
   messages,
   loading = false,
+  hasEarlier = false,
+  onLoadEarlier,
   me,
   names,
   reactions,
@@ -42,6 +44,9 @@ export function Conversation({
   messages: Message[];
   /** The first sync is still running: a placeholder instead of messages, so the list opens at its newest one. */
   loading?: boolean;
+  /** Older messages are still on the server: scrolling up to the oldest held fetches the page before it. */
+  hasEarlier?: boolean;
+  onLoadEarlier?: () => Promise<void>;
   me: string;
   names: Names;
   reactions: Record<string, Reaction[]>;
@@ -92,6 +97,14 @@ export function Conversation({
     seen.current = newest?.id;
     if (sent) list.current?.scrollToOffset({ offset: 0, animated: true });
   }, [newest, me]);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const loadEarlier = () => {
+    if (loading || !hasEarlier || loadingEarlier || !onLoadEarlier) return;
+    setLoadingEarlier(true);
+    onLoadEarlier()
+      .catch(() => {})
+      .finally(() => setLoadingEarlier(false));
+  };
   // Far from the newest message, a button takes the reader back down in one tap.
   const [away, setAway] = useState(false);
   // KeyboardAvoidingView measures itself relative to its parent, so anything
@@ -136,6 +149,16 @@ export function Conversation({
             onScroll={(e) => setAway(e.nativeEvent.contentOffset.y > AWAY)}
             scrollEventThrottle={100}
             ListHeaderComponent={working ? <Thinking label={working} /> : undefined}
+            // Inverted: the end of the list is its top, the oldest message held.
+            onEndReached={loadEarlier}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              hasEarlier && !loading ? (
+                <View style={styles.earlier}>
+                  <ActivityIndicator color={colors.subtle} />
+                </View>
+              ) : undefined
+            }
             ListEmptyComponent={
               loading ? (
                 <View style={styles.loading}>
@@ -220,6 +243,7 @@ const useStyles = makeStyles((colors) =>
     },
     empty: { flex: 1, alignItems: "center", justifyContent: "center", transform: [{ scaleY: -1 }] },
     // Flipped back like the empty state; the placeholder sits where the newest messages will.
-    loading: { flex: 1, justifyContent: "flex-end", transform: [{ scaleY: -1 }] },
+    loading: { flex: 1, justifyContent: "flex-end", overflow: "hidden", transform: [{ scaleY: -1 }] },
+    earlier: { alignItems: "center", paddingVertical: 8 },
   }),
 );

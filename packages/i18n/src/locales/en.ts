@@ -124,6 +124,7 @@ export const en = {
   // Project chat
   "chat.membersLabel": { one: "1 member", other: "{count} members" },
   "chat.earlier": { one: "Show 1 earlier message", other: "Show {count} earlier messages" },
+  "chat.earlierMore": "Show earlier messages",
   "chat.loading": "Loading messages",
   "chat.toEnd": "Jump to latest",
   "chat.placeholder": "Give Myrel a task",

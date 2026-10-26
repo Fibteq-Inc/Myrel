@@ -1,4 +1,12 @@
-import { threadMessages, threadPullRequests, threadSummary, threadTasks, threadUsage } from "@myrel/client";
+import {
+  conversationState,
+  findMessage,
+  threadMessages,
+  threadPullRequests,
+  threadSummary,
+  threadTasks,
+  threadUsage,
+} from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { CLOUD_RUNNER, decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
@@ -30,7 +38,7 @@ import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
 import { CHAT_MIN, PANEL_MIN, useThreadPanel } from "./panel-state";
-import { ThreadUsage } from "./thread-usage";
+import { ThreadUsageTab } from "./thread-usage";
 
 const CONVERSATION = "conversation";
 
@@ -128,7 +136,20 @@ export function ThreadPanel({
     };
     const at = tabs.findIndex((tab) => tab.id === "changes") + 1;
     tabs.splice(at, 0, pr);
-    tabs.push({ id: "usage", label: t("workspace.usage"), icon: ChartColumn, content: <ThreadUsage messages={messages} /> });
+    tabs.push({
+      id: "usage",
+      label: t("workspace.usage"),
+      icon: ChartColumn,
+      content: (
+        <ThreadUsageTab
+          projectId={project.id}
+          threadId={thread.id}
+          messages={messages}
+          complete={!conversationState(state, thread.id).hasEarlier}
+          version={JSON.stringify(thread.summary?.usage ?? null)}
+        />
+      ),
+    });
   }
   const tool = tabs.some((tab) => tab.id === panel.tool) ? panel.tool : null;
   const current = tabs.find((tab) => tab.id === tool);
@@ -338,15 +359,23 @@ function Conversation({
   className?: string;
 }) {
   const t = useT();
-  const { project, names, state, send, emit } = useProjectContext();
+  const { project, names, state, status, send, emit, loadConversation } = useProjectContext();
   const thread = state.threads[threadId]!;
+  // A thread the first sync did not bring (it brings only the project chat) is fetched when opened.
+  const held = conversationState(state, thread.id);
+  useEffect(() => {
+    if (!held.loaded && status === "open") loadConversation(thread.id).catch(() => {});
+  }, [held.loaded, thread.id, status, loadConversation]);
   const pickable = usePickableClis(project, thread.runner?.id);
   const ownWorkspaces = useOwnWorkspaces(project);
   // A project that always works in the cloud has nothing to place.
   const placeable = useQuery(projectSettingsQuery(project.id)).data?.taskTarget !== "cloud";
-  const root = state.messages.find((m) => m.id === thread.rootMessageId);
+  const root = findMessage(state, thread.rootMessageId);
   const messages = threadMessages(state, thread.id);
-  const history = useHistoryWindow(messages);
+  const history = useHistoryWindow(messages, {
+    hasEarlier: held.hasEarlier,
+    load: () => loadConversation(thread.id, messages[0]?.seq),
+  });
   const answers = decisionAnswers(messages);
   // A tap on a card is shown on the card itself, not again as a bubble.
   const picks = decisionPicks(messages);
@@ -384,71 +413,79 @@ function Conversation({
         </div>
       )}
       <ScrollToEnd
-        last={last?.id}
+        // Brought to the end once the thread's messages arrive, even when the newest came in live before.
+        last={held.loaded ? last?.id : undefined}
         busy={active}
         mine={last?.authorKind === "user" && last.authorId === me}
         className="flex-1 overflow-y-auto"
       >
-        <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
-          {root && !history.hidden && (
-            <MessageView
-              message={root}
-              me={me}
-              names={names}
-              reactions={state.reactions[root.id]}
-              onEdit={(body) => emit({ type: "message.edit", messageId: root.id, body })}
-            />
-          )}
-          {!history.hidden && <ThreadRunnerNote thread={thread} />}
-          {!history.hidden && <ThreadCliNote thread={thread} />}
-          <EarlierMessages hidden={history.hidden} onShow={history.showEarlier} />
-          {history.visible.map((m) => {
-            if (picks.has(m.id)) return null;
-            const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
-            if (plan !== null) {
-              const current = m.id === currentPlan;
-              return (
-                <PlanCard
-                  key={m.id}
-                  id={planAnchor(m.id)}
-                  text={current && thread.statusText ? thread.statusText : plan}
-                  live={current && working}
-                />
-              );
-            }
-            const update = m.authorKind === "agent" ? parsePlanUpdate(m.body) : null;
-            if (update) {
-              return (
-                <PlanUpdateNote key={m.id} update={update} onOpenPlan={thread.statusText ? () => setPlanOpen(true) : undefined} />
-              );
-            }
-            return (
+        {!held.loaded ? (
+          // The thread's shape while its newest messages load, at the bottom where they will be.
+          <div className={cn("mx-auto flex h-full w-full flex-col justify-end overflow-hidden px-5 py-6", wide ? "max-w-[760px]" : "")}>
+            <ChatSkeleton />
+          </div>
+        ) : (
+          <div className={cn("mx-auto flex w-full flex-col gap-6 px-5 py-6", wide ? "max-w-[760px]" : "")}>
+            {root && !history.more && (
               <MessageView
-                key={m.id}
-                message={m}
+                message={root}
                 me={me}
                 names={names}
-                reactions={state.reactions[m.id]}
-                decision={{ answer: answers.get(m.id), onChoose: choose }}
-                onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
-                onInterrupt={m.id === waiting?.id ? () => api.interruptThread(project.id, thread.id) : undefined}
-              >
-                {m.artifacts?.length ? (
-                  <ArtifactCards
-                    projectId={project.id}
-                    threadId={thread.id}
-                    refs={m.artifacts}
-                    artifacts={state.artifacts}
-                    openId={openArtifact}
+                reactions={state.reactions[root.id]}
+                onEdit={(body) => emit({ type: "message.edit", messageId: root.id, body })}
+              />
+            )}
+            {!history.more && <ThreadRunnerNote thread={thread} />}
+            {!history.more && <ThreadCliNote thread={thread} />}
+            <EarlierMessages hidden={history.hidden} more={history.more} loading={history.loading} onShow={history.showEarlier} />
+            {history.visible.map((m) => {
+              if (picks.has(m.id)) return null;
+              const plan = m.authorKind === "agent" ? planChecklist(m.body) : null;
+              if (plan !== null) {
+                const current = m.id === currentPlan;
+                return (
+                  <PlanCard
+                    key={m.id}
+                    id={planAnchor(m.id)}
+                    text={current && thread.statusText ? thread.statusText : plan}
+                    live={current && working}
                   />
-                ) : null}
-                {m.authorKind === "agent" && <PullRequestCards pullRequests={mentionedPullRequests(m.body, pullRequests)} />}
-              </MessageView>
-            );
-          })}
-          <PullRequestCards pullRequests={unmentioned} />
-          {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
-        </div>
+                );
+              }
+              const update = m.authorKind === "agent" ? parsePlanUpdate(m.body) : null;
+              if (update) {
+                return (
+                  <PlanUpdateNote key={m.id} update={update} onOpenPlan={thread.statusText ? () => setPlanOpen(true) : undefined} />
+                );
+              }
+              return (
+                <MessageView
+                  key={m.id}
+                  message={m}
+                  me={me}
+                  names={names}
+                  reactions={state.reactions[m.id]}
+                  decision={{ answer: answers.get(m.id), onChoose: choose }}
+                  onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
+                  onInterrupt={m.id === waiting?.id ? () => api.interruptThread(project.id, thread.id) : undefined}
+                >
+                  {m.artifacts?.length ? (
+                    <ArtifactCards
+                      projectId={project.id}
+                      threadId={thread.id}
+                      refs={m.artifacts}
+                      artifacts={state.artifacts}
+                      openId={openArtifact}
+                    />
+                  ) : null}
+                  {m.authorKind === "agent" && <PullRequestCards pullRequests={mentionedPullRequests(m.body, pullRequests)} />}
+                </MessageView>
+              );
+            })}
+            <PullRequestCards pullRequests={unmentioned} />
+            {active && <Thinking label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))} />}
+          </div>
+        )}
       </ScrollToEnd>
       <div className={cn("mx-auto w-full", wide ? "max-w-[808px]" : "")}>
         <Composer

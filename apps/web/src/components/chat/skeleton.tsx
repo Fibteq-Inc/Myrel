@@ -9,12 +9,18 @@ const ROWS: ({ agent: string[] } | { bubble: string })[] = [
   { agent: ["w-5/6", "w-1/2"] },
 ];
 
-/** The shape of a conversation while its messages load, in place of a spinner. */
+/** Enough rows to fill a tall window; the area they sit in clips the oldest at its top. */
+const FILL = Array.from({ length: 18 }, (_, i) => ROWS[i % ROWS.length]!);
+
+/**
+ * The shape of a conversation while its messages load, in place of a spinner. Put it at the bottom
+ * of an area that hides what overflows (`justify-end overflow-hidden`), so it fills the area from the newest end.
+ */
 export function ChatSkeleton() {
   const t = useT();
   return (
-    <div role="status" aria-label={t("chat.loading")} className="flex animate-pulse flex-col gap-7">
-      {ROWS.map((row, i) =>
+    <div role="status" aria-label={t("chat.loading")} className="flex flex-none animate-pulse flex-col gap-7">
+      {FILL.map((row, i) =>
         "bubble" in row ? (
           <div key={i} className="flex justify-end">
             <div className={`h-10 ${row.bubble} rounded-2xl rounded-br-md bg-bubble`} />
