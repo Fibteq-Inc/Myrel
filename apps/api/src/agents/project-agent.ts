@@ -28,6 +28,7 @@ import {
   type RoutineSchedule,
   type RoutineTarget,
   type ServerEvent,
+  CLOUD_RUNNER,
   SYNC_PAGE_SIZE,
   type Thread,
   type ThreadCli,
@@ -421,6 +422,11 @@ export class ProjectAgent extends Agent<Env> {
           this.updateThread(thread.id, { runner: null });
           return;
         }
+        // The cloud runs on nobody's computer, so any member sends a thread there.
+        if (event.runnerId === CLOUD_RUNNER) {
+          this.updateThread(thread.id, { runner: { id: CLOUD_RUNNER, by: "person", reason: null } });
+          return;
+        }
         // Like the CLI: a turn runs on a computer as its owner, so only they send a thread there.
         const computer = await workspaceClis(this.env, this.name, { runnerId: event.runnerId });
         if (computer?.ownerId !== userId) {
@@ -430,7 +436,7 @@ export class ProjectAgent extends Agent<Env> {
             message: "A thread can work only on one of this project's computers, and only the person whose computer it is can send it there.",
           });
         }
-        this.updateThread(thread.id, { runner: { id: event.runnerId, by: "person" } });
+        this.updateThread(thread.id, { runner: { id: event.runnerId, by: "person", reason: null } });
         return;
       }
       case "thread.model": {
@@ -613,9 +619,11 @@ export class ProjectAgent extends Agent<Env> {
    * then any member picks among the cloud CLIs (CloudCli), which run in the thread's sandbox with
    * the project's model. Otherwise only the computer's owner picks, among the CLIs installed there.
    * `localOnly`: a pick that only means something on the computer (its model and effort).
-   * `runnerId`: the computer the thread was set to; else the person's own among the project's, if any.
+   * `runnerId`: the computer the thread was set to (CLOUD_RUNNER: the cloud); else the person's own
+   * among the project's, if any.
    */
   private async offeredClis(userId: string, wanted: CliId[], localOnly = false, runnerId?: string): Promise<CliId[]> {
+    if (runnerId === CLOUD_RUNNER) return localOnly ? [] : [...new Set(wanted)].filter((c) => CloudCli.safeParse(c).success);
     const computer = await workspaceClis(this.env, this.name, runnerId ? { runnerId } : { ownerId: userId });
     if (!localOnly) {
       const [row] = await createDb(this.env.DB).select({ taskTarget: schema.projects.taskTarget }).from(schema.projects).where(eq(schema.projects.id, this.name));
@@ -638,10 +646,11 @@ export class ProjectAgent extends Agent<Env> {
     ackMessageId: string | null = null,
     id = createId("thread"),
     cli: ThreadCli | null = null,
+    runner: ThreadRunner | null = null,
   ): Thread {
     const now = new Date().toISOString();
-    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, created_at, updated_at)
-      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${now}, ${now})`;
+    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, runner, created_at, updated_at)
+      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${runner ? JSON.stringify(runner) : null}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
     this.syncActivity();
@@ -1352,12 +1361,12 @@ export class ProjectAgent extends Agent<Env> {
         reacted?.add(messageId);
         this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID });
       },
-      startThread: async ({ rootMessageId, title, brief, ack, projectAck, cli }) => {
+      startThread: async ({ rootMessageId, title, brief, ack, projectAck, cli, runner }) => {
         // The id comes first so the "on it" line can carry the brief before the thread exists.
         const relay: MessageRelay = { kind: "brief", threadId: createId("thread"), note: brief };
         // The project-chat line goes first so the card can sit under it: ask, "on it", card.
         const ackMessage = projectAck ? post(projectAck, relay) : null;
-        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null, relay.threadId, cli ?? null);
+        const thread = this.createThread(rootMessageId, title, ackMessage?.id ?? null, relay.threadId, cli ?? null, runner ?? null);
         relayInThread(relay, ack || relayLine("brief", brief));
         const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
         await agent.start({ projectId: this.name, threadId: thread.id, brief, actor: startedFor });

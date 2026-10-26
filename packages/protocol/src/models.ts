@@ -167,14 +167,20 @@ export const ThreadModel = z.object({
 });
 export type ThreadModel = z.infer<typeof ThreadModel>;
 
+/** ThreadRunner's id for a thread set to work in the cloud, whoever asks in it. */
+export const CLOUD_RUNNER = "cloud";
+
 /**
- * The computer a thread works on, among the project's local folders. by: "person" (its owner picked
- * it; the thread waits for it) or "auto" (the thread's first local turn ran there, so its CLI session
- * and uncommitted work are there: it stays unless the computer leaves the project).
+ * Where a thread works: one of the project's computers, or the cloud (id CLOUD_RUNNER). by: "person"
+ * (picked in the thread: a computer by its owner, the thread waiting for it; the cloud by any member),
+ * "auto" (the thread's first local turn ran on that computer, so its CLI session and uncommitted work
+ * are there: it stays unless the computer leaves the project) or "coordinator" (it opened the thread
+ * in the cloud, for `reason`).
  */
 export const ThreadRunner = z.object({
   id: z.string().max(60),
-  by: z.enum(["person", "auto"]),
+  by: z.enum(["person", "auto", "coordinator"]),
+  reason: z.string().max(300).nullable().default(null),
 });
 export type ThreadRunner = z.infer<typeof ThreadRunner>;
 

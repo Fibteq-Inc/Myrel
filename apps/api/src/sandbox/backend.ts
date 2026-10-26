@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { type AgentStart, CLI_NAMES, CliId, CloudCli, type ProjectWorkspace, type TaskGithub, type TaskModel, TaskTarget, type ThreadRunner } from "@myrel/protocol";
+import { type AgentStart, CLI_NAMES, CLOUD_RUNNER, CliId, CloudCli, type ProjectWorkspace, type TaskGithub, type TaskModel, TaskTarget, type ThreadRunner } from "@myrel/protocol";
 import { claudeModel, type ModelConfig, type RunnerBackend, type TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -117,7 +117,7 @@ export type TaskPlace =
  * turn waits for the computer rather than quietly moving to the cloud, and says so when that CLI
  * is gone from it.
  *
- * `runner`: the computer the thread was set to (it waits for that one) or first ran on (it stays
+ * `runner`: the cloud, or the computer the thread was set to (it waits for that one) or first ran on (it stays
  * there: its CLI session and uncommitted work are there). Without one, when the project's computer
  * for the person is offline, another of theirs in the project that is online (and has the CLI) does.
  */
@@ -128,6 +128,8 @@ export async function taskPlace(
   cli?: string | null,
   runner?: ThreadRunner | null,
 ): Promise<TaskPlace> {
+  // A thread set to the cloud (by a member or the coordinator) works there whoever asks.
+  if (runner?.id === CLOUD_RUNNER) return { kind: "cloud" };
   const [row] = await createDb(env.DB)
     .select({ taskTarget: schema.projects.taskTarget })
     .from(schema.projects)

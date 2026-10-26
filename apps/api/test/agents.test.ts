@@ -237,6 +237,29 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("opens a thread in the cloud when the coordinator says why, even with the person's computer online", async () => {
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      const message_id = newMessageId(req.prompt);
+      const input = { message_id, title: "Push", instructions: "Push the branch.", project_ack: "Bulutta başlıyorum.", cloud: true };
+      // First without cloud_reason; after the tool error (two more messages), with it.
+      if (req.turns === 1) return { text: "", toolCalls: [call("start_thread", input)] };
+      if (req.turns === 3) return { text: "", toolCalls: [call("start_thread", { ...input, cloud_reason: "Bu bilgisayarda GitHub kimliği yok." })] };
+      return { text: "", toolCalls: [] };
+    });
+    const { ws, agent, turns } = await setup();
+    ws.send(JSON.stringify({ type: "message.send", body: "Bulutta push et" }));
+
+    const thread = await until(async () => (await agent.listThreads())[0] ?? null, "thread");
+    expect(thread.runner).toEqual({ id: "cloud", by: "coordinator", reason: "Bu bilgisayarda GitHub kimliği yok." });
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    // The cloud turn fails here: this test runtime has no sandbox. It never reached the computer.
+    await until(async () => (await threadAgent.getTasks())[0]?.status === "failed", "cloud turn");
+    expect((await threadAgent.getTasks())[0]).toMatchObject({ backend: "sandbox" });
+    expect(turns).toHaveLength(0);
+    ws.close();
+  });
+
   it("refuses a second thread for the same ask sent again", async () => {
     setFakeModel((req) => {
       if (!isCoordinator(req)) return { text: "", toolCalls: [] };
