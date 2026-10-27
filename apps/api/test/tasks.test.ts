@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { hashAgentToken } from "../src/agents/harness-agent";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { readWorkspace, threadWorkspace } from "../src/sandbox/workspace";
+import { toBase64 } from "../src/skills/store";
 import { resetFakeModel } from "./fake-llm";
 
 const BASE = "http://myrel.test";
@@ -220,6 +221,46 @@ describe("the cloud agent", () => {
     expect(await threadAgent.modelCaller("tok")).toMatchObject({ taskId: "task_sandbox" });
     expect(await threadAgent.modelCaller("other")).toBeNull();
   });
+
+  it("hands a turn a 5 MB skill whole, and only to the running turn's token", async () => {
+    const { project, token, thread, threadAgent } = await threadSetup();
+    // Five files of almost 1 MB each plus SKILL.md: just under the 5 MB a skill may have.
+    const MB = 1024 * 1024;
+    const big = (n: number) => {
+      const bytes = new Uint8Array(MB - 1024);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + n) & 0xff;
+      return bytes;
+    };
+    const md = "---\nname: big-data\ndescription: Large reference tables.\n---\nRead data/.";
+    const files = [{ path: "SKILL.md", content: toBase64(new TextEncoder().encode(md)) }];
+    for (let n = 0; n < 5; n++) files.push({ path: `data/part-${n}.bin`, content: toBase64(big(n)) });
+    const res = await api(`/api/projects/${project.id}/skills`, { method: "POST", token, body: JSON.stringify({ kind: "upload", files }) });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const { skill } = (await res.json()) as { skill: { id: string; size: number } };
+    expect(skill.size).toBeGreaterThan(4.9 * MB);
+
+    await runInDurableObject(threadAgent as unknown as DurableObjectStub, async (_, state) => {
+      const sql = state.storage.sql;
+      const spec = { taskId: "task_skills", title: "x", prompt: "x", harness: "opencode", openPr: false, timeoutSec: 60 };
+      sql.exec(
+        "INSERT INTO tasks (id, spec, backend, status, progress, language, created_at) VALUES (?, ?, 'sandbox', 'running', '{}', 'en', ?)",
+        spec.taskId, JSON.stringify(spec), new Date().toISOString(),
+      );
+      const given = [{ id: skill.id, name: "big-data", tame: false }, { id: "skill_gone", name: "gone" }];
+      const meta = { agent_token: await hashAgentToken("tok"), agent_skills: JSON.stringify(given), project_id: project.id, thread_id: thread.id };
+      for (const [key, value] of Object.entries(meta)) {
+        sql.exec("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+      }
+    });
+    expect((await api(`/api/agent-mcp/${thread.id}/skills`, { token: "other" })).status).toBe(401);
+    const got = await api(`/api/agent-mcp/${thread.id}/skills`, { token: "tok" });
+    expect(got.status).toBe(200);
+    const bundle = (await got.json()) as { skills: { name: string; files: { path: string; content: string }[] }[] };
+    // A skill whose files are gone is left out.
+    expect(bundle.skills.map((s) => s.name)).toEqual(["big-data"]);
+    expect(bundle.skills[0]!.files.map((f) => f.path).sort()).toEqual(files.map((f) => f.path).sort());
+    for (const f of files) expect(bundle.skills[0]!.files.find((g) => g.path === f.path)?.content).toBe(f.content);
+  }, 30_000);
 
   it("learns the address the sandbox calls back on when someone opens the project", async () => {
     const { ws, projectAgent } = await threadSetup();

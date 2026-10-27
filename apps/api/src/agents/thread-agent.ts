@@ -19,7 +19,6 @@ import {
   type MarkMemoryInput,
   type Message,
   type MessageStats,
-  type SkillBundle,
   type Task,
   type TaskStatus,
   type TerminalLine,
@@ -42,7 +41,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { type ConnectorRow, readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { findOffers, knownConnectors, searchOffers, signInOffer } from "../connectors/suggest";
-import { fromBase64, readBundle, tameSkillMd, toBase64, type TurnSkill, turnSkills } from "../skills/store";
+import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
@@ -1076,26 +1075,14 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
-   * The files of the running turn's skills (GET /api/agent-mcp/:threadId/skills), for the sandbox
-   * or the runner to put next to the agent. Only the running turn's token opens them. Callable over RPC.
+   * The skills the running turn was given (GET /api/agent-mcp/:threadId/skills), whose files the
+   * route streams to the sandbox or the runner (see streamSkillBundle). Only the running turn's
+   * token opens them. Callable over RPC.
    */
-  async skillBundle(token: string): Promise<SkillBundle | null> {
+  async givenSkills(token: string): Promise<GivenSkill[] | null> {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return null;
-    const given = JSON.parse(this.getMeta("agent_skills") ?? "[]") as { id: string; name: string; tame?: boolean }[];
-    const skills = await Promise.all(
-      given.map(async (s) => {
-        const files = await readBundle(this.env, s.id);
-        if (!s.tame) return { name: s.name, files };
-        return {
-          name: s.name,
-          files: files.map((f) =>
-            f.path === "SKILL.md" ? { ...f, content: toBase64(new TextEncoder().encode(tameSkillMd(new TextDecoder().decode(fromBase64(f.content))))) } : f,
-          ),
-        };
-      }),
-    );
-    return { skills: skills.filter((s) => s.files.length) };
+    return JSON.parse(this.getMeta("agent_skills") ?? "[]") as GivenSkill[];
   }
 
   /**

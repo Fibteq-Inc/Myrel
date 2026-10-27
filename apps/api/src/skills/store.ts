@@ -150,6 +150,40 @@ export async function turnSkills(env: Env, where: { projectId: string; userId: s
   return out;
 }
 
+/** A skill a turn was given, as the thread remembers it. `tame`: its SKILL.md goes tamed (see tameSkillMd). */
+export type GivenSkill = { id: string; name: string; tame?: boolean };
+
+/**
+ * A turn's skills as a SkillBundle in JSON, read from storage and sent one skill at a time, so a
+ * turn with many large skills never holds them all in memory or in one RPC message.
+ */
+export function streamSkillBundle(env: Env, given: GivenSkill[]): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  const next = given.values();
+  let sent = 0;
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(enc.encode('{"skills":['));
+    },
+    async pull(controller) {
+      for (let s = next.next(); !s.done; s = next.next()) {
+        const { id, name, tame } = s.value;
+        const files = await readBundle(env, id);
+        if (!files.length) continue;
+        const out = tame
+          ? files.map((f) =>
+              f.path === "SKILL.md" ? { ...f, content: toBase64(enc.encode(tameSkillMd(new TextDecoder().decode(fromBase64(f.content))))) } : f,
+            )
+          : files;
+        controller.enqueue(enc.encode((sent++ ? "," : "") + JSON.stringify({ name, files: out })));
+        return;
+      }
+      controller.enqueue(enc.encode("]}"));
+      controller.close();
+    },
+  });
+}
+
 export function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));

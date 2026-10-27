@@ -29,8 +29,11 @@ export const SkillPath = z
   .regex(/^[\w@+=,.~ -]+(\/[\w@+=,.~ -]+)*$/, "Invalid file path.")
   .refine((p) => !p.split("/").some((part) => part === "." || part === ".."), "Invalid file path.");
 
-/** Limits of one skill, so a turn's skills stay small enough to hand over. */
-export const SKILL_LIMITS = { files: 200, bytes: 2 * 1024 * 1024, fileBytes: 1024 * 1024 } as const;
+/**
+ * Limits of one skill, so a turn's skills stay small enough to hand over. The server checks them on
+ * every upload and GitHub import (checkSkillFiles); a turn's bundle is streamed one skill at a time.
+ */
+export const SKILL_LIMITS = { files: 200, bytes: 5 * 1024 * 1024, fileBytes: 1024 * 1024 } as const;
 /** At most this many skills reach one turn; the rest wait (project ones come first). */
 export const MAX_TURN_SKILLS = 40;
 
