@@ -117,6 +117,12 @@ such a step fails and the run goes on. Stopping a turn from Myrel interrupts it 
 session is whole for the next turn. A message you write in the thread while it works goes into the running turn at
 once (`turn/steer`, runner 0.23.0 or later), instead of with its next call to one of Myrel's tools. Set `MYREL_CODEX_EXEC=1` in the runner's environment to keep `codex exec`.
 
+Claude Code takes the prompt as streaming input (`--input-format stream-json`, runner 0.26.0 or later, where the
+installed Claude Code has `--replay-user-messages`). A message you write in the thread while it works goes into the
+running turn at its next step, after the tool it is running, instead of with its next call to one of Myrel's tools.
+Stopping a turn from Myrel interrupts it the way Esc does in Claude Code, so the session is whole for the next turn.
+Set `MYREL_CLAUDE_ONESHOT=1` in the runner's environment to give it the prompt on a stdin that ends at once, as before.
+
 Subagents show in the thread's Terminal tab (runner 0.24.0 or later): Claude Code's Agent tool and the agents Codex's
 app server spawns each get a line when they start (with what they are for) and when they end (with their answer), and
 their steps show indented under their name. Codex subagents' tokens count toward the turn's usage. From 0.25.0 the

@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ADAPTERS, type ParseState } from "../src/clis";
 import { loadConfig, type RunnerConfig, SessionStore, saveConfig, shareFolder, unshareFolder } from "../src/config";
 import { readRunning, saveInterrupted, takeInterrupted, writeRunning } from "../src/restart";
@@ -306,6 +306,10 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
 });
 
 describe.skipIf(process.platform === "win32")("TaskRunner", () => {
+  // These stand-ins take the prompt on a stdin that ends at once (streaming input: claude-stream.test.ts).
+  beforeEach(() => void (process.env.MYREL_CLAUDE_ONESHOT = "1"));
+  afterEach(() => void delete process.env.MYREL_CLAUDE_ONESHOT);
+
   /** A stand-in `claude` on PATH that echoes its prompt and cwd as stream-json. */
   async function fakeClaude(script: string) {
     const bin = join(home, "bin");

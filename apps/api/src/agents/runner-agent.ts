@@ -257,12 +257,13 @@ export class RunnerAgent extends Agent<Env> {
 
   /**
    * Hands people's new messages to a running task's CLI mid-turn (feature "steer"). True once the CLI
-   * took them; false when it cannot (another CLI, an older runner, the turn just ended). Callable over RPC.
+   * took them; false when it cannot (another CLI, an older runner, the turn just ended). feature: the one
+   * the task's CLI needs ("steer-claude" for Claude Code). Callable over RPC.
    */
-  async steerTask(taskId: string, text: string): Promise<boolean> {
+  async steerTask(taskId: string, text: string, feature: RunnerFeature = "steer"): Promise<boolean> {
     const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`;
     if (task?.status !== "running") return false;
-    const answer = await this.ask({ type: "task.steer", taskId, text }, "steer");
+    const answer = await this.ask({ type: "task.steer", taskId, text }, feature);
     return answer.ok !== false && answer.type === "task.steered" && answer.taken;
   }
 

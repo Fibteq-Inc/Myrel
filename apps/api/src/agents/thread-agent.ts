@@ -14,6 +14,7 @@ import {
   formatPlanUpdate,
   type PlanUpdate,
   type ProjectWorkspace,
+  type RunnerFeature,
   type LineAgent,
   type MarkMemoryInput,
   type Message,
@@ -224,6 +225,8 @@ const GITHUB_RENEW_SEC = 45 * 60;
  * is ended for it (some models keep calling tools after their last reply).
  */
 const FINISH_AFTER_REPLY_SEC = 60;
+/** The runner feature that hands new messages to a running turn of each CLI that takes them. */
+const STEER_FEATURES: Record<string, RunnerFeature> = { codex: "steer", claude: "steer-claude" };
 /** How long a choice card waits on the coordinator before it goes to the person anyway. */
 const QUESTION_TIMEOUT_SEC = 120;
 /** The coordinator stops a thread's running turn at most once in this long, so its notes cannot keep the thread from working. */
@@ -1712,16 +1715,18 @@ export class ThreadAgent extends Agent<Env> {
   async steerNews(): Promise<void> {
     const row = this.runningTask();
     const spec = row?.backend === "local" ? (JSON.parse(row.spec) as StoredSpec) : null;
-    // Only Codex's app server takes them; asking any other CLI would only hold them up meanwhile.
-    if (!row || !spec?.runnerId || !spec.agent || spec.harness !== "codex") return;
-    if (!(await runnerHasFeature(this.env, spec.runnerId, "steer"))) return;
+    // Only Codex's app server and Claude Code's streaming input take them; asking any other CLI would
+    // only hold them up meanwhile.
+    const feature = STEER_FEATURES[spec?.harness ?? ""];
+    if (!row || !spec?.runnerId || !spec.agent || !feature) return;
+    if (!(await runnerHasFeature(this.env, spec.runnerId, feature))) return;
     const news = await this.pendingNews();
     if (!news) return;
     const before = { dirty: this.getMeta("dirty"), wakeEdit: this.getMeta("wake_edit"), wakeNote: this.getMeta("wake_note") };
     if (!this.claimNews(news)) return;
     const claimed = this.getMeta("edits_taken") ?? "{}";
     const runner = await getAgentByName(this.env.RUNNER_AGENT, spec.runnerId);
-    const taken = await runner.steerTask(row.id, news.text).catch((err) => (console.warn("steering the running turn failed", err), false));
+    const taken = await runner.steerTask(row.id, news.text, feature).catch((err) => (console.warn("steering the running turn failed", err), false));
     if (taken) return this.newsDelivered(news);
     // Not taken: they wait for the agent's next call to Myrel (or the next turn), as before.
     if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.last || (this.getMeta("edits_taken") ?? "{}") !== claimed) return;

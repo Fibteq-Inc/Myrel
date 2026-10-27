@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunnerConfig, SessionStore } from "../src/config";
 import { TaskRunner } from "../src/tasks";
 import { listWorktrees, pruneWorktrees, removeWorktree, threadWorktree } from "../src/worktrees";
@@ -31,6 +31,9 @@ beforeEach(async () => {
 });
 
 describe.skipIf(process.platform === "win32")("thread worktrees", () => {
+  // The stand-in claude takes the prompt on a stdin that ends at once.
+  beforeEach(() => void (process.env.MYREL_CLAUDE_ONESHOT = "1"));
+  afterEach(() => void delete process.env.MYREL_CLAUDE_ONESHOT);
   it("gives each thread its own worktree and branch, reused by its later tasks", async () => {
     const a = await threadWorktree(repo, A);
     const b = await threadWorktree(repo, B);

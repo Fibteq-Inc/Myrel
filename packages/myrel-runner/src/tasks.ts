@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
 import { type AppServerAsk, AppServerTurn, type AppServerTurnOptions, approveAccess } from "./app-server";
-import { ADAPTERS, type CliAdapter, hasAppServer, modelFlags, type ParseState, safeModel } from "./clis";
+import { ClaudeStreamTurn } from "./claude-stream";
+import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { GitCredentials } from "./github";
 import { downloadSkills, type RunSkills } from "./skills";
@@ -40,8 +41,8 @@ export type TaskRunnerOptions = {
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
 export class TaskRunner {
   private readonly running = new Map<string, ChildProcess>();
-  /** Running tasks' app server turns, which stop by interrupting the turn. */
-  private readonly turns = new Map<string, AppServerTurn>();
+  /** Running tasks' turns that take new messages mid-turn and stop by interrupting (Codex's app server, Claude Code's streaming input). */
+  private readonly turns = new Map<string, Pick<AppServerTurn, "steer" | "interrupt">>();
   /** The worktree each running task works in. */
   private readonly worktrees = new Map<string, string>();
   /** Tasks the server asked to stop. */
@@ -147,7 +148,9 @@ export class TaskRunner {
       // Codex runs as its app server where it has one, which can ask the person about a step.
       const appServer = adapter.appServer && (await hasAppServer(adapter.bin)) ? { ...adapter.appServer({ access: config.access, dirs, asks: !!ask }), ask } : undefined;
       if (appServer) log("  as its app server");
-      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup, appServer };
+      // Claude Code keeps its stdin open while the turn runs, so new messages can go in mid-turn.
+      const stream = !!adapter.streamInput && (await hasStreamInput(adapter.bin));
+      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup, appServer, stream };
       const retry = await this.attempt(task, run, session?.id, short ?? task.prompt);
       if (retry) {
         log(`  could not resume the ${adapter.id} session; starting a new one`);
@@ -160,7 +163,8 @@ export class TaskRunner {
 
   /**
    * People's new messages for a running task, mid-turn ("task.steer"): true once its CLI took them.
-   * Only Codex's app server takes them; for other CLIs they reach the agent with its next Myrel tool call.
+   * Only Codex's app server and Claude Code's streaming input take them; for other CLIs they reach the
+   * agent with its next Myrel tool call.
    */
   async steer(taskId: string, text: string): Promise<boolean> {
     return (await this.turns.get(taskId)?.steer(text)) ?? false;
@@ -187,6 +191,8 @@ export class TaskRunner {
       cleanup: () => Promise<unknown>;
       /** How to run the CLI as Codex's app server, instead of args(). */
       appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config" | "ask">;
+      /** Claude Code's streaming input instead of a prompt on a stdin that ends at once. */
+      stream?: boolean;
     },
     resume: string | undefined,
     prompt: string,
@@ -203,7 +209,7 @@ export class TaskRunner {
     if (promptFile) await writeFile(promptFile, input, { mode: 0o600 });
     // The app server takes the model in the session; its flags are agent()'s config overrides.
     const extra = [...(run.appServer ? [] : modelFlags(adapter, task.model)), ...agent.args];
-    const args = run.appServer ? ["app-server", ...agent.args] : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile });
+    const args = run.appServer ? ["app-server", ...agent.args] : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile, stream: run.stream });
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: childEnv(run.env),
@@ -289,6 +295,11 @@ export class TaskRunner {
       state.appServer = new AppServerTurn(io, options, state);
       this.turns.set(task.taskId, state.appServer);
       state.appServer.start();
+    } else if (run.stream) {
+      const io = { write: (line: string) => void child.stdin!.write(line), end: () => child.stdin!.end() };
+      state.claudeStream = new ClaudeStreamTurn(io, input);
+      this.turns.set(task.taskId, state.claudeStream);
+      state.claudeStream.start();
     } else child.stdin!.end(promptFile ? "" : input);
 
     const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
@@ -374,7 +385,7 @@ export class TaskRunner {
     const child = this.running.get(taskId);
     if (!child) return;
     this.cancelled.add(taskId);
-    // An app server turn is interrupted first, which ends it with its session whole; killed if it does not end.
+    // An app server or streaming turn is interrupted first, which ends it with its session whole; killed if it does not end.
     const graceMs = this.turns.get(taskId)?.interrupt() ? 5000 : 0;
     const kill = () => {
       if (child.exitCode !== null) return;
