@@ -3,6 +3,7 @@ export * from "./code-language";
 export * from "./external-links";
 export * from "./onboarding";
 export * from "./platform";
+export * from "./project-pins";
 export * from "./project-state";
 export * from "./server";
 export * from "./tasks";

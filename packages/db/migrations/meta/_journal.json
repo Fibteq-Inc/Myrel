@@ -248,9 +248,16 @@
       "breakpoints": true
     },
     {
+      "idx": 35,
+      "version": "6",
+      "when": 1793098576121,
+      "tag": "0035_project_pins",
+      "breakpoints": true
+    },
+    {
       "idx": 36,
       "version": "6",
-      "when": 1793098588779,
+      "when": 1793099613459,
       "tag": "0036_project_icon_color",
       "breakpoints": true
     }

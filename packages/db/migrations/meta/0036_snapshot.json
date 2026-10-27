@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d507891d-b90b-4984-b63a-58f113c4797e",
-  "prevId": "c2d04e8f-f1e1-4387-9d28-e838fcc4a7b8",
+  "id": "d3494f37-55f8-45de-bbd6-0644c2b01939",
+  "prevId": "b9417f5e-1a02-41fb-998d-c8e7824bcdd0",
   "tables": {
     "account": {
       "name": "account",
@@ -1547,6 +1547,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "pinned_at": {
+          "name": "pinned_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

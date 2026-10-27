@@ -371,8 +371,13 @@ export const Project = z.object({
   activity: ProjectActivity.optional(),
   /** Missing from servers older than this field. */
   cost: ProjectCost.optional(),
+  /** Pinned to the top of this user's own project lists; every member pins for themselves. Missing from older servers. */
+  pinned: z.boolean().optional(),
 });
 export type Project = z.infer<typeof Project>;
+
+export const PinProjectInput = z.object({ pinned: z.boolean() });
+export type PinProjectInput = z.infer<typeof PinProjectInput>;
 
 export const CreateProjectInput = z.object({
   name: z.string().trim().min(1).max(120),

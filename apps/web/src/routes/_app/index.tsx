@@ -4,6 +4,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { Project } from "@myrel/protocol";
 import { ArrowRight, FolderPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { PinButton } from "../../components/project-pin";
 import { ProjectBadge } from "../../components/project-badge";
 import { NavToggle, PaneHeader } from "../../components/shell/shell";
 import { api, projectsQuery } from "../../lib/api";
@@ -79,24 +80,29 @@ function ProjectsPage() {
               </h2>
               <ul className="grid gap-2.5 sm:grid-cols-2">
                 {projects.map((p) => (
-                  <li key={p.id}>
-                    <Link
-                      to="/projects/$projectId"
-                      params={{ projectId: p.id }}
-                      className="group flex items-center gap-3 rounded-xl border border-line bg-raised px-3.5 py-3 transition-colors hover:border-edge hover:bg-hover"
-                    >
-                      <ProjectBadge name={p.name} icon={p.icon} color={p.color} size={32} />
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-medium">{p.name}</span>
-                        <ProjectActivity project={p} />
-                      </span>
-                      <ProjectCost project={p} />
-                      <ArrowRight
-                        size={15}
-                        className="flex-none text-subtle transition-transform group-hover:translate-x-0.5"
-                        aria-hidden="true"
-                      />
-                    </Link>
+                  // The name's link covers the whole card, so the pin toggle can sit in it without nesting a button in a link.
+                  <li
+                    key={p.id}
+                    className="group relative flex items-center gap-3 rounded-xl border border-line bg-raised px-3.5 py-3 transition-colors hover:border-edge hover:bg-hover has-[a:focus-visible]:border-accent"
+                  >
+                    <ProjectBadge name={p.name} icon={p.icon} color={p.color} size={32} />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <Link
+                        to="/projects/$projectId"
+                        params={{ projectId: p.id }}
+                        className="truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl"
+                      >
+                        {p.name}
+                      </Link>
+                      <ProjectActivity project={p} />
+                    </span>
+                    <ProjectCost project={p} />
+                    <PinButton project={p} className="relative -mr-1" />
+                    <ArrowRight
+                      size={15}
+                      className="flex-none text-subtle transition-transform group-hover:translate-x-0.5"
+                      aria-hidden="true"
+                    />
                   </li>
                 ))}
               </ul>
@@ -144,7 +150,7 @@ function ProjectCost({ project }: { project: Project }) {
   const month = t("projects.costMonth", { cost: cost(project.cost.monthMicros) });
   const total = t("projects.costTotal", { cost: cost(project.cost.totalMicros) });
   return (
-    <span className="flex-none text-xs tabular-nums text-subtle" title={`${month}\n${total}`} aria-label={`${month}, ${total}`}>
+    <span className="relative flex-none text-xs tabular-nums text-subtle" title={`${month}\n${total}`} aria-label={`${month}, ${total}`}>
       {cost(project.cost.monthMicros)}
     </span>
   );
