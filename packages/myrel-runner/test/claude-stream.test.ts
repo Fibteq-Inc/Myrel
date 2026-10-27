@@ -140,7 +140,13 @@ process.stdin.on("end", () => process.exit(0));
     await writeFile(join(bin, "claude"), script);
     await chmod(join(bin, "claude"), 0o755);
     process.env.PATH = `${bin}:/usr/bin:/bin`;
-    return { marks: () => readFile(marks, "utf8").catch(() => "") };
+    const read = () => readFile(marks, "utf8").catch(() => "");
+    /** Resolves once the run's claude started (finding out what it takes runs claude first, slowly on CI). */
+    const started = async () => {
+      for (let i = 0; i < 200 && !(await read()).includes("args "); i++) await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 50));
+    };
+    return { marks: read, started };
   }
 
   function runner(folder: string) {
@@ -161,10 +167,10 @@ process.stdin.on("end", () => process.exit(0));
   }
 
   it("takes a message written while the turn runs into the same run", async () => {
-    await fakeClaude();
+    const fake = await fakeClaude();
     const r = runner(await folder());
     const running = r.start();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await fake.started();
     expect(await r.tasks.steer("task_01JTEST0000000000000000009", "README'yi de güncelle")).toBe(true);
     await running;
     expect(r.done()).toMatchObject({ ok: true });
@@ -178,7 +184,7 @@ process.stdin.on("end", () => process.exit(0));
     const fake = await fakeClaude();
     const r = runner(await folder());
     const running = r.start();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await fake.started();
     r.tasks.cancel("task_01JTEST0000000000000000009");
     await running;
     expect(r.done()).toMatchObject({ ok: false, cancelled: true });
