@@ -54,7 +54,8 @@ signed installers and `latest.json`, and publishes the release once every platfo
 from the tag; `package.json` and `src-tauri/Cargo.toml` aren't bumped.
 
 A release drafted by hand in the GitHub UI (tag `desktop-vx.y.z` on main, "Generate release notes") works
-too: publishing it starts the build.
+too: save it as a draft, build it with Actions → Desktop → Run workflow on main with the tag, then publish it.
+Publishing doesn't start a build, because the signing secrets are only open to runs on main.
 
 If one platform fails, the release stays a draft. Fix the cause on main and rebuild it with a manual run
 (Actions → Desktop → Run workflow on main, with the tag): it builds the tagged commit and replaces the
@@ -76,7 +77,9 @@ reachable while the repository is public; a private fork has to point `plugins.u
 
 ### Signing secrets
 
-Builds run without these, but unsigned. Add them under the repository's Settings → Secrets and variables → Actions.
+Builds run without these, but unsigned. Add the secrets to the repository's `release` environment (Settings → Environments →
+`release`), not as repository secrets: only runs on main can use the environment, so a workflow
+pushed to another branch cannot. The variable stays under Settings → Secrets and variables → Actions.
 
 **Updater (needed for auto-update):**
 

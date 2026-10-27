@@ -5,7 +5,9 @@ name: Release myrel-runner
 # and this does the rest. Also runs by hand from the Actions tab.
 #
 # Uses npm trusted publishing (no token): on npmjs.com, each package's
-# Settings > Trusted publishing must name this repository and this workflow file.
+# Settings > Trusted publishing must name this repository, this workflow file and
+# the `release` environment, which only main can use, so a workflow pushed to
+# another branch cannot publish.
 # npm matches the owner and repository name exactly, capitals included
 # (Fibteq-Inc/Myrel, release-runner.yml): after renaming the repository, update
 # it there too, or publishing fails with a 404 on PUT. The repository field in
@@ -29,6 +31,7 @@ permissions:
 
 jobs:
   publish:
+    environment: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
