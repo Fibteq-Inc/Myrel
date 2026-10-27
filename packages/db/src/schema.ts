@@ -109,6 +109,9 @@ export const projects = sqliteTable("projects", {
   /** Model settings; null = the server default (LLM_PROVIDER / LLM_MODEL). */
   llmProvider: text("llm_provider"),
   llmModel: text("llm_model"),
+  /** How the project is marked in lists (ProjectIcon / ProjectColor in @myrel/protocol); null = first letter / accent. */
+  icon: text("icon"),
+  color: text("color"),
   /** Key the project's agents call the model with; null = an instance key for the provider. */
   llmKeyId: text("llm_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
   /** Default model and effort per CLI for threads on a computer, JSON (CliModelDefaults in @myrel/protocol); null = none. */

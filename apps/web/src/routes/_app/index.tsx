@@ -4,7 +4,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { Project } from "@myrel/protocol";
 import { ArrowRight, FolderPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { ProjectBadge } from "../../components/shell/project-header";
+import { ProjectBadge } from "../../components/project-badge";
 import { NavToggle, PaneHeader } from "../../components/shell/shell";
 import { api, projectsQuery } from "../../lib/api";
 import { useFormat } from "../../lib/format";
@@ -85,7 +85,7 @@ function ProjectsPage() {
                       params={{ projectId: p.id }}
                       className="group flex items-center gap-3 rounded-xl border border-line bg-raised px-3.5 py-3 transition-colors hover:border-edge hover:bg-hover"
                     >
-                      <ProjectBadge name={p.name} size={32} />
+                      <ProjectBadge name={p.name} icon={p.icon} color={p.color} size={32} />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate font-medium">{p.name}</span>
                         <ProjectActivity project={p} />

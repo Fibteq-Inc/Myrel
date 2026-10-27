@@ -18,6 +18,8 @@ import {
   WorkspaceDefaultInput,
   WorkspaceFolderInput,
   CloudCli,
+  ProjectColor,
+  ProjectIcon,
   TaskTarget,
   UpdateProjectSettingsInput,
   CONVERSATION_PAGE_SIZE,
@@ -45,6 +47,8 @@ const projectColumns = {
   id: projects.id,
   name: projects.name,
   role: projectMembers.role,
+  icon: projects.icon,
+  color: projects.color,
   createdAt: projects.createdAt,
   activeCount: projects.activeCount,
   waitingCount: projects.waitingCount,
@@ -79,7 +83,7 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projects).values({ id, name: input.data.name, createdBy: userId, createdAt, updatedAt: createdAt }),
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
-    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", createdAt, activeCount: 0, waitingCount: 0 }) }, 201);
+    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, activeCount: 0, waitingCount: 0 }) }, 201);
   })
   .get("/:id", async (c) => {
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
@@ -109,7 +113,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, model, taskTarget, cloudCli, cliModels } = input.data;
+    const { name, icon, color, model, taskTarget, cloudCli, cliModels } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -126,6 +130,8 @@ export const projectRoutes = new Hono<AppEnv>()
       .update(projects)
       .set({
         ...(name !== undefined && { name }),
+        ...(icon !== undefined && { icon }),
+        ...(color !== undefined && { color }),
         ...(model !== undefined && { llmModel: model || null }),
         ...(taskTarget !== undefined && { taskTarget }),
         ...(cloudCli !== undefined && { cloudCli: cloudCli === "opencode" ? null : cloudCli }),
@@ -676,12 +682,20 @@ function toProject(row: {
   id: string;
   name: string;
   role: Project["role"];
+  icon: string | null;
+  color: string | null;
   createdAt: Date;
   activeCount: number;
   waitingCount: number;
 }): Project {
-  const { activeCount, waitingCount, ...rest } = row;
-  return { ...rest, createdAt: row.createdAt.toISOString(), activity: { working: activeCount, waiting: waitingCount } };
+  const { activeCount, waitingCount, icon, color, ...rest } = row;
+  return {
+    ...rest,
+    icon: ProjectIcon.nullable().catch(null).parse(icon),
+    color: ProjectColor.nullable().catch(null).parse(color),
+    createdAt: row.createdAt.toISOString(),
+    activity: { working: activeCount, waiting: waitingCount },
+  };
 }
 
 const emptyCost: ProjectCost = { monthMicros: 0, totalMicros: 0 };
@@ -730,6 +744,8 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
   const [row] = await createDb(env.DB)
     .select({
       name: projects.name,
+      icon: projects.icon,
+      color: projects.color,
       provider: projects.llmProvider,
       model: projects.llmModel,
       keyId: projects.llmKeyId,
@@ -742,6 +758,8 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
   return {
     ...row!,
     provider: row!.provider as ProjectSettings["provider"],
+    icon: ProjectIcon.nullable().catch(null).parse(row!.icon),
+    color: ProjectColor.nullable().catch(null).parse(row!.color),
     taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
     cloudCli: CloudCli.catch("opencode").parse(row!.cloudCli ?? "opencode"),
     cliModels: parseCliModels(row!.cliModels),

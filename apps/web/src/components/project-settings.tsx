@@ -5,6 +5,8 @@ import {
   type CloudCli,
   effortsFor,
   type InviteRole,
+  type ProjectColor,
+  type ProjectIcon,
   type ProjectRole,
   type ProviderId,
   type RunnerCli,
@@ -20,6 +22,7 @@ import { PersonalInProject } from "./personal-in-project";
 import { Skills } from "./skills";
 import { GithubRepos } from "./github-repos";
 import { ProjectFolders } from "./project-folders";
+import { ProjectLookPicker } from "./project-badge";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
@@ -226,10 +229,14 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
   const t = useT();
   const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
   const [name, setName] = useState(settings.name);
+  const [icon, setIcon] = useState<ProjectIcon | null>(settings.icon);
+  const [color, setColor] = useState<ProjectColor | null>(settings.color);
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   const [cloudCli, setCloudCli] = useState<CloudCli>(settings.cloudCli);
   useEffect(() => {
     setName(settings.name);
+    setIcon(settings.icon);
+    setColor(settings.color);
     setTaskTarget(settings.taskTarget);
     setCloudCli(settings.cloudCli);
   }, [settings]);
@@ -237,7 +244,7 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate({ name: name.trim(), taskTarget, cloudCli });
+    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli });
   }
 
   return (
@@ -246,6 +253,17 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
         <Field label={t("projectSettings.name")}>
           <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} required disabled={!canManage} />
         </Field>
+      </Section>
+
+      <Section title={t("projectSettings.look")} description={t("projectSettings.lookDescription")}>
+        <ProjectLookPicker
+          name={name || settings.name}
+          icon={icon}
+          color={color}
+          onIcon={setIcon}
+          onColor={setColor}
+          disabled={!canManage}
+        />
       </Section>
 
       <Section title={t("projectSettings.tasks")} description={t("projectSettings.tasksDescription")}>

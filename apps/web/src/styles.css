@@ -69,6 +69,34 @@
   --color-shadow: rgb(0 0 0 / 0.5);
 }
 
+/*
+ * The colors a project can be marked with (ProjectColor in @myrel/protocol), each a mark
+ * and a soft fill behind it, readable on each other in both themes. Plain variables rather
+ * than @theme colors: components pick them by name at runtime (components/project-badge.tsx).
+ */
+:root {
+  --project-indigo: #b4beff;
+  --project-indigo-soft: #1e2142;
+  --project-blue: #8cc4ff;
+  --project-blue-soft: #10243d;
+  --project-teal: #6fdccb;
+  --project-teal-soft: #0f2a27;
+  --project-green: #7fdc9c;
+  --project-green-soft: #132a1b;
+  --project-amber: #f5c56b;
+  --project-amber-soft: #2d2410;
+  --project-orange: #ffab7a;
+  --project-orange-soft: #331d10;
+  --project-red: #ff9a92;
+  --project-red-soft: #36171a;
+  --project-pink: #f79fd0;
+  --project-pink-soft: #331529;
+  --project-purple: #c9a8ff;
+  --project-purple-soft: #261a40;
+  --project-gray: #c4c4cc;
+  --project-gray-soft: #26262b;
+}
+
 :root[data-theme="light"] {
   --color-ground: #fbfbfc;
   --color-rail: #f1f1f4;
@@ -122,6 +150,29 @@
   --color-danger: #d1343a;
   --color-danger-hover: #b92c32;
   --color-shadow: rgb(20 20 30 / 0.14);
+}
+
+:root[data-theme="light"] {
+  --project-indigo: #3a45c4;
+  --project-indigo-soft: #eceeff;
+  --project-blue: #1a5fb4;
+  --project-blue-soft: #e3effc;
+  --project-teal: #0b6e62;
+  --project-teal-soft: #dcf4f0;
+  --project-green: #1d6f3a;
+  --project-green-soft: #e1f5e7;
+  --project-amber: #855000;
+  --project-amber-soft: #fcf0d4;
+  --project-orange: #a8430d;
+  --project-orange-soft: #fde9dd;
+  --project-red: #b42a26;
+  --project-red-soft: #fde4e2;
+  --project-pink: #a3266f;
+  --project-pink-soft: #fbe3f1;
+  --project-purple: #6a35c2;
+  --project-purple-soft: #efe6fd;
+  --project-gray: #4b4b55;
+  --project-gray-soft: #e6e6eb;
 }
 
 html,

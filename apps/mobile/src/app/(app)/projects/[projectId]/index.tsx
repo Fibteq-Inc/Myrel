@@ -11,6 +11,7 @@ import type { ComposerHandle } from "../../../../components/composer";
 import { Conversation } from "../../../../components/conversation";
 import { ArtifactsTab } from "../../../../components/project/artifacts-tab";
 import { FilesTab } from "../../../../components/project/files-tab";
+import { ProjectBadge } from "../../../../components/project-badge";
 import { GoalBanner } from "../../../../components/project/goal-banner";
 import { StarterExamples, StarterList } from "../../../../components/project/starter";
 import { Tabs } from "../../../../components/project/tabs";
@@ -41,9 +42,14 @@ export default function ProjectScreen() {
         options={{
           headerTitle: () => (
             <View style={styles.title}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {project.data?.name ?? ""}
-              </Text>
+              <View style={styles.titleRow}>
+                {project.data && (
+                  <ProjectBadge name={project.data.name} icon={project.data.icon} color={project.data.color} size={22} />
+                )}
+                <Text style={styles.titleText} numberOfLines={1}>
+                  {project.data?.name ?? ""}
+                </Text>
+              </View>
               {status !== "open" && (
                 <Text style={styles.status}>
                   {status === "connecting" ? t("connection.connecting") : t("connection.closed")}
@@ -164,6 +170,7 @@ function ChatTab({ owner }: { owner: boolean }) {
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
     title: { alignItems: "center" },
+    titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
     titleText: { color: colors.fg, fontSize: 17, fontWeight: "600", maxWidth: 240 },
     status: { color: colors.subtle, fontSize: 12 },
     emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600", textAlign: "center" },

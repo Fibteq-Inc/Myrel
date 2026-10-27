@@ -1,4 +1,5 @@
 import type { Theme } from "@myrel/client";
+import type { ProjectColor } from "@myrel/protocol";
 import { createContext, useContext } from "react";
 
 /** Design tokens, matching apps/web/src/styles.css (the same names, both palettes). */
@@ -88,6 +89,36 @@ export const lightColors: Colors = {
 };
 
 export const palettes: Record<Theme, Colors> = { dark: darkColors, light: lightColors };
+
+/** A project color's mark and the fill behind it (ProjectColor in @myrel/protocol), as in the web's --project-* variables. */
+export type ProjectTint = { mark: string; soft: string };
+
+export const projectColors: Record<Theme, Record<ProjectColor, ProjectTint>> = {
+  dark: {
+    indigo: { mark: "#b4beff", soft: "#1e2142" },
+    blue: { mark: "#8cc4ff", soft: "#10243d" },
+    teal: { mark: "#6fdccb", soft: "#0f2a27" },
+    green: { mark: "#7fdc9c", soft: "#132a1b" },
+    amber: { mark: "#f5c56b", soft: "#2d2410" },
+    orange: { mark: "#ffab7a", soft: "#331d10" },
+    red: { mark: "#ff9a92", soft: "#36171a" },
+    pink: { mark: "#f79fd0", soft: "#331529" },
+    purple: { mark: "#c9a8ff", soft: "#261a40" },
+    gray: { mark: "#c4c4cc", soft: "#26262b" },
+  },
+  light: {
+    indigo: { mark: "#3a45c4", soft: "#eceeff" },
+    blue: { mark: "#1a5fb4", soft: "#e3effc" },
+    teal: { mark: "#0b6e62", soft: "#dcf4f0" },
+    green: { mark: "#1d6f3a", soft: "#e1f5e7" },
+    amber: { mark: "#855000", soft: "#fcf0d4" },
+    orange: { mark: "#a8430d", soft: "#fde9dd" },
+    red: { mark: "#b42a26", soft: "#fde4e2" },
+    pink: { mark: "#a3266f", soft: "#fbe3f1" },
+    purple: { mark: "#6a35c2", soft: "#efe6fd" },
+    gray: { mark: "#4b4b55", soft: "#e6e6eb" },
+  },
+};
 
 export const ThemeContext = createContext<Theme>("dark");
 

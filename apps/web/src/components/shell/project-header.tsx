@@ -1,5 +1,6 @@
 import { type SocketStatus, workingCount } from "@myrel/client";
 import type { MessageKey, Translate } from "@myrel/i18n";
+import type { ProjectColor, ProjectIcon } from "@myrel/protocol";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -9,6 +10,7 @@ import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { WorkspaceButton } from "../local-folder";
+import { ProjectBadge } from "../project-badge";
 import { useOpenProjectSettings } from "../project-settings-dialog";
 import { type ProjectView, useProjectView, viewSearch } from "../project-view";
 import { RoutinesButton, RoutinesPanel } from "../routines";
@@ -69,6 +71,8 @@ export function ProjectHeader() {
         <ProjectSwitcher
           current={project.id}
           name={project.name}
+          icon={project.icon}
+          color={project.color}
           memberCount={members.length}
           working={workingCount(state)}
         />
@@ -153,11 +157,15 @@ export function ProjectHeader() {
 function ProjectSwitcher({
   current,
   name,
+  icon,
+  color,
   memberCount,
   working,
 }: {
   current: string;
   name: string;
+  icon?: ProjectIcon | null;
+  color?: ProjectColor | null;
   memberCount: number;
   /** The open project's working count, live from its socket; the list's is only as fresh as its last fetch. */
   working: number;
@@ -172,7 +180,7 @@ function ProjectSwitcher({
       panelClassName="w-[248px]"
       trigger={
         <>
-          <ProjectBadge name={name} />
+          <ProjectBadge name={name} icon={icon} color={color} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate font-semibold">{name}</span>
             <span className="text-xs text-subtle @max-[760px]:hidden">{t("sidebar.members", { count: memberCount })}</span>
@@ -227,7 +235,7 @@ function ProjectList({ current, working, onSelect }: { current: string; working:
   return (
     <div className="max-h-72 overflow-y-auto">
       {projects.map((p) => (
-        <MenuItem key={p.id} icon={<ProjectBadge name={p.name} size={22} />} onSelect={() => onSelect(p.id)}>
+        <MenuItem key={p.id} icon={<ProjectBadge name={p.name} icon={p.icon} color={p.color} size={22} />} onSelect={() => onSelect(p.id)}>
           <span className="min-w-0 flex-1 truncate">{p.name}</span>
           <WorkingBadge count={p.id === current ? working : (p.activity?.working ?? 0)} />
           {p.id === current && <Check size={14} className="flex-none text-accent" aria-label={t("sidebar.current")} />}
@@ -245,19 +253,6 @@ function WorkingBadge({ count }: { count: number }) {
     <span className="flex flex-none items-center gap-1 whitespace-nowrap rounded-full bg-accent-soft px-1.5 py-px text-[11px] tabular-nums text-link">
       <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent" aria-hidden="true" />
       {t("sidebar.working", { count })}
-    </span>
-  );
-}
-
-/** A project's first letter on a tinted square. */
-export function ProjectBadge({ name, size = 28 }: { name: string; size?: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.46) }}
-      className="flex flex-none items-center justify-center rounded-lg bg-accent-soft font-semibold text-link"
-    >
-      {name.trim()[0]?.toLocaleUpperCase() ?? "?"}
     </span>
   );
 }
