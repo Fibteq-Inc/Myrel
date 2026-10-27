@@ -103,6 +103,9 @@ export const en = {
   "projects.waiting": { one: "1 waiting on you", other: "{count} waiting on you" },
   "projects.costMonth": "This month: {cost}",
   "projects.costTotal": "All time: {cost}",
+  "projects.pin": "Pin to top",
+  "projects.unpin": "Unpin",
+  "projects.pinned": "Pinned",
 
   // Project sidebar
   "sidebar.searchThreads": "Search threads",

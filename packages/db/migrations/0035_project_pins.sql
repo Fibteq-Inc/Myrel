@@ -1,0 +1,1 @@
+ALTER TABLE `project_members` ADD `pinned_at` integer;

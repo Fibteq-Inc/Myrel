@@ -9,6 +9,7 @@ import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
 import { cn, IconButton } from "../../lib/ui";
 import { WorkspaceButton } from "../local-folder";
+import { PinButton } from "../project-pin";
 import { useOpenProjectSettings } from "../project-settings-dialog";
 import { type ProjectView, useProjectView, viewSearch } from "../project-view";
 import { RoutinesButton, RoutinesPanel } from "../routines";
@@ -220,6 +221,7 @@ function ProjectSwitcher({
 /**
  * The switcher's projects, each with how many agents work in it. Mounted only while the menu is open,
  * so it fetches fresh counts on opening and polls like the project list, without polling in the background.
+ * Pinned projects come first, in the server's order; each row has its own pin toggle.
  */
 function ProjectList({ current, working, onSelect }: { current: string; working: number; onSelect: (projectId: string) => void }) {
   const t = useT();
@@ -227,11 +229,14 @@ function ProjectList({ current, working, onSelect }: { current: string; working:
   return (
     <div className="max-h-72 overflow-y-auto">
       {projects.map((p) => (
-        <MenuItem key={p.id} icon={<ProjectBadge name={p.name} size={22} />} onSelect={() => onSelect(p.id)}>
-          <span className="min-w-0 flex-1 truncate">{p.name}</span>
-          <WorkingBadge count={p.id === current ? working : (p.activity?.working ?? 0)} />
-          {p.id === current && <Check size={14} className="flex-none text-accent" aria-label={t("sidebar.current")} />}
-        </MenuItem>
+        <div key={p.id} className="group relative">
+          <MenuItem icon={<ProjectBadge name={p.name} size={22} />} onSelect={() => onSelect(p.id)} className="pr-10">
+            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            <WorkingBadge count={p.id === current ? working : (p.activity?.working ?? 0)} />
+            {p.id === current && <Check size={14} className="flex-none text-accent" aria-label={t("sidebar.current")} />}
+          </MenuItem>
+          <PinButton project={p} className="absolute right-1.5 top-1/2 -translate-y-1/2" />
+        </div>
       ))}
     </div>
   );

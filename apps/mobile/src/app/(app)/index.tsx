@@ -1,8 +1,9 @@
+import { withProjectPinned } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
 import type { Project } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
-import { ChevronRight, FolderClosed, Plus, Settings } from "lucide-react-native";
+import { ChevronRight, FolderClosed, Pin, Plus, Settings } from "lucide-react-native";
 import { useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Button, errorMessage, Input, Spinner, useRelativeTime } from "../../components/ui";
@@ -30,6 +31,21 @@ export default function ProjectsScreen() {
       void queryClient.invalidateQueries({ queryKey: ["projects", server] });
       router.push(`/projects/${project.id}` as Href);
     },
+  });
+  // Moves the row at once; the server's order replaces it when the list refetches.
+  const pin = useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => api.pinProject(id, pinned),
+    onMutate: async ({ id, pinned }) => {
+      const key = ["projects", server];
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
+      const before = queryClient.getQueryData<Project[]>(key);
+      if (before) queryClient.setQueryData(key, withProjectPinned(before, id, pinned));
+      return { before };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.before) queryClient.setQueryData(["projects", server], context.before);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["projects", server], exact: true }),
   });
 
   return (
@@ -119,6 +135,20 @@ export default function ProjectsScreen() {
               <ProjectActivity project={item} />
             </View>
             <ProjectCost project={item} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={item.pinned ? t("projects.unpin") : t("projects.pin")}
+              accessibilityState={{ selected: !!item.pinned }}
+              hitSlop={8}
+              onPress={() => pin.mutate({ id: item.id, pinned: !item.pinned })}
+              style={({ pressed }) => [styles.pin, pressed && { backgroundColor: colors.hover }]}
+            >
+              <Pin
+                size={16}
+                color={item.pinned ? colors.accent : colors.subtle}
+                fill={item.pinned ? colors.accent : "transparent"}
+              />
+            </Pressable>
             <ChevronRight size={16} color={colors.subtle} />
           </Pressable>
         )}
@@ -203,6 +233,7 @@ const useStyles = makeStyles((colors) =>
     dot: { width: 6, height: 6, borderRadius: 3 },
     activityText: { fontSize: 13, fontWeight: "500" },
     cost: { color: colors.subtle, fontSize: 13, fontVariant: ["tabular-nums"] },
+    pin: { width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center" },
     empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
     emptyTitle: { color: colors.fg, fontSize: 18, fontWeight: "600" },
     emptyHint: { color: colors.subtle, fontSize: 14, lineHeight: 20, textAlign: "center", paddingHorizontal: 24 },

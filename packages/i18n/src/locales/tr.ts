@@ -100,6 +100,9 @@ export const tr: Catalog = {
   "projects.waiting": { one: "1 iş seni bekliyor", other: "{count} iş seni bekliyor" },
   "projects.costMonth": "Bu ay: {cost}",
   "projects.costTotal": "Toplam: {cost}",
+  "projects.pin": "Üste sabitle",
+  "projects.unpin": "Sabitlemeyi kaldır",
+  "projects.pinned": "Sabitlendi",
 
   // Project sidebar
   "sidebar.searchThreads": "Thread'lerde ara",

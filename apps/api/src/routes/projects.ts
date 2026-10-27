@@ -6,6 +6,7 @@ import {
   CreateInviteInput,
   CreateProjectInput,
   createId,
+  PinProjectInput,
   type Invite,
   type Member,
   type Project,
@@ -46,6 +47,7 @@ const projectColumns = {
   name: projects.name,
   role: projectMembers.role,
   createdAt: projects.createdAt,
+  pinnedAt: projectMembers.pinnedAt,
   activeCount: projects.activeCount,
   waitingCount: projects.waitingCount,
 };
@@ -60,7 +62,8 @@ export const projectRoutes = new Hono<AppEnv>()
         .from(projectMembers)
         .innerJoin(projects, eq(projects.id, projectMembers.projectId))
         .where(eq(projectMembers.userId, userId))
-        .orderBy(desc(projects.createdAt)),
+        // Pinned first (in the order they were pinned), then the rest newest first as before.
+        .orderBy(sql`${projectMembers.pinnedAt} IS NULL`, projectMembers.pinnedAt, desc(projects.createdAt)),
       projectCosts(c.env.DB, userId),
     ]);
     return c.json({ projects: rows.map((row) => ({ ...toProject(row), cost: costs.get(row.id) ?? emptyCost })) });
@@ -79,7 +82,26 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projects).values({ id, name: input.data.name, createdBy: userId, createdAt, updatedAt: createdAt }),
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
-    return c.json({ project: toProject({ id, name: input.data.name, role: "owner", createdAt, activeCount: 0, waitingCount: 0 }) }, 201);
+    return c.json(
+      { project: toProject({ id, name: input.data.name, role: "owner", createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0 }) },
+      201,
+    );
+  })
+  .put("/:id/pin", async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    const input = PinProjectInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const project = await findMembership(c.env, id, userId);
+    if (!project) return c.json({ error: "not_found" }, 404);
+    // Only the caller's own membership row: a pin is personal, never a project setting.
+    if (input.data.pinned !== project.pinned) {
+      await createDb(c.env.DB)
+        .update(projectMembers)
+        .set({ pinnedAt: input.data.pinned ? new Date() : null })
+        .where(and(eq(projectMembers.projectId, id), eq(projectMembers.userId, userId)));
+    }
+    return c.json({ project: { ...project, pinned: input.data.pinned } });
   })
   .get("/:id", async (c) => {
     const project = await findMembership(c.env, c.req.param("id"), c.get("user").id);
@@ -677,11 +699,17 @@ function toProject(row: {
   name: string;
   role: Project["role"];
   createdAt: Date;
+  pinnedAt: Date | null;
   activeCount: number;
   waitingCount: number;
 }): Project {
-  const { activeCount, waitingCount, ...rest } = row;
-  return { ...rest, createdAt: row.createdAt.toISOString(), activity: { working: activeCount, waiting: waitingCount } };
+  const { activeCount, waitingCount, pinnedAt, ...rest } = row;
+  return {
+    ...rest,
+    createdAt: row.createdAt.toISOString(),
+    pinned: pinnedAt !== null,
+    activity: { working: activeCount, waiting: waitingCount },
+  };
 }
 
 const emptyCost: ProjectCost = { monthMicros: 0, totalMicros: 0 };
