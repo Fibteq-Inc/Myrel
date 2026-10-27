@@ -116,6 +116,15 @@ describe("project knowledge API", () => {
       size: 7,
       contentType: "text/markdown; charset=utf-8",
     });
+    // `curl --data-binary` (an agent's upload link) sends a form type for any file: the extension wins.
+    res = await api(`${base}/files/content?path=shot.png`, {
+      token,
+      method: "PUT",
+      body: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(((await res.json()) as { file: ProjectFile }).file.contentType).toBe("image/png");
+    expect((await api(`${base}/files/content?path=shot.png`, { token, method: "DELETE" })).status).toBe(200);
     expect((await api(`${base}/files/content?path=../x`, { token, method: "PUT", body: "x" })).status).toBe(400);
 
     res = await api(`${base}/files`, { token });

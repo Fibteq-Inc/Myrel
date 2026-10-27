@@ -177,14 +177,18 @@ async function store(c: Ctx, projectId: string, path: string, author: Author, st
   const room = await canStoreFile(c.env, projectId, (await project.filesBytes(path)) + bytes.byteLength);
   if (!room.ok) return c.json({ error: "limit_reached", message: room.reason }, 402);
 
-  const sent = c.req.header("content-type")?.split(";")[0]?.trim();
-  // Browsers send octet-stream for unknown types; the extension usually knows better.
+  const sent = c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase();
+  // Browsers send octet-stream for unknown types, and `curl --data-binary` (an agent's upload link)
+  // sends a form type for any file; the extension knows better than either.
   const contentType =
-    sent && sent !== "application/octet-stream" ? (c.req.header("content-type") as string) : contentTypeFor(path, "application/octet-stream");
+    sent && !UNTYPED.has(sent) ? (c.req.header("content-type") as string) : contentTypeFor(path, "application/octet-stream");
   await c.env.FILES.put(fileKey(projectId, path), bytes, { httpMetadata: { contentType } });
   const file = await project.recordFile({ path, size: bytes.byteLength, contentType }, author);
   return c.json({ file }, status);
 }
+
+/** Content types that say nothing about the file itself. */
+const UNTYPED = new Set(["application/octet-stream", "application/x-www-form-urlencoded", "multipart/form-data"]);
 
 function queryPath(c: Ctx): string | null {
   const path = normalizeFilePath(c.req.query("path") ?? "");
