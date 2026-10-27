@@ -140,6 +140,16 @@ describe("SKILL.md", () => {
     const good = checkSkillFiles(new Map([["scripts/a.py", enc("1")], ["SKILL.md", enc("---\ndescription: Folder named.\n---\n")]]), "my-skill");
     expect(good).toMatchObject({ ok: true, skill: { name: "my-skill", files: [{ path: "SKILL.md" }, { path: "scripts/a.py" }] } });
   });
+
+  it("takes a skill up to 5 MB and no larger", () => {
+    const md = new TextEncoder().encode("---\nname: big\ndescription: Big.\n---\n");
+    const MB = 1024 * 1024;
+    const files = (last: number) =>
+      new Map<string, Uint8Array>([["SKILL.md", md], ...[0, 1, 2, 3].map((n) => [`data/${n}.bin`, new Uint8Array(MB)] as const), ["data/4.bin", new Uint8Array(last)]]);
+    expect(checkSkillFiles(files(MB - md.length))).toMatchObject({ ok: true, skill: { size: 5 * MB } });
+    expect(checkSkillFiles(files(MB - md.length + 1))).toEqual({ ok: false, error: "A skill can be at most 5 MB." });
+    expect(checkSkillFiles(new Map([["SKILL.md", md], ["one.bin", new Uint8Array(MB + 1)]]))).toEqual({ ok: false, error: "one.bin is larger than 1 MB." });
+  });
 });
 
 describe("GitHub sources", () => {
@@ -201,6 +211,13 @@ describe("skills API", () => {
     expect(skill).toMatchObject({ name: "csv-clean", source: { kind: "upload" }, size: files.reduce((n, f) => n + atob(f.content).length, 0) });
     const bad = await api("/api/account/skills", { method: "POST", token: me.token, body: { kind: "upload", files: [{ path: "x.md", content: b64("x") }] } });
     expect(bad.status).toBe(400);
+    // The server holds the 5 MB line whatever the client checked.
+    const chunk = btoa(String.fromCharCode(...new Uint8Array(3 * 1024)));
+    const over = [{ path: "SKILL.md", content: files[0]!.content }];
+    for (let n = 0; n < 6; n++) over.push({ path: `data/${n}.txt`, content: chunk.repeat(Math.floor((1024 * 1024) / (3 * 1024))) });
+    const tooBig = await api("/api/account/skills", { method: "POST", token: me.token, body: { kind: "upload", files: over } });
+    expect(tooBig.status).toBe(400);
+    expect(await tooBig.text()).toContain("at most 5 MB");
   });
 
   it("adds a skill from GitHub at a pinned commit and updates it on request", async () => {

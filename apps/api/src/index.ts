@@ -26,6 +26,7 @@ import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
+import { streamSkillBundle } from "./skills/store";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
 import { DEFAULT_PRICES, messagesBaseUrl, modelCallAllowed, parsePrices, proxyModel } from "./llm";
@@ -140,8 +141,9 @@ const app = new Hono<AppEnv>()
     const threadId = ThreadId.safeParse(c.req.param("threadId"));
     if (!token || !threadId.success) return c.json({ error: "unauthorized" }, 401);
     const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
-    const bundle = await thread.skillBundle(token);
-    return bundle ? c.json(bundle) : c.json({ error: "unauthorized" }, 401);
+    const given = await thread.givenSkills(token);
+    if (!given) return c.json({ error: "unauthorized" }, 401);
+    return new Response(streamSkillBundle(c.env, given), { headers: { "content-type": "application/json" } });
   })
   .route("/file-links", fileLinkRoutes)
   .route("/connectors/oauth", connectorOAuthRoutes)
