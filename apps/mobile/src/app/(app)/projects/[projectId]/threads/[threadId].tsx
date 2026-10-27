@@ -8,22 +8,13 @@ import {
   threadUsage,
 } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { CLOUD_RUNNER, waitsForAgent } from "@myrel/protocol";
+import { waitsForAgent } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { CircleCheck, RotateCcw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
-import {
-  ThreadCliNote,
-  ThreadCliPicker,
-  ThreadModelPicker,
-  ThreadRunnerNote,
-  ThreadRunnerPicker,
-  useOwnWorkspaces,
-  usePickableClis,
-  usePlaceable,
-} from "../../../../../components/cli-picker";
+import { ThreadCliNote, ThreadRunnerNote, ThreadSettingsPicker, useOwnWorkspaces, usePickableClis, usePlaceable } from "../../../../../components/cli-picker";
 import { Conversation } from "../../../../../components/conversation";
 import { Tabs } from "../../../../../components/project/tabs";
 import { WorkspaceFilesTab } from "../../../../../components/thread/files";
@@ -203,16 +194,17 @@ export default function ThreadScreen() {
           onStop={() => api.stopThread(projectId, threadId)}
           header={header}
           tools={
-            pickable &&
             thread && (
-              <>
-                {/* The cloud or a computer, for someone with the project on one of theirs (else their turns work in the cloud anyway). */}
-                {placeable && (ownWorkspaces.length > 0 || thread.runner?.id === CLOUD_RUNNER) && (
-                  <ThreadRunnerPicker workspaces={ownWorkspaces} thread={thread} onChange={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })} />
-                )}
-                <ThreadCliPicker pickable={pickable} thread={thread} onChange={(cli) => emit({ type: "thread.cli", threadId, cli })} />
-                <ThreadModelPicker pickable={pickable} thread={thread} onChange={(pick) => emit({ type: "thread.model", threadId, ...pick })} />
-              </>
+              <ThreadSettingsPicker
+                projectId={projectId}
+                pickable={pickable}
+                workspaces={ownWorkspaces}
+                placeable={placeable}
+                thread={thread}
+                onRunner={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })}
+                onCli={(cli) => emit({ type: "thread.cli", threadId, cli })}
+                onModel={(pick) => emit({ type: "thread.model", threadId, ...pick })}
+              />
             )
           }
           plan={plan}

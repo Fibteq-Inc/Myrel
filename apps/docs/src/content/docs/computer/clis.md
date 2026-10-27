@@ -34,9 +34,15 @@ The CLI button under **Give Myrel a task** shows which CLI the next ask will use
 
 ## Change it for a thread
 
-In a thread, the same button reads **This thread runs with**. The change applies from the thread's next turn.
+In a thread, one button under the message box sums up how it works, for example **Claude Code · Opus · High**. It opens **How this thread works**, with everything in one place:
 
-The button only shows for the person whose computer holds the project's folder, and not when the project runs **Always in the cloud**.
+- **Works on**: the project's default computer, another of your computers in the project, or **Cloud**.
+- **CLI**: the project's default or one of the CLIs installed there.
+- **Model** and **Effort**: for a CLI that lists its models. **Project default** uses the project's choice for that CLI; effort offers only the levels the model takes.
+
+The panel stays open while you pick, so you can switch the CLI and then pick its model. Changes apply from the thread's next turn.
+
+Only the person whose computer the thread works on can change these; others see the same button read-only. In the cloud, any member can pick the CLI and the project's model runs.
 
 ## Usage limits
 

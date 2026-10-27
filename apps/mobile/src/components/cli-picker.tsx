@@ -2,7 +2,7 @@ import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Check, ChevronDown, Cloud, Laptop, Sparkles, SquareTerminal } from "lucide-react-native";
+import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -83,99 +83,11 @@ export function AskCliPicker({ pickable, value, onChange }: { pickable: Pickable
   );
 }
 
-/** Thread: the CLI it runs with from its next turn. */
-export function ThreadCliPicker({ pickable, thread, onChange }: { pickable: Pickable; thread: Thread; onChange: (cli: CliId | null) => void }) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  const current = thread.cli?.id;
-  const pick = (cli: CliId | null) => {
-    if ((cli ?? undefined) !== current) onChange(cli);
-    setOpen(false);
-  };
-  return (
-    <>
-      <Chip
-        label={cliName(current ?? pickable.folderCli)}
-        active={!!current}
-        several={thread.cli?.by === "coordinator"}
-        title={t("cliPicker.threadTitle")}
-        onPress={() => setOpen(true)}
-      />
-      <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.threadTitle")} hint={pickable.cloud ? `${t("cliPicker.threadHint")} ${t("cliPicker.cloudHint")}` : t("cliPicker.threadHint")}>
-        <Option kind="radio" checked={!current} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => pick(null)} />
-        {pickable.clis.map((c) => (
-          <Option key={c.id} kind="radio" checked={current === c.id} title={cliName(c.id)} note={limitNote(c, t)} onPress={() => pick(c.id)} />
-        ))}
-      </Sheet>
-    </>
-  );
-}
-
 /** Whether a thread can be placed at all: a project that always works in the cloud has nothing to place. */
 export function usePlaceable(projectId: string): boolean {
   const { api, server } = useSession();
   const { data: settings } = useQuery({ queryKey: ["project-settings", server, projectId], queryFn: () => api.getProjectSettings(projectId) });
   return settings?.taskTarget !== "cloud";
-}
-
-/** Thread: where it works from its next turn, the cloud or one of the person's computers in the project. */
-export function ThreadRunnerPicker({
-  workspaces,
-  thread,
-  onChange,
-}: {
-  workspaces: ProjectWorkspace[];
-  thread: Thread;
-  onChange: (runnerId: string | null) => void;
-}) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  const cloud = thread.runner?.id === CLOUD_RUNNER;
-  // The coordinator's cloud counts as picked too: the default sends the thread back to a computer.
-  const picked = thread.runner && thread.runner.by !== "auto" ? thread.runner.id : null;
-  const current = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0];
-  const pick = (runnerId: string | null) => {
-    if (runnerId !== picked) onChange(runnerId);
-    setOpen(false);
-  };
-  return (
-    <>
-      <Chip
-        label={cloud || !current ? t("runnerPicker.cloud") : current.runnerName}
-        active={!!picked}
-        several={false}
-        computer={!cloud}
-        cloud={cloud}
-        title={t("runnerPicker.title")}
-        onPress={() => setOpen(true)}
-      />
-      <Sheet open={open} onClose={() => setOpen(false)} title={t("runnerPicker.title")} hint={t("runnerPicker.hint")}>
-        <Option
-          kind="radio"
-          checked={!picked}
-          title={
-            thread.runner?.by === "auto" && current
-              ? t("runnerPicker.started", { computer: current.runnerName })
-              : workspaces[0]
-                ? t("cliPicker.default", { cli: workspaces[0].runnerName })
-                : t("runnerPicker.auto")
-          }
-          onPress={() => pick(null)}
-        />
-        <Option kind="radio" checked={cloud} title={t("runnerPicker.cloud")} onPress={() => pick(CLOUD_RUNNER)} />
-        {workspaces.map((w) => (
-          <Option
-            key={w.runnerId}
-            kind="radio"
-            checked={picked === w.runnerId}
-            title={w.runnerName}
-            note={w.online ? undefined : t("localFolder.offline")}
-            onPress={() => pick(w.runnerId)}
-          />
-        ))}
-      </Sheet>
-    </>
-  );
 }
 
 /** An effort level's name; one Myrel does not know shows as the CLI wrote it. */
@@ -184,78 +96,265 @@ export function effortName(effort: string, t: ReturnType<typeof useT>): string {
 }
 
 /**
- * Thread: the model and effort its CLI runs with from the next turn, as on the web. Only for a CLI
- * that lists its models; efforts only those the model takes, none for a model that takes none.
+ * The model and effort a thread's CLI runs with from its next turn, as on the web: the thread's own
+ * pick, else the project's default for that CLI, else the CLI's. Only for a local CLI that lists its
+ * models; efforts only those the model takes.
  */
-export function ThreadModelPicker({
-  pickable,
-  thread,
-  onChange,
-}: {
-  pickable: Pickable;
-  thread: Thread;
-  onChange: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
-}) {
-  const t = useT();
-  const styles = useStyles();
-  const colors = useColors();
-  const [open, setOpen] = useState(false);
+function modelChoice(pickable: Pickable, thread: Thread) {
   const cli = (thread.cli?.id as CliId | undefined) ?? pickable.folderCli;
   // In the cloud the project's model runs whichever CLI it is.
   const models = pickable.cloud ? undefined : pickable.clis.find((c) => c.id === cli)?.models;
   if (!models?.length) return null;
   const own = thread.model?.cli === cli ? thread.model : null;
   const project = pickable.defaults[cli];
-  const model = models.find((m) => m.id === (own?.model ?? project?.model));
+  const modelId = own?.model ?? project?.model ?? null;
+  const model = modelId ? models.find((m) => m.id === modelId) : undefined;
   const efforts = effortsFor(models, model?.id ?? null);
   const effortId = own?.effort ?? project?.effort ?? null;
   const effort = effortId && efforts.includes(effortId) ? effortId : null;
-  const pick = (next: { model?: string | null; effort?: string | null }) => {
-    const m = next.model !== undefined ? next.model : (own?.model ?? null);
-    let e = next.effort !== undefined ? next.effort : (own?.effort ?? null);
-    if (e && !effortsFor(models, m ?? project?.model ?? null).includes(e)) e = null;
-    onChange({ cli, model: m, effort: e });
-  };
-  const label = [model?.name ?? t("modelPicker.cliDefault"), effort && effortName(effort, t)].filter(Boolean).join(" · ");
   const projectModel = project?.model ? (models.find((m) => m.id === project.model)?.name ?? project.model) : null;
+  const next = (change: { model?: string | null; effort?: string | null }) => {
+    const m = change.model !== undefined ? change.model : (own?.model ?? null);
+    let e = change.effort !== undefined ? change.effort : (own?.effort ?? null);
+    if (e && !effortsFor(models, m ?? project?.model ?? null).includes(e)) e = null;
+    return { cli, model: m, effort: e };
+  };
+  return { cli, models, own, model, efforts, effort, projectModel, next };
+}
+
+/**
+ * Thread: one chip summing up where it works, its CLI, model and effort, opening one sheet to change
+ * any of them from its next turn, as on the web. The sheet stays open across picks; the model list
+ * opens inside it. Someone who can pick nothing sees it read-only.
+ */
+export function ThreadSettingsPicker({
+  projectId,
+  pickable,
+  workspaces,
+  placeable,
+  thread,
+  onRunner,
+  onCli,
+  onModel,
+}: {
+  projectId: string;
+  pickable: Pickable | null;
+  /** The person's own computers in the project, the default first. */
+  workspaces: ProjectWorkspace[];
+  /** The project does not always work in the cloud, so a thread can be moved. */
+  placeable: boolean;
+  thread: Thread;
+  onRunner: (runnerId: string | null) => void;
+  onCli: (cli: CliId | null) => void;
+  onModel: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
+}) {
+  const t = useT();
+  const styles = useStyles();
+  const { api, server } = useSession();
+  const [open, setOpen] = useState(false);
+  const [models, setModels] = useState(false);
+  const { data: folder } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: all = [] } = useQuery({
+    queryKey: [...workspaceQueryKey(server, projectId), "all"],
+    queryFn: () => api.getWorkspaces(projectId),
+    enabled: !!folder,
+  });
+  const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!folder });
+  const { data: settings } = useQuery({ queryKey: ["project-settings", server, projectId], queryFn: () => api.getProjectSettings(projectId) });
+  const close = () => {
+    setOpen(false);
+    setModels(false);
+  };
+  const cloud = thread.runner?.id === CLOUD_RUNNER;
+
+  if (!pickable) {
+    // Nothing to pick, e.g. a thread working on another member's computer: say what it runs with.
+    // Not while what decides it still loads, or it would flash.
+    if (!folder || !runners || !settings) return null;
+    const computer = all.find((w) => w.runnerId === thread.runner?.id) ?? folder;
+    const cli = thread.cli?.id ?? computer.cli;
+    const own = thread.model?.cli === cli ? thread.model : null;
+    const modelLabel = [own?.model, own?.effort && effortName(own.effort, t)].filter(Boolean).join(" · ");
+    return (
+      <>
+        <Chip label={[cliName(cli), modelLabel].filter(Boolean).join(" · ")} active={false} title={t("threadSettings.title")} onPress={() => setOpen(true)} />
+        <Sheet open={open} onClose={close} title={t("threadSettings.title")} hint={t("threadSettings.readOnly")}>
+          <Text style={styles.section}>{t("threadSettings.where")}</Text>
+          <Locked>{computer.runnerName}</Locked>
+          <Text style={styles.section}>{t("threadSettings.cli")}</Text>
+          <Locked>{cliName(cli)}</Locked>
+          {modelLabel ? (
+            <>
+              <Text style={styles.section}>{t("threadSettings.model")}</Text>
+              <Locked>{modelLabel}</Locked>
+            </>
+          ) : null}
+        </Sheet>
+      </>
+    );
+  }
+
+  // Where it works: the cloud or one of the person's computers in the project, for someone with the
+  // project on one of theirs (else their turns work in the cloud anyway).
+  const showRunner = placeable && (workspaces.length > 0 || cloud);
+  // The coordinator's cloud counts as picked too: the default sends the thread back to a computer.
+  const pickedRunner = thread.runner && thread.runner.by !== "auto" ? thread.runner.id : null;
+  const computer = workspaces.find((w) => w.runnerId === thread.runner?.id) ?? workspaces[0];
+  const currentCli = thread.cli?.id;
+  const choice = modelChoice(pickable, thread);
+  const active = !!pickedRunner || !!currentCli || !!choice?.own;
+  const where = cloud ? t("runnerPicker.cloud") : showRunner && computer && computer !== workspaces[0] ? computer.runnerName : null;
+  const label = [where, cliName(currentCli ?? pickable.folderCli), choice?.model?.name, choice?.effort && effortName(choice.effort, t)]
+    .filter(Boolean)
+    .join(" · ");
+  const hint = [showRunner && cloud ? t("runnerPicker.hint") : t("cliPicker.threadHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ");
+
   return (
     <>
-      <Chip label={label} active={!!own} several={false} model title={t("modelPicker.title")} onPress={() => setOpen(true)} />
-      <Sheet open={open} onClose={() => setOpen(false)} title={t("modelPicker.title")} hint={t("cliPicker.threadHint")}>
-        <ScrollView style={{ maxHeight: 320 }}>
-          <Option
-            kind="radio"
-            checked={!own?.model}
-            title={projectModel ? t("modelPicker.projectDefault", { model: projectModel }) : t("modelPicker.cliDefault")}
-            onPress={() => pick({ model: null })}
-          />
-          {models.map((m) => (
-            <Option key={m.id} kind="radio" checked={own?.model === m.id} title={m.name} onPress={() => pick({ model: m.id })} />
-          ))}
-        </ScrollView>
-        <Text style={styles.section}>{t("modelPicker.effort")}</Text>
-        {efforts.length > 0 ? (
-          <View style={styles.efforts}>
-            {[null, ...efforts].map((e) => {
-              const on = (own?.effort ?? null) === e;
-              return (
-                <Pressable
-                  key={e ?? ""}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: on }}
-                  onPress={() => pick({ effort: e })}
-                  style={({ pressed }) => [styles.effort, on && styles.effortOn, pressed && !on && { backgroundColor: colors.hover }]}
-                >
-                  <Text style={[styles.effortText, on && { color: colors.onAccent }]}>{e ? effortName(e, t) : t("modelPicker.effortDefault")}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+      <Chip
+        label={label}
+        active={active}
+        several={thread.cli?.by === "coordinator"}
+        cloud={cloud}
+        settings
+        title={t("threadSettings.title")}
+        onPress={() => setOpen(true)}
+      />
+      <Sheet open={open} onClose={close} title={models ? t("threadSettings.model") : t("threadSettings.title")} hint={models ? undefined : hint}>
+        {models && choice ? (
+          <ScrollView style={{ maxHeight: 420 }}>
+            <Option
+              kind="radio"
+              checked={!choice.own?.model}
+              title={choice.projectModel ? t("modelPicker.projectDefault", { model: choice.projectModel }) : t("modelPicker.cliDefault")}
+              onPress={() => {
+                onModel(choice.next({ model: null }));
+                setModels(false);
+              }}
+            />
+            {choice.models.map((m) => (
+              <Option
+                key={m.id}
+                kind="radio"
+                checked={choice.own?.model === m.id}
+                title={m.name}
+                onPress={() => {
+                  onModel(choice.next({ model: m.id }));
+                  setModels(false);
+                }}
+              />
+            ))}
+          </ScrollView>
         ) : (
-          <Text style={styles.hint}>{t("modelPicker.noEffort")}</Text>
+          <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ gap: 10 }}>
+            {showRunner && (
+              <>
+                <Text style={styles.section}>{t("threadSettings.where")}</Text>
+                <Pills>
+                  <Pill
+                    checked={!pickedRunner}
+                    onPress={() => pickedRunner && onRunner(null)}
+                    label={
+                      thread.runner?.by === "auto" && computer
+                        ? t("runnerPicker.started", { computer: computer.runnerName })
+                        : workspaces[0]
+                          ? t("cliPicker.default", { cli: workspaces[0].runnerName })
+                          : t("runnerPicker.auto")
+                    }
+                  />
+                  <Pill checked={cloud} onPress={() => !cloud && onRunner(CLOUD_RUNNER)} label={t("runnerPicker.cloud")} />
+                  {workspaces.map((w) => (
+                    <Pill
+                      key={w.runnerId}
+                      checked={pickedRunner === w.runnerId}
+                      onPress={() => pickedRunner !== w.runnerId && onRunner(w.runnerId)}
+                      label={w.online ? w.runnerName : `${w.runnerName} (${t("localFolder.offline")})`}
+                    />
+                  ))}
+                </Pills>
+              </>
+            )}
+            <Text style={styles.section}>{t("threadSettings.cli")}</Text>
+            <Pills>
+              <Pill checked={!currentCli} onPress={() => currentCli && onCli(null)} label={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} />
+              {pickable.clis.map((c) => {
+                const note = limitNote(c, t);
+                return (
+                  <Pill
+                    key={c.id}
+                    checked={currentCli === c.id}
+                    onPress={() => currentCli !== c.id && onCli(c.id)}
+                    label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
+                  />
+                );
+              })}
+            </Pills>
+            <Text style={styles.section}>{t("threadSettings.model")}</Text>
+            {pickable.cloud ? (
+              <Locked>{t("threadSettings.cloudModel")}</Locked>
+            ) : choice ? (
+              <>
+                <Option
+                  kind="radio"
+                  checked
+                  title={choice.model?.name ?? choice.projectModel ?? t("modelPicker.cliDefault")}
+                  note={t("threadSettings.change")}
+                  onPress={() => setModels(true)}
+                />
+                <Text style={styles.section}>{t("modelPicker.effort")}</Text>
+                {choice.efforts.length > 0 ? (
+                  <Pills>
+                    <Pill checked={!choice.own?.effort} onPress={() => onModel(choice.next({ effort: null }))} label={t("modelPicker.effortDefault")} />
+                    {choice.efforts.map((e) => (
+                      <Pill key={e} checked={choice.own?.effort === e} onPress={() => onModel(choice.next({ effort: e }))} label={effortName(e, t)} />
+                    ))}
+                  </Pills>
+                ) : (
+                  <Text style={styles.hint}>{t("modelPicker.noEffort")}</Text>
+                )}
+              </>
+            ) : (
+              <Text style={styles.hint}>{t("threadSettings.noModels")}</Text>
+            )}
+          </ScrollView>
         )}
       </Sheet>
     </>
+  );
+}
+
+function Pills({ children }: { children: React.ReactNode }) {
+  const styles = useStyles();
+  return <View style={styles.efforts}>{children}</View>;
+}
+
+function Pill({ checked, onPress, label }: { checked: boolean; onPress: () => void; label: string }) {
+  const styles = useStyles();
+  const colors = useColors();
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.effort, checked && styles.effortOn, pressed && !checked && { backgroundColor: colors.hover }]}
+    >
+      <Text style={[styles.effortText, checked && { color: colors.onAccent }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function Locked({ children }: { children: React.ReactNode }) {
+  const styles = useStyles();
+  const colors = useColors();
+  return (
+    <View style={styles.locked}>
+      <Lock size={14} color={colors.subtle} />
+      <Text style={styles.optionText} numberOfLines={1}>
+        {children}
+      </Text>
+    </View>
   );
 }
 
@@ -314,17 +413,15 @@ function Chip({
   label,
   active,
   several,
-  model,
-  computer,
+  settings,
   cloud,
   title,
   onPress,
 }: {
   label: string;
   active: boolean;
-  several: boolean;
-  model?: boolean;
-  computer?: boolean;
+  several?: boolean;
+  settings?: boolean;
   cloud?: boolean;
   title: string;
   onPress: () => void;
@@ -341,12 +438,10 @@ function Chip({
     >
       {several ? (
         <Sparkles size={14} color={colors.accent} />
-      ) : model ? (
-        <Brain size={14} color={active ? colors.accent : colors.muted} />
-      ) : computer ? (
-        <Laptop size={14} color={active ? colors.accent : colors.muted} />
       ) : cloud ? (
         <Cloud size={14} color={active ? colors.accent : colors.muted} />
+      ) : settings ? (
+        <SlidersHorizontal size={14} color={active ? colors.accent : colors.muted} />
       ) : (
         <SquareTerminal size={14} color={active ? colors.accent : colors.muted} />
       )}
@@ -475,5 +570,6 @@ const useStyles = makeStyles((colors) =>
     effort: { borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
     effortOn: { borderColor: colors.accent, backgroundColor: colors.accent },
     effortText: { color: colors.body, fontSize: 13 },
+    locked: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 4 },
   }),
 );
