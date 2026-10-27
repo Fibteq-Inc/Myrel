@@ -227,7 +227,7 @@ const FINISH_AFTER_REPLY_SEC = 60;
 /** How long a choice card waits on the coordinator before it goes to the person anyway. */
 const QUESTION_TIMEOUT_SEC = 120;
 /** The coordinator stops a thread's running turn at most once in this long, so its notes cannot keep the thread from working. */
-const COORDINATOR_STOP_COOLDOWN_MS = 10 * 60 * 1000;
+const COORDINATOR_STOP_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** A choice card the agent asked that waits on the coordinator: answered there, or passed on to people. */
 type PendingQuestion = { id: string; card: string; question: string };

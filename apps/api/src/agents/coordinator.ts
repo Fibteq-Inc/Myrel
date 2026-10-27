@@ -65,14 +65,14 @@ const interruptInput = z
   .boolean()
   .optional()
   .describe(
-    "Also stop the thread's running turn, so it starts again at once with this note. Only when the note makes the work it is doing now wrong or wasted (the person cancelled or changed the ask, another thread's result makes it moot). A note that only adds to or informs the work reaches the running turn by itself at its next step: leave this out. At most once in 10 minutes per thread.",
+    "Also stop the thread's running turn, so it starts again at once with this note. Only when the note makes the work it is doing now wrong or wasted (the person cancelled or changed the ask, another thread's result makes it moot). A note that only adds to or informs the work reaches the running turn by itself at its next step: leave this out. At most once in 2 minutes per thread.",
   );
 
 /** The tool result's word on the running turn, after the note went. */
 function interruptText(outcome: InterruptOutcome | void): string {
   if (outcome === "stopped") return " Its running turn was stopped; the next one starts now with your note.";
   if (outcome === "not_running") return " Nothing was running; the note starts its next turn.";
-  if (outcome === "too_soon") return " Its turn was not stopped: you stopped it less than 10 minutes ago. The note reaches the running turn at its next step.";
+  if (outcome === "too_soon") return " Its turn was not stopped: you stopped it less than 2 minutes ago. The note reaches the running turn at its next step.";
   if (outcome === "failed") return " Its turn could not be stopped; the note reaches it at its next step.";
   return "";
 }
