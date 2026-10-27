@@ -6,6 +6,7 @@ import { type CliId, type CliLimits, type CliModel, type LineAgent, type RunnerC
 import type { AcpMcpServer, AcpTurn, AcpTurnOptions } from "./acp";
 import type { AppServerTurn, AppServerTurnOptions } from "./app-server";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
+import type { ClaudeStreamTurn } from "./claude-stream";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
 import { refreshPath } from "./path";
@@ -44,6 +45,8 @@ export type ParseState = {
   acp?: AcpTurn;
   /** The app server turn of this run, when Codex runs as `codex app-server` (see CliAdapter.appServer). */
   appServer?: AppServerTurn;
+  /** Claude Code's streaming input of this run (see CliAdapter.streamInput). */
+  claudeStream?: ClaudeStreamTurn;
 };
 
 /**
@@ -56,9 +59,10 @@ export type CliAdapter = {
   /**
    * extra: flags from `agent`, placed before the CLI's own trailing arguments. dirs: other folders
    * the CLI may work in besides its current one. asks: Claude Code sends permission prompts to
-   * Myrel's approve_access tool, which asks the person (see AgentMcp.asks).
+   * Myrel's approve_access tool, which asks the person (see AgentMcp.asks). stream: the prompt goes
+   * in as Claude Code's streaming input (see streamInput).
    */
-  args(opts: { access: Access; resume?: string; extra?: string[]; dirs?: string[]; asks?: boolean; promptFile?: string }): string[];
+  args(opts: { access: Access; resume?: string; extra?: string[]; dirs?: string[]; asks?: boolean; promptFile?: string; stream?: boolean }): string[];
   /**
    * Connects the CLI to the thread's MCP endpoint for a run as the thread's agent, so it talks
    * to people through Myrel's tools without asking for permission. `dir` is a private folder
@@ -88,6 +92,12 @@ export type CliAdapter = {
    * to the person, so the app server may ask instead of failing them.
    */
   appServer?(opts: { access: Access; dirs: string[]; asks: boolean }): Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config">;
+  /**
+   * For Claude Code: the prompt goes in as streaming input on a stdin that stays open (see
+   * claude-stream.ts), so new messages can go in mid-turn, when the installed version takes it
+   * (see hasStreamInput).
+   */
+  streamInput?: boolean;
   /** Whether `<bin> --version` printed this CLI's version, for a binary name another tool also uses. */
   isMine?(version: string): boolean;
   /** The models the CLI lists, with the efforts each takes; undefined when it could not be asked. */
@@ -244,11 +254,12 @@ async function privateFile(dir: string, name: string, content: unknown): Promise
 const claude: CliAdapter = {
   id: "claude",
   bin: "claude",
-  args: ({ access, resume, extra = [], dirs = [], asks }) => [
+  args: ({ access, resume, extra = [], dirs = [], asks, stream }) => [
     "-p",
     "--output-format",
     "stream-json",
     "--verbose",
+    ...(stream ? ["--input-format", "stream-json", "--replay-user-messages"] : []),
     "--permission-mode",
     // Bypassing permissions would skip the question about folders outside the project, so full
     // access with Myrel asking pre-allows the rest instead (see agent()).
@@ -296,9 +307,11 @@ const claude: CliAdapter = {
       },
     };
   },
+  streamInput: true,
   line(line, state) {
     const event = parseJson(line);
     if (!event) return;
+    state.claudeStream?.receive(event);
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.type === "system" && typeof event.model === "string") state.model = event.model;
     if (event.type === "rate_limit_event") state.limits = claudeLimits(event.rate_limit_info, state.limits);
@@ -1012,6 +1025,25 @@ export async function hasAppServer(bin: string): Promise<boolean> {
   if (!known) {
     known = output(bin, ["app-server", "--help"], 10_000).then((help) => !!help?.includes("--listen"));
     appServers.set(version, known);
+  }
+  return known;
+}
+
+/** Whether each Claude Code version takes streaming input, by version. */
+const streamInputs = new Map<string, Promise<boolean>>();
+
+/**
+ * Whether this computer's Claude Code takes streaming input with echoes, asked once per version.
+ * MYREL_CLAUDE_ONESHOT=1 keeps the prompt on a stdin that ends at once, as before.
+ */
+export async function hasStreamInput(bin: string): Promise<boolean> {
+  if (process.env.MYREL_CLAUDE_ONESHOT === "1") return false;
+  const version = await cliVersion(bin);
+  if (!version) return false;
+  let known = streamInputs.get(version);
+  if (!known) {
+    known = output(bin, ["--help"], 10_000).then((help) => !!help?.includes("--replay-user-messages"));
+    streamInputs.set(version, known);
   }
   return known;
 }

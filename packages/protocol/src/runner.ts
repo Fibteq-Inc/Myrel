@@ -116,6 +116,8 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * drops a task.start carrying one of GitHub's longer installation tokens: never sent one.
  * "steer": hands people's new messages to a running task's CLI mid-turn ("task.steer"), when that CLI
  * takes them (Codex's app server); answered "task.steered" with taken false when it does not.
+ * "steer-claude": the same for Claude Code, which runs with streaming input and stops with an
+ * interrupt request (runner 0.26.0).
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -132,6 +134,7 @@ export const RunnerFeature = z.enum([
   "github-token",
   "git-token",
   "steer",
+  "steer-claude",
 ]);
 
 /**
