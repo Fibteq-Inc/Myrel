@@ -3,7 +3,7 @@ import { ApiError, codeLanguage } from "@myrel/client";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
@@ -25,8 +25,26 @@ export function displayName(path: string) {
 
 type Kind = "image" | "pdf" | "markdown" | "text" | "other";
 
+/**
+ * Pictures by extension. Files stored before uploads were typed by their name can carry a form or
+ * octet-stream type (an agent's `curl --data-binary`), so the name decides as well.
+ */
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+};
+
+function imageType(path: string): string | undefined {
+  return IMAGE_TYPES[/\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase() ?? ""];
+}
+
 function kindOf(path: string, contentType: string): Kind {
-  if (contentType.startsWith("image/")) return "image";
+  if (contentType.startsWith("image/") || imageType(path)) return "image";
   if (contentType === "application/pdf") return "pdf";
   if (/\.(md|markdown)$/i.test(path) || contentType.startsWith("text/markdown")) return "markdown";
   if (contentType.startsWith("text/") || /json|xml|javascript|yaml|sql/.test(contentType) || codeLanguage(path)) return "text";
@@ -146,7 +164,12 @@ export function FilePreview({
   });
   const type = contentType ?? blob.data?.type ?? "";
   const kind = kindOf(path, type);
-  const url = useObjectUrl(blob.data);
+  // A picture stored with another type still shows: the image gets its type from the name.
+  const data = useMemo(() => {
+    const type = blob.data && kind === "image" && !blob.data.type.startsWith("image/") ? imageType(path) : undefined;
+    return type ? new Blob([blob.data!], { type }) : blob.data;
+  }, [blob.data, kind, path]);
+  const url = useObjectUrl(data);
   const [text, setText] = useState<string | null>(null);
   useEffect(() => {
     setText(null);

@@ -10,7 +10,8 @@ export function displayName(path: string) {
 
 /** What the in-app preview can show, by content type with the extension as fallback. */
 export function fileKind(type: string, path: string): FileKind {
-  if (type.startsWith("image/") || (!type && /\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(path))) return "image";
+  // The name decides for pictures too: older agent uploads were stored with a form type.
+  if (type.startsWith("image/") || /\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(path)) return "image";
   if (/\.(md|markdown)$/i.test(path) || type.startsWith("text/markdown")) return "markdown";
   if (
     type.startsWith("text/") ||
