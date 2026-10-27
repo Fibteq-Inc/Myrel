@@ -127,6 +127,18 @@ describe("Updater", () => {
     expect(t.restarts()).toBe(1);
   });
 
+  it("auto-update waits longer for running tasks than a requested update", async () => {
+    const t = updater({ latest: async () => "0.14.0", waitMs: 0, autoWaitMs: 60_000 });
+    t.setRunning(["task_1"]);
+    await t.u.checkNewest();
+    await settle();
+    expect(t.restarts()).toBe(0);
+    expect(t.u.state()).toMatchObject({ state: "waiting", version: "0.14.0" });
+    t.u.request("0.14.0");
+    await settle();
+    expect(t.restarts()).toBe(1);
+  });
+
   it("refuses a version that is not newer", () => {
     expect(() => updater().u.request("0.13.0")).toThrow(/up to date/);
   });

@@ -13,6 +13,11 @@ import { isNewer, latestVersion } from "./update";
 
 /** How long an update waits for running tasks before restarting anyway, as `myrel-runner update` does. */
 export const UPDATE_WAIT_MS = 10 * 60 * 1000;
+/**
+ * How long auto-update waits for running tasks: nobody asked for it, so it waits for a quiet moment
+ * instead of cutting a turn short, and only restarts anyway on a computer that is never idle.
+ */
+export const AUTO_UPDATE_WAIT_MS = 6 * 60 * 60 * 1000;
 /** How long a new version has to connect before the previous one is put back. */
 export const CONFIRM_MS = 2 * 60 * 1000;
 
@@ -33,6 +38,7 @@ export type UpdaterOptions = {
   latest?: () => Promise<string | null>;
   pollMs?: number;
   waitMs?: number;
+  autoWaitMs?: number;
   now?: () => number;
 };
 
@@ -48,6 +54,8 @@ export class Updater {
   private pending: UpdateMarker | null = null;
   private busy = false;
   private hurry = false;
+  /** Until when a waiting update waits for running tasks. */
+  private until = 0;
 
   constructor(private readonly opts: UpdaterOptions) {}
 
@@ -119,16 +127,20 @@ export class Updater {
 
   /**
    * Starts updating to `version`. With `now`, running tasks are stopped (Myrel continues them);
-   * otherwise it waits for them, at most UPDATE_WAIT_MS. Asking again with `now` hurries a waiting one.
+   * otherwise it waits for them, at most UPDATE_WAIT_MS (AUTO_UPDATE_WAIT_MS for auto-update). Asking
+   * again with `now` hurries a waiting one; asking without it cuts an auto-update's wait to UPDATE_WAIT_MS.
    */
-  request(version: string, now = false): RunnerUpdateState {
+  request(version: string, now = false, auto = false): RunnerUpdateState {
     if (!isNewer(version, this.opts.version)) throw new Error(`myrel-runner ${this.opts.version} is already up to date.`);
+    const until = this.now + (auto ? (this.opts.autoWaitMs ?? AUTO_UPDATE_WAIT_MS) : (this.opts.waitMs ?? UPDATE_WAIT_MS));
     if (this.busy) {
       if (now) this.hurry = true;
+      this.until = Math.min(this.until, until);
       return this.current!;
     }
     this.busy = true;
     this.hurry = now;
+    this.until = until;
     this.set({ state: "waiting", version, running: this.opts.running().length });
     void this.run(version).finally(() => {
       this.busy = false;
@@ -143,12 +155,11 @@ export class Updater {
     if (!latest || !isNewer(latest, this.opts.version)) return;
     if (this.current && this.current.version === latest && this.current.state !== "waiting") return;
     this.opts.log(`Installing myrel-runner ${latest} (auto-update is on).`);
-    this.request(latest);
+    this.request(latest, false, true);
   }
 
   private async run(version: string) {
-    const until = this.now + (this.opts.waitMs ?? UPDATE_WAIT_MS);
-    for (let running = this.opts.running(); running.length && !this.hurry && this.now < until; running = this.opts.running()) {
+    for (let running = this.opts.running(); running.length && !this.hurry && this.now < this.until; running = this.opts.running()) {
       if (running.length !== this.current?.running) this.set({ state: "waiting", version, running: running.length });
       await new Promise((r) => setTimeout(r, this.opts.pollMs ?? 2000));
     }

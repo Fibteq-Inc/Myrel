@@ -64,7 +64,8 @@ From runner 0.14.0 the background runner can be updated and set up from **Myrel 
   connect within 2 minutes while the server is reachable, it puts the previous copy back and restarts on it; the card
   says so. The state across the restart is in `~/.myrel-runner/update.json`.
 - **Settings**: the access level, worktrees and **Update by itself** (auto-update: looks for a newer version every
-  6 hours and installs it when no task is running). They are saved in `config.json` on the computer.
+  6 hours and installs it when no task is running, waiting up to 6 hours for running tasks rather than 10 minutes, so
+  it does not cut turns short; **Update** while it waits uses the 10 minutes). They are saved in `config.json` on the computer.
   `myrel-runner settings` shows and changes the same ones here, and `myrel-runner settings remote off` stops Myrel from
   changing them (only this computer can turn it back on).
 
