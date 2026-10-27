@@ -57,6 +57,26 @@ export type FinishedThread = {
 /** A note the coordinator passed from one thread's work to another thread. */
 export type Relay = { fromThreadId: string; toThreadId: string; note: string; createdAt: string };
 
+/** What became of a thread's running turn the coordinator asked to stop. */
+export type InterruptOutcome = "stopped" | "not_running" | "too_soon" | "failed";
+
+/** The interrupt flag of message_thread and relay_to_thread. */
+const interruptInput = z
+  .boolean()
+  .optional()
+  .describe(
+    "Also stop the thread's running turn, so it starts again at once with this note. Only when the note makes the work it is doing now wrong or wasted (the person cancelled or changed the ask, another thread's result makes it moot). A note that only adds to or informs the work reaches the running turn by itself at its next step: leave this out. At most once in 10 minutes per thread.",
+  );
+
+/** The tool result's word on the running turn, after the note went. */
+function interruptText(outcome: InterruptOutcome | void): string {
+  if (outcome === "stopped") return " Its running turn was stopped; the next one starts now with your note.";
+  if (outcome === "not_running") return " Nothing was running; the note starts its next turn.";
+  if (outcome === "too_soon") return " Its turn was not stopped: you stopped it less than 10 minutes ago. The note reaches the running turn at its next step.";
+  if (outcome === "failed") return " Its turn could not be stopped; the note reaches it at its next step.";
+  return "";
+}
+
 /** The project operations the coordinator's tools act through. */
 export type CoordinatorHost = {
   getMessage(id: string): Message | null;
@@ -80,10 +100,13 @@ export type CoordinatorHost = {
   findDuplicate(messageId: string): Thread | null;
   /** Closes a thread opened by mistake. Throws when it already holds work only a person may set aside. */
   closeThread(threadId: string, input: { reason: ThreadCloseReason; duplicateOf?: string; note?: string }): Promise<Thread>;
-  /** follow_up forwards a person's follow-up; reply answers the thread's request. */
-  messageThread(threadId: string, note: string, kind: "follow_up" | "reply"): Promise<void>;
+  /**
+   * follow_up forwards a person's follow-up; reply answers the thread's request. interrupt also stops
+   * the thread's running turn so the next one starts with the note; returns what became of the turn.
+   */
+  messageThread(threadId: string, note: string, kind: "follow_up" | "reply", interrupt?: boolean): Promise<InterruptOutcome | void>;
   /** Tell an open thread what another thread's work means for it. Throws when the relay would repeat or bounce. */
-  relay(fromThreadId: string, toThreadId: string, note: string): Promise<void>;
+  relay(fromThreadId: string, toThreadId: string, note: string, interrupt?: boolean): Promise<InterruptOutcome | void>;
   /** Answers a thread agent's choice card from what the project knows; it never reaches people. Throws when it is not open. */
   answerQuestion(questionId: string, answer: string, source: string): Promise<void>;
   /** Passes a thread agent's choice card to people, with an optional line of context. Throws when it is not open. */
@@ -321,10 +344,11 @@ export function coordinatorTools(
         .min(1)
         .max(2000)
         .describe("One or two sentences: what changed and what it means for the recipient's work."),
+      interrupt: interruptInput,
     }),
-    run: async ({ from_thread_id, to_thread_id, note }) => {
-      await host.relay(from_thread_id, to_thread_id, note);
-      return "Relayed.";
+    run: async ({ from_thread_id, to_thread_id, note, interrupt }) => {
+      const outcome = await host.relay(from_thread_id, to_thread_id, note, interrupt);
+      return `Relayed.${interruptText(outcome)}`;
     },
   });
   // Routing needs memory and a view of the files, not file contents.
@@ -447,12 +471,13 @@ export function coordinatorTools(
           .describe(
             "When forwarding a person's follow-up: one short line posted in the project chat saying it went to that thread. Leave out when answering a thread's request.",
           ),
+        interrupt: interruptInput,
       }),
-      run: async ({ thread_id, note, project_ack }) => {
+      run: async ({ thread_id, note, project_ack, interrupt }) => {
         const thread = host.getThread(thread_id);
         if (!thread) throw new Error(`No thread ${thread_id}.`);
         const ack = project_ack?.trim();
-        await host.messageThread(thread_id, note, ack ? "follow_up" : "reply");
+        const outcome = await host.messageThread(thread_id, note, ack ? "follow_up" : "reply", interrupt);
         // People should be one tap from the thread their message went to, even when the model forgot the link.
         if (ack) {
           host.post(ack.includes(`(#${thread.id})`) ? ack : `${ack} ${threadLink(thread)}`, {
@@ -461,7 +486,7 @@ export function coordinatorTools(
             note,
           });
         }
-        return "Delivered.";
+        return `Delivered.${interruptText(outcome)}`;
       },
     }),
     tool({

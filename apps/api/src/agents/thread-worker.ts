@@ -394,10 +394,16 @@ export function editedSince(m: Message, since: string | undefined): boolean {
 }
 
 /**
- * People's messages that arrived while the turn runs, added to the result of its next Myrel tool
- * call. People see them as delivered from then on, and the next turn does not show them as NEW.
+ * People's messages and the coordinator's notes that arrived while the turn runs, added to the result
+ * of its next Myrel tool call (or steered into its CLI). People see them as delivered from then on,
+ * and the next turn does not show them as NEW.
  */
-export function newsNote(messages: Message[], names: Record<string, string>, edited: Message[] = []): string {
+export function newsNote(
+  messages: Message[],
+  names: Record<string, string>,
+  edited: Message[] = [],
+  notes: Pick<CoordinatorNote, "body" | "createdAt">[] = [],
+): string {
   const many = messages.length > 1;
   const news = messages.length
     ? [
@@ -413,5 +419,12 @@ export function newsNote(messages: Message[], names: Record<string, string>, edi
         ...edited.map((m) => renderMessage(m, names, { isNew: true })),
       ]
     : [];
-  return [...news, ...changed].join("\n\n");
+  const noted = notes.length
+    ? [
+        `## ${notes.length > 1 ? "Notes" : "A note"} from the coordinator while you work`,
+        `${notes.length > 1 ? "They arrived" : "It arrived"} after this turn started. Take ${notes.length > 1 ? "them" : "it"} into account from here on: ${notes.length > 1 ? "they" : "it"} may change, add to or stop the work.`,
+        ...notes.map((n) => `- ${n.createdAt}: ${n.body}`),
+      ]
+    : [];
+  return [...news, ...changed, ...noted].join("\n\n");
 }
