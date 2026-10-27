@@ -164,6 +164,13 @@ export const tr: Catalog = {
   "starter.step.github": "GitHub'ı bağla",
   "starter.step.githubHint": "Ajanlar dal açıp pull request göndersin",
 
+  // Standing goal
+  "goal.until": "Koordinatör devam ediyor · bitiş {time}",
+  "goal.threads": "{count}/{max} thread kullanıldı",
+  "goal.stop": "Durdur",
+  "goal.stopTitle": "Hedef durdurulsun mu?",
+  "goal.stopConfirm": "Koordinatör artık kendiliğinden yeni iş başlatmaz. Çalışan thread'ler devam eder.",
+
   // Messages
   "message.copy": "Mesajı kopyala",
   "message.edit": "Mesajı düzenle",

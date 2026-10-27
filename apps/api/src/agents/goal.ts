@@ -1,31 +1,10 @@
-import { nextCronRun, Timestamp } from "@myrel/protocol";
+import { type Goal, GOAL_MAX_THREADS, GOAL_MAX_WAKES, nextCronRun, Timestamp } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 
-/**
- * A standing goal: a person told the coordinator to keep going ("work through the night", "keep at
- * it until it is done"). While one is open, the coordinator wakes with its full tools when the last
- * open thread finishes, and on a fallback check, so it can start the next work without anyone writing.
- */
-export type Goal = {
-  text: string;
-  /** When the goal ends on its own, whatever is left. */
-  until: string;
-  /** The person who asked for it; threads the coordinator opens for it work for them. */
-  createdBy: string;
-  createdAt: string;
-  /** Turns the coordinator was woken for it without anyone writing. */
-  wakes: number;
-  /** Threads opened while it was open. */
-  threads: number;
-  /** Wakes in a row that started no work. */
-  idle: number;
-};
+// The goal itself and its limits people see are in the protocol; how the coordinator works with it is here.
+export { type Goal, GOAL_MAX_THREADS, GOAL_MAX_WAKES };
 
-/** A goal ends after this many automatic wakes, so it cannot run up turns all night. */
-export const GOAL_MAX_WAKES = 20;
-/** Threads opened while a goal is open, beyond which start_thread refuses until a person asks again. */
-export const GOAL_MAX_THREADS = 15;
 /** Automatic wakes in a row that start no work end the goal: nothing useful is left. */
 export const GOAL_MAX_IDLE = 2;
 /** The longest a goal may stay open. */

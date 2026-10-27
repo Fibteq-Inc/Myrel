@@ -11,6 +11,7 @@ import type { ComposerHandle } from "../../../../components/composer";
 import { Conversation } from "../../../../components/conversation";
 import { ArtifactsTab } from "../../../../components/project/artifacts-tab";
 import { FilesTab } from "../../../../components/project/files-tab";
+import { GoalBanner } from "../../../../components/project/goal-banner";
 import { StarterExamples, StarterList } from "../../../../components/project/starter";
 import { Tabs } from "../../../../components/project/tabs";
 import { ThreadsTab } from "../../../../components/project/threads-tab";
@@ -127,7 +128,14 @@ function ChatTab({ owner }: { owner: boolean }) {
       onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
       tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
       composer={composer}
-      header={asked ? <StarterList projectId={projectId} owner={owner} asked folded /> : undefined}
+      header={
+        asked || state.goal ? (
+          <>
+            {asked && <StarterList projectId={projectId} owner={owner} asked folded />}
+            {state.goal && <GoalBanner goal={state.goal} onStop={() => emit({ type: "goal.stop" })} />}
+          </>
+        ) : undefined
+      }
       footerFor={(m) => {
         const thread = threads.get(m.id);
         const offered = m.clis?.length ? <OfferedClis clis={m.clis} /> : null;

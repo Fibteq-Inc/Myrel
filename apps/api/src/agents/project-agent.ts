@@ -484,7 +484,14 @@ export class ProjectAgent extends Agent<Env> {
         this.updateThread(thread.id, { model: { cli, model: event.model, effort: event.effort } });
         return;
       }
+      case "goal.stop": {
+        if (!this.getGoal()) return;
+        const { names } = await this.directory();
+        this.endGoal(`${names[userId] ?? "Someone"} stopped the standing goal. The coordinator no longer carries on by itself.`);
+        return;
+      }
       case "sync": {
+        const goal = this.getGoal();
         const threads = this.listThreads();
         const artifacts = this.artifacts.list();
         const routines = this.listRoutines();
@@ -502,6 +509,7 @@ export class ProjectAgent extends Agent<Env> {
             reactions: chat.reactions,
             artifacts,
             routines,
+            goal,
             windows: [{ threadId: null, hasEarlier: chat.hasEarlier }],
             ...(event.afterSeq > 0 ? { reset: true } : {}),
             lastSeq,
@@ -518,6 +526,7 @@ export class ProjectAgent extends Agent<Env> {
               reactions: this.reactionsFor(page.messages.map((m) => m.id)),
               artifacts,
               routines,
+              goal,
               ...(page.hasMore ? {} : { lastSeq }),
             });
             if (!event.all || !page.hasMore) break;
@@ -1315,8 +1324,14 @@ export class ProjectAgent extends Agent<Env> {
     return goal && Date.parse(goal.until) > Date.now() ? goal : null;
   }
 
+  /** Tells clients the goal changed: set, moved along or ended. */
+  private goalChanged() {
+    this.emit({ type: "goal.updated", goal: this.getGoal() });
+  }
+
   private endGoal(notice?: string) {
     this.sql`DELETE FROM coordinator_goal WHERE id = 1`;
+    this.goalChanged();
     if (notice) this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: notice });
   }
 
@@ -1330,6 +1345,7 @@ export class ProjectAgent extends Agent<Env> {
         const createdAt = new Date().toISOString();
         this.sql`INSERT OR REPLACE INTO coordinator_goal (id, text, until_at, created_by, created_at, wakes, threads, idle)
           VALUES (1, ${text}, ${until.toISOString()}, ${asked.authorId}, ${createdAt}, 0, 0, 0)`;
+        this.goalChanged();
         post(line);
         // A look at its end time, and every half hour in case a wake was missed; a replaced goal's checks find nothing to do.
         await this.schedule(until, "goalCheck", { createdAt, repeat: false }, { idempotent: false });
@@ -1367,6 +1383,7 @@ export class ProjectAgent extends Agent<Env> {
     const goal = this.getGoal();
     if (wakes.length === 0 || !goal) return null;
     this.sql`UPDATE coordinator_goal SET wakes = wakes + 1 WHERE id = 1`;
+    this.goalChanged();
     const over = wakes.includes("end") || Date.parse(goal.until) <= Date.now() || goal.wakes + 1 >= GOAL_MAX_WAKES;
     return over ? "end" : "idle";
   }
@@ -1381,6 +1398,7 @@ export class ProjectAgent extends Agent<Env> {
     }
     if (this.coordinatorWork > 0) {
       this.sql`UPDATE coordinator_goal SET idle = 0 WHERE id = 1`;
+      this.goalChanged();
       return;
     }
     if (goal.idle + 1 >= GOAL_MAX_IDLE) {
@@ -1388,6 +1406,7 @@ export class ProjectAgent extends Agent<Env> {
       return;
     }
     this.sql`UPDATE coordinator_goal SET idle = idle + 1 WHERE id = 1`;
+    this.goalChanged();
   }
 
   private recentRelays(): Relay[] {
@@ -1637,7 +1656,10 @@ export class ProjectAgent extends Agent<Env> {
         if (goal && (goal.threads >= GOAL_MAX_THREADS || goal.wakes >= GOAL_MAX_WAKES)) {
           throw new Error("The standing goal reached its limit. Start no more threads for it; call finish_goal with a summary for the person.");
         }
-        if (goal) this.sql`UPDATE coordinator_goal SET threads = threads + 1 WHERE id = 1`;
+        if (goal) {
+          this.sql`UPDATE coordinator_goal SET threads = threads + 1 WHERE id = 1`;
+          this.goalChanged();
+        }
         this.coordinatorWork++;
         // The id comes first so the "on it" line can carry the brief before the thread exists.
         const relay: MessageRelay = { kind: "brief", threadId: createId("thread"), note: brief };

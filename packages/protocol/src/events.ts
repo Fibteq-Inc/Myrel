@@ -3,6 +3,7 @@ import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
+import { Goal } from "./goal";
 import { CliId, RunnerId } from "./runner";
 import { CLOUD_RUNNER, MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
@@ -88,6 +89,8 @@ export const ClientEvent = z.discriminatedUnion("type", [
     model: z.string().trim().min(1).max(200).nullable(),
     effort: z.string().trim().min(1).max(20).nullable(),
   }),
+  /** Any member ends the project's standing goal; the coordinator stops waking by itself for it. */
+  z.object({ type: z.literal("goal.stop") }),
   z.object({
     type: z.literal("sync"),
     /** Return messages with seq strictly greater than this. 0 = from the start. */
@@ -134,6 +137,8 @@ export const ServerEvent = z.discriminatedUnion("type", [
     artifacts: z.array(Artifact).default([]),
     /** Every routine in the project, current state. */
     routines: z.array(Routine).default([]),
+    /** The project's standing goal, null when none is open (absent from older servers). */
+    goal: Goal.nullable().optional(),
     /**
      * Set when the sync answered `recent` with only the newest messages: the conversations it holds
      * from their newest message, each saying whether older ones are left on the server.
@@ -152,6 +157,8 @@ export const ServerEvent = z.discriminatedUnion("type", [
   /** A routine was created or changed (schedule, paused, a run happened). */
   z.object({ type: z.literal("routine.updated"), routine: Routine }),
   z.object({ type: z.literal("routine.deleted"), routineId: RoutineId }),
+  /** The standing goal was set, moved along (wakes, threads) or ended (null). */
+  z.object({ type: z.literal("goal.updated"), goal: Goal.nullable() }),
   /**
    * An agent started or stopped working. threadId null = the coordinator in the project chat.
    * Ephemeral: not replayed by sync.

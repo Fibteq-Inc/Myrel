@@ -11,6 +11,7 @@ export * from "./settings";
 export * from "./runner";
 export * from "./artifacts";
 export * from "./routines";
+export * from "./goal";
 export * from "./notifications";
 export * from "./cron";
 export * from "./billing";
