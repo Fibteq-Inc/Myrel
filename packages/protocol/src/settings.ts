@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ProjectRole } from "./models";
+import { ProjectColor, ProjectIcon, ProjectRole } from "./models";
 import { CliId } from "./runner";
 
 /** Model providers a server can call. Each has its own key format and default model. */
@@ -68,6 +68,9 @@ export const ProjectSettings = z.object({
   model: z.string().nullable(),
   keyId: z.string().nullable(),
   taskTarget: TaskTarget,
+  /** Older servers never send them; null = first letter / accent color. */
+  icon: ProjectIcon.nullable().default(null),
+  color: ProjectColor.nullable().default(null),
   /** Older servers never send it. */
   cloudCli: CloudCli.default("opencode"),
   /** Older servers never send it. */
@@ -81,6 +84,8 @@ export const UpdateProjectSettingsInput = z.object({
   model: z.string().trim().max(200).nullable().optional(),
   keyId: z.string().nullable().optional(),
   taskTarget: TaskTarget.optional(),
+  icon: ProjectIcon.nullable().optional(),
+  color: ProjectColor.nullable().optional(),
   cloudCli: CloudCli.optional(),
   /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
   cliModels: CliModelDefaults.optional(),

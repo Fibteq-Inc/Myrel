@@ -323,10 +323,49 @@ export const ProjectCost = z.object({
 });
 export type ProjectCost = z.infer<typeof ProjectCost>;
 
+/** Colors a project can be marked with. Each app draws them from its theme's own tokens (light and dark), never from a hex here. */
+export const ProjectColor = z.enum(["indigo", "blue", "teal", "green", "amber", "orange", "red", "pink", "purple", "gray"]);
+export type ProjectColor = z.infer<typeof ProjectColor>;
+
+/** Icons a project can show instead of its first letter; each app maps them to its own icon set. */
+export const ProjectIcon = z.enum([
+  "folder",
+  "rocket",
+  "code",
+  "terminal",
+  "globe",
+  "smartphone",
+  "server",
+  "database",
+  "cpu",
+  "bot",
+  "book",
+  "pen",
+  "palette",
+  "camera",
+  "music",
+  "gamepad",
+  "briefcase",
+  "cart",
+  "chart",
+  "shield",
+  "flask",
+  "leaf",
+  "heart",
+  "star",
+  "zap",
+  "home",
+]);
+export type ProjectIcon = z.infer<typeof ProjectIcon>;
+
 export const Project = z.object({
   id: ProjectId,
   name: z.string().min(1).max(120),
   role: ProjectRole,
+  /** Shared by every member; null = the first letter of the name. Missing from older servers. */
+  icon: ProjectIcon.nullable().optional(),
+  /** Shared by every member; null = the accent color. Missing from older servers. */
+  color: ProjectColor.nullable().optional(),
   createdAt: Timestamp,
   /** Missing from servers older than this field. */
   activity: ProjectActivity.optional(),

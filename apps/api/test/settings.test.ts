@@ -132,6 +132,8 @@ describe("project settings", () => {
       model: "claude-opus-5-5",
       keyId: aliceKey.id,
       taskTarget: "auto",
+      icon: null,
+      color: null,
       cloudCli: "opencode",
       cliModels: {},
     });
@@ -163,6 +165,34 @@ describe("project settings", () => {
     // Back to the server default.
     await json(patch(alice.token, { provider: null }));
     expect((await projectProvider(env, project.id)).ok).toBe(true);
+  });
+
+  it("marks a project with an icon and a color every member sees, set by those who manage it", async () => {
+    const alice = await signUp();
+    const bob = await signUp();
+    const project = await createProject(alice.token);
+    const base = `/api/projects/${project.id}`;
+    const patch = (token: string, body: unknown) => api(`${base}/settings`, { method: "PATCH", token, body });
+
+    const { settings } = await json<{ settings: ProjectSettings }>(patch(alice.token, { icon: "rocket", color: "teal" }));
+    expect(settings).toMatchObject({ icon: "rocket", color: "teal" });
+    expect((await patch(alice.token, { icon: "unicorn" })).status).toBe(400);
+    expect((await patch(alice.token, { color: "#ff0000" })).status).toBe(400);
+
+    // Members see it in the project and the project list, but cannot change it.
+    const { invite } = await json<{ invite: Invite }>(
+      api(`${base}/invites`, { method: "POST", token: alice.token, body: { email: bob.email } }),
+      201,
+    );
+    await json(api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: bob.token }));
+    expect((await json<{ project: Project }>(api(base, { token: bob.token }))).project).toMatchObject({ icon: "rocket", color: "teal" });
+    const listed = await json<{ projects: Project[] }>(api("/api/projects", { token: bob.token }));
+    expect(listed.projects.find((p) => p.id === project.id)).toMatchObject({ icon: "rocket", color: "teal" });
+    expect((await patch(bob.token, { color: "red" })).status).toBe(403);
+
+    // null goes back to the first letter and the accent color.
+    const reset = await json<{ settings: ProjectSettings }>(patch(alice.token, { icon: null, color: null }));
+    expect(reset.settings).toMatchObject({ icon: null, color: null });
   });
 });
 

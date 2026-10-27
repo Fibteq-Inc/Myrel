@@ -3,9 +3,10 @@ import { useI18n, useT } from "@myrel/i18n/react";
 import type { Project } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
-import { ChevronRight, FolderClosed, Pin, Plus, Settings } from "lucide-react-native";
+import { ChevronRight, Pin, Plus, Settings } from "lucide-react-native";
 import { useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ProjectBadge } from "../../components/project-badge";
 import { Button, errorMessage, Input, Spinner, useRelativeTime } from "../../components/ui";
 import { formatCost } from "../../lib/format";
 import { useSession } from "../../lib/session";
@@ -122,9 +123,7 @@ export default function ProjectsScreen() {
             onPress={() => router.push(`/projects/${item.id}` as Href)}
             style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.hover }]}
           >
-            <View style={styles.icon}>
-              <FolderClosed size={18} color={colors.accent} />
-            </View>
+            <ProjectBadge name={item.name} icon={item.icon} color={item.color} />
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={styles.name} numberOfLines={1}>
                 {item.name}
@@ -217,14 +216,6 @@ const useStyles = makeStyles((colors) =>
       borderWidth: 1,
       borderColor: colors.line,
       backgroundColor: colors.raised,
-    },
-    icon: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      backgroundColor: colors.accentSoft,
-      alignItems: "center",
-      justifyContent: "center",
     },
     name: { color: colors.fg, fontSize: 16, fontWeight: "600" },
     meta: { color: colors.subtle, fontSize: 13 },

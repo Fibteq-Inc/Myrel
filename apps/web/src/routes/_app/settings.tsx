@@ -1,8 +1,9 @@
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { BookMarked, ChevronLeft, CreditCard, Folder, KeyRound, Mail, Plug, Server, UserRound } from "lucide-react";
+import { BookMarked, ChevronLeft, CreditCard, KeyRound, Mail, Plug, Server, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
+import { ProjectBadge } from "../../components/project-badge";
 import { meQuery, myInvitesQuery, projectsQuery, serverInfoQuery } from "../../lib/api";
 import { cn } from "../../lib/ui";
 
@@ -74,7 +75,7 @@ function SettingsLayout() {
                     className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-hover hover:text-fg"
                     activeProps={{ className: "bg-hover text-fg" }}
                   >
-                    <Folder size={14} className="flex-none" />
+                    <ProjectBadge name={p.name} icon={p.icon} color={p.color} size={18} />
                     <span className="truncate">{p.name}</span>
                   </Link>
                 </li>
