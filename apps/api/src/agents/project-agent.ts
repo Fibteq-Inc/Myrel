@@ -75,6 +75,7 @@ import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SEEN_EMOJI, SYSTEM_ID, TH
 import { answerLine, relayLine } from "./relay-line";
 import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
+import { GOAL_CHECK_SEC, GOAL_MAX_IDLE, GOAL_MAX_THREADS, GOAL_MAX_WAKES, type Goal, type GoalHost, goalTools } from "./goal";
 
 /** Header the API Worker sets after authenticating a WebSocket upgrade. */
 export const USER_ID_HEADER = "x-myrel-user-id";
@@ -127,6 +128,7 @@ type ThreadRow = {
 };
 
 type InboxRow = { id: number; kind: InboxItem["kind"]; payload: string };
+type GoalRow = { text: string; until_at: string; created_by: string; created_at: string; wakes: number; threads: number; idle: number };
 
 type RoutineRow = {
   id: string;
@@ -217,6 +219,8 @@ export class ProjectAgent extends Agent<Env> {
    * with the object (a deploy, an eviction) leaves its rows for the queue's retry to take again.
    */
   private coordinatorTaken = 0;
+  /** Threads the running coordinator turn started or sent work to, to tell an idle goal wake. In memory only. */
+  private coordinatorWork = 0;
 
   /** Project instructions, memory and the file index. */
   readonly knowledge: KnowledgeStore;
@@ -288,6 +292,17 @@ export class ProjectAgent extends Agent<Env> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       kind TEXT NOT NULL,
       payload TEXT NOT NULL
+    )`;
+    // The standing goal a person asked the coordinator to keep working toward; at most one row.
+    this.sql`CREATE TABLE IF NOT EXISTS coordinator_goal (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      text TEXT NOT NULL,
+      until_at TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      wakes INTEGER NOT NULL DEFAULT 0,
+      threads INTEGER NOT NULL DEFAULT 0,
+      idle INTEGER NOT NULL DEFAULT 0
     )`;
     // Notes the coordinator passed from one thread to another.
     this.sql`CREATE TABLE IF NOT EXISTS coordinator_relays (
@@ -1240,9 +1255,16 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   private async observeFinished(threadId: string) {
-    if (!this.listThreads().some((t) => !t.resolved && t.id !== threadId)) return;
+    const othersOpen = this.listThreads().some((t) => !t.resolved && t.id !== threadId);
+    const goal = this.openGoal();
+    if (!othersOpen && !goal) return;
     const item: InboxItem = { kind: "finished", threadId };
     this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${item.kind}, ${JSON.stringify(item)})`;
+    // The last open thread finishing is an open goal's cue: the coordinator wakes with its full tools to start what is next.
+    if (goal && !othersOpen) {
+      const wake: InboxItem = { kind: "goal", reason: "idle" };
+      this.sql`INSERT INTO coordinator_inbox (kind, payload) VALUES (${wake.kind}, ${JSON.stringify(wake)})`;
+    }
     // With the observe delay, its last reply (sent just before it resolved) comes in the same look.
     await this.schedule(OBSERVE_DELAY_SEC, "coordinatorTurn", "observe", { idempotent: true });
   }
@@ -1275,6 +1297,97 @@ export class ProjectAgent extends Agent<Env> {
         .map((m) => ({ threadId: m.threadId!, note: m.relay!.note, createdAt: m.createdAt }));
       return { thread, last: last ?? null, mentions };
     });
+  }
+
+  // ---- Standing goal ----------------------------------------------------
+
+  /** The standing goal, if one is set; it may be past its end until its last turn closes it. Callable over RPC. */
+  getGoal(): Goal | null {
+    const [r] = this.sql<GoalRow>`SELECT * FROM coordinator_goal WHERE id = 1`;
+    return r
+      ? { text: r.text, until: r.until_at, createdBy: r.created_by, createdAt: r.created_at, wakes: r.wakes, threads: r.threads, idle: r.idle }
+      : null;
+  }
+
+  /** The standing goal while it still runs: set and not past its end. */
+  private openGoal(): Goal | null {
+    const goal = this.getGoal();
+    return goal && Date.parse(goal.until) > Date.now() ? goal : null;
+  }
+
+  private endGoal(notice?: string) {
+    this.sql`DELETE FROM coordinator_goal WHERE id = 1`;
+    if (notice) this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: notice });
+  }
+
+  private goalHost(post: (body: string) => Message): GoalHost {
+    return {
+      setGoal: async ({ messageId, text, until, line }) => {
+        const asked = this.getMessage(messageId);
+        if (!asked || asked.threadId || asked.authorKind !== "user") {
+          throw new Error(`${messageId} is not a person's project-chat message; set a goal only on a person's ask.`);
+        }
+        const createdAt = new Date().toISOString();
+        this.sql`INSERT OR REPLACE INTO coordinator_goal (id, text, until_at, created_by, created_at, wakes, threads, idle)
+          VALUES (1, ${text}, ${until.toISOString()}, ${asked.authorId}, ${createdAt}, 0, 0, 0)`;
+        post(line);
+        // A look at its end time, and every half hour in case a wake was missed; a replaced goal's checks find nothing to do.
+        await this.schedule(until, "goalCheck", { createdAt, repeat: false }, { idempotent: false });
+        await this.schedule(GOAL_CHECK_SEC, "goalCheck", { createdAt, repeat: true }, { idempotent: false });
+        return this.getGoal()!;
+      },
+      finishGoal: async (summary) => {
+        if (!this.getGoal()) throw new Error("No goal is open.");
+        this.endGoal();
+        post(summary);
+      },
+      defaultTimezone: this.defaultTimezone(),
+    };
+  }
+
+  /** Schedule callback: the goal's end time came, or its fallback look while no thread is open. */
+  async goalCheck(payload: { createdAt: string; repeat: boolean }): Promise<void> {
+    const goal = this.getGoal();
+    if (!goal || goal.createdAt !== payload.createdAt) return;
+    if (Date.parse(goal.until) <= Date.now()) {
+      await this.notifyCoordinator({ kind: "goal", reason: "end" });
+      return;
+    }
+    if (!payload.repeat) return;
+    if (!this.listThreads().some((t) => !t.resolved)) await this.notifyCoordinator({ kind: "goal", reason: "idle" });
+    await this.schedule(GOAL_CHECK_SEC, "goalCheck", payload, { idempotent: false });
+  }
+
+  /**
+   * Counts an automatic goal wake before its turn: how the coordinator is to treat it, "end" once the
+   * goal ran out of time or wakes. Null when the turn was not a goal wake or the goal is gone.
+   */
+  private takeGoalWake(inbox: InboxItem[]): "idle" | "end" | null {
+    const wakes = inbox.flatMap((i) => (i.kind === "goal" ? [i.reason] : []));
+    const goal = this.getGoal();
+    if (wakes.length === 0 || !goal) return null;
+    this.sql`UPDATE coordinator_goal SET wakes = wakes + 1 WHERE id = 1`;
+    const over = wakes.includes("end") || Date.parse(goal.until) <= Date.now() || goal.wakes + 1 >= GOAL_MAX_WAKES;
+    return over ? "end" : "idle";
+  }
+
+  /** After a goal wake: a goal its last turn left open past its end is closed; idle wakes in a row end it too. */
+  private settleGoal(wake: "idle" | "end" | null) {
+    const goal = this.getGoal();
+    if (!wake || !goal) return;
+    if (wake === "end") {
+      this.endGoal("The standing goal ended: its time or its limit of automatic turns ran out. Write in the chat to carry on.");
+      return;
+    }
+    if (this.coordinatorWork > 0) {
+      this.sql`UPDATE coordinator_goal SET idle = 0 WHERE id = 1`;
+      return;
+    }
+    if (goal.idle + 1 >= GOAL_MAX_IDLE) {
+      this.endGoal("The standing goal ended: the coordinator found no further work for it. Write in the chat to carry on.");
+      return;
+    }
+    this.sql`UPDATE coordinator_goal SET idle = idle + 1 WHERE id = 1`;
   }
 
   private recentRelays(): Relay[] {
@@ -1334,6 +1447,8 @@ export class ProjectAgent extends Agent<Env> {
       return;
     }
 
+    const goalWake = this.takeGoalWake(inbox);
+    this.coordinatorWork = 0;
     this.setActivity(null, true);
     try {
       const { projectName, names } = await this.directory();
@@ -1367,6 +1482,8 @@ export class ProjectAgent extends Agent<Env> {
           chat,
           threads: this.listThreads(),
           routines: this.listRoutines(),
+          goal: this.getGoal(),
+          goalWake,
           inbox,
           threadUpdates,
           finished: this.finishedThreads(inbox),
@@ -1381,6 +1498,7 @@ export class ProjectAgent extends Agent<Env> {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
+          ...(onlyThreadUpdates ? [] : goalTools(this.goalHost((body) => this.coordinatorPost(body, meter)))),
         ],
         maxSteps: 8,
         // One key per project: its turns share the system prompt, tools and most of the prompt.
@@ -1402,6 +1520,7 @@ export class ProjectAgent extends Agent<Env> {
         body: `The coordinator could not answer: ${err instanceof Error ? err.message : String(err)}`,
       });
     } finally {
+      this.settleGoal(goalWake);
       this.setActivity(null, false);
     }
   }
@@ -1412,6 +1531,8 @@ export class ProjectAgent extends Agent<Env> {
       const m = item.kind === "message" || item.kind === "edited" ? this.getMessage(item.messageId) : null;
       if (m?.authorKind === "user") return m.authorId;
     }
+    // A goal wake works for the person who set the goal.
+    if (inbox.some((i) => i.kind === "goal")) return this.getGoal()?.createdBy ?? null;
     return null;
   }
 
@@ -1430,6 +1551,8 @@ export class ProjectAgent extends Agent<Env> {
       } else if (item.kind === "routine") {
         const routine = this.getRoutine(item.routineId);
         people.add(routine && routine.createdBy !== "agent" ? routine.createdBy : "");
+      } else if (item.kind === "goal") {
+        people.add(this.getGoal()?.createdBy ?? "");
       }
     }
     const [only] = people;
@@ -1444,7 +1567,7 @@ export class ProjectAgent extends Agent<Env> {
    */
   private followUpFor(inbox: InboxItem[]): string | null | undefined {
     const asked = inbox.some((item) => {
-      if (item.kind === "routine") return true;
+      if (item.kind === "routine" || item.kind === "goal") return true;
       if (item.kind !== "message" && item.kind !== "edited") return false;
       return this.getMessage(item.messageId)?.authorKind === "user";
     });
@@ -1460,11 +1583,23 @@ export class ProjectAgent extends Agent<Env> {
   private startedFor(inbox: InboxItem[]): string | null {
     const requests = inbox.filter((i) => i.kind === "request");
     if (requests.length === 0) return this.forwardedFor(inbox);
-    const asked = inbox.filter((i) => i.kind === "message" || i.kind === "edited" || i.kind === "routine");
+    const asked = inbox.filter((i) => i.kind === "message" || i.kind === "edited" || i.kind === "routine" || i.kind === "goal");
     const people = new Set(requests.map((r) => r.actor ?? ""));
     if (asked.length > 0) people.add(this.forwardedFor(asked) ?? "");
     const [only] = people;
     return people.size === 1 && only ? only : null;
+  }
+
+  /** A coordinator message in the project chat, carrying the turn's usage so far. */
+  private coordinatorPost(body: string, meter?: TurnMeter, relay?: MessageRelay): Message {
+    return this.sendMessage({
+      threadId: null,
+      authorKind: "agent",
+      authorId: COORDINATOR_ID,
+      body,
+      ...(relay && { relay }),
+      ...(meter && { stats: meter.take() ?? undefined }),
+    });
   }
 
   private coordinatorHost(
@@ -1476,15 +1611,7 @@ export class ProjectAgent extends Agent<Env> {
     reacted?: Set<string>,
     startedFor: string | null = null,
   ): CoordinatorHost {
-    const post = (body: string, relay?: MessageRelay) =>
-      this.sendMessage({
-        threadId: null,
-        authorKind: "agent",
-        authorId: COORDINATOR_ID,
-        body,
-        ...(relay && { relay }),
-        ...(meter && { stats: meter.take() ?? undefined }),
-      });
+    const post = (body: string, relay?: MessageRelay) => this.coordinatorPost(body, meter, relay);
     // The line in the thread where a note arrived, so people can open what the coordinator said.
     const relayInThread = (relay: MessageRelay, body: string) =>
       this.sendMessage({ threadId: relay.threadId, authorKind: "agent", authorId: COORDINATOR_ID, body, relay });
@@ -1506,6 +1633,12 @@ export class ProjectAgent extends Agent<Env> {
         this.addReaction({ messageId, emoji, authorKind: "agent", authorId: COORDINATOR_ID });
       },
       startThread: async ({ rootMessageId, title, brief, ack, projectAck, cli, runner }) => {
+        const goal = this.openGoal();
+        if (goal && (goal.threads >= GOAL_MAX_THREADS || goal.wakes >= GOAL_MAX_WAKES)) {
+          throw new Error("The standing goal reached its limit. Start no more threads for it; call finish_goal with a summary for the person.");
+        }
+        if (goal) this.sql`UPDATE coordinator_goal SET threads = threads + 1 WHERE id = 1`;
+        this.coordinatorWork++;
         // The id comes first so the "on it" line can carry the brief before the thread exists.
         const relay: MessageRelay = { kind: "brief", threadId: createId("thread"), note: brief };
         // The project-chat line goes first so the card can sit under it: ask, "on it", card.
@@ -1520,6 +1653,7 @@ export class ProjectAgent extends Agent<Env> {
       closeThread: (threadId, input) => this.closeThread(threadId, { ...input, by: "coordinator" }),
       messageThread: async (threadId, note, kind) => {
         const thread = this.getThread(threadId);
+        this.coordinatorWork++;
         // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
         const reopened = !!thread?.resolved;
         if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
