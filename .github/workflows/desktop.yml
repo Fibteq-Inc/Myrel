@@ -4,14 +4,16 @@ name: Desktop
 # Builds only run from main. Pull requests don't build the app; CI's typecheck and build already cover
 # the desktop and runner TypeScript.
 # Releases: the Release workflow (release.yml) tags `desktop-v*`, opens a draft release with GitHub's
-# generated notes and calls this workflow with that tag. Publishing a `desktop-v*` release drafted by hand
-# in the GitHub UI starts it the same way. The version comes from the tag, not from a file.
+# generated notes and calls this workflow with that tag. A `desktop-v*` release drafted by hand in the GitHub
+# UI is built with a manual run on main with its tag. The version comes from the tag, not from a file.
 # Manual runs on main upload unsigned-for-release installers as workflow artifacts. A manual run with a tag
 # rebuilds that release from its tag (e.g. when one platform failed) and replaces its installers.
 # Release builds: signed builds (when the secrets below exist) attached to the tag's GitHub release,
 # plus `latest.json` for the in-app updater.
 #
-# Optional secrets (the build still runs without them, just unsigned):
+# Optional secrets, kept in the `release` environment (the build still runs without them, just unsigned).
+# Only runs on main can use the environment, so a workflow pushed to another branch, or to a tag, cannot
+# read them. That is also why published releases don't start this workflow: their runs are on the tag.
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY  macOS code signing
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID                                macOS notarization
 #   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD          updater signatures
@@ -23,9 +25,6 @@ name: Desktop
 #   MYREL_DESKTOP_API_URL default server the app opens on (users can change it)
 
 on:
-  # Releases published in the UI. Ones written by release.yml (GITHUB_TOKEN) don't trigger this.
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -49,8 +48,6 @@ permissions:
 jobs:
   # Stops tags on commits that aren't on main, and manual runs started from another branch.
   from-main:
-    # A published release only builds when it is a desktop one.
-    if: github.event_name != 'release' || startsWith(github.ref_name, 'desktop-v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -74,10 +71,10 @@ jobs:
 
   build:
     needs: from-main
+    environment: release
     env:
-      # The release to attach installers to: release.yml's tag, a published release's tag, or none for
-      # manual runs.
-      RELEASE_TAG: ${{ inputs.tag || (github.event_name == 'release' && github.ref_name) || '' }}
+      # The release to attach installers to: release.yml's or a manual run's tag, or none for test builds.
+      RELEASE_TAG: ${{ inputs.tag || '' }}
     strategy:
       fail-fast: false
       matrix:

@@ -297,7 +297,8 @@ node packages/myrel-runner/dist/cli.js --help
 2. Merge it. The [Release myrel-runner](../../.github/workflows/release-runner.yml) workflow then tests, builds and
    publishes both packages whose version is not on npm yet (it can also be run by hand from the Actions tab).
    It uses npm trusted publishing: once, on npmjs.com, open each package's **Settings > Trusted publishing**, choose
-   GitHub Actions and enter `Fibteq-Inc`, `myrel` and `release-runner.yml`.
+   GitHub Actions and enter `Fibteq-Inc`, `Myrel`, `release-runner.yml` and the environment `release` (which only main
+   can use, so a workflow pushed to another branch cannot publish).
 
 By hand instead (needs an npm account in the `fibteq` npm organization), runner first, then the short name, with
 `pnpm` (it replaces `workspace:` versions and uses the built files from `publishConfig`):

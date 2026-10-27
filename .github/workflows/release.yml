@@ -12,8 +12,8 @@ name: Release
 #          uploads them to TestFlight and Play internal testing. Mobile releases are never marked
 #          "latest", because the desktop updater reads releases/latest/download/latest.json.
 #
-# A release drafted by hand in the GitHub UI with a `desktop-v*` tag works too: publishing it starts the
-# desktop build (desktop.yml listens for published releases).
+# A release drafted by hand in the GitHub UI with a `desktop-v*` tag on main is built with Actions → Desktop
+# → Run workflow on main with its tag (signing secrets are only open to runs on main).
 
 on:
   workflow_dispatch:
