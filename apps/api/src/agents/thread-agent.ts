@@ -168,6 +168,8 @@ type PendingNews = {
   /** edits_taken when read. */
   editsTaken: string;
   readAt: string;
+  /** The coordinator's notes taken, by id: unseen ones up to the first that waits for a turn of its own. */
+  noteIds: number[];
 };
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean };
 
@@ -224,6 +226,8 @@ const GITHUB_RENEW_SEC = 45 * 60;
 const FINISH_AFTER_REPLY_SEC = 60;
 /** How long a choice card waits on the coordinator before it goes to the person anyway. */
 const QUESTION_TIMEOUT_SEC = 120;
+/** The coordinator stops a thread's running turn at most once in this long, so its notes cannot keep the thread from working. */
+const COORDINATOR_STOP_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** A choice card the agent asked that waits on the coordinator: answered there, or passed on to people. */
 type PendingQuestion = { id: string; card: string; question: string };
@@ -369,10 +373,14 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && !reason.edited && reason.seq !== undefined) {
       this.setMeta("wake_seq", String(Math.max(reason.seq, Number(this.getMeta("wake_seq") ?? 0))));
     } else if (reason.kind === "message" && reason.edited) this.setMeta("wake_edit", new Date().toISOString());
-    else this.setMeta("wake_other", "1");
+    else if (reason.kind === "coordinator") {
+      // Like a message: a running turn that takes the note in needs no next turn for it.
+      const id = this.sql<{ id: number }>`SELECT MAX(id) AS id FROM notes`[0]!.id;
+      this.setMeta("wake_note", String(id));
+    } else this.setMeta("wake_other", "1");
     await this.markDirty();
     // Into the running turn right away where its CLI takes it, without holding up the sender.
-    if (reason.kind === "message" && this.runningTask()) await this.queue("steerNews", null);
+    if ((reason.kind === "message" || reason.kind === "coordinator") && this.runningTask()) await this.queue("steerNews", null);
   }
 
   /**
@@ -484,6 +492,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("dirty", "0");
     this.deleteMeta("wake_other");
     this.deleteMeta("wake_edit");
+    this.deleteMeta("wake_note");
     const projectId = this.getMeta("project_id");
     const threadId = this.getMeta("thread_id");
     if (!projectId || !threadId) return;
@@ -871,7 +880,9 @@ export class ThreadAgent extends Agent<Env> {
     let pending = turn?.pending ?? [];
     const replied = turn?.replied ?? false;
     const interrupted = this.getMeta("interrupted_task") === taskId;
+    const interruptedBy = this.getMeta("interrupted_by");
     this.deleteMeta("interrupted_task");
+    this.deleteMeta("interrupted_by");
     const stopped = this.getMeta("stopped_task") === taskId;
     this.deleteMeta("stopped_task");
     if (stopped) {
@@ -897,7 +908,14 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
         authorKind: "system",
         authorId: SYSTEM_ID,
-        body: tr ? "Durduruldu; yeni mesajla devam ediyor." : "Stopped; continuing with the new message.",
+        body:
+          interruptedBy === "coordinator"
+            ? tr
+              ? "Myrel durdurdu; koordinatörün notuyla devam ediyor."
+              : "Stopped by Myrel; continuing with the coordinator's note."
+            : tr
+              ? "Durduruldu; yeni mesajla devam ediyor."
+              : "Stopped; continuing with the new message.",
         artifacts: pending,
         stats: this.runStats(row, turn?.mark).stats,
       });
@@ -1699,7 +1717,7 @@ export class ThreadAgent extends Agent<Env> {
     if (!(await runnerHasFeature(this.env, spec.runnerId, "steer"))) return;
     const news = await this.pendingNews();
     if (!news) return;
-    const before = { dirty: this.getMeta("dirty"), wakeEdit: this.getMeta("wake_edit") };
+    const before = { dirty: this.getMeta("dirty"), wakeEdit: this.getMeta("wake_edit"), wakeNote: this.getMeta("wake_note") };
     if (!this.claimNews(news)) return;
     const claimed = this.getMeta("edits_taken") ?? "{}";
     const runner = await getAgentByName(this.env.RUNNER_AGENT, spec.runnerId);
@@ -1709,7 +1727,9 @@ export class ThreadAgent extends Agent<Env> {
     if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.last || (this.getMeta("edits_taken") ?? "{}") !== claimed) return;
     this.setMeta("last_seen_seq", String(news.seen));
     this.setMeta("edits_taken", news.editsTaken);
+    for (const id of news.noteIds) this.sql`UPDATE notes SET seen = 0 WHERE id = ${id}`;
     if (before.wakeEdit !== null) this.setMeta("wake_edit", before.wakeEdit);
+    if (before.wakeNote !== null) this.setMeta("wake_note", before.wakeNote);
     if (before.dirty !== null) this.setMeta("dirty", before.dirty);
   }
 
@@ -1719,7 +1739,13 @@ export class ThreadAgent extends Agent<Env> {
    */
   private async pendingNews(): Promise<PendingNews | null> {
     const requester = this.getMeta("requester");
-    if (!requester || !this.runningTask()) return null;
+    // A turn being stopped leaves what waits for the turn that follows, where it shows as NEW.
+    if (!this.runningTask() || this.getMeta("interrupted_task") || this.getMeta("stopped_task")) return null;
+    // The coordinator's notes, up to the first one forwarding someone else's ask (that one may need
+    // their computer or connectors, so it waits for a turn of its own, like their messages).
+    const unseen = this.sql<NoteRow & { forwarded: number; actor: string | null }>`SELECT * FROM notes WHERE seen = 0 ORDER BY id`;
+    const waits = unseen.findIndex((n) => n.forwarded === 1 && (!requester || n.actor !== requester));
+    const notes = waits === -1 ? unseen : unseen.slice(0, waits);
     const seen = Number(this.getMeta("last_seen_seq") ?? 0);
     const editsTaken = this.getMeta("edits_taken") ?? "{}";
     const taken0 = JSON.parse(editsTaken) as Record<string, string>;
@@ -1728,22 +1754,24 @@ export class ThreadAgent extends Agent<Env> {
     const readAt = new Date().toISOString();
     const read = await project.threadMessagesAfter(threadId, seen, this.getMeta("last_seen_at") ?? undefined);
     const { messages, names } = read;
-    const other = messages.findIndex((m) => m.authorKind === "user" && m.authorId !== requester);
+    // Without a person the turn works for, every message waits for a turn of its own.
+    const other = messages.findIndex((m) => m.authorKind === "user" && (!requester || m.authorId !== requester));
     const taken = other === -1 ? messages : messages.slice(0, other);
     const news = taken.filter((m) => m.authorKind === "user");
     const edits = read.edited.filter((m) => m.authorKind === "user" && taken0[m.id] !== m.editedAt);
     const edited = edits.filter((m) => m.authorId === requester);
-    if (!news.length && !edited.length) return null;
+    if (!news.length && !edited.length && !notes.length) return null;
     return {
-      text: newsNote(news, names, edited),
+      text: newsNote(news, names, edited, notes.map((n) => ({ body: n.body, createdAt: n.created_at }))),
       seen,
       last: news.length ? taken.at(-1)!.seq : seen,
-      whole: other === -1,
+      whole: other === -1 && waits === -1,
       hasNew: news.length > 0,
       edited,
       allEdits: edited.length === edits.length,
       editsTaken,
       readAt,
+      noteIds: notes.map((n) => n.id),
     };
   }
 
@@ -1751,7 +1779,12 @@ export class ThreadAgent extends Agent<Env> {
   private claimNews(news: PendingNews): boolean {
     // Read again: another call may have taken them meanwhile.
     if (Number(this.getMeta("last_seen_seq") ?? 0) !== news.seen || (this.getMeta("edits_taken") ?? "{}") !== news.editsTaken) return false;
+    if (news.noteIds.some((id) => this.sql<{ seen: number }>`SELECT seen FROM notes WHERE id = ${id}`[0]?.seen !== 0)) return false;
     this.setMeta("last_seen_seq", String(news.last));
+    for (const id of news.noteIds) this.sql`UPDATE notes SET seen = 1 WHERE id = ${id}`;
+    // Every note the wake was for is taken in: no turn after this one for it.
+    const wakeNote = Number(this.getMeta("wake_note") ?? 0);
+    if (wakeNote && news.noteIds.length && Math.max(...news.noteIds) >= wakeNote) this.deleteMeta("wake_note");
     if (news.edited.length) {
       const editsTaken = JSON.parse(news.editsTaken) as Record<string, string>;
       for (const m of news.edited) editsTaken[m.id] = m.editedAt!;
@@ -1761,7 +1794,13 @@ export class ThreadAgent extends Agent<Env> {
       if (wakeEdit && wakeEdit <= news.readAt && news.allEdits) this.deleteMeta("wake_edit");
     }
     // Taken in whole, with nothing else waiting: no turn after this one just for them.
-    if (news.whole && !this.getMeta("wake_other") && !this.getMeta("wake_edit") && Number(this.getMeta("wake_seq") ?? 0) <= news.last) {
+    if (
+      news.whole &&
+      !this.getMeta("wake_other") &&
+      !this.getMeta("wake_edit") &&
+      !this.getMeta("wake_note") &&
+      Number(this.getMeta("wake_seq") ?? 0) <= news.last
+    ) {
       this.setMeta("dirty", "0");
     }
     return true;
@@ -1965,7 +2004,7 @@ export class ThreadAgent extends Agent<Env> {
    * with what is waiting; a local CLI continues the same session. A cloud turn's harness is ended so
    * its task still saves the work. Nothing running: the waiting messages get their turn. Callable over RPC.
    */
-  async interrupt(): Promise<{ ok: true } | { ok: false; error: string }> {
+  async interrupt(by?: "coordinator"): Promise<{ ok: true } | { ok: false; error: string }> {
     if (this.getMeta("closed") === "1") return { ok: false, error: "This thread is closed." };
     const row = this.runningTask();
     this.setMeta("dirty", "1");
@@ -1974,6 +2013,8 @@ export class ThreadAgent extends Agent<Env> {
       return { ok: true };
     }
     this.setMeta("interrupted_task", row.id);
+    if (by) this.setMeta("interrupted_by", by);
+    else this.deleteMeta("interrupted_by");
     if (row.backend === "sandbox") {
       const ended = await this.env.SANDBOX.getByName(this.getMeta("thread_id")!)
         .finish(row.id)
@@ -1981,8 +2022,38 @@ export class ThreadAgent extends Agent<Env> {
       if (ended) return { ok: true };
     }
     const cancelled = await this.cancelTask(row.id);
-    if (!cancelled.ok) this.deleteMeta("interrupted_task");
+    if (!cancelled.ok) {
+      this.deleteMeta("interrupted_task");
+      this.deleteMeta("interrupted_by");
+    }
     return cancelled;
+  }
+
+  /**
+   * The coordinator's note changes the work the running turn is doing (message_thread or
+   * relay_to_thread with interrupt): the turn stops with one line and the next one starts at once,
+   * with the note as NEW. Marked stopping before the note is added, so the running turn cannot take
+   * it in on its way out. At most once per COORDINATOR_STOP_COOLDOWN_MS; otherwise, or when nothing
+   * runs, the note goes as usual. Callable over RPC.
+   */
+  async coordinatorInterrupt(reason: Extract<ThreadWake, { kind: "coordinator" }>): Promise<"stopped" | "not_running" | "too_soon" | "failed"> {
+    const row = this.getMeta("closed") === "1" ? undefined : this.runningTask();
+    const last = Number(this.getMeta("coordinator_stop_at") ?? 0);
+    const outcome = !row ? "not_running" : Date.now() - last < COORDINATOR_STOP_COOLDOWN_MS ? "too_soon" : null;
+    if (outcome || !row) {
+      await this.wake(reason);
+      return outcome ?? "not_running";
+    }
+    this.setMeta("interrupted_task", row.id);
+    this.setMeta("coordinator_stop_at", String(Date.now()));
+    await this.wake(reason);
+    const stopped = await this.interrupt("coordinator");
+    // Not stopped: the note reaches the running turn the usual way, now that it is not marked stopping.
+    if (!stopped.ok) {
+      if (this.runningTask()) await this.queue("steerNews", null);
+      return "failed";
+    }
+    return "stopped";
   }
 
   /**

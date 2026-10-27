@@ -248,3 +248,65 @@ describe("messages written while the thread's agent works", () => {
     close();
   });
 });
+
+describe("the coordinator's notes while the thread's agent works", () => {
+  it("reach the running turn with its next call to Myrel, and need no turn of their own", { timeout: 30_000 }, async () => {
+    let noted!: () => void;
+    const sent = new Promise<void>((r) => (noted = r));
+    // Sent once the reply's call returned, so that call cannot take the note in.
+    let replied!: () => void;
+    const started = new Promise<void>((r) => (replied = r));
+    const results: string[] = [];
+    const { projectAgent, threadAgent, thread, turns, close } = await steerSetup(async (turn, index) => {
+      if (index > 0) return;
+      await turn.call("reply", { text: "Başlıyorum." });
+      replied();
+      await sent;
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "active" }] })).text);
+      results.push((await turn.call("update_plan", { title: "Testler", steps: [{ text: "Yaz", state: "done" }] })).text);
+      await turn.call("reply", { text: "Bitti." });
+    });
+    await started;
+    await threadAgent.wake({ kind: "coordinator", note: 'From the "API" thread: the endpoint moved to /v2.' });
+    noted();
+
+    await until(() => results.length === 2, "the plan calls");
+    expect(results[0]).toContain("## A note from the coordinator while you work");
+    expect(results[0]).toContain("the endpoint moved to /v2");
+    // Delivered once.
+    expect(results[1]).not.toContain("/v2");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "the turn to end");
+    // Taken in already: no second turn starts just for it.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(turns).toHaveLength(1);
+    close();
+  });
+
+  it("stop the running turn when the coordinator asks, at most once in a while", { timeout: 30_000 }, async () => {
+    const { threadAgent, thread, turns, frames, send, messages, projectAgent, close } = await steerSetup(async (_turn, index) => {
+      // The first two turns work until they are stopped.
+      if (index < 2) await new Promise(() => {});
+    });
+    await until(() => turns.length === 1, "the first turn");
+    expect(await threadAgent.coordinatorInterrupt({ kind: "coordinator", note: "İsmail işi iptal etti; README'yi güncelle yeter." })).toBe("stopped");
+    const cancel = await until(
+      () => frames.find((f): f is Extract<ServerToRunner, { type: "task.cancel" }> => f.type === "task.cancel"),
+      "the cancel frame",
+    );
+    expect(cancel.taskId).toBe(turns[0]!.start.taskId);
+    send({ type: "task.done", taskId: cancel.taskId, ok: false, cancelled: true, result: "Stopped from Myrel." });
+
+    await until(() => turns.length === 2, "the next turn");
+    // The note is new to the next turn: the stopping one could not take it in.
+    expect(turns[1]!.prompt).toMatch(/· NEW: İsmail işi iptal etti/);
+    const bodies = (await messages()).map((m) => m.body);
+    expect(bodies).toContain("Stopped by Myrel; continuing with the coordinator's note.");
+
+    // Again within minutes: the note goes, the turn keeps working.
+    expect(await threadAgent.coordinatorInterrupt({ kind: "coordinator", note: "Bir de CHANGELOG." })).toBe("too_soon");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(frames.filter((f) => f.type === "task.cancel")).toHaveLength(1);
+    expect((await projectAgent.getThread(thread.id))?.status).toBe("working");
+    close();
+  });
+});

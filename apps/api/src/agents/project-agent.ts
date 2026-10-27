@@ -1673,7 +1673,7 @@ export class ProjectAgent extends Agent<Env> {
       },
       findDuplicate: (messageId) => this.findDuplicateThread(messageId),
       closeThread: (threadId, input) => this.closeThread(threadId, { ...input, by: "coordinator" }),
-      messageThread: async (threadId, note, kind) => {
+      messageThread: async (threadId, note, kind, interrupt) => {
         const thread = this.getThread(threadId);
         this.coordinatorWork++;
         // Reopened right away, so the card stops reading "Resolved" before the thread's turn starts.
@@ -1681,7 +1681,9 @@ export class ProjectAgent extends Agent<Env> {
         if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
         relayInThread({ kind, threadId, note }, relayLine(kind, note));
         // A forwarded ask works for whoever asked it; an answer to the thread's own request changes nothing.
-        await this.wakeThread(threadId, { kind: "coordinator", note, reopened, ...(kind === "follow_up" && forwardedFor !== undefined && { forwardedFor }) });
+        const wake = { kind: "coordinator", note, reopened, ...(kind === "follow_up" && forwardedFor !== undefined && { forwardedFor }) } as const;
+        if (interrupt) return (await getAgentByName(this.env.THREAD_AGENT, threadId)).coordinatorInterrupt(wake);
+        await this.wakeThread(threadId, wake);
       },
       answerQuestion: async (questionId, answer, source) => {
         const { threadId, agent } = await openQuestion(questionId);
@@ -1698,7 +1700,7 @@ export class ProjectAgent extends Agent<Env> {
         const { agent } = await openQuestion(questionId);
         if (!(await agent.escalateQuestion(questionId, note))) throw new Error("That question already went to the person.");
       },
-      relay: async (fromThreadId, toThreadId, note) => {
+      relay: async (fromThreadId, toThreadId, note, interrupt) => {
         const from = this.getThread(fromThreadId);
         const to = this.getThread(toThreadId);
         if (!from) throw new Error(`No thread ${fromThreadId}.`);
@@ -1719,7 +1721,9 @@ export class ProjectAgent extends Agent<Env> {
         this.sql`INSERT INTO coordinator_relays (from_thread_id, to_thread_id, note, created_at)
           VALUES (${from.id}, ${to.id}, ${note}, ${new Date().toISOString()})`;
         relayInThread({ kind: "relay", threadId: to.id, fromThreadId: from.id, note }, relayLine("relay", note, from.title));
-        await this.wakeThread(to.id, { kind: "coordinator", note: `From the "${from.title}" thread: ${note}` });
+        const wake = { kind: "coordinator", note: `From the "${from.title}" thread: ${note}` } as const;
+        if (interrupt) return (await getAgentByName(this.env.THREAD_AGENT, to.id)).coordinatorInterrupt(wake);
+        await this.wakeThread(to.id, wake);
       },
     };
   }
