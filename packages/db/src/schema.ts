@@ -134,6 +134,8 @@ export const projectMembers = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["owner", "admin", "member"] }).notNull(),
+    /** When this member pinned the project to the top of their own project lists; null = not pinned. */
+    pinnedAt: integer("pinned_at", { mode: "timestamp_ms" }),
     createdAt: timestamps.createdAt,
   },
   (t) => [primaryKey({ columns: [t.projectId, t.userId] }), index("project_members_user_id_idx").on(t.userId)],

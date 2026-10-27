@@ -222,6 +222,11 @@ export class ApiClient {
     return (await this.request<{ project: Project }>("/api/projects", { method: "POST", body: input })).project;
   }
 
+  /** Pins or unpins the project for the signed-in person only. */
+  async pinProject(id: string, pinned: boolean) {
+    return (await this.request<{ project: Project }>(`${projectPath(id)}/pin`, { method: "PUT", body: { pinned } })).project;
+  }
+
   async getProject(id: string) {
     return (await this.request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`)).project;
   }
