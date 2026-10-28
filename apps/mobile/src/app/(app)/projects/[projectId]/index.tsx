@@ -18,6 +18,7 @@ import { Tabs } from "../../../../components/project/tabs";
 import { ThreadsTab } from "../../../../components/project/threads-tab";
 import { UsageTab } from "../../../../components/project/usage-tab";
 import { ThreadCard } from "../../../../components/thread-card";
+import { ComputerTip } from "../../../../components/tips";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
 import { useNames } from "../../../../lib/use-names";
@@ -138,6 +139,7 @@ function ChatTab({ owner }: { owner: boolean }) {
         asked || state.goal ? (
           <>
             {asked && <StarterList projectId={projectId} owner={owner} asked folded />}
+            {asked && ready && <ComputerTip threads={Object.values(state.threads)} />}
             {state.goal && <GoalBanner goal={state.goal} onStop={() => emit({ type: "goal.stop" })} />}
           </>
         ) : undefined

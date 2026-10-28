@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { starterDraft, starterSteps } from "../src/onboarding";
+import { computerTipDue, decisionTipDue, starterDraft, starterSteps } from "../src/onboarding";
 
 describe("starterSteps", () => {
   it("starts with the project done and fills in from what exists", () => {
@@ -25,5 +25,23 @@ describe("starterDraft", () => {
 
   it("puts the caret at the end when there is none", () => {
     expect(starterDraft("Hello").select).toEqual([5, 5]);
+  });
+});
+
+describe("one-time tips", () => {
+  const done = [{ status: "working" as const }, { status: "done" as const }];
+  it("offers a computer after a finished thread, to someone without one, once", () => {
+    expect(computerTipDue({ tips: [], computers: 0, threads: done })).toBe(true);
+    expect(computerTipDue({ tips: [], computers: 0, threads: [{ status: "working" }] })).toBe(false);
+    expect(computerTipDue({ tips: [], computers: 1, threads: done })).toBe(false);
+    expect(computerTipDue({ tips: ["computer"], computers: 0, threads: done })).toBe(false);
+    // Older servers send no tips: none are shown.
+    expect(computerTipDue({ tips: undefined, computers: 0, threads: done })).toBe(false);
+  });
+
+  it("explains a decision card until the note is seen", () => {
+    expect(decisionTipDue([])).toBe(true);
+    expect(decisionTipDue(["decision"])).toBe(false);
+    expect(decisionTipDue(undefined)).toBe(false);
   });
 });

@@ -118,6 +118,13 @@ export type UpdateMemberInput = z.infer<typeof UpdateMemberInput>;
 export const InstanceRole = z.enum(["admin", "user"]);
 export type InstanceRole = z.infer<typeof InstanceRole>;
 
+/**
+ * One-time tips in the apps, each shown once per account: `computer` offers pairing a computer after
+ * the first finished thread, `decision` explains the first decision card.
+ */
+export const TipId = z.enum(["computer", "decision"]);
+export type TipId = z.infer<typeof TipId>;
+
 /** `GET /api/me`. */
 export const Me = z.object({
   id: z.string(),
@@ -126,6 +133,8 @@ export const Me = z.object({
   role: InstanceRole,
   /** Whether the person finished or hid the "Get started" list; older servers do not send it (the apps then never show the list). */
   onboarded: z.boolean().optional(),
+  /** The one-time tips the person has seen or closed; older servers do not send it (the apps then show no tips). */
+  tips: z.array(z.string()).optional(),
 });
 export type Me = z.infer<typeof Me>;
 

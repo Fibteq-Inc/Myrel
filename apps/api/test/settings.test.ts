@@ -314,6 +314,18 @@ describe("get started list", () => {
     expect((await me()).user.onboarded).toBe(true);
     expect((await api("/api/account/onboarded", { method: "POST" })).status).toBe(401);
   });
+
+  it("remembers each one-time tip once seen", async () => {
+    const user = await signUp();
+    const tips = async () => (await json<{ user: { tips: string[] } }>(api("/api/account", { token: user.token }))).user.tips;
+    expect(await tips()).toEqual([]);
+    await json(api("/api/account/tips/decision", { method: "POST", token: user.token }), 204);
+    await json(api("/api/account/tips/decision", { method: "POST", token: user.token }), 204);
+    await json(api("/api/account/tips/computer", { method: "POST", token: user.token }), 204);
+    expect(await tips()).toEqual(["decision", "computer"]);
+    expect((await api("/api/account/tips/nope", { method: "POST", token: user.token })).status).toBe(404);
+    expect((await api("/api/account/tips/decision", { method: "POST" })).status).toBe(401);
+  });
 });
 
 describe("sign-up setting", () => {
@@ -323,7 +335,7 @@ describe("sign-up setting", () => {
     expect((await api("/api/admin/settings", { token: user.token })).status).toBe(403);
     await makeAdmin(admin);
     expect(await json(api("/api/account", { token: admin.token }))).toEqual({
-      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false },
+      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [] },
     });
 
     const set = (signUpEnabled: boolean) =>

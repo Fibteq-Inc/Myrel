@@ -1,3 +1,5 @@
+import type { Thread } from "@myrel/protocol";
+
 /** The user guide; pages under it explain what the apps cannot do in place (e.g. pairing a computer from a phone). */
 export const DOCS_URL = "https://docs.myrel.fibteq.io";
 
@@ -32,4 +34,18 @@ export function starterDraft(prompt: string): { text: string; select: [number, n
   const start = prompt.indexOf("[");
   const end = start < 0 ? -1 : prompt.indexOf("]", start);
   return { text: prompt, select: start < 0 || end < 0 ? [prompt.length, prompt.length] : [start, end + 1] };
+}
+
+/**
+ * Whether the project chat offers pairing a computer: once a thread in it has
+ * finished its work, while the person has no computer and has not seen the tip.
+ * `tips` is undefined from older servers, which never show tips.
+ */
+export function computerTipDue(input: { tips: string[] | undefined; computers: number; threads: Pick<Thread, "status">[] }) {
+  return !!input.tips && !input.tips.includes("computer") && input.computers === 0 && input.threads.some((t) => t.status === "done");
+}
+
+/** Whether a decision card the person can answer carries the one-time note on how it works. */
+export function decisionTipDue(tips: string[] | undefined) {
+  return !!tips && !tips.includes("decision");
 }
