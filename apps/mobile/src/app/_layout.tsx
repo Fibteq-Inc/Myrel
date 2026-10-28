@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DarkTheme, DefaultTheme, SplashScreen, Stack, ThemeProvider } from "expo-router";
+import { DarkTheme, DefaultTheme, SplashScreen, Stack, ThemeProvider, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { type ReactNode, useEffect, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { AppI18n } from "../lib/i18n";
 import { drafts } from "../lib/drafts";
+import { reportUncaughtErrors } from "../lib/errors";
 import { unregisterPush } from "../lib/push";
 import { SessionProvider, useSession } from "../lib/session";
 import { AppTheme } from "../lib/theme";
@@ -61,10 +62,15 @@ function NavigationTheme({ children }: { children: ReactNode }) {
 
 function Routes() {
   const colors = useColors();
-  const { ready, user } = useSession();
+  const { ready, user, api } = useSession();
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
   }, [ready]);
+  // The screen's route pattern ("(app)/projects/[projectId]"), not its ids.
+  const segments = useSegments();
+  const screen = useRef("");
+  screen.current = segments.join("/");
+  useEffect(() => (user ? reportUncaughtErrors(api, () => screen.current || "?") : undefined), [api, user]);
   if (!ready) return null;
 
   return (

@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo, TipId } from "@myrel/protocol";
+import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo, TipId, ClientErrorInput } from "@myrel/protocol";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAuth, firstPasswordKey } from "../auth";
@@ -9,6 +9,7 @@ import { toApiKey } from "../keys";
 import { PROVIDERS, serverProviderId } from "../llm";
 import { type AppEnv, requireUser } from "../middleware";
 import { UNVERIFIED_MESSAGE } from "../verification";
+import { recordError } from "../errors";
 
 const { apiKeys, projectInvites, projectMembers, projects, user } = schema;
 
@@ -42,6 +43,15 @@ export const accountRoutes = new Hono<AppEnv>()
     const [row] = await db.select({ tipsSeen: user.tipsSeen }).from(user).where(eq(user.id, id));
     const seen = row?.tipsSeen ?? [];
     if (!seen.includes(tip.data)) await db.update(user).set({ tipsSeen: [...seen, tip.data] }).where(eq(user.id, id));
+    return c.body(null, 204);
+  })
+  // An app's own failure, counted with the server's for admins (see recordError).
+  .post("/client-errors", async (c) => {
+    const input = ClientErrorInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input" }, 400);
+    const { platform, where, name, message, stack, version } = input.data;
+    const error = Object.assign(new Error(message), { name, stack: stack && version ? `app ${version}\n${stack}` : stack });
+    c.executionCtx.waitUntil(recordError(c.env, platform, where, error));
     return c.body(null, 204);
   })
   // Where a first email verification leads (see firstVerification in auth.ts): on to the page that

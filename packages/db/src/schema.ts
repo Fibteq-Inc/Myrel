@@ -784,7 +784,7 @@ export const errorGroups = sqliteTable(
   {
     /** SHA-256 of source, where, name and the normalized message, hex. */
     id: text("id").primaryKey(),
-    /** What ran into it: "api" (a request), "agent" (a project or thread agent) or "cron". */
+    /** What ran into it: "api" (a request), "agent" (a project or thread agent), "cron", or an app ("web", "desktop", "mobile"). */
     source: text("source").notNull(),
     /** Where in it, e.g. "POST /api/projects/:id/threads" or "coordinator turn". */
     where: text("where").notNull(),
