@@ -8,6 +8,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { CodeTokens, lineClass, useCodeLines } from "../lib/highlight";
+import { nextPreviewText, type PreviewText, previewTextFor } from "../lib/preview-text";
 import { IconButton } from "../lib/ui";
 import { ImageViewer } from "./image-viewer";
 import { useProjectView } from "./project-view";
@@ -171,12 +172,19 @@ export function FilePreview({
     return type ? new Blob([blob.data!], { type }) : blob.data;
   }, [blob.data, kind, path]);
   const url = useObjectUrl(data);
-  const [text, setText] = useState<string | null>(null);
+  // The text stays on screen while a refetch (on window focus too) reads the file again: clearing it
+  // first emptied the preview for a moment and its scroll went back to the top.
+  const [loaded, setLoaded] = useState<PreviewText | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
-    setText(null);
-    if (blob.data && (kind === "text" || kind === "markdown")) void blob.data.text().then(setText);
-  }, [blob.data, kind]);
+    if (!blob.data || (kind !== "text" && kind !== "markdown")) return;
+    let live = true;
+    void blob.data.text().then((text) => live && setLoaded((old) => nextPreviewText(old, path, text)));
+    return () => {
+      live = false;
+    };
+  }, [blob.data, kind, path]);
+  const text = kind === "text" || kind === "markdown" ? previewTextFor(loaded, path) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
