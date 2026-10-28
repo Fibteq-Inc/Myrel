@@ -16,10 +16,10 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.4.4",
-    "@cloudflare/workers-types": "5.20261019.1",
+    "@cloudflare/vitest-plugin": "1.4.9",
+    "@cloudflare/workers-types": "5.20261023.1",
     "@myrel/api": "workspace:*",
     "vitest": "5.0.5",
-    "wrangler": "4.151.1"
+    "wrangler": "4.154.0"
   }
 }
