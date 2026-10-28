@@ -2,6 +2,7 @@ import {
   conversationState,
   draftKey,
   findMessage,
+  threadCli,
   threadMessages,
   threadPullRequests,
   threadSummary,
@@ -486,6 +487,7 @@ function Conversation({
             {active && (
               <Thinking
                 label={state.progress[thread.id] ?? (working ? t("message.working") : t("message.thinking"))}
+                cli={threadCli(thread, messages)}
                 onStop={() => api.stopThread(project.id, thread.id)}
               />
             )}

@@ -20,7 +20,8 @@ import { formatDuration, formatTokens } from "../../lib/format";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
 import { Empty } from "../project/empty";
-import { errorMessage, Spinner } from "../ui";
+import { harnessName } from "../message-stats";
+import { CliMark, errorMessage, Spinner } from "../ui";
 
 /**
  * Every task the thread's agent ran, newest first under a heading for its day. The running one and,
@@ -165,7 +166,8 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
           <Text style={styles.title} numberOfLines={1}>
             {task.title}
           </Text>
-          <Text style={styles.meta}>{task.harness}</Text>
+          <CliMark cli={task.harness} size={14} color={colors.subtle} />
+          <Text style={styles.meta}>{harnessName(task.harness)}</Text>
         </Pressable>
         <Text
           style={styles.meta}

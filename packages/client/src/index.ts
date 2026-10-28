@@ -12,3 +12,4 @@ export * from "./socket";
 export * from "./theme";
 export * from "./token-store";
 export * from "./error-report";
+export * from "./cli-marks";

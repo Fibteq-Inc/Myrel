@@ -1,3 +1,4 @@
+import { cliMark } from "@myrel/client";
 import { relativeTime, type Translate } from "@myrel/i18n";
 import { useI18n } from "@myrel/i18n/react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
@@ -78,6 +79,42 @@ export function MyrelMark({ size = 28 }: { size?: number }) {
           <path key={angle} d={MARK_PETAL} transform={`rotate(${angle} 512 512)`} />
         ))}
       </svg>
+    </span>
+  );
+}
+
+/**
+ * The CLI that does a thread's work, in place of MyrelMark: its logo, or its initial when there is
+ * none. `tile` sets it on a card like MyrelMark's, as an avatar; without it, it sits inline next to
+ * the CLI's name in the text's colour. Anything that is not a CLI gets MyrelMark (tile) or nothing.
+ */
+export function CliMark({ cli, size = 28, tile = false }: { cli: string | null | undefined; size?: number; tile?: boolean }) {
+  const mark = cliMark(cli);
+  if (!mark) return tile ? <MyrelMark size={size} /> : null;
+  const glyph = tile ? size * 0.6 : size;
+  const inner = mark.logo ? (
+    <svg width={glyph} height={glyph} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      {mark.logo.map((p) => (
+        <path key={p.d} d={p.d} fillRule={p.evenOdd ? "evenodd" : undefined} clipRule={p.evenOdd ? "evenodd" : undefined} />
+      ))}
+    </svg>
+  ) : (
+    <span style={{ fontSize: Math.round(glyph * (tile ? 0.85 : 0.7)) }} className="font-semibold leading-none">
+      {mark.initial}
+    </span>
+  );
+  return (
+    <span
+      role="img"
+      aria-label={mark.name}
+      title={mark.name}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.3) }}
+      className={cn(
+        "flex flex-none items-center justify-center",
+        tile ? "border border-frame bg-card text-fg" : !mark.logo && "border border-current",
+      )}
+    >
+      {inner}
     </span>
   );
 }
