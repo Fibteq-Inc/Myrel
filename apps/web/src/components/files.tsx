@@ -2,13 +2,14 @@ import { useT } from "@myrel/i18n/react";
 import { ApiError, codeLanguage } from "@myrel/client";
 import type { Attachment, ProjectFile } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, Download, File, FileCode, FileImage, FileText, LoaderCircle, Paperclip, X } from "lucide-react";
+import { Check, Copy, Download, File, FileCode, FileImage, FileText, LoaderCircle, Maximize2, Paperclip, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { CodeTokens, lineClass, useCodeLines } from "../lib/highlight";
 import { IconButton } from "../lib/ui";
+import { ImageViewer } from "./image-viewer";
 import { useProjectView } from "./project-view";
 
 export function formatSize(bytes: number) {
@@ -171,6 +172,7 @@ export function FilePreview({
   }, [blob.data, kind, path]);
   const url = useObjectUrl(data);
   const [text, setText] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     setText(null);
     if (blob.data && (kind === "text" || kind === "markdown")) void blob.data.text().then(setText);
@@ -184,6 +186,11 @@ export function FilePreview({
           {path}
         </span>
         {text !== null && <CopyFileButton text={text} />}
+        {url && kind === "image" && (
+          <IconButton type="button" onClick={() => setFullscreen(true)} aria-label={t("files.openFullscreen")} title={t("files.openFullscreen")}>
+            <Maximize2 size={16} />
+          </IconButton>
+        )}
         {url && (
           <a
             href={url}
@@ -208,7 +215,12 @@ export function FilePreview({
             {blob.error instanceof ApiError && blob.error.status !== 404 && blob.error.status < 500 ? blob.error.message : t("files.loadFailed")}
           </p>
         )}
-        {url && kind === "image" && <img src={url} alt={displayName(path)} className="mx-auto max-w-full p-5" />}
+        {url && kind === "image" && (
+          <button type="button" onClick={() => setFullscreen(true)} title={t("files.openFullscreen")} className="block w-full cursor-zoom-in p-5">
+            <img src={url} alt={displayName(path)} className="mx-auto max-w-full" />
+          </button>
+        )}
+        {url && kind === "image" && fullscreen && <ImageViewer url={url} name={displayName(path)} onClose={() => setFullscreen(false)} />}
         {url && kind === "pdf" && <iframe src={url} title={path} className="size-full min-h-[70vh] bg-white" />}
         {text !== null && kind === "markdown" && (
           <div className="prose-myrel p-5">
