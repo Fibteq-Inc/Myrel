@@ -4,6 +4,7 @@ import { CLI_NAMES, type MessageStats, type Runtime } from "@myrel/protocol";
 import { Cloud, Laptop } from "lucide-react";
 import { useState } from "react";
 import { useFormat } from "../../lib/format";
+import { promptStatsValue } from "./context-gauge";
 
 const HARNESS_NAMES: Record<string, string> = {
   ...CLI_NAMES,
@@ -118,6 +119,7 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
           {stats.cachedInputTokens > 0 && <Row label={t("stats.cached")} value={fmt.tokens(stats.cachedInputTokens)} />}
           <Row label={t("stats.output")} value={fmt.tokens(stats.outputTokens)} />
           <Row label={t("stats.cost")} value={stats.costMicros === null ? t("stats.unpriced") : fmt.cost(stats.costMicros)} />
+          {stats.prompt && <Row label={t("stats.prompt")} value={promptStatsValue(stats.prompt, t, fmt.tokens)} />}
         </dl>
       )}
     </div>

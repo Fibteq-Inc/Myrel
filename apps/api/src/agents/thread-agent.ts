@@ -20,6 +20,7 @@ import {
   type MarkMemoryInput,
   type Message,
   type MessageStats,
+  type PromptSize,
   type Task,
   type TaskStatus,
   type TerminalLine,
@@ -118,6 +119,7 @@ import {
   type RoutineRun,
   renderQuestion,
   threadPrompt,
+  type ThreadPromptSize,
   threadTools,
 } from "./thread-worker";
 
@@ -175,7 +177,7 @@ type PendingNews = {
   /** The coordinator's notes taken, by id: unseen ones up to the first that waits for a turn of its own. */
   noteIds: number[];
 };
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean };
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean; promptSize?: PromptSize };
 
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
 type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
@@ -600,7 +602,7 @@ export class ThreadAgent extends Agent<Env> {
     const seen = JSON.parse(this.getMeta("agent_prompt_seen") ?? "null") as { task: string; hashes: string[] } | null;
     const unchanged = unchangedSections(seen && seen.task === this.getMeta("agent_last_task") ? seen.hashes : []);
     await this.startAgentTurn({
-      prompt: (budget) => threadPrompt({ ...promptInput, ...note, budget }),
+      prompt: (budget, measure) => threadPrompt({ ...promptInput, ...note, budget, measure }),
       followUp: { prompt: (budget) => threadPrompt({ ...promptInput, followUp: true, ...note, lasting: unchanged.lasting, budget }), unchanged },
       requester,
       place,
@@ -652,8 +654,8 @@ export class ThreadAgent extends Agent<Env> {
    * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
    */
   private async startAgentTurn(input: {
-    /** The thread's part of the prompt, within `budget` characters (see threadPrompt). */
-    prompt: (budget: number) => string;
+    /** The thread's part of the prompt, within `budget` characters (see threadPrompt); `measure` hears how it came out. */
+    prompt: (budget: number, measure?: (size: ThreadPromptSize) => void) => string;
     /**
      * The same, with only what is new since the last turn, for a CLI session that continues it:
      * sections it holds unchanged from then are left out (see unchangedSections). Called once.
@@ -724,10 +726,34 @@ export class ThreadAgent extends Agent<Env> {
       const skills = await this.turnSkills(place, input.requester);
       // A long thread leaves its oldest messages out so the whole prompt, instructions too, fits.
       const budget = (p: AgentPlace) => MAX_TASK_TEXT - PROMPT_SLACK - agentPrompt(p, "", infos, skills).length;
-      const fullPrompt = (p: AgentPlace) => agentPrompt(p, input.prompt(budget(p)), infos, skills);
+      // What the full prompt held, for the context gauge people see (a resumed session gets the short one, but holds the rest).
+      let promptSize: PromptSize | undefined;
+      const fullPrompt = (p: AgentPlace) => {
+        let thread: ThreadPromptSize | undefined;
+        const prompt = agentPrompt(p, input.prompt(budget(p), (size) => (thread = size)), infos, skills);
+        const instructions = agentPrompt(p, "", infos, []).length;
+        if (thread) {
+          const { droppedMessages, droppedNotes, cut, ...parts } = thread;
+          promptSize = {
+            chars: prompt.length,
+            limit: MAX_TASK_TEXT - PROMPT_SLACK,
+            parts: { instructions, skills: agentPrompt(p, "", infos, skills).length - instructions, ...parts },
+            droppedMessages,
+            droppedNotes,
+            cut,
+          };
+        }
+        return prompt;
+      };
       const spec = TaskSpec.parse({ taskId, title: "OpenCode", prompt: fullPrompt(agentPlace), timeoutSec: AGENT_TURN_SEC });
       // The stored spec keeps only the start of the prompt; the runner gets all of it.
-      const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({ ...s, prompt: s.prompt.slice(0, 4000), agent: true, ...extra });
+      const stored = (s: TaskSpec, extra: Partial<StoredSpec> = {}): StoredSpec => ({
+        ...s,
+        prompt: s.prompt.slice(0, 4000),
+        agent: true,
+        ...(promptSize && { promptSize }),
+        ...extra,
+      });
       if (place.kind === "local") {
         const { workspace } = place;
         const local: AgentConnector[] = await Promise.all(
@@ -1935,6 +1961,7 @@ export class ThreadAgent extends Agent<Env> {
       runtime,
       ...(runtime === "local" && spec.computer && { computer: spec.computer }),
       harness: spec.harness,
+      ...(spec.promptSize && { prompt: spec.promptSize }),
     };
     return { stats, from: start, mark };
   }

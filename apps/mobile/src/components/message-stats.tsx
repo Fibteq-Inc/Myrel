@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatCost, formatDuration, formatTokens, modelName } from "../lib/format";
 import { makeStyles, mono, radius, useColors } from "../theme";
+import { promptStatsValue } from "./context-gauge";
 
 const HARNESS_NAMES: Record<string, string> = { ...CLI_NAMES, opencode: "OpenCode", "claude-code": "Claude Code", shell: "Shell" };
 export const harnessName = (h: string) => HARNESS_NAMES[h] ?? h;
@@ -63,6 +64,7 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
           {stats.cachedInputTokens > 0 && <Row label={t("stats.cached")} value={formatTokens(stats.cachedInputTokens, locale)} />}
           <Row label={t("stats.output")} value={formatTokens(stats.outputTokens, locale)} />
           <Row label={t("stats.cost")} value={cost === null ? t("stats.unpriced") : formatCost(cost, locale)} />
+          {stats.prompt && <Row label={t("stats.prompt")} value={promptStatsValue(stats.prompt, t, locale)} />}
         </View>
       )}
     </View>

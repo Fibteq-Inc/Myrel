@@ -1,6 +1,6 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type RunnerCli, type Thread } from "@myrel/protocol";
+import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors } from "../theme";
+import { ContextRing, ContextSection } from "./context-gauge";
 
 /** cloud: the person's threads run in the cloud, where the choice is among the cloud CLIs. */
 export type Pickable = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults; cloud?: boolean };
@@ -125,7 +126,8 @@ function modelChoice(pickable: Pickable, thread: Thread) {
 /**
  * Thread: one chip summing up where it works, its CLI, model and effort, opening one sheet to change
  * any of them from its next turn, as on the web. The sheet stays open across picks; the model list
- * opens inside it. Someone who can pick nothing sees it read-only.
+ * opens inside it. Someone who can pick nothing sees it read-only. After the agent's first turn it
+ * also shows how full that turn's prompt was.
  */
 export function ThreadSettingsPicker({
   projectId,
@@ -133,6 +135,7 @@ export function ThreadSettingsPicker({
   workspaces,
   placeable,
   thread,
+  prompt,
   onRunner,
   onCli,
   onModel,
@@ -144,6 +147,8 @@ export function ThreadSettingsPicker({
   /** The project does not always work in the cloud, so a thread can be moved. */
   placeable: boolean;
   thread: Thread;
+  /** What the agent's prompt held on its last turn, once it had one. */
+  prompt?: PromptSize | null;
   onRunner: (runnerId: string | null) => void;
   onCli: (cli: CliId | null) => void;
   onModel: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
@@ -177,7 +182,13 @@ export function ThreadSettingsPicker({
     const modelLabel = [own?.model, own?.effort && effortName(own.effort, t)].filter(Boolean).join(" · ");
     return (
       <>
-        <Chip label={[cliName(cli), modelLabel].filter(Boolean).join(" · ")} active={false} title={t("threadSettings.title")} onPress={() => setOpen(true)} />
+        <Chip
+          label={[cliName(cli), modelLabel].filter(Boolean).join(" · ")}
+          active={false}
+          prompt={prompt}
+          title={t("threadSettings.title")}
+          onPress={() => setOpen(true)}
+        />
         <Sheet open={open} onClose={close} title={t("threadSettings.title")} hint={t("threadSettings.readOnly")}>
           <Text style={styles.section}>{t("threadSettings.where")}</Text>
           <Locked>{computer.runnerName}</Locked>
@@ -189,6 +200,7 @@ export function ThreadSettingsPicker({
               <Locked>{modelLabel}</Locked>
             </>
           ) : null}
+          {prompt && <ContextSection prompt={prompt} />}
         </Sheet>
       </>
     );
@@ -217,6 +229,7 @@ export function ThreadSettingsPicker({
         several={thread.cli?.by === "coordinator"}
         cloud={cloud}
         settings
+        prompt={prompt}
         title={t("threadSettings.title")}
         onPress={() => setOpen(true)}
       />
@@ -316,6 +329,7 @@ export function ThreadSettingsPicker({
             ) : (
               <Text style={styles.hint}>{t("threadSettings.noModels")}</Text>
             )}
+            {prompt && <ContextSection prompt={prompt} />}
           </ScrollView>
         )}
       </Sheet>
@@ -415,6 +429,7 @@ function Chip({
   several,
   settings,
   cloud,
+  prompt,
   title,
   onPress,
 }: {
@@ -423,6 +438,7 @@ function Chip({
   several?: boolean;
   settings?: boolean;
   cloud?: boolean;
+  prompt?: PromptSize | null;
   title: string;
   onPress: () => void;
 }) {
@@ -436,6 +452,7 @@ function Chip({
       onPress={onPress}
       style={({ pressed }) => [styles.chip, pressed && { backgroundColor: colors.hover }]}
     >
+      {prompt && <ContextRing prompt={prompt} />}
       {several ? (
         <Sparkles size={14} color={colors.accent} />
       ) : cloud ? (

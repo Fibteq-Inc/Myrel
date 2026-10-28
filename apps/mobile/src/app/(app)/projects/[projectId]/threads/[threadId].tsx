@@ -8,7 +8,7 @@ import {
   threadUsage,
 } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { waitsForAgent } from "@myrel/protocol";
+import { lastPromptSize, waitsForAgent } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
 import {
   ChartColumn,
@@ -218,6 +218,7 @@ export default function ThreadScreen() {
                 workspaces={ownWorkspaces}
                 placeable={placeable}
                 thread={thread}
+                prompt={lastPromptSize(messages)}
                 onRunner={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })}
                 onCli={(cli) => emit({ type: "thread.cli", threadId, cli })}
                 onModel={(pick) => emit({ type: "thread.model", threadId, ...pick })}

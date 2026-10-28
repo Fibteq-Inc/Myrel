@@ -54,6 +54,37 @@ export const TaskStats = z.object({
 });
 export type TaskStats = z.infer<typeof TaskStats>;
 
+/**
+ * What Myrel put in a thread agent's prompt for the turn, in characters: the part each kind of
+ * context took, and what a long thread left out to stay within `limit` (see fitPrompt).
+ */
+export const PromptSize = z.object({
+  chars: Count,
+  /** The most the prompt may take. */
+  limit: Count,
+  parts: z.object({
+    /** Myrel's own instructions and the connectors guide. */
+    instructions: Count,
+    /** The list of skills people added. */
+    skills: Count,
+    /** Project instructions, memory and the files list. */
+    knowledge: Count,
+    brief: Count,
+    /** The thread's messages. */
+    conversation: Count,
+    /** Coordinator notes, GitHub events and routine runs. */
+    notes: Count,
+    /** Everything else: repositories, pull requests, artifacts, the plan. */
+    other: Count,
+  }),
+  /** The oldest messages and coordinator notes left out to fit. */
+  droppedMessages: Count,
+  droppedNotes: Count,
+  /** One message was too long even alone, so its middle was cut. */
+  cut: z.boolean(),
+});
+export type PromptSize = z.infer<typeof PromptSize>;
+
 /** What it took to write an agent's message: the model calls since its previous message, and any task it reports. */
 export const MessageStats = z.object({
   /** The model that answered (the one a router picked, when it says). */
@@ -75,6 +106,8 @@ export const MessageStats = z.object({
    */
   harness: z.string().optional(),
   task: TaskStats.optional(),
+  /** A thread agent's turn: what its prompt held. */
+  prompt: PromptSize.optional(),
 });
 export type MessageStats = z.infer<typeof MessageStats>;
 
