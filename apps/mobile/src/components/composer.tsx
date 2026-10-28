@@ -1,9 +1,11 @@
+import { draftKey } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { MAX_MESSAGE_LENGTH, type ProjectFile, takeLongPaste } from "@myrel/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CircleAlert, Paperclip, X } from "lucide-react-native";
 import { type ComponentRef, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useDraft } from "../lib/drafts";
 import { pickPhotos } from "../lib/pick-photos";
 import { platform } from "../lib/platform";
 import { useProject } from "../lib/project";
@@ -25,7 +27,8 @@ type Picked = { name: string; blob: Blob };
 /**
  * Message box pinned to the bottom of a conversation. The paperclip attaches photos or files:
  * they upload right away and are sent by path, like the web's composer. A long text paste is
- * attached the same way as a .txt file, with a way to put it back into the message.
+ * attached the same way as a .txt file, with a way to put it back into the message. Unsent
+ * text is kept on this device per project chat and thread, and comes back when it opens again.
  */
 export function Composer({
   placeholder,
@@ -33,6 +36,7 @@ export function Composer({
   disabled,
   tools,
   handle,
+  threadId,
 }: {
   placeholder: string;
   /** Shown above the text field, e.g. the CLI picker. */
@@ -41,6 +45,8 @@ export function Composer({
   onSend: (body: string, attachments: string[]) => void;
   disabled?: boolean;
   handle?: Ref<ComposerHandle>;
+  /** The thread this composer writes to; none in the project chat. Its draft is kept apart. */
+  threadId?: string;
 }) {
   const t = useT();
   const theme = useTheme();
@@ -49,7 +55,7 @@ export function Composer({
   const { api, server } = useSession();
   const { projectId } = useProject();
   const queryClient = useQueryClient();
-  const [body, setBody] = useState("");
+  const [body, setBody] = useDraft(draftKey(projectId, threadId));
   const [pending, setPending] = useState<Pending[]>([]);
   const nextId = useRef(0);
   const uploading = pending.some((p) => !p.file && !p.error);

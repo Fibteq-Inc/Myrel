@@ -166,6 +166,13 @@ export const tr: Catalog = {
   "starter.step.computerHintMobile": "Masaüstü uygulamasından ya da terminalden",
   "starter.step.github": "GitHub'ı bağla",
   "starter.step.githubHint": "Ajanlar dal açıp pull request göndersin",
+  "tip.computer.title": "Sıradakini kendi bilgisayarında yaptır",
+  "tip.computer.body":
+    "Myrel kendi Claude Code, Codex, Antigravity ya da OpenCode'unla, kendi klasörlerinde de çalışabilir. Dosyaların ve girişlerin bilgisayarında kalır.",
+  "tip.computer.connect": "Bilgisayarını bağla",
+  "tip.computer.later": "Şimdi değil",
+  "tip.decision": "Seçim senin. Önerilen seçenek işaretli; istersen mesaj kutusuna kendi cevabını da yazabilirsin.",
+  "tip.decision.ok": "Anladım",
 
   // Standing goal
   "goal.until": "Koordinatör devam ediyor · bitiş {time}",

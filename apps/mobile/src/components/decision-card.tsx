@@ -4,6 +4,7 @@ import { CircleCheck, CircleHelp, TriangleAlert } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { chosenOption, type Decision } from "../lib/decision";
 import { makeStyles, radius, useColors } from "../theme";
+import { DecisionTip, useDecisionTip } from "./tips";
 
 /**
  * A question with 2 to 4 options, one recommended. One tap sends the option's
@@ -26,6 +27,8 @@ export function DecisionCard({
   const answered = answer !== undefined;
   const chosen = chosenOption(decision, answer);
   const danger = !!decision.danger;
+  const tip = useDecisionTip();
+  const showTip = tip.due && !answered && !!onChoose;
 
   // Answered: one line with the question and the pick, so the conversation moves on.
   if (answered) {
@@ -69,6 +72,7 @@ export function DecisionCard({
               disabled={answered || !onChoose}
               onPress={() => {
                 void Haptics.selectionAsync();
+                if (showTip) tip.seen();
                 onChoose?.(option.label);
               }}
               style={({ pressed }) => [
@@ -97,6 +101,7 @@ export function DecisionCard({
           );
         })}
       </View>
+      {showTip && <DecisionTip onSeen={tip.seen} />}
     </View>
   );
 }

@@ -5,6 +5,7 @@ import { IconRail } from "../components/shell/icon-rail";
 import { AppShell } from "../components/shell/shell";
 import { useState } from "react";
 import { api, canChooseServer, server, serverInfoQuery, sessionQuery } from "../lib/api";
+import { drafts } from "../lib/drafts";
 import { disableWebPush } from "../lib/push";
 
 export const Route = createFileRoute("/_app")({
@@ -27,6 +28,8 @@ function AppLayout() {
     await disableWebPush().catch(() => {});
     await api.signOut();
     queryClient.clear();
+    // Unsent text is the account's too.
+    drafts.clear();
     await navigate({ to: "/login" });
   }
 

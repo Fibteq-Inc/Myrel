@@ -169,6 +169,13 @@ export const en = {
   "starter.step.computerHintMobile": "From the desktop app or a terminal",
   "starter.step.github": "Connect GitHub",
   "starter.step.githubHint": "Agents open branches and pull requests",
+  "tip.computer.title": "Run the next one on your computer",
+  "tip.computer.body":
+    "Myrel can also work with your own Claude Code, Codex, Antigravity or OpenCode, in your folders. Your files and sign-ins stay on your computer.",
+  "tip.computer.connect": "Connect your computer",
+  "tip.computer.later": "Not now",
+  "tip.decision": "It's your choice. The recommended option is marked; you can also write your own answer in the message box.",
+  "tip.decision.ok": "Got it",
 
   // Standing goal
   "goal.until": "The coordinator keeps going · ends {time}",

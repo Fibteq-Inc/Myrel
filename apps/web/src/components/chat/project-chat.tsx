@@ -1,4 +1,4 @@
-import { conversationState, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { conversationState, draftKey, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { type CliId, decisionPicks, type Message } from "@myrel/protocol";
 import { MessagesSquare } from "lucide-react";
@@ -16,6 +16,7 @@ import { ScrollToEnd } from "./scroll-to-end";
 import { ChatSkeleton } from "./skeleton";
 import { StarterExamples, StarterList } from "./starter";
 import { ThreadCard } from "./thread-card";
+import { ComputerTip } from "./tips";
 
 const NONE: Message[] = [];
 
@@ -97,6 +98,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
             );
           })}
           {thinking && <Thinking />}
+          {ready && asked && <ComputerTip threads={Object.values(state.threads)} />}
         </div>
       </ScrollToEnd>
 
@@ -111,6 +113,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
           autoFocus
           handle={composer}
+          draftKey={draftKey(project.id)}
         />
       </div>
     </div>

@@ -1,5 +1,6 @@
 import {
   conversationState,
+  draftKey,
   findMessage,
   threadMessages,
   threadPullRequests,
@@ -495,6 +496,7 @@ function Conversation({
         <Composer
           key={thread.id}
           placeholder={t("thread.placeholder")}
+          draftKey={draftKey(project.id, thread.id)}
           onSend={(body, attachments) => send(body, thread.id, attachments)}
           onUpload={(file) => api.upload(project.id, file.name, file)}
           tools={

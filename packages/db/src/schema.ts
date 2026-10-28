@@ -27,6 +27,8 @@ export const user = sqliteTable("user", {
   termsVersion: text("terms_version"),
   /** When the person finished or hid the "Get started" list in the apps (null: still shown). */
   onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
+  /** The one-time tips (TipId in @myrel/protocol) the person has seen, as a JSON array; null: none yet. */
+  tipsSeen: text("tips_seen", { mode: "json" }).$type<string[]>(),
   ...timestamps,
 });
 

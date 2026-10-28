@@ -3,6 +3,7 @@ import { DarkTheme, DefaultTheme, SplashScreen, Stack, ThemeProvider } from "exp
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useEffect, useMemo } from "react";
 import { AppI18n } from "../lib/i18n";
+import { drafts } from "../lib/drafts";
 import { unregisterPush } from "../lib/push";
 import { SessionProvider, useSession } from "../lib/session";
 import { AppTheme } from "../lib/theme";
@@ -25,6 +26,8 @@ export default function RootLayout() {
                 await unregisterPush(api);
               } finally {
                 queryClient.clear();
+                // Unsent text is the account's too.
+                drafts.clear();
               }
             }}
           >

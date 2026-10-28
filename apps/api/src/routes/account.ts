@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo } from "@myrel/protocol";
+import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo, TipId } from "@myrel/protocol";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAuth, firstPasswordKey } from "../auth";
@@ -17,8 +17,13 @@ export const accountRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get("/", async (c) => {
     const { id, name, email, role } = c.get("user");
-    const [row] = await createDb(c.env.DB).select({ onboardedAt: user.onboardedAt }).from(user).where(eq(user.id, id));
-    return c.json({ user: { id, name, email, role, onboarded: !!row?.onboardedAt } satisfies Me });
+    const [row] = await createDb(c.env.DB)
+      .select({ onboardedAt: user.onboardedAt, tipsSeen: user.tipsSeen })
+      .from(user)
+      .where(eq(user.id, id));
+    return c.json({
+      user: { id, name, email, role, onboarded: !!row?.onboardedAt, tips: row?.tipsSeen ?? [] } satisfies Me,
+    });
   })
   // The "Get started" list is done or hidden, for this account on every device.
   .post("/onboarded", async (c) => {
@@ -26,6 +31,17 @@ export const accountRoutes = new Hono<AppEnv>()
       .update(user)
       .set({ onboardedAt: new Date() })
       .where(and(eq(user.id, c.get("user").id), isNull(user.onboardedAt)));
+    return c.body(null, 204);
+  })
+  // A one-time tip was seen or closed, for this account on every device.
+  .post("/tips/:tip", async (c) => {
+    const tip = TipId.safeParse(c.req.param("tip"));
+    if (!tip.success) return c.json({ error: "unknown_tip" }, 404);
+    const db = createDb(c.env.DB);
+    const id = c.get("user").id;
+    const [row] = await db.select({ tipsSeen: user.tipsSeen }).from(user).where(eq(user.id, id));
+    const seen = row?.tipsSeen ?? [];
+    if (!seen.includes(tip.data)) await db.update(user).set({ tipsSeen: [...seen, tip.data] }).where(eq(user.id, id));
     return c.body(null, 204);
   })
   // Where a first email verification leads (see firstVerification in auth.ts): on to the page that
