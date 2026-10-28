@@ -1,3 +1,4 @@
+import { cliMark } from "@myrel/client";
 import { LoaderCircle } from "lucide-react-native";
 import { useI18n } from "@myrel/i18n/react";
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
@@ -119,6 +120,47 @@ export function MyrelMark({ size = 28 }: { size?: number }) {
           <Path key={angle} d={MARK_PETAL} fill="#f4efe6" transform={`rotate(${angle} 512 512)`} />
         ))}
       </Svg>
+    </View>
+  );
+}
+
+/**
+ * The CLI that does a thread's work, in place of MyrelMark: its logo, or its initial when there is
+ * none. `tile` sets it on a card like MyrelMark's, as an avatar; without it, it sits inline next to
+ * the CLI's name in `color` (the body text's by default). Anything that is not a CLI gets MyrelMark
+ * (tile) or nothing.
+ */
+export function CliMark({ cli, size = 28, tile = false, color }: { cli: string | null | undefined; size?: number; tile?: boolean; color?: string }) {
+  const colors = useColors();
+  const mark = cliMark(cli);
+  if (!mark) return tile ? <MyrelMark size={size} /> : null;
+  const ink = tile ? colors.fg : (color ?? colors.body);
+  const glyph = tile ? size * 0.6 : size;
+  return (
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={mark.name}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.round(size * 0.3),
+        alignItems: "center",
+        justifyContent: "center",
+        ...(tile ? { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.frame } : !mark.logo ? { borderWidth: 1, borderColor: ink } : null),
+      }}
+    >
+      {mark.logo ? (
+        <Svg width={glyph} height={glyph} viewBox="0 0 24 24">
+          {mark.logo.map((p) => (
+            <Path key={p.d} d={p.d} fill={ink} fillRule={p.evenOdd ? "evenodd" : undefined} clipRule={p.evenOdd ? "evenodd" : undefined} />
+          ))}
+        </Svg>
+      ) : (
+        <Text style={{ color: ink, fontSize: Math.round(glyph * (tile ? 0.85 : 0.7)), fontWeight: "600", lineHeight: Math.round(glyph * (tile ? 1 : 0.85)) }}>
+          {mark.initial}
+        </Text>
+      )}
     </View>
   );
 }

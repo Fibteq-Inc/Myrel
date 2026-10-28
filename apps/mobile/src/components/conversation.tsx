@@ -29,6 +29,7 @@ export function Conversation({
   projectId,
   threadId,
   working,
+  workingCli,
   placeholder,
   onSend,
   onEdit,
@@ -57,6 +58,8 @@ export function Conversation({
   threadId?: string;
   /** Null when idle; otherwise what to show while the agent works. */
   working: string | null;
+  /** The CLI doing a thread's work, shown by its mark on the working line. */
+  workingCli?: string | null;
   placeholder: string;
   /** `attachments` are paths of files the composer uploaded. */
   onSend: (body: string, attachments?: string[]) => void;
@@ -151,7 +154,7 @@ export function Conversation({
             // Inverted: the offset is the distance from the newest message.
             onScroll={(e) => setAway(e.nativeEvent.contentOffset.y > AWAY)}
             scrollEventThrottle={100}
-            ListHeaderComponent={working ? <Thinking label={working} onStop={onStop} /> : undefined}
+            ListHeaderComponent={working ? <Thinking label={working} cli={workingCli} onStop={onStop} /> : undefined}
             // Inverted: the end of the list is its top, the oldest message held.
             onEndReached={loadEarlier}
             onEndReachedThreshold={0.5}

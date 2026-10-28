@@ -1,3 +1,4 @@
+import { cliMark } from "@myrel/client";
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import {
@@ -18,7 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 import { projectSettingsQuery, runnersQuery, workspaceQuery, workspacesQuery } from "../../lib/api";
-import { cn } from "../../lib/ui";
+import { CliMark, cn } from "../../lib/ui";
 import { Menu, MenuLabel, MenuSeparator } from "../ui/menu";
 import { ContextRing, ContextSection } from "./context-gauge";
 
@@ -91,7 +92,7 @@ export function AskCliPicker({
     <Menu
       label={t("cliPicker.askTitle")}
       side="top"
-      trigger={<Trigger label={label} active={value.length > 0} several={value.length > 1} />}
+      trigger={<Trigger label={label} active={value.length > 0} several={value.length > 1} cli={value.length > 1 ? undefined : (value[0] ?? pickable.folderCli)} />}
       className={triggerClass}
       panelClassName="w-72"
     >
@@ -112,6 +113,7 @@ export function AskCliPicker({
               checked={value.includes(c.id)}
               onSelect={() => toggle(c.id)}
               title={cliName(c.id)}
+              cli={c.id}
               note={limitNote(c, t)}
             />
           ))}
@@ -207,7 +209,12 @@ export function ThreadSettingsPicker({
             <MenuLabel>{t("threadSettings.where")}</MenuLabel>
             <Locked>{computer.runnerName}</Locked>
             <MenuLabel>{t("threadSettings.cli")}</MenuLabel>
-            <Locked>{cliName(cli)}</Locked>
+            <Locked>
+              <span className="flex items-center gap-1.5">
+                <CliMark cli={cli} size={14} />
+                {cliName(cli)}
+              </span>
+            </Locked>
             {own?.model && (
               <>
                 <MenuLabel>{t("threadSettings.model")}</MenuLabel>
@@ -289,6 +296,7 @@ export function ThreadSettingsPicker({
                   checked={currentCli === c.id}
                   onSelect={() => currentCli !== c.id && onCli(c.id)}
                   label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
+                  cli={c.id}
                 />
               );
             })}
@@ -375,7 +383,8 @@ function Pills({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap gap-1.5 px-2.5 pb-2 pt-1">{children}</div>;
 }
 
-function Pill({ checked, onSelect, label }: { checked: boolean; onSelect: () => void; label: string }) {
+/** `cli`: a CLI's pill, led by its mark. */
+function Pill({ checked, onSelect, label, cli }: { checked: boolean; onSelect: () => void; label: string; cli?: string }) {
   return (
     <button
       type="button"
@@ -383,11 +392,12 @@ function Pill({ checked, onSelect, label }: { checked: boolean; onSelect: () => 
       aria-checked={checked}
       onClick={onSelect}
       className={cn(
-        "max-w-full truncate rounded-full border px-2.5 py-1 text-xs",
+        "flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
         checked ? "border-accent bg-accent text-ground" : "border-edge text-body hover:bg-hover hover:text-fg",
       )}
     >
-      {label}
+      {cli && <CliMark cli={cli} size={13} />}
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -447,11 +457,16 @@ export function OfferedClis({ clis }: { clis: string[] }) {
 const triggerClass =
   "flex h-8 max-w-[11rem] flex-none items-center gap-1.5 rounded-lg px-2 text-[12.5px] text-muted hover:bg-hover hover:text-fg aria-expanded:bg-hover aria-expanded:text-fg";
 
-function Trigger({ label, active, several }: { label: string; active: boolean; several: boolean }) {
+/** `cli`: the one CLI it stands for, shown by its mark. */
+function Trigger({ label, active, several, cli }: { label: string; active: boolean; several: boolean; cli?: string }) {
   return (
     <>
       {several ? (
         <Sparkles size={14} className="flex-none text-accent" aria-hidden="true" />
+      ) : cliMark(cli) ? (
+        <span className={cn("flex-none", active && "text-accent")}>
+          <CliMark cli={cli} size={14} />
+        </span>
       ) : (
         <SquareTerminal size={14} className={cn("flex-none", active && "text-accent")} aria-hidden="true" />
       )}
@@ -467,12 +482,15 @@ function Option({
   onSelect,
   title,
   note,
+  cli,
 }: {
   role: "menuitemradio" | "menuitemcheckbox";
   checked: boolean;
   onSelect: () => void;
   title: string;
   note?: ReactNode;
+  /** A CLI's option, led by its mark. */
+  cli?: string;
 }) {
   return (
     <button
@@ -492,6 +510,7 @@ function Option({
       >
         {checked && <Check size={11} strokeWidth={3} />}
       </span>
+      {cli && <CliMark cli={cli} size={16} />}
       <span className="min-w-0 flex-1 truncate">{title}</span>
       {note && <span className="flex-none text-xs text-subtle">{note}</span>}
     </button>

@@ -12,13 +12,14 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react";
-import { newestFirst, type SubagentSummary, taskHeadline, taskSubagents } from "@myrel/client";
+import { cliMark, newestFirst, type SubagentSummary, taskHeadline, taskSubagents } from "@myrel/client";
 import { clockTime, dayLabel, localDay, type Translate } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { useFormat } from "../../lib/format";
-import { duration } from "../chat/message-stats";
+import { CliMark } from "../../lib/ui";
+import { duration, harnessName } from "../chat/message-stats";
 import { FilesTab } from "./files";
 import { EmptyTab, type WorkspaceTab } from "./workspace-panel";
 
@@ -145,9 +146,15 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
         >
           <ChevronRight size={14} className={`flex-none text-subtle transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true" />
           <StatusIcon status={task.status} />
-          <SquareTerminal size={14} className="flex-none text-subtle" aria-hidden="true" />
+          {cliMark(task.harness) ? (
+            <span className="flex-none text-subtle">
+              <CliMark cli={task.harness} size={14} />
+            </span>
+          ) : (
+            <SquareTerminal size={14} className="flex-none text-subtle" aria-hidden="true" />
+          )}
           <span className="truncate font-medium">{task.title}</span>
-          <span className="flex-none text-xs text-subtle">{task.harness}</span>
+          <span className="flex-none text-xs text-subtle">{harnessName(task.harness)}</span>
           {headline && <span className="min-w-0 flex-1 truncate text-xs text-muted">{headline}</span>}
           {subagents.length > 0 && (
             <span className="flex flex-none items-center gap-1 text-xs text-subtle">

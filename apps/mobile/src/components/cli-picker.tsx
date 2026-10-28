@@ -1,6 +1,7 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
+import { cliMark } from "@myrel/client";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
@@ -10,6 +11,7 @@ import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors } from "../theme";
 import { ContextRing, ContextSection } from "./context-gauge";
+import { CliMark } from "./ui";
 
 /** cloud: the person's threads run in the cloud, where the choice is among the cloud CLIs. */
 export type Pickable = { clis: RunnerCli[]; folderCli: CliId; defaults: CliModelDefaults; cloud?: boolean };
@@ -73,11 +75,18 @@ export function AskCliPicker({ pickable, value, onChange }: { pickable: Pickable
   const toggle = (id: CliId) => onChange(value.includes(id) ? value.filter((c) => c !== id) : [...value, id]);
   return (
     <>
-      <Chip label={label} active={value.length > 0} several={value.length > 1} title={t("cliPicker.askTitle")} onPress={() => setOpen(true)} />
+      <Chip
+        label={label}
+        active={value.length > 0}
+        several={value.length > 1}
+        cli={value.length > 1 ? undefined : (value[0] ?? pickable.folderCli)}
+        title={t("cliPicker.askTitle")}
+        onPress={() => setOpen(true)}
+      />
       <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.askTitle")} hint={[pickable.clis.length > 1 && t("cliPicker.askHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ") || undefined}>
         <Option kind="radio" checked={value.length === 0} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => onChange([])} />
         {pickable.clis.map((c) => (
-          <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} note={limitNote(c, t)} onPress={() => toggle(c.id)} />
+          <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} cli={c.id} note={limitNote(c, t)} onPress={() => toggle(c.id)} />
         ))}
       </Sheet>
     </>
@@ -193,7 +202,7 @@ export function ThreadSettingsPicker({
           <Text style={styles.section}>{t("threadSettings.where")}</Text>
           <Locked>{computer.runnerName}</Locked>
           <Text style={styles.section}>{t("threadSettings.cli")}</Text>
-          <Locked>{cliName(cli)}</Locked>
+          <Locked cli={cli}>{cliName(cli)}</Locked>
           {modelLabel ? (
             <>
               <Text style={styles.section}>{t("threadSettings.model")}</Text>
@@ -298,6 +307,7 @@ export function ThreadSettingsPicker({
                     checked={currentCli === c.id}
                     onPress={() => currentCli !== c.id && onCli(c.id)}
                     label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
+                    cli={c.id}
                   />
                 );
               })}
@@ -342,7 +352,8 @@ function Pills({ children }: { children: React.ReactNode }) {
   return <View style={styles.efforts}>{children}</View>;
 }
 
-function Pill({ checked, onPress, label }: { checked: boolean; onPress: () => void; label: string }) {
+/** `cli`: a CLI's pill, led by its mark. */
+function Pill({ checked, onPress, label, cli }: { checked: boolean; onPress: () => void; label: string; cli?: string }) {
   const styles = useStyles();
   const colors = useColors();
   return (
@@ -352,6 +363,7 @@ function Pill({ checked, onPress, label }: { checked: boolean; onPress: () => vo
       onPress={onPress}
       style={({ pressed }) => [styles.effort, checked && styles.effortOn, pressed && !checked && { backgroundColor: colors.hover }]}
     >
+      {cli && <CliMark cli={cli} size={14} color={checked ? colors.onAccent : colors.body} />}
       <Text style={[styles.effortText, checked && { color: colors.onAccent }]} numberOfLines={1}>
         {label}
       </Text>
@@ -359,12 +371,14 @@ function Pill({ checked, onPress, label }: { checked: boolean; onPress: () => vo
   );
 }
 
-function Locked({ children }: { children: React.ReactNode }) {
+/** `cli`: the CLI it names, shown by its mark. */
+function Locked({ children, cli }: { children: React.ReactNode; cli?: string }) {
   const styles = useStyles();
   const colors = useColors();
   return (
     <View style={styles.locked}>
       <Lock size={14} color={colors.subtle} />
+      {cli && <CliMark cli={cli} size={16} />}
       <Text style={styles.optionText} numberOfLines={1}>
         {children}
       </Text>
@@ -429,6 +443,7 @@ function Chip({
   several,
   settings,
   cloud,
+  cli,
   prompt,
   title,
   onPress,
@@ -436,6 +451,8 @@ function Chip({
   label: string;
   active: boolean;
   several?: boolean;
+  /** The one CLI it stands for, shown by its mark. */
+  cli?: string;
   settings?: boolean;
   cloud?: boolean;
   prompt?: PromptSize | null;
@@ -459,6 +476,8 @@ function Chip({
         <Cloud size={14} color={active ? colors.accent : colors.muted} />
       ) : settings ? (
         <SlidersHorizontal size={14} color={active ? colors.accent : colors.muted} />
+      ) : cliMark(cli) ? (
+        <CliMark cli={cli} size={14} color={active ? colors.accent : colors.muted} />
       ) : (
         <SquareTerminal size={14} color={active ? colors.accent : colors.muted} />
       )}
@@ -497,6 +516,7 @@ export function Option({
   title,
   note,
   wrap,
+  cli,
   onPress,
 }: {
   kind: "radio" | "check";
@@ -504,6 +524,8 @@ export function Option({
   title: string;
   note?: string;
   wrap?: boolean;
+  /** A CLI's option, led by its mark. */
+  cli?: string;
   onPress: () => void;
 }) {
   const colors = useColors();
@@ -518,6 +540,7 @@ export function Option({
       <View style={[styles.mark, kind === "radio" ? { borderRadius: 10 } : { borderRadius: 5 }, checked && styles.markOn]}>
         {checked && <Check size={13} strokeWidth={3} color={colors.onAccent} />}
       </View>
+      {cli && <CliMark cli={cli} size={18} />}
       <Text style={styles.optionText} numberOfLines={wrap ? undefined : 1}>
         {title}
       </Text>
@@ -584,7 +607,7 @@ const useStyles = makeStyles((colors) =>
     offeredText: { color: colors.subtle, fontSize: 12 },
     section: { color: colors.subtle, fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
     efforts: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    effort: { borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
+    effort: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
     effortOn: { borderColor: colors.accent, backgroundColor: colors.accent },
     effortText: { color: colors.body, fontSize: 13 },
     locked: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 4 },

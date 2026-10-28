@@ -23,7 +23,7 @@ import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
 import { StopButton } from "./stop-button";
-import { MyrelMark, Spinner, useRelativeTime } from "./ui";
+import { CliMark, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
 
@@ -83,7 +83,8 @@ export function MessageView({
     const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
     return (
       <View style={styles.agent}>
-        <MyrelMark size={28} />
+        {/* In a thread, the mark of the CLI that wrote it. */}
+        <CliMark cli={message.threadId ? (message.stats?.task?.harness ?? message.stats?.harness) : null} tile />
         <View style={{ flex: 1, minWidth: 0, gap: 8, paddingTop: 2 }}>
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
@@ -295,12 +296,13 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label, onStop }: { label: string; onStop?: () => Promise<unknown> }) {
+/** The working line. `cli`: the CLI doing a thread's work, shown instead of Myrel's mark. */
+export function Thinking({ label, cli, onStop }: { label: string; cli?: string | null; onStop?: () => Promise<unknown> }) {
   const colors = useColors();
   const styles = useStyles();
   return (
     <View style={styles.agent}>
-      <MyrelMark size={28} />
+      <CliMark cli={cli} tile />
       <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }} accessibilityRole="progressbar" accessibilityLabel={label}>
         <Spinner size={15} color={colors.subtle} />
         <Text style={{ color: colors.subtle, fontSize: 15, flexShrink: 1 }} numberOfLines={2}>

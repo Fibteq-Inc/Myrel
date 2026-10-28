@@ -1,6 +1,7 @@
 import {
   conversationState,
   findMessage,
+  threadCli,
   threadMessages,
   threadPullRequests,
   threadSummary,
@@ -204,6 +205,7 @@ export default function ThreadScreen() {
           artifacts={state.artifacts}
           projectId={projectId}
           working={state.active[threadId] ? (state.progress[threadId] ?? t("message.working")) : null}
+          workingCli={thread ? threadCli(thread, messages) : null}
           placeholder={t("thread.placeholder")}
           onSend={onSend}
           onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}

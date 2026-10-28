@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { DECISION_LANG, type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
 import { AlarmClock, CircleAlert, LoaderCircle, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { MyrelMark, useRelativeTime } from "../../lib/ui";
+import { CliMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
 import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
@@ -16,7 +16,8 @@ export type Names = Record<string, string>;
 
 /**
  * One message, Claude style: people's messages as bubbles on the right,
- * the assistant's as open text beside its mark, system notes as a banner.
+ * the assistant's as open text beside its mark (in a thread, the mark of the CLI that wrote it),
+ * system notes as a banner.
  * `children` renders under the message (e.g. its thread card). `onEdit` lets the
  * person change their own message's text. `onInterrupt`: the message waits for the
  * thread's working agent, which this stops so it goes now.
@@ -71,7 +72,7 @@ export function MessageView({
     const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
     return (
       <div className="group flex gap-3.5">
-        <MyrelMark size={28} />
+        <CliMark cli={message.threadId ? (message.stats?.task?.harness ?? message.stats?.harness) : null} tile />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
@@ -236,11 +237,12 @@ function Reactions({ reactions }: { reactions?: Reaction[] }) {
   );
 }
 
-export function Thinking({ label, onStop }: { label?: string; onStop?: () => Promise<unknown> }) {
+/** The working line. `cli`: the CLI doing a thread's work, shown instead of Myrel's mark. */
+export function Thinking({ label, cli, onStop }: { label?: string; cli?: string | null; onStop?: () => Promise<unknown> }) {
   const t = useT();
   return (
     <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
-      <MyrelMark size={28} />
+      <CliMark cli={cli} tile />
       <span className="flex items-center gap-2 text-[13px] text-subtle" role="status">
         <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
         {label ?? t("message.thinking")}…
