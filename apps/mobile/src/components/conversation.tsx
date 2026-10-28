@@ -214,7 +214,7 @@ export function Conversation({
           )}
         </View>
         <View style={{ paddingBottom: keyboardOpen ? 8 : Platform.OS === "ios" ? insets.bottom : insets.bottom + 4 }}>
-          <Composer placeholder={placeholder} onSend={onSend} tools={tools} handle={composer} />
+          <Composer placeholder={placeholder} onSend={onSend} tools={tools} handle={composer} threadId={threadId} />
         </View>
       </KeyboardAvoidingView>
     </View>

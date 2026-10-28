@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useDraft } from "../../lib/drafts";
 import { errorMessage } from "../../lib/ui";
 import { PendingAttachments } from "../files";
 
@@ -29,7 +30,8 @@ export type ComposerHandle = {
  * picker and the like plug in there). With `onUpload`, files can be attached
  * (paperclip, paste or drop); they upload right away and are sent by path.
  * A long text paste is attached as a .txt file the same way, with a way to
- * put it back into the message.
+ * put it back into the message. With `draftKey`, unsent text is kept on this
+ * device under that key and comes back when the composer opens again.
  */
 export function Composer({
   placeholder,
@@ -39,6 +41,7 @@ export function Composer({
   tools,
   autoFocus,
   handle,
+  draftKey,
 }: {
   placeholder: string;
   /** `attachments` are paths of files already uploaded with `onUpload`. */
@@ -48,9 +51,11 @@ export function Composer({
   tools?: ReactNode;
   autoFocus?: boolean;
   handle?: Ref<ComposerHandle>;
+  /** Where the unsent text is kept, from `draftKey()`. */
+  draftKey?: string;
 }) {
   const t = useT();
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useDraft(draftKey);
   const ref = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<Pending[]>([]);

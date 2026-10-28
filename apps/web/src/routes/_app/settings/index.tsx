@@ -8,6 +8,7 @@ import { AppUpdateSection } from "../../../components/app-update";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { api, meQuery, platform, sessionQuery } from "../../../lib/api";
+import { drafts } from "../../../lib/drafts";
 import { currentPushSubscription } from "../../../lib/push";
 import { setThemePreference, useThemePreference } from "../../../lib/theme";
 import { Button, errorMessage, Input } from "../../../lib/ui";
@@ -175,6 +176,7 @@ function DeleteAccount({ email }: { email: string }) {
     },
     onSuccess: async () => {
       queryClient.clear();
+      drafts.clear();
       await navigate({ to: "/login" });
     },
   });
