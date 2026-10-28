@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { saveConfig } from "../src/config";
 import { listDirs, shareableFolder } from "../src/folders";
 import { checkPairing, type RunnerStatus, startRunner } from "../src/runner";
-import { launchdPlist, startupScript, systemdUnit } from "../src/service";
+import { launchdPlist, startupScript, systemdUnit, upgradeSystemdUnit } from "../src/service";
 
 describe("listDirs", () => {
   it("lists visible folders only, sorted, with the parent", async () => {
@@ -65,6 +65,15 @@ describe("service files", () => {
     expect(unit).toContain('ExecStart="/usr/local/bin/node" "/Users/a b/.myrel-runner/bin/myrel-runner.mjs" "start"');
     expect(unit).toContain('Environment="PATH=/usr/bin:/home/a/100%%"');
     expect(unit).toContain("Restart=on-failure");
+    expect(unit).toContain("OOMPolicy=continue");
+    expect(upgradeSystemdUnit(unit)).toBeNull();
+  });
+
+  it("systemd: an older unit gets OOMPolicy once", () => {
+    const old = systemdUnit(args, { PATH: "/usr/bin" }).replace("OOMPolicy=continue\n", "");
+    const next = upgradeSystemdUnit(old)!;
+    expect(next).toContain("RestartSec=10\nOOMPolicy=continue\n");
+    expect(upgradeSystemdUnit(next)).toBeNull();
   });
 
   it("windows: runs hidden with output in the log", () => {
