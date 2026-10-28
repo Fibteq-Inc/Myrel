@@ -9,7 +9,7 @@ import {
   threadUsage,
 } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { decisionPicks, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
+import { decisionPicks, lastPromptSize, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
@@ -506,6 +506,7 @@ function Conversation({
               workspaces={ownWorkspaces}
               placeable={placeable}
               thread={thread}
+              prompt={lastPromptSize(messages)}
               onRunner={(runnerId) => emit({ type: "thread.runner", threadId: thread.id, runnerId })}
               onCli={(cli) => emit({ type: "thread.cli", threadId: thread.id, cli })}
               onModel={(pick) => emit({ type: "thread.model", threadId: thread.id, ...pick })}

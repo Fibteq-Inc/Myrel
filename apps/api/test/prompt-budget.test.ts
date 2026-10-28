@@ -1,7 +1,7 @@
 import type { Message, Thread } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
 import { unchangedSections } from "../src/agents/harness-agent";
-import { threadPrompt } from "../src/agents/thread-worker";
+import { threadPrompt, type ThreadPromptSize } from "../src/agents/thread-worker";
 
 const thread = { id: "thr_1", title: "Long thread", resolved: false, statusText: null } as Thread;
 const message = (seq: number, body: string): Message => ({
@@ -78,5 +78,23 @@ describe("threadPrompt budget", () => {
     threadPrompt(input(messages, { budget: 40_000, lasting: sections.lasting }));
     // Knowledge, brief and repositories.
     expect(sections.hashes).toHaveLength(3);
+  });
+
+  it("measures each kind of context and what was left out", () => {
+    const notes = [{ body: `note ${"n".repeat(500)}`, createdAt: "2026-10-26T10:00:00.000Z", isNew: true }];
+    let size: ThreadPromptSize | undefined;
+    const prompt = threadPrompt(input(messages, { notes, budget: 40_000, measure: (s) => (size = s) }));
+    const { droppedMessages, droppedNotes, cut, ...parts } = size!;
+    expect(Number(/The (\d+) oldest messages are left out/.exec(prompt)?.[1])).toBe(droppedMessages);
+    expect(droppedNotes).toBe(0);
+    expect(cut).toBe(false);
+    expect(Object.values(parts).reduce((a, b) => a + b, 0)).toBe(prompt.length);
+    expect(parts.conversation).toBeGreaterThan(30_000);
+    expect(parts.notes).toBeGreaterThan(500);
+    expect(parts.brief).toBeGreaterThan(0);
+    expect(parts.knowledge).toBeGreaterThan(0);
+
+    threadPrompt(input(messages.slice(0, 2), { measure: (s) => (size = s) }));
+    expect(size!.droppedMessages).toBe(0);
   });
 });

@@ -93,6 +93,8 @@ export function threadPrompt(input: {
   lasting?: (section: string) => string;
   /** The most characters the prompt may take: the oldest messages and coordinator notes go first (see fitPrompt). */
   budget?: number;
+  /** Told how the prompt came out: each kind of context's share and what fitting left out. */
+  measure?: (size: ThreadPromptSize) => void;
 }): string {
   const lasting = input.lasting ?? ((section: string) => section);
   const isNew = (m: Message) =>
@@ -138,24 +140,51 @@ export function threadPrompt(input: {
     input.resumeNote ?? "",
     "Continue the work now.",
   ];
-  const render = (left: { history: number; notes: number }) => {
+  const conversation = (left: { history: number; notes: number }) => {
     const leftOut = (n: number, what: string) => (n ? `(The ${n} oldest ${what} are left out to keep this prompt within its size limit.)` : "");
     const messages = [leftOut(left.history, "messages"), ...history.slice(left.history)].filter(Boolean).join("\n\n");
     const shownNotes = notes.slice(left.notes);
     const noteText = shownNotes.length ? [leftOut(left.notes, "notes"), ...shownNotes].filter(Boolean).join("\n") : "";
-    return [
-      ...head,
-      input.followUp
+    return {
+      messages: input.followUp
         ? `## New in the thread since your last turn, oldest first (the earlier messages are in this session already; one marked edited is an earlier message a person changed, so its new text replaces the old)\n${messages || "(no new messages)"}`
         : `## Thread so far, oldest first (NEW = arrived, or edited by its author, since your last turn)\n${messages || "(no messages yet)"}`,
-      noteText ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${noteText}` : "",
-      ...tail,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      notes: noteText ? `## Notes from the coordinator (people can open each under a one-line marker in the thread)\n${noteText}` : "",
+    };
   };
-  return fitPrompt(render, { history: history.length, notes: notes.length }, input.budget);
+  const render = (left: { history: number; notes: number }) => {
+    const middle = conversation(left);
+    return [...head, middle.messages, middle.notes, ...tail].filter(Boolean).join("\n\n");
+  };
+  const fitted = fitPrompt(render, { history: history.length, notes: notes.length }, input.budget);
+  if (input.measure) {
+    const middle = conversation(fitted.left);
+    const [, knowledge = "", brief = "", , root = ""] = head;
+    // The tail's GitHub events and routine runs (its second and fourth sections) are news, like the notes.
+    const news = middle.notes.length + (tail[1]?.length ?? 0) + (tail[3]?.length ?? 0);
+    const parts = { knowledge: knowledge.length, brief: brief.length, conversation: root.length + middle.messages.length, notes: news };
+    input.measure({
+      ...parts,
+      other: Math.max(0, fitted.prompt.length - parts.knowledge - parts.brief - parts.conversation - parts.notes),
+      droppedMessages: fitted.left.history,
+      droppedNotes: fitted.left.notes,
+      cut: fitted.cut,
+    });
+  }
+  return fitted.prompt;
 }
+
+/** How threadPrompt's sections came out, in characters, and what fitting left out. */
+export type ThreadPromptSize = {
+  knowledge: number;
+  brief: number;
+  conversation: number;
+  notes: number;
+  other: number;
+  droppedMessages: number;
+  droppedNotes: number;
+  cut: boolean;
+};
 
 /**
  * The prompt within `budget` characters. A long thread's messages, coordinator notes and the like
@@ -168,9 +197,9 @@ export function fitPrompt(
   render: (left: { history: number; notes: number }) => string,
   counts: { history: number; notes: number },
   budget = Number.POSITIVE_INFINITY,
-): string {
+): { prompt: string; left: { history: number; notes: number }; cut: boolean } {
   let prompt = render({ history: 0, notes: 0 });
-  if (prompt.length <= budget) return prompt;
+  if (prompt.length <= budget) return { prompt, left: { history: 0, notes: 0 }, cut: false };
   // Keep the newest message: drop from the oldest, finding the fewest to leave out by halving.
   const fewest = (fits: (n: number) => boolean, max: number) => {
     let lo = 0;
@@ -185,13 +214,13 @@ export function fitPrompt(
   const maxHistory = Math.max(0, counts.history - 1);
   const history = fewest((n) => render({ history: n, notes: 0 }).length <= budget, maxHistory);
   prompt = render({ history, notes: 0 });
-  if (prompt.length <= budget) return prompt;
+  if (prompt.length <= budget) return { prompt, left: { history, notes: 0 }, cut: false };
   const notes = fewest((n) => render({ history, notes: n }).length <= budget, counts.notes);
   prompt = render({ history, notes });
-  if (prompt.length <= budget) return prompt;
+  if (prompt.length <= budget) return { prompt, left: { history, notes }, cut: false };
   const cut = "\n\n(…part of this prompt is cut here to keep it within its size limit…)\n\n";
   const tail = Math.floor((budget - cut.length) / 3);
-  return `${prompt.slice(0, budget - cut.length - tail)}${cut}${prompt.slice(-tail)}`;
+  return { prompt: `${prompt.slice(0, budget - cut.length - tail)}${cut}${prompt.slice(-tail)}`, left: { history, notes }, cut: true };
 }
 
 function renderPullRequest(pr: PullRequest): string {
