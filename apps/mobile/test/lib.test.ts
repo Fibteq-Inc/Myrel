@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
 import { dataUrlBase64, displayName, fileKind } from "../src/lib/files";
 import { surelyLong } from "../src/lib/fold";
-import { notificationPath } from "../src/lib/push-target";
+import { notificationNavigation, notificationPath } from "../src/lib/push-target";
 import { unwrapHref, wrapHref } from "../src/lib/raw-href";
 import { secureKey } from "../src/lib/secure-key";
 
@@ -65,6 +65,24 @@ describe("notificationPath", () => {
     expect(notificationPath({ projectId: "proj_01ABC", threadId: null })).toBe("/projects/proj_01ABC");
     expect(notificationPath({ projectId: "../evil" })).toBeNull();
     expect(notificationPath(null)).toBeNull();
+  });
+});
+
+describe("notificationNavigation", () => {
+  const thread = "/projects/proj_B/threads/thr_T";
+  it("leaves another project before opening the thread", () => {
+    expect(notificationNavigation("/projects/proj_A/threads/thr_X", thread)).toBe("switch");
+    expect(notificationNavigation("/projects/proj_A", thread)).toBe("switch");
+    expect(notificationNavigation("/projects/proj_A/settings", "/projects/proj_B")).toBe("switch");
+  });
+  it("pushes from the project list (cold start) or within the same project", () => {
+    expect(notificationNavigation("/", thread)).toBe("push");
+    expect(notificationNavigation("/settings", thread)).toBe("push");
+    expect(notificationNavigation("/projects/proj_B", thread)).toBe("push");
+    expect(notificationNavigation("/projects/proj_B/threads/thr_U", thread)).toBe("push");
+  });
+  it("does nothing when the thread is already open", () => {
+    expect(notificationNavigation(thread, thread)).toBe("none");
   });
 });
 
