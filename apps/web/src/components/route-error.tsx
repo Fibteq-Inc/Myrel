@@ -3,6 +3,7 @@ import { useT } from "@myrel/i18n/react";
 import { type ErrorComponentProps, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { server } from "../lib/api";
+import { reportError } from "../lib/errors";
 import { Button, errorMessage, MyrelMark } from "../lib/ui";
 
 /** How often a page that failed for want of a connection tries again by itself. */
@@ -22,6 +23,10 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
   const t = useT();
   const router = useRouter();
   const offline = isNetworkError(error);
+  const routeId = router.state.matches.at(-1)?.routeId ?? "?";
+  useEffect(() => {
+    if (!offline) reportError(error, routeId);
+  }, [error, offline, routeId]);
 
   function retry() {
     reset();

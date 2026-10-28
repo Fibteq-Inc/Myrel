@@ -11,3 +11,4 @@ export * from "./tasks";
 export * from "./socket";
 export * from "./theme";
 export * from "./token-store";
+export * from "./error-report";

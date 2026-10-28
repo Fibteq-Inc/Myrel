@@ -1,7 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Copy, Trash2 } from "lucide-react";
+import { Check, Copy, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Badge, List, Notice, Row, Section } from "../../../components/settings";
 import { adminSettingsQuery, api, serverInfoQuery } from "../../../lib/api";
@@ -56,8 +56,94 @@ function ServerSettings() {
           </>
         }
       />
+      <Funnel />
+      <ServerErrors />
       {info?.billing && <GiftLinks />}
     </>
+  );
+}
+
+const FUNNEL_DAYS = [7, 30, 90];
+const FUNNEL_STEPS = ["signedUp", "verified", "inProject", "asked", "threadRan", "pairedComputer"] as const;
+
+/** How far the people who signed up lately got, step by step, from what the server already keeps. */
+function Funnel() {
+  const t = useT();
+  const [days, setDays] = useState(30);
+  const { data: funnel, error } = useQuery({ queryKey: ["admin-funnel", days], queryFn: () => api.getAdminFunnel(days) });
+
+  return (
+    <Section title={t("server.funnel")} description={t("server.funnelDescription")}>
+      <Select className="w-auto self-start" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={t("server.funnelDays")}>
+        {FUNNEL_DAYS.map((d) => (
+          <option key={d} value={d}>
+            {t("server.funnelDaysOption", { count: d })}
+          </option>
+        ))}
+      </Select>
+      {error && <Notice>{errorMessage(error, t)}</Notice>}
+      <List empty="">
+        {FUNNEL_STEPS.map((step) => {
+          const value = funnel?.[step] ?? 0;
+          const share = funnel?.signedUp ? Math.round((value / funnel.signedUp) * 100) : 0;
+          return (
+            <Row key={step}>
+              <div className="min-w-0 flex-1">
+                <div className="truncate">{t(`server.funnel.${step}`)}</div>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-hover">
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${share}%` }} />
+                </div>
+              </div>
+              <span className="w-16 flex-none text-right tabular-nums">
+                <span className="font-medium">{funnel ? value : "–"}</span>
+                {funnel && step !== "signedUp" && <span className="ml-1.5 text-xs text-subtle">{share}%</span>}
+              </span>
+            </Row>
+          );
+        })}
+      </List>
+    </Section>
+  );
+}
+
+/** The server's errors, grouped by kind, last seen first; one marked fixed goes away until it comes back. */
+function ServerErrors() {
+  const t = useT();
+  const fmt = useFormat();
+  const queryClient = useQueryClient();
+  const { data: errors, error } = useQuery({ queryKey: ["admin-errors"], queryFn: () => api.listAdminErrors() });
+  const clear = useMutation({
+    mutationFn: (id: string) => api.clearAdminError(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-errors"] }),
+  });
+  const [open, setOpen] = useState<string | null>(null);
+
+  return (
+    <Section title={t("server.errors")} description={t("server.errorsDescription")}>
+      {(error || clear.error) && <Notice>{errorMessage(error ?? clear.error, t)}</Notice>}
+      <List empty={t("server.errorsEmpty")}>
+        {(errors ?? []).map((e) => (
+          <Row key={e.id}>
+            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(open === e.id ? null : e.id)} aria-expanded={open === e.id}>
+              <div className="truncate font-medium">{e.where}</div>
+              <div className={open === e.id ? "break-words text-[13px] text-muted" : "truncate text-[13px] text-muted"}>
+                {e.name}: {e.message}
+              </div>
+              <div className="truncate text-xs text-subtle">
+                {t("server.errorSeen", { count: e.count })} · {fmt.relative(new Date(e.lastSeenAt).toISOString())}
+              </div>
+              {open === e.id && e.stack && (
+                <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-raised p-2 text-[11.5px] text-subtle">{e.stack}</pre>
+              )}
+            </button>
+            <Badge>{t(`server.errorSource.${e.source}`)}</Badge>
+            <IconButton type="button" aria-label={t("server.errorFixed")} title={t("server.errorFixed")} disabled={clear.isPending} onClick={() => clear.mutate(e.id)}>
+              <Check size={15} />
+            </IconButton>
+          </Row>
+        ))}
+      </List>
+    </Section>
   );
 }
 

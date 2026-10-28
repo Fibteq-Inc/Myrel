@@ -142,5 +142,49 @@ export type Me = z.infer<typeof Me>;
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });
 export type AdminSettings = z.infer<typeof AdminSettings>;
 
+/** What ran into a failure: the server (a request, an agent, the cron) or one of the apps. */
+export const ErrorSource = z.enum(["api", "agent", "cron", "web", "desktop", "mobile"]);
+export type ErrorSource = z.infer<typeof ErrorSource>;
+
+/** An app's own failure (`POST /api/account/client-errors`); no message, file or token contents. */
+export const ClientErrorInput = z.object({
+  platform: z.enum(["web", "desktop", "mobile"]),
+  /** The screen's route pattern, e.g. "/projects/$projectId". */
+  where: z.string().trim().min(1).max(200),
+  name: z.string().max(100).default("Error"),
+  message: z.string().max(500),
+  stack: z.string().max(4000).optional(),
+  version: z.string().max(40).optional(),
+});
+export type ClientErrorInput = z.input<typeof ClientErrorInput>;
+
+/** A kind of failure the server ran into, counted each time it comes back (`GET /api/admin/errors`). */
+export const AdminErrorGroup = z.object({
+  id: z.string(),
+  source: ErrorSource,
+  where: z.string(),
+  name: z.string(),
+  message: z.string(),
+  stack: z.string().nullable(),
+  count: z.number().int(),
+  firstSeenAt: z.number(),
+  lastSeenAt: z.number(),
+});
+export type AdminErrorGroup = z.infer<typeof AdminErrorGroup>;
+
+/** The first steps of the people who signed up in the last `days` days (`GET /api/admin/funnel`). */
+export const AdminFunnel = z.object({
+  days: z.number().int(),
+  signedUp: z.number().int(),
+  verified: z.number().int(),
+  inProject: z.number().int(),
+  /** Gave a task: the coordinator answered a message of theirs. */
+  asked: z.number().int(),
+  /** A thread worked for them. */
+  threadRan: z.number().int(),
+  pairedComputer: z.number().int(),
+});
+export type AdminFunnel = z.infer<typeof AdminFunnel>;
+
 export const UpdateAdminSettingsInput = AdminSettings.partial();
 export type UpdateAdminSettingsInput = z.infer<typeof UpdateAdminSettingsInput>;

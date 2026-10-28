@@ -1,6 +1,8 @@
 import { API_VERSION, type ServerInfo, ThreadId } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { matchedRoutes } from "hono/route";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { BOOKMARK_HEADER, withD1Session } from "./d1-session";
@@ -30,6 +32,7 @@ import { sshRoutes } from "./routes/ssh";
 import { streamSkillBundle } from "./skills/store";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
+import { pruneErrors, reportError } from "./errors";
 import { DEFAULT_PRICES, messagesBaseUrl, modelCallAllowed, parsePrices, proxyModel } from "./llm";
 
 export { ProjectAgent } from "./agents/project-agent";
@@ -169,7 +172,16 @@ const app = new Hono<AppEnv>()
   .route("/runner", runnerDeviceRoutes)
   .route("/runners", runnerRoutes)
   .route("/notifications", notificationRoutes)
-  .notFound((c) => c.json({ error: "not_found" }, 404));
+  .notFound((c) => c.json({ error: "not_found" }, 404))
+  // An uncaught failure answers 500 as before, and is counted for admins under its route.
+  .onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse();
+    // The route's pattern, not its path, so /projects/a and /projects/b fall in one group.
+    const routes = matchedRoutes(c);
+    const route = routes.findLast((r) => r.method !== "ALL") ?? routes.at(-1);
+    c.executionCtx.waitUntil(reportError(c.env, "api", `${c.req.method} ${route?.path ?? "?"}`, err));
+    return c.text("Internal Server Error", 500);
+  });
 
 export type AppType = typeof app;
 
@@ -193,8 +205,9 @@ async function scheduled(_controller: ScheduledController, env: Env) {
     const r = await syncCatalog(env);
     console.log(`connector catalog: read ${r.read}, kept ${r.kept}`);
   } catch (err) {
-    console.error("connector catalog sync failed", err);
+    await reportError(env, "cron", "connector catalog sync", err);
   }
+  await pruneErrors(env).catch((err) => console.error("pruning errors failed", err));
 }
 
 export default {
