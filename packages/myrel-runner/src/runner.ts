@@ -17,12 +17,12 @@ import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { saveInterrupted, takeInterrupted, writeRunning } from "./restart";
 import { forgetKey, listKeys, makeKey, runSsh, scanHostKeys, testSsh } from "./ssh";
 import { applySettings, settingsOf, updateMode } from "./self-update";
-import { relaunchService } from "./service";
+import { relaunchService, upgradeService } from "./service";
 import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.28.0";
+export const RUNNER_VERSION = "0.28.1";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -136,6 +136,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   let finish!: (reason: StopReason) => void;
   const done = new Promise<StopReason>((r) => (finish = r));
   const updates = updateMode();
+  if (updates === "service") void upgradeService().catch(() => {});
   const updater = new Updater({
     version: RUNNER_VERSION,
     running: () => tasks.runningIds(),

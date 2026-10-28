@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -215,10 +215,34 @@ ${Object.entries(env)
   .join("\n")}
 Restart=on-failure
 RestartSec=10
+${OOM_POLICY}
 
 [Install]
 WantedBy=default.target
 `;
+}
+
+/**
+ * When the computer runs out of memory the kernel kills the biggest process, usually a CLI or a
+ * test run it started. systemd's default then stops the whole unit, so every task on the computer
+ * was cut off; with this only the task whose process died ends.
+ */
+const OOM_POLICY = "OOMPolicy=continue";
+
+/** A unit written by an older runner, with what it lacks added; null when it is up to date. */
+export function upgradeSystemdUnit(unit: string): string | null {
+  if (/^OOMPolicy=/m.test(unit) || !/^RestartSec=.*$/m.test(unit)) return null;
+  return unit.replace(/^RestartSec=.*$/m, (line) => `${line}\n${OOM_POLICY}`);
+}
+
+/** Brings the systemd unit an older runner installed up to date, for the next start of the service. */
+export async function upgradeService(): Promise<void> {
+  if (platform() !== "linux") return;
+  const file = join(homedir(), ".config", "systemd", "user", SYSTEMD_UNIT);
+  const next = upgradeSystemdUnit(await readFile(file, "utf8").catch(() => ""));
+  if (!next) return;
+  await writeFile(file, next);
+  await run("systemctl", ["--user", "daemon-reload"]);
 }
 
 /** Starts the runner hidden, with its output appended to the log. */
