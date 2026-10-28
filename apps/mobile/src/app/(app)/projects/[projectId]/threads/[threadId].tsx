@@ -10,7 +10,18 @@ import {
 import { useI18n, useT } from "@myrel/i18n/react";
 import { waitsForAgent } from "@myrel/protocol";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { CircleCheck, RotateCcw } from "lucide-react-native";
+import {
+  ChartColumn,
+  CircleCheck,
+  FileText,
+  FolderTree,
+  GitCompareArrows,
+  GitPullRequest,
+  type LucideIcon,
+  MessageSquareText,
+  RotateCcw,
+  SquareTerminal,
+} from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
@@ -88,14 +99,20 @@ export default function ThreadScreen() {
   }, [state.artifacts, messages, threadId]);
   // Cloud tasks save their work in the thread's workspace; tasks on a computer work in its own folder.
   const sandbox = tasks.some((task) => task.backend === "sandbox");
-  const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "conversation", label: t("threadPanel.conversation") },
-    { key: "changes", label: t("workspace.changes"), count: tasks.filter((task) => task.prUrl).length || undefined },
-    { key: "pr", label: t("workspace.pr"), count: pullRequests.length || undefined },
-    { key: "terminal", label: t("workspace.terminal"), count: tasks.length || undefined },
-    ...(sandbox ? [{ key: "files" as const, label: t("files.workspace") }] : []),
-    { key: "outputs", label: t("workspace.outputs"), count: outputs.length || undefined },
-    { key: "usage", label: t("workspace.usage") },
+  // Same icons as the web thread panel: each tab is its icon, the selected one also shows its name.
+  const tabs: { key: Tab; label: string; icon: LucideIcon; count?: number }[] = [
+    { key: "conversation", label: t("threadPanel.conversation"), icon: MessageSquareText },
+    {
+      key: "changes",
+      label: t("workspace.changes"),
+      icon: GitCompareArrows,
+      count: tasks.filter((task) => task.prUrl).length || undefined,
+    },
+    { key: "pr", label: t("workspace.pr"), icon: GitPullRequest, count: pullRequests.length || undefined },
+    { key: "terminal", label: t("workspace.terminal"), icon: SquareTerminal, count: tasks.length || undefined },
+    ...(sandbox ? [{ key: "files" as const, label: t("files.workspace"), icon: FolderTree }] : []),
+    { key: "outputs", label: t("workspace.outputs"), icon: FileText, count: outputs.length || undefined },
+    { key: "usage", label: t("workspace.usage"), icon: ChartColumn },
   ];
   const current = tabs.some((x) => x.key === tab) ? tab : "conversation";
 
