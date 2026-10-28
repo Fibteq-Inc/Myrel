@@ -1,9 +1,9 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback } from "react";
-import type { PanelTab } from "./project-knowledge";
+import type { KnowledgeSection } from "./project-knowledge";
 
 /** The tabs across the top of a project. The conversation is the default and has no `view`. */
-export type ProjectView = "chat" | "threads" | "artifacts" | "files" | "usage";
+export type ProjectView = "chat" | "threads" | "artifacts" | "files" | "knowledge" | "usage";
 
 /**
  * The open tab and what it shows, kept in the URL of every project page so an
@@ -15,22 +15,25 @@ export type ProjectSearch = {
   item?: string;
   /** A pinned artifact version. */
   v?: number;
-  /** Files, memory or instructions, in the files tab. */
-  section?: PanelTab;
+  /** Memory or instructions, in the knowledge tab. */
+  section?: KnowledgeSection;
 };
 
 export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section"] as const;
 
-const VIEWS = ["threads", "artifacts", "files", "usage"];
-const SECTIONS = ["files", "memory", "instructions"];
+const VIEWS = ["threads", "artifacts", "files", "knowledge", "usage"];
+const SECTIONS = ["memory", "instructions"];
 
 export function validateProjectSearch(s: Record<string, unknown>): ProjectSearch {
   const v = Number(s.v);
+  const section = SECTIONS.includes(s.section as string) ? (s.section as KnowledgeSection) : undefined;
+  // Memory and instructions used to be sections of the files tab; older links land on their own tab.
+  const view = s.view === "files" && section ? "knowledge" : s.view;
   return {
-    ...(VIEWS.includes(s.view as string) && { view: s.view as ProjectSearch["view"] }),
+    ...(VIEWS.includes(view as string) && { view: view as ProjectSearch["view"] }),
     ...(typeof s.item === "string" && { item: s.item }),
     ...(Number.isInteger(v) && v > 0 && { v }),
-    ...(SECTIONS.includes(s.section as string) && { section: s.section as PanelTab }),
+    ...(section && view === "knowledge" && { section }),
   };
 }
 

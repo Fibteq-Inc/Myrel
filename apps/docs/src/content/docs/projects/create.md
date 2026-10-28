@@ -22,7 +22,8 @@ Each project has five tabs at the top:
 | **Conversation** | The project chat, where you ask for work |
 | **Threads** | Every task Myrel has worked on, with its status |
 | **Artifacts** | Pages, reports and prototypes Myrel published |
-| **Files** | Files, memory and project instructions |
+| **Files** | Files uploaded to the project or made by Myrel |
+| **Memory and instructions** | Project instructions and the memory notes Myrel keeps |
 | **Usage** | What the project used and its estimated cost |
 
 On the right of the header are the project's folder (when [your computer](/computer/connect/) is connected), **Routines** and **Project settings**.

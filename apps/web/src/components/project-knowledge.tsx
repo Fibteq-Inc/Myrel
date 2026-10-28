@@ -2,7 +2,7 @@ import type { MessageKey } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { MEMORY_INDEX, type MemoryEntry, MemoryUpkeepMode } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Check, FolderOpen, Plus, ScrollText, Trash2, TriangleAlert, Upload } from "lucide-react";
+import { Brain, Check, Plus, ScrollText, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, filesQuery, instructionsQuery, memoryQuery, memoryUpkeepQuery, projectQuery } from "../lib/api";
 import { Button, errorMessage, GhostButton, Input } from "../lib/ui";
@@ -10,43 +10,65 @@ import { displayName, FileIcon, FilePreview, formatSize } from "./files";
 import { useConfirm } from "./ui/confirm";
 import { Select } from "./ui/controls";
 
-export type PanelTab = "files" | "memory" | "instructions";
+export type KnowledgeSection = "memory" | "instructions";
 
-const TABS: { id: PanelTab; label: MessageKey; icon: ReactNode }[] = [
-  { id: "files", label: "knowledge.tabFiles", icon: <FolderOpen size={15} aria-hidden="true" /> },
+const SECTIONS: { id: KnowledgeSection; label: MessageKey; icon: ReactNode }[] = [
   { id: "memory", label: "knowledge.tabMemory", icon: <Brain size={15} aria-hidden="true" /> },
   { id: "instructions", label: "knowledge.tabInstructions", icon: <ScrollText size={15} aria-hidden="true" /> },
 ];
 
+/** The project's shared files, with a preview beside the list. Rendered by the project's files tab. */
+export function ProjectFiles({ projectId, file, onOpen }: { projectId: string; file?: string; onOpen: (file?: string) => void }) {
+  const t = useT();
+  return (
+    <div className="flex min-h-0 flex-1">
+      <div
+        className={`min-w-0 flex-col lg:flex lg:max-w-[420px] lg:border-r lg:border-line ${
+          file ? "hidden" : "flex"
+        } flex-1`}
+      >
+        <FilesTab projectId={projectId} selected={file} onOpen={onOpen} />
+      </div>
+      {file ? (
+        <div className="flex min-w-0 flex-1 flex-col bg-sunken">
+          <FilePreview projectId={projectId} path={file} onClose={() => onOpen()} />
+        </div>
+      ) : (
+        <div className="hidden flex-1 items-center justify-center text-[13px] text-subtle lg:flex">
+          {t("knowledge.pickFile")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
- * The project's shared knowledge, one tab at a time: files (with a preview
- * beside the list), memory and instructions. Rendered by the project's
- * /files route, under the shell's pane header.
+ * What agents work from besides files, one section at a time: the memory
+ * notes they share and the instructions members set. Rendered by the
+ * project's knowledge tab.
  */
 export function ProjectKnowledge({
   projectId,
-  tab,
-  file,
-  onNavigate,
+  section,
+  onSection,
 }: {
   projectId: string;
-  tab: PanelTab;
-  file?: string;
-  onNavigate: (next: { tab: PanelTab; file?: string }) => void;
+  section: KnowledgeSection;
+  onSection: (section: KnowledgeSection) => void;
 }) {
   const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div role="tablist" aria-label={t("knowledge.label")} className="flex flex-none gap-1 border-b border-line px-3 py-2">
-        {TABS.map((item) => (
+        {SECTIONS.map((item) => (
           <button
             key={item.id}
             type="button"
             role="tab"
-            aria-selected={tab === item.id}
-            onClick={() => onNavigate({ tab: item.id })}
+            aria-selected={section === item.id}
+            onClick={() => onSection(item.id)}
             className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] ${
-              tab === item.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
+              section === item.id ? "bg-hover text-fg" : "text-muted hover:bg-hover hover:text-fg"
             }`}
           >
             {item.icon}
@@ -54,36 +76,9 @@ export function ProjectKnowledge({
           </button>
         ))}
       </div>
-      {tab === "files" && (
-        <div className="flex min-h-0 flex-1">
-          <div
-            className={`min-w-0 flex-col lg:flex lg:max-w-[420px] lg:border-r lg:border-line ${
-              file ? "hidden" : "flex"
-            } flex-1`}
-          >
-            <FilesTab projectId={projectId} selected={file} onOpen={(path) => onNavigate({ tab: "files", file: path })} />
-          </div>
-          {file ? (
-            <div className="flex min-w-0 flex-1 flex-col bg-sunken">
-              <FilePreview projectId={projectId} path={file} onClose={() => onNavigate({ tab: "files" })} />
-            </div>
-          ) : (
-            <div className="hidden flex-1 items-center justify-center text-[13px] text-subtle lg:flex">
-              {t("knowledge.pickFile")}
-            </div>
-          )}
-        </div>
-      )}
-      {tab === "memory" && (
-        <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col">
-          <MemoryTab projectId={projectId} />
-        </div>
-      )}
-      {tab === "instructions" && (
-        <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col">
-          <InstructionsTab projectId={projectId} />
-        </div>
-      )}
+      <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col">
+        {section === "memory" ? <MemoryTab projectId={projectId} /> : <InstructionsTab projectId={projectId} />}
+      </div>
     </div>
   );
 }

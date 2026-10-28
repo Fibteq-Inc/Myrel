@@ -8,7 +8,7 @@ import { errorMessage } from "../lib/ui";
 import { cn } from "../lib/ui";
 import { ArtifactList, ArtifactViewer, Empty, ViewerBack } from "./artifacts";
 import { ProjectChat } from "./chat/project-chat";
-import { ProjectKnowledge } from "./project-knowledge";
+import { ProjectFiles, ProjectKnowledge } from "./project-knowledge";
 import { ProjectThreads } from "./project-threads";
 import { Segmented, Skeleton, UsageDashboard, useUsage } from "./usage-dashboard";
 import type { ChartMetric } from "./usage-chart";
@@ -26,6 +26,8 @@ export function ProjectTabPanel({ me, className = "" }: { me: string; className?
         <ArtifactsTab />
       ) : view === "files" ? (
         <FilesTab />
+      ) : view === "knowledge" ? (
+        <KnowledgeTab />
       ) : view === "usage" ? (
         <UsageTab />
       ) : (
@@ -74,16 +76,22 @@ function ArtifactsTab() {
   );
 }
 
-/** The project's files, memory and instructions. */
+/** The project's shared files, one previewed beside the list. */
 function FilesTab() {
+  const { project } = useProjectContext();
+  const { search, go } = useProjectView();
+  return <ProjectFiles projectId={project.id} file={search.item} onOpen={(file) => go("files", file ? { item: file } : {})} />;
+}
+
+/** The project's memory and instructions. */
+function KnowledgeTab() {
   const { project } = useProjectContext();
   const { search, go } = useProjectView();
   return (
     <ProjectKnowledge
       projectId={project.id}
-      tab={search.section ?? "files"}
-      file={search.item}
-      onNavigate={(next) => go("files", { ...(next.tab !== "files" && { section: next.tab }), ...(next.file && { item: next.file }) })}
+      section={search.section ?? "memory"}
+      onSection={(section) => go("knowledge", section === "memory" ? {} : { section })}
     />
   );
 }

@@ -4,7 +4,7 @@ import type { ProjectColor, ProjectIcon } from "@myrel/protocol";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { BarChart3, Blocks, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
+import { BarChart3, Blocks, Brain, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -26,6 +26,7 @@ const TABS: { id: ProjectView; label: MessageKey; icon: typeof List }[] = [
   { id: "threads", label: "sidebar.threads", icon: List },
   { id: "artifacts", label: "sidebar.artifacts", icon: Blocks },
   { id: "files", label: "tabs.files", icon: FolderOpen },
+  { id: "knowledge", label: "tabs.knowledge", icon: Brain },
   { id: "usage", label: "tabs.usage", icon: BarChart3 },
 ];
 
