@@ -58,6 +58,7 @@ import type {
   Thread,
   ThreadFiles,
   TerminalLine,
+  TipId,
   UpdateAdminSettingsInput,
   UpdateConnectorInput,
   UpdateSkillInput,
@@ -293,6 +294,11 @@ export class ApiClient {
   /** Marks the "Get started" list done or hidden for this account, on every device. */
   async markOnboarded() {
     await this.request("/api/account/onboarded", { method: "POST" });
+  }
+
+  /** Marks a one-time tip seen for this account, on every device. */
+  async markTipSeen(tip: TipId) {
+    await this.request(`/api/account/tips/${tip}`, { method: "POST" });
   }
 
   /** Deletes the signed-in account for good; projects only this person owns go with it. */

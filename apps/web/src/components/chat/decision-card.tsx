@@ -3,6 +3,7 @@ import type { Decision } from "@myrel/protocol";
 import { CircleCheck, CircleHelp, TriangleAlert } from "lucide-react";
 import { useId } from "react";
 import { cn } from "../../lib/ui";
+import { DecisionTip, useDecisionTip } from "./tips";
 
 /**
  * A question with 2 to 4 options, one recommended. Picking an option sends
@@ -26,6 +27,8 @@ export function DecisionCard({
     : -1;
   const answered = answer !== undefined;
   const danger = !!decision.danger;
+  const tip = useDecisionTip();
+  const showTip = tip.due && !answered && !!onChoose;
 
   // Answered: one line with the question and the pick, so the conversation moves on.
   if (answered) {
@@ -78,7 +81,10 @@ export function DecisionCard({
               key={option.label}
               type="button"
               disabled={answered || !onChoose}
-              onClick={() => onChoose?.(option.label)}
+              onClick={() => {
+                if (showTip) tip.seen();
+                onChoose?.(option.label);
+              }}
               aria-pressed={picked}
               className={cn(
                 "flex flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
@@ -102,6 +108,7 @@ export function DecisionCard({
           );
         })}
       </div>
+      {showTip && <DecisionTip onSeen={tip.seen} />}
     </div>
   );
 }

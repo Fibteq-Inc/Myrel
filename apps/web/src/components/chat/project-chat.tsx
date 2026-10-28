@@ -16,6 +16,7 @@ import { ScrollToEnd } from "./scroll-to-end";
 import { ChatSkeleton } from "./skeleton";
 import { StarterExamples, StarterList } from "./starter";
 import { ThreadCard } from "./thread-card";
+import { ComputerTip } from "./tips";
 
 const NONE: Message[] = [];
 
@@ -97,6 +98,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
             );
           })}
           {thinking && <Thinking />}
+          {ready && asked && <ComputerTip threads={Object.values(state.threads)} />}
         </div>
       </ScrollToEnd>
 
