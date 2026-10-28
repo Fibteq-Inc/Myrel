@@ -3,6 +3,7 @@ import { env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { normalizeMessage, pruneErrors, recordError } from "../src/errors";
+import { emails } from "./fake-llm";
 
 const BASE = "http://myrel.test";
 // Secrets are injected by vitest.config.ts, so the generated binding types do not list them.
@@ -87,5 +88,36 @@ describe("funnel", () => {
     expect(after.signedUp - before.signedUp).toBe(1);
     expect(after.inProject - before.inProject).toBe(1);
     expect(after.pairedComputer - before.pairedComputer).toBe(0);
+  });
+});
+
+describe("app errors", () => {
+  it("are counted under their platform for signed-in people only, and email verified admins once per kind", async () => {
+    const admin = await signUp();
+    await makeAdmin(admin);
+    await env.DB.prepare("UPDATE user SET email_verified = 1 WHERE id = ?").bind(admin.id).run();
+    const user = await signUp();
+    const where = `/projects/$projectId ${crypto.randomUUID()}`;
+    const body = { platform: "mobile", where, name: "TypeError", message: "x is undefined", stack: "at a (b.js:1:2)", version: "0.24.0" };
+    expect((await api("/api/account/client-errors", { method: "POST", body })).status).toBe(401);
+    expect((await api("/api/account/client-errors", { method: "POST", token: user.token, body: { ...body, platform: "tv" } })).status).toBe(400);
+    emails.length = 0;
+    await json(api("/api/account/client-errors", { method: "POST", token: user.token, body }), 204);
+    await json(api("/api/account/client-errors", { method: "POST", token: user.token, body }), 204);
+    // The record is written after the answer; give it a moment.
+    let group: AdminErrorGroup | undefined;
+    for (let i = 0; i < 50 && group?.count !== 2; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      const { errors } = await json<{ errors: AdminErrorGroup[] }>(api("/api/admin/errors", { token: admin.token }));
+      group = errors.find((e) => e.where === where);
+    }
+    expect(group).toMatchObject({ source: "mobile", name: "TypeError", message: "x is undefined", count: 2 });
+    expect(group!.stack).toBe("app 0.24.0\nat a (b.js:1:2)");
+    const alerts = emails.filter((e) => e.subject.includes(where));
+    // One email per admin, sent once for the kind, not for each time it happens.
+    const to = alerts.map((e) => e.to);
+    expect(to).toContain(admin.email);
+    expect(new Set(to).size).toBe(to.length);
+    expect(to).not.toContain(user.email);
   });
 });

@@ -27,6 +27,7 @@ import type {
   Member,
   AdminErrorGroup,
   AdminFunnel,
+  ClientErrorInput,
   MarkMemoryInput,
   MemoryEntry,
   MemoryUpkeepMode,
@@ -296,6 +297,11 @@ export class ApiClient {
   /** Marks the "Get started" list done or hidden for this account, on every device. */
   async markOnboarded() {
     await this.request("/api/account/onboarded", { method: "POST" });
+  }
+
+  /** Reports one of the app's own errors to the server (see createErrorReporter). */
+  async reportClientError(input: ClientErrorInput) {
+    await this.request("/api/account/client-errors", { method: "POST", body: input });
   }
 
   /** Marks a one-time tip seen for this account, on every device. */

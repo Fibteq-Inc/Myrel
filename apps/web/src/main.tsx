@@ -4,6 +4,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "./lib/api";
+import { reportError } from "./lib/errors";
 import { initialLocale, saveLocale } from "./lib/i18n";
 import { initTheme } from "./lib/theme";
 import { RouteError } from "./components/route-error";
@@ -23,6 +24,11 @@ window.addEventListener("vite:preloadError", () => {
 initTheme();
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent", defaultErrorComponent: RouteError });
+
+// Errors nothing caught, under the screen they happened on (its route pattern, not its ids).
+const screen = () => router.state.matches.at(-1)?.routeId ?? "?";
+window.addEventListener("error", (e) => reportError(e.error ?? e.message, screen()));
+window.addEventListener("unhandledrejection", (e) => reportError(e.reason, screen()));
 
 declare module "@tanstack/react-router" {
   interface Register {

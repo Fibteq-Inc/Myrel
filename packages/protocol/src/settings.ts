@@ -142,10 +142,26 @@ export type Me = z.infer<typeof Me>;
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });
 export type AdminSettings = z.infer<typeof AdminSettings>;
 
+/** What ran into a failure: the server (a request, an agent, the cron) or one of the apps. */
+export const ErrorSource = z.enum(["api", "agent", "cron", "web", "desktop", "mobile"]);
+export type ErrorSource = z.infer<typeof ErrorSource>;
+
+/** An app's own failure (`POST /api/account/client-errors`); no message, file or token contents. */
+export const ClientErrorInput = z.object({
+  platform: z.enum(["web", "desktop", "mobile"]),
+  /** The screen's route pattern, e.g. "/projects/$projectId". */
+  where: z.string().trim().min(1).max(200),
+  name: z.string().max(100).default("Error"),
+  message: z.string().max(500),
+  stack: z.string().max(4000).optional(),
+  version: z.string().max(40).optional(),
+});
+export type ClientErrorInput = z.input<typeof ClientErrorInput>;
+
 /** A kind of failure the server ran into, counted each time it comes back (`GET /api/admin/errors`). */
 export const AdminErrorGroup = z.object({
   id: z.string(),
-  source: z.enum(["api", "agent", "cron"]),
+  source: ErrorSource,
   where: z.string(),
   name: z.string(),
   message: z.string(),
