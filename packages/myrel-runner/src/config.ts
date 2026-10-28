@@ -52,13 +52,19 @@ export async function loadConfig(): Promise<RunnerConfig> {
 const RUNNER_SECRETS = ["MYREL_RUNNER_TOKEN"];
 
 /**
+ * The person's SSH agent: with it a CLI could reach any server their loaded keys open without asking.
+ * SSH from a thread goes through Myrel instead, where each command is put to the person first.
+ */
+const PERSON_SECRETS = ["SSH_AUTH_SOCK"];
+
+/**
  * The environment for a process the runner starts (an agent CLI, git, a version check): the runner's
- * own, minus its device token. A task runs repository code (tests, builds, scripts) that must never
- * be able to read the token and connect as this computer.
+ * own, minus its device token and the person's SSH agent. A task runs repository code (tests, builds,
+ * scripts) that must never be able to read the token and connect as this computer.
  */
 export function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
-  for (const key of RUNNER_SECRETS) delete env[key];
+  for (const key of [...RUNNER_SECRETS, ...PERSON_SECRETS]) delete env[key];
   return env;
 }
 

@@ -19,4 +19,17 @@ describe("childEnv", () => {
     // The runner keeps its own.
     expect(process.env.MYREL_RUNNER_TOKEN).toBe("sentinel-device-token");
   });
+
+  it("keeps the person's SSH agent out of the processes it starts", () => {
+    const sock = process.env.SSH_AUTH_SOCK;
+    process.env.SSH_AUTH_SOCK = "/tmp/ssh-agent.sock";
+    try {
+      expect(childEnv().SSH_AUTH_SOCK).toBeUndefined();
+      expect(childEnv({ SSH_AUTH_SOCK: "/tmp/other.sock" }).SSH_AUTH_SOCK).toBeUndefined();
+      expect(process.env.SSH_AUTH_SOCK).toBe("/tmp/ssh-agent.sock");
+    } finally {
+      if (sock === undefined) delete process.env.SSH_AUTH_SOCK;
+      else process.env.SSH_AUTH_SOCK = sock;
+    }
+  });
 });
