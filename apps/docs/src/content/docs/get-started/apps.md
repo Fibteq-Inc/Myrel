@@ -24,7 +24,7 @@ The Windows installer is not signed yet, so Windows SmartScreen may warn you. Ch
 
 Install Myrel from [Google Play](https://play.google.com/store/apps/details?id=io.fibteq.myrel). The app sends a push notification when a task finishes or needs you, once you allow notifications.
 
-To change a project's settings on your phone, open the project and tap the gear at the top right. The app covers the project's name, where tasks run, the models on your computer, GitHub repositories, members and invitations. Folders, connectors, skills and the model key are set on the web; **Open in browser** at the bottom of the screen takes you there.
+To change a project's settings on your phone, open the project and tap the gear at the top right. The same sections as on the web open from a list: General (name, icon and color, where tasks run, deleting the project), Model and key, Folders, GitHub, Connectors, Skills and Members. Connecting GitHub and adding model keys still happen in the browser, and a skill with more files than its SKILL.md is added from GitHub.
 
 ## Using your own server
 
