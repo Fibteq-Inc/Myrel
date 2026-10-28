@@ -260,6 +260,13 @@
       "when": 1793099613459,
       "tag": "0036_project_icon_color",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1793191526448,
+      "tag": "0037_ssh_hosts",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,7 @@ import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
+import { sshRoutes } from "./routes/ssh";
 import { streamSkillBundle } from "./skills/store";
 import { proxyMcp } from "./connectors/gateway";
 import { projectTaskModel } from "./keys";
@@ -156,6 +157,7 @@ const app = new Hono<AppEnv>()
   .route("/projects/:projectId/routines", routineRoutes)
   .route("/projects/:id/connectors", projectConnectorRoutes)
   .route("/projects/:id/skills", projectSkillRoutes)
+  .route("/projects/:id/ssh", sshRoutes)
   .route("/projects/:id/personal", personalInProjectRoutes)
   .route("/projects/:id/threads/:threadId/connector-suggestions", connectorSuggestionRoutes)
   .route("/projects", projectRoutes)

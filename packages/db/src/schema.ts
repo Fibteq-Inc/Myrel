@@ -432,6 +432,71 @@ export const projectWorkspaces = sqliteTable(
   (t) => [primaryKey({ columns: [t.projectId, t.runnerId] }), index("project_workspaces_runner_id_idx").on(t.runnerId)],
 );
 
+/**
+ * A server a project's agents may reach over SSH, through the runner of the computer that holds its key
+ * (`runnerId`). No secret is kept here: the private key (and its passphrase) stay on that computer,
+ * under ~/.myrel-runner/ssh. `hostKey` is the server's own public key the person confirmed by its
+ * fingerprint; until then the server cannot be used. rule ask: every command waits for the owner's
+ * OK on a card; off: registered, but agents cannot use it.
+ */
+export const projectSshHosts = sqliteTable(
+  "project_ssh_hosts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    alias: text("alias").notNull(),
+    host: text("host").notNull(),
+    port: integer("port").notNull().default(22),
+    user: text("user").notNull(),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "cascade" }),
+    /** new: a key Myrel made on the computer for this server; existing: one of the computer's own keys. */
+    keySource: text("key_source", { enum: ["new", "existing"] }).notNull().default("new"),
+    publicKey: text("public_key"),
+    keyFingerprint: text("key_fingerprint"),
+    hostKey: text("host_key"),
+    hostFingerprint: text("host_fingerprint"),
+    rule: text("rule", { enum: ["ask", "off"] }).notNull().default("ask"),
+    /** When the last connection test passed. */
+    testedAt: integer("tested_at", { mode: "timestamp_ms" }),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("project_ssh_hosts_alias_idx").on(t.projectId, t.alias), index("project_ssh_hosts_runner_id_idx").on(t.runnerId)],
+);
+
+/**
+ * Every SSH command an agent asked for, run or not: who answered, how it ended, and the start of its
+ * output (2 KB). Shown in the project's SSH settings.
+ */
+export const sshAudit = sqliteTable(
+  "ssh_audit",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    hostId: text("host_id").references(() => projectSshHosts.id, { onDelete: "set null" }),
+    alias: text("alias").notNull(),
+    threadId: text("thread_id"),
+    command: text("command").notNull(),
+    reason: text("reason"),
+    /** once: this command; turn: allowed on this server for the turn; deny / timeout: it did not run. */
+    decision: text("decision", { enum: ["once", "turn", "deny", "timeout", "failed"] }).notNull(),
+    approvedBy: text("approved_by").references(() => user.id, { onDelete: "set null" }),
+    exitCode: integer("exit_code"),
+    ms: integer("ms"),
+    output: text("output"),
+    at: integer("at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch('subsec') * 1000)`),
+  },
+  (t) => [index("ssh_audit_project_at_idx").on(t.projectId, t.at)],
+);
+
 // --- Notifications ---
 
 export const notifications = sqliteTable(

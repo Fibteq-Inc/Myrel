@@ -9,6 +9,7 @@ export * from "./paths";
 export * from "./usage";
 export * from "./settings";
 export * from "./runner";
+export * from "./ssh";
 export * from "./artifacts";
 export * from "./routines";
 export * from "./goal";

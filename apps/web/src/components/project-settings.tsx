@@ -15,11 +15,12 @@ import {
 } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, Users, X } from "lucide-react";
+import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, SquareTerminal, Users, X } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
 import { PersonalInProject } from "./personal-in-project";
 import { Skills } from "./skills";
+import { SshHosts } from "./ssh-hosts";
 import { GithubRepos } from "./github-repos";
 import { ProjectFolders } from "./project-folders";
 import { ProjectLookPicker } from "./project-badge";
@@ -43,11 +44,11 @@ import { useConfirm } from "./ui/confirm";
 
 export const roleKey = (role: ProjectRole) => `role.${role}` as const;
 
-export type ProjectSettingsTab = "general" | "model" | "folders" | "github" | "connectors" | "skills" | "members";
+export type ProjectSettingsTab = "general" | "model" | "folders" | "github" | "connectors" | "ssh" | "skills" | "members";
 
 /**
  * Everything about one project, split into tabs: general (name, where tasks run, delete),
- * model and key, GitHub, connectors, skills, members and invites. Drawn on the settings page
+ * model and key, GitHub, connectors, SSH servers, skills, members and invites. Drawn on the settings page
  * (tabs across the top) and in the project's settings dialog (tabs down the side).
  * A new group of settings gets its own entry in `tabs` below.
  */
@@ -83,6 +84,7 @@ export function ProjectSettings({
     { id: "folders", label: t("projectSettings.tab.folders"), icon: <Folder size={15} /> },
     { id: "github", label: t("projectSettings.tab.github"), icon: <FolderGit2 size={15} /> },
     { id: "connectors", label: t("projectSettings.tab.connectors"), icon: <Plug size={15} /> },
+    { id: "ssh", label: t("projectSettings.tab.ssh"), icon: <SquareTerminal size={15} /> },
     { id: "skills", label: t("settings.skills"), icon: <BookMarked size={15} /> },
     { id: "members", label: t("projectSettings.tab.members"), icon: <Users size={15} /> },
   ];
@@ -104,6 +106,7 @@ export function ProjectSettings({
           <PersonalInProject projectId={projectId} kind="connectors" />
         </>
       )}
+      {tab === "ssh" && <SshHosts projectId={projectId} canManage={canManage} />}
       {tab === "skills" && (
         <>
           <Skills projectId={projectId} canManage={canManage} />

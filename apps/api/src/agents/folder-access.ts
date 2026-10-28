@@ -14,7 +14,17 @@ export type AccessAnswer = "once" | "always" | "deny";
  * a command inside the folders that the runner's access level does not run on its own; `folder`
  * then holds the command, and "always" means every command for the rest of this turn.
  */
-export type AccessRequest = { id: string; folder: string; kind?: "command"; answer?: AccessAnswer; messageId?: string };
+export type AccessRequest = {
+  id: string;
+  folder: string;
+  /** ssh: one command for a project's SSH server (ssh-access.ts); `folder` is then a key for it, `ssh` the rest. */
+  kind?: "command" | "ssh";
+  ssh?: { hostId: string; alias: string; command: string; danger: boolean };
+  answer?: AccessAnswer;
+  /** Who answered. */
+  by?: string;
+  messageId?: string;
+};
 
 /** How long the agent waits for the person before carrying on without the folder. */
 export const ACCESS_WAIT_MS = 10 * 60 * 1000;

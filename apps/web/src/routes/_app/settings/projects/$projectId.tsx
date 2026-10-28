@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ProjectSettings, type ProjectSettingsTab } from "../../../../components/project-settings";
 import { projectQuery, projectSettingsQuery } from "../../../../lib/api";
 
-const TABS: ProjectSettingsTab[] = ["general", "model", "folders", "github", "connectors", "skills", "members"];
+const TABS: ProjectSettingsTab[] = ["general", "model", "folders", "github", "connectors", "ssh", "skills", "members"];
 
 export const Route = createFileRoute("/_app/settings/projects/$projectId")({
   // `github` is the result of a GitHub connect round trip (see components/github-repos.tsx);

@@ -15,6 +15,7 @@ import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
 import { loadLimits, readCodexLimits, saveLimits } from "./limits";
 import { saveInterrupted, takeInterrupted, writeRunning } from "./restart";
+import { forgetKey, listKeys, makeKey, runSsh, scanHostKeys, testSsh } from "./ssh";
 import { applySettings, settingsOf, updateMode } from "./self-update";
 import { relaunchService } from "./service";
 import { TaskRunner } from "./tasks";
@@ -202,6 +203,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "git-token",
         "steer",
         "steer-claude",
+        "ssh",
         ...(updates === "service" ? (["update"] as const) : []),
       ],
       settings: settingsOf(config),
@@ -287,6 +289,23 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
     if (frame.type === "dirs.list") return send({ type: "dirs", requestId, ...(await listDirs(frame.path)) });
     if (frame.type === "task.steer") return send({ type: "task.steered", requestId, taken: await tasks.steer(frame.taskId, frame.text) });
     if (frame.type === "file.read") return send({ type: "file", requestId, ...(await readProjectFile(config, frame)) });
+    if (frame.type === "ssh.keygen") {
+      const key = await makeKey({ projectId: frame.projectId, alias: frame.alias }, frame.comment, frame.existing);
+      log(`${frame.existing ? "Using" : "Made"} an SSH key for ${frame.alias} (${key.fingerprint}, from Myrel)`);
+      return send({ type: "ssh.key", requestId, ...key });
+    }
+    if (frame.type === "ssh.keys") return send({ type: "ssh.keylist", requestId, keys: await listKeys() });
+    if (frame.type === "ssh.hostkeys") return send({ type: "ssh.hostkeylist", requestId, keys: await scanHostKeys(frame.host, frame.port) });
+    if (frame.type === "ssh.test") return send({ type: "ssh.result", requestId, ...(await testSsh(frame.target)) });
+    if (frame.type === "ssh.run") {
+      log(`SSH ${frame.target.alias}: ${frame.command.split("\n")[0]!.slice(0, 80)}`);
+      return send({ type: "ssh.result", requestId, ...(await runSsh(frame.target, frame.command)) });
+    }
+    if (frame.type === "ssh.forget") {
+      await forgetKey({ projectId: frame.projectId, alias: frame.alias });
+      log(`Forgot the SSH key for ${frame.alias} (from Myrel)`);
+      return send({ type: "ssh.result", requestId, exitCode: 0, stdout: "", stderr: "", truncated: false, ms: 0 });
+    }
     if (frame.type === "runner.update") {
       if (updates !== "service") {
         throw new Error(
