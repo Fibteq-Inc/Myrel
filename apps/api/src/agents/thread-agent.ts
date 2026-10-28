@@ -1,3 +1,4 @@
+import { reportError } from "../errors";
 import {
   type AgentConnector,
   MAX_TASK_TEXT,
@@ -834,6 +835,7 @@ export class ThreadAgent extends Agent<Env> {
         this.clearAccess();
         this.deleteMeta("agent_skills");
         const message = err instanceof Error ? err.message : String(err);
+        this.ctx.waitUntil(reportError(this.env, "agent", "thread agent start", err));
         await project.sendMessage({
           threadId,
           authorKind: "system",
@@ -961,6 +963,10 @@ export class ThreadAgent extends Agent<Env> {
       if (this.getMeta("dirty") === "1") await this.queue("threadTurn", null);
       return;
     } else if (row.status !== "done") {
+      if (row.status === "failed") {
+        const failure = Object.assign(new Error(row.summary || row.progress || "failed"), { name: "TaskFailed" });
+        this.ctx.waitUntil(reportError(this.env, "agent", `thread turn (${row.backend})`, failure));
+      }
       await project.sendMessage({
         threadId,
         authorKind: "agent",

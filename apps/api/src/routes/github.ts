@@ -1,3 +1,4 @@
+import { reportError } from "../errors";
 import { createDb, schema } from "@myrel/db";
 import type { GithubRepo, GithubStatus } from "@myrel/protocol";
 import { and, eq, inArray } from "drizzle-orm";
@@ -38,7 +39,7 @@ export const githubRoutes = new Hono<AppEnv>()
     const payload = JSON.parse(body);
     await handleWebhook(c.env.DB, event, payload);
     // A GitHub hiccup while reading CI must not fail the delivery; the next event catches up.
-    await handlePullEvent(c.env, event, payload).catch((err) => console.error("pull request event failed", event, err));
+    await handlePullEvent(c.env, event, payload).catch((err) => reportError(c.env, "api", `github ${event} event`, err));
     return c.json({ ok: true });
   })
   .use(requireUser)
@@ -90,7 +91,7 @@ export const githubRoutes = new Hono<AppEnv>()
         .catch((err) => console.warn("reading the GitHub account failed", err));
       return back("connected");
     } catch (err) {
-      console.error("github callback failed", err);
+      c.executionCtx.waitUntil(reportError(c.env, "api", "github callback", err));
       return back("error");
     }
   })

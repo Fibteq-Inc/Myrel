@@ -133,5 +133,33 @@ export type Me = z.infer<typeof Me>;
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });
 export type AdminSettings = z.infer<typeof AdminSettings>;
 
+/** A kind of failure the server ran into, counted each time it comes back (`GET /api/admin/errors`). */
+export const AdminErrorGroup = z.object({
+  id: z.string(),
+  source: z.enum(["api", "agent", "cron"]),
+  where: z.string(),
+  name: z.string(),
+  message: z.string(),
+  stack: z.string().nullable(),
+  count: z.number().int(),
+  firstSeenAt: z.number(),
+  lastSeenAt: z.number(),
+});
+export type AdminErrorGroup = z.infer<typeof AdminErrorGroup>;
+
+/** The first steps of the people who signed up in the last `days` days (`GET /api/admin/funnel`). */
+export const AdminFunnel = z.object({
+  days: z.number().int(),
+  signedUp: z.number().int(),
+  verified: z.number().int(),
+  inProject: z.number().int(),
+  /** Gave a task: the coordinator answered a message of theirs. */
+  asked: z.number().int(),
+  /** A thread worked for them. */
+  threadRan: z.number().int(),
+  pairedComputer: z.number().int(),
+});
+export type AdminFunnel = z.infer<typeof AdminFunnel>;
+
 export const UpdateAdminSettingsInput = AdminSettings.partial();
 export type UpdateAdminSettingsInput = z.infer<typeof UpdateAdminSettingsInput>;

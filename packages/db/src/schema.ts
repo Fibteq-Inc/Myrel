@@ -771,3 +771,29 @@ export const projectConnectors = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.connectorId] }), index("project_connectors_connector_idx").on(t.connectorId)],
 );
+
+/**
+ * Errors the server ran into, grouped: one row per kind of failure (where it happened, its name and
+ * its message with numbers and ids taken out), counted each time it comes back. Admins see the list
+ * in Settings › Server. Holds no message, file or token contents; the stack is the server's own code.
+ */
+export const errorGroups = sqliteTable(
+  "error_groups",
+  {
+    /** SHA-256 of source, where, name and the normalized message, hex. */
+    id: text("id").primaryKey(),
+    /** What ran into it: "api" (a request), "agent" (a project or thread agent) or "cron". */
+    source: text("source").notNull(),
+    /** Where in it, e.g. "POST /api/projects/:id/threads" or "coordinator turn". */
+    where: text("where").notNull(),
+    name: text("name").notNull(),
+    /** The latest message, cut to 500 characters. */
+    message: text("message").notNull(),
+    /** The latest stack, cut to 4000 characters. */
+    stack: text("stack"),
+    count: integer("count").notNull().default(1),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("error_groups_last_seen_idx").on(t.lastSeenAt)],
+);

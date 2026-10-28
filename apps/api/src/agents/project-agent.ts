@@ -1,3 +1,4 @@
+import { reportError } from "../errors";
 import { createDb, schema } from "@myrel/db";
 import {
   type Attachment,
@@ -963,7 +964,7 @@ export class ProjectAgent extends Agent<Env> {
         origin,
       });
     } catch (err) {
-      console.error("notification failed", err);
+      this.ctx.waitUntil(reportError(this.env, "agent", "notification", err));
     }
   }
 
@@ -1531,7 +1532,7 @@ export class ProjectAgent extends Agent<Env> {
         }
       }
     } catch (err) {
-      console.error("coordinator turn failed", err);
+      this.ctx.waitUntil(reportError(this.env, "agent", "coordinator turn", err));
       this.sendMessage({
         threadId: null,
         authorKind: "system",
