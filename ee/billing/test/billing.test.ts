@@ -311,6 +311,21 @@ describe("hosted billing", () => {
     expect(await billingExtensions.canAddConnector!(workerEnv, { userId })).toEqual({ ok: true });
   });
 
+  it("allows one SSH server on Free, counting the servers on the person's computers", async () => {
+    const { token, userId } = await signUp();
+    const project = ((await (await createProject(token)).json()) as { project: Project }).project;
+    expect(await billingExtensions.canAddSshHost!(workerEnv, userId)).toEqual({ ok: true });
+    const runnerId = `rnr_${crypto.randomUUID()}`;
+    await env.DB.prepare("INSERT INTO runners (id, user_id, name, token_hash) VALUES (?, ?, 'Laptop', ?)").bind(runnerId, userId, crypto.randomUUID()).run();
+    await env.DB.prepare("INSERT INTO project_ssh_hosts (id, project_id, alias, host, user, runner_id) VALUES (?, ?, 'prod-web', '203.0.113.10', 'deploy', ?)")
+      .bind(`ssh_${crypto.randomUUID()}`, project.id, runnerId)
+      .run();
+    const refused = await billingExtensions.canAddSshHost!(workerEnv, userId);
+    expect(refused.ok || refused.reason).toContain("1 SSH server");
+    await webhook(subscriptionEvent(userId, "myrel_pro_monthly"));
+    expect(await billingExtensions.canAddSshHost!(workerEnv, userId)).toEqual({ ok: true });
+  });
+
   it("keeps a person's own plan first when a Team owner adds them, and lets them leave", async () => {
     const owner = await signUp();
     await webhook(subscriptionEvent(owner.userId, "myrel_team_monthly"));

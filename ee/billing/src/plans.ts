@@ -18,6 +18,8 @@ export type Limits = {
   connectors: number | null;
   /** Bytes each project's files may take; null = no limit. */
   storageBytes: number | null;
+  /** SSH servers a person may set up on their computers, across projects; null = no limit. */
+  sshHosts: number | null;
   /** Agent turns that may run in cloud sandboxes at once, across the person's (or Team's) projects; null = no limit. */
   concurrentSandboxes: number | null;
 };
@@ -28,10 +30,10 @@ const GB = 1_000_000_000;
 
 /** Per person; a Team plan multiplies sandbox time and model spend by its seats, pooled. */
 export const PLANS: Record<PlanId, Limits> = {
-  free: { projects: 3, sandboxSeconds: 2 * HOUR, modelMicros: 1 * DOLLAR, connectors: 2, storageBytes: 1 * GB, concurrentSandboxes: 1 },
-  pro: { projects: null, sandboxSeconds: 100 * HOUR, modelMicros: 5 * DOLLAR, connectors: null, storageBytes: 20 * GB, concurrentSandboxes: null },
-  team: { projects: null, sandboxSeconds: 150 * HOUR, modelMicros: 5 * DOLLAR, connectors: null, storageBytes: 20 * GB, concurrentSandboxes: null },
-  admin: { projects: null, sandboxSeconds: null, modelMicros: null, connectors: null, storageBytes: null, concurrentSandboxes: null },
+  free: { projects: 3, sandboxSeconds: 2 * HOUR, modelMicros: 1 * DOLLAR, connectors: 2, storageBytes: 1 * GB, sshHosts: 1, concurrentSandboxes: 1 },
+  pro: { projects: null, sandboxSeconds: 100 * HOUR, modelMicros: 5 * DOLLAR, connectors: null, storageBytes: 20 * GB, sshHosts: null, concurrentSandboxes: null },
+  team: { projects: null, sandboxSeconds: 150 * HOUR, modelMicros: 5 * DOLLAR, connectors: null, storageBytes: 20 * GB, sshHosts: null, concurrentSandboxes: null },
+  admin: { projects: null, sandboxSeconds: null, modelMicros: null, connectors: null, storageBytes: null, sshHosts: null, concurrentSandboxes: null },
 };
 
 export function limitsFor(plan: PlanId, seats = 1): Limits {

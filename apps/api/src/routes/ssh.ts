@@ -3,6 +3,7 @@ import { createId, CreateSshHostInput, RunnerId, SshHostKey, TrustSshHostInput, 
 import { getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
+import { canAddSshHost } from "../extensions";
 import { type AppEnv, requireUser } from "../middleware";
 import { listWorkspaces } from "../runners";
 import { ownsComputer } from "../sandbox/backend";
@@ -50,6 +51,9 @@ export const sshRoutes = new Hono<AppEnv>()
       .from(projectSshHosts)
       .where(and(eq(projectSshHosts.projectId, member.projectId), eq(projectSshHosts.alias, data.alias)));
     if (taken) return c.json({ error: "conflict", message: `This project already has a server called ${data.alias}.` }, 409);
+
+    const allowed = await canAddSshHost(c.env, userId);
+    if (!allowed.ok) return c.json({ error: "limit_reached", message: allowed.reason }, 402);
 
     const id = createId("sshHost");
     const runner = await getAgentByName(c.env.RUNNER_AGENT, data.runnerId);
