@@ -2,11 +2,11 @@ import type { ApiClient } from "@myrel/client";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { type Href, useRouter } from "expo-router";
-import { useEffect } from "react";
+import { type Href, usePathname, useRouter } from "expo-router";
+import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { platform } from "./platform";
-import { notificationPath } from "./push-target";
+import { notificationNavigation, notificationPath } from "./push-target";
 
 const TOKEN_KEY = "push-token";
 
@@ -52,13 +52,24 @@ export async function unregisterPush(api: ApiClient): Promise<void> {
   await api.unregisterPush(token);
 }
 
-/** Opens the project or thread a tapped notification points at. */
+/**
+ * Opens the project or thread a tapped notification points at, from whichever project is open:
+ * a thread of another project opens in that project, under its own live connection.
+ */
 export function useNotificationRouting() {
   const router = useRouter();
+  const pathname = usePathname();
+  // Read when a tap arrives, so moving around the app does not replay the last one.
+  const current = useRef(pathname);
+  current.current = pathname;
   const response = Notifications.useLastNotificationResponse();
   useEffect(() => {
     if (!response || response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
     const path = notificationPath(response.notification.request.content.data);
-    if (path) router.push(path as Href);
+    if (!path) return;
+    const step = notificationNavigation(current.current, path);
+    if (step === "none") return;
+    if (step === "switch") router.dismissTo("/");
+    router.push(path as Href);
   }, [response, router]);
 }
