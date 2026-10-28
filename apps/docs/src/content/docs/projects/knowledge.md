@@ -3,13 +3,13 @@ title: Instructions, memory and files
 description: Tell Myrel how your project works, once, for every task.
 ---
 
-The **Files** tab holds what every task in the project can use. It has three parts.
+Every task in the project works from three things: instructions and memory, in the **Memory and instructions** tab (the brain icon), and files, in the **Files** tab.
 
 ## Instructions
 
 Rules every task in the project follows, such as the tone to write in, the branch to use or who to check with before something is published.
 
-1. Open **Files** → **Instructions**.
+1. Open **Memory and instructions** → **Instructions**.
 2. Write your rules in plain words.
 3. Choose **Save instructions**.
 
@@ -45,7 +45,7 @@ At the top of the memory list, owners and admins pick how it runs:
 
 ## Files
 
-Everything uploaded to the project, and the files Myrel creates for you.
+The **Files** tab holds everything uploaded to the project, and the files Myrel creates for you.
 
 - **Upload** adds files here directly.
 - Files you attach to a message are saved here too, under `uploads/`.

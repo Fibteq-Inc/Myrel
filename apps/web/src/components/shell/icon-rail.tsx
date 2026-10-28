@@ -2,11 +2,10 @@ import { DOCS_URL, type SessionUser } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, type MessageKey } from "@myrel/i18n";
 import { useI18n } from "@myrel/i18n/react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { BarChart3, BookOpen, Blocks, Check, FolderOpen, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
+import { BarChart3, BookOpen, Blocks, Check, Languages, LogOut, MessagesSquare, MonitorSmartphone, Server, Settings, type LucideIcon } from "lucide-react";
 import { canChooseServer, platform, server } from "../../lib/api";
 import { MyrelMark, cn, UserAvatar } from "../../lib/ui";
 import { NotificationBell } from "../notifications";
-import { viewSearch } from "../project-view";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../ui/menu";
 
 type RailItem = {
@@ -25,8 +24,6 @@ type RailItem = {
 export const RAIL_ITEMS: RailItem[] = [
   { label: "rail.projects", icon: MessagesSquare, to: "/", match: ["/", "/projects"] },
   { label: "rail.artifacts", icon: Blocks, to: "/artifacts", match: ["/artifacts"] },
-  // Files belong to a project: the rail links to the open project's (below).
-  { label: "rail.files", icon: FolderOpen },
   { label: "rail.devices", icon: MonitorSmartphone, to: "/devices", match: ["/devices"] },
   { label: "rail.usage", icon: BarChart3, to: "/usage", match: ["/usage"] },
 ];
@@ -37,10 +34,8 @@ const itemClass =
 export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: () => void }) {
   const { t, locale, setLocale } = useI18n();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const view = useRouterState({ select: (s) => (s.location.search as { view?: string }).view });
   const isActive = (item: RailItem) =>
     item.match?.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p))) ?? false;
-  const projectId = /^\/projects\/([^/]+)/.exec(pathname)?.[1];
 
   return (
     <nav
@@ -52,20 +47,7 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
       </Link>
 
       {RAIL_ITEMS.map((item) =>
-        item.label === "rail.files" && projectId ? (
-          <Link
-            key={item.label}
-            to="/projects/$projectId"
-            params={{ projectId }}
-            search={viewSearch("files")}
-            aria-label={t("rail.projectFiles")}
-            title={t("rail.projectFiles")}
-            aria-current={view === "files" ? "page" : undefined}
-            className={cn(itemClass, view === "files" && "bg-hover text-fg")}
-          >
-            <item.icon size={20} strokeWidth={1.8} />
-          </Link>
-        ) : item.to ? (
+        item.to ? (
           <Link
             key={item.label}
             to={item.to}
@@ -81,8 +63,8 @@ export function IconRail({ user, onSignOut }: { user: SessionUser; onSignOut: ()
             key={item.label}
             type="button"
             disabled
-            aria-label={item.label === "rail.files" ? t("rail.filesNoProject") : t("common.comingSoon", { label: t(item.label) })}
-            title={item.label === "rail.files" ? t("rail.filesNoProjectTitle") : t("common.comingSoonTitle", { label: t(item.label) })}
+            aria-label={t("common.comingSoon", { label: t(item.label) })}
+            title={t("common.comingSoonTitle", { label: t(item.label) })}
             className={cn(itemClass, "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-subtle")}
           >
             <item.icon size={20} strokeWidth={1.8} />

@@ -79,7 +79,6 @@ export const tr: Catalog = {
   "rail.home": "Myrel ana sayfa",
   "rail.projects": "Projeler",
   "rail.artifacts": "Artifact'ler",
-  "rail.files": "Dosyalar",
   "rail.devices": "Cihazlar",
   "rail.settings": "Ayarlar",
   "rail.account": "Hesap",
@@ -119,6 +118,7 @@ export const tr: Catalog = {
   "tabs.label": "Proje bölümleri",
   "tabs.chat": "Konuşma",
   "tabs.files": "Dosyalar",
+  "tabs.knowledge": "Hafıza ve talimatlar",
   "tabs.usage": "Kullanım",
   "threads.open": "Açık",
   "connection.connecting": "Bağlanıyor",
@@ -706,9 +706,6 @@ export const tr: Catalog = {
   "cliPicker.picked": "Bu thread {cli} ile çalışıyor. Myrel bunu {options} arasından seçti.",
   "cliPicker.offered": "Myrel {clis} arasından seçecek",
   "composer.attach": "Dosya ekle",
-  "rail.projectFiles": "Proje dosyaları",
-  "rail.filesNoProject": "Dosyalar (önce bir proje aç)",
-  "rail.filesNoProjectTitle": "Dosyalarını görmek için bir proje aç",
   "sidebar.files": "Dosyalar ve hafıza",
   "sidebar.artifacts": "Artifact'ler",
 
@@ -838,7 +835,6 @@ export const tr: Catalog = {
 
   // Files, memory and local folders
   "knowledge.label": "Proje bilgisi",
-  "knowledge.tabFiles": "Dosyalar",
   "knowledge.tabMemory": "Hafıza",
   "knowledge.tabInstructions": "Talimatlar",
   "knowledge.pickFile": "Önizlemek için bir dosya seç.",

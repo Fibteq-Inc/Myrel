@@ -83,7 +83,6 @@ export const en = {
   "rail.home": "Myrel home",
   "rail.projects": "Projects",
   "rail.artifacts": "Artifacts",
-  "rail.files": "Files",
   "rail.devices": "Devices",
   "rail.settings": "Settings",
   "rail.account": "Account",
@@ -122,6 +121,7 @@ export const en = {
   "tabs.label": "Project sections",
   "tabs.chat": "Conversation",
   "tabs.files": "Files",
+  "tabs.knowledge": "Memory and instructions",
   "tabs.usage": "Usage",
   "threads.open": "Open",
   "connection.connecting": "Connecting",
@@ -708,9 +708,6 @@ export const en = {
   "cliPicker.picked": "Myrel picked {cli} for this thread, out of {options}.",
   "cliPicker.offered": "Myrel picks one of {clis}",
   "composer.attach": "Attach files",
-  "rail.projectFiles": "Project files",
-  "rail.filesNoProject": "Files (open a project first)",
-  "rail.filesNoProjectTitle": "Open a project to see its files",
   "sidebar.files": "Files and memory",
   "sidebar.artifacts": "Artifacts",
 
@@ -843,7 +840,6 @@ export const en = {
 
   // Files, memory and local folders
   "knowledge.label": "Project knowledge",
-  "knowledge.tabFiles": "Files",
   "knowledge.tabMemory": "Memory",
   "knowledge.tabInstructions": "Instructions",
   "knowledge.pickFile": "Pick a file to preview it.",
