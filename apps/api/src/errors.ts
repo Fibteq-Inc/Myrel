@@ -75,7 +75,8 @@ async function alertAdmins(env: Env, e: { source: ErrorSource; where: string; na
   if ((recent?.n ?? 0) > MAX_ALERTS_PER_HOUR) return;
   const admins = await db.select({ email: user.email }).from(user).where(and(eq(user.role, "admin"), eq(user.emailVerified, true)));
   if (!admins.length) return;
-  const origin = env.BETTER_AUTH_URL?.replace(/\/+$/, "") || null;
+  let origin = env.BETTER_AUTH_URL ?? "";
+  while (origin.endsWith("/")) origin = origin.slice(0, -1);
   const link = origin ? `${origin}/settings/server` : null;
   const text = [`A new kind of error (${e.source}) at ${e.where}:`, "", `${e.name}: ${e.message}`, "", link ? `See it: ${link}` : "See it in Settings › Server.", "", "— Myrel"].join("\n");
   const html = `<p>A new kind of error (${esc(e.source)}) at <b>${esc(e.where)}</b>:</p><pre style="white-space:pre-wrap">${esc(`${e.name}: ${e.message}`)}</pre><p>${link ? `<a href="${esc(link)}">See it in Settings › Server</a>` : "See it in Settings › Server."}</p>`;
