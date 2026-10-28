@@ -23,6 +23,7 @@ import {
   type TaskStatus,
   type TerminalLine,
   type ThreadModel,
+  destructiveCommand,
 } from "@myrel/protocol";
 import {
   emptyProgress,
@@ -95,6 +96,8 @@ import {
   opensPullRequest,
   USE_OPEN_PULL_REQUEST,
 } from "./folder-access";
+import { answeredSshMessage, sshAnswer, sshMessage, sshToolOutput } from "./ssh-access";
+import { matchSshHost, projectSshHostRows, recordSshAudit, type SshHostRow, sshTarget } from "../ssh/store";
 import { type Author, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
@@ -1170,7 +1173,7 @@ export class ThreadAgent extends Agent<Env> {
    * Puts one folder to the person as a card (or joins a card already asking about it) and waits for
    * the answer: null when none came in time or the turn ended.
    */
-  private async askAccess(folder: string, what: string, kind?: "command"): Promise<AccessAnswer | null> {
+  private async askAccess(folder: string, what: string, kind?: "command" | "ssh", ssh?: { request: NonNullable<AccessRequest["ssh"]>; body: string }): Promise<AccessAnswer | null> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const until = Date.now() + ACCESS_WAIT_MS;
@@ -1182,11 +1185,11 @@ export class ThreadAgent extends Agent<Env> {
     if (!this.runningTask() || Date.now() >= until) return null;
     let request = this.accessRequests().find((r) => r.folder === folder && r.kind === kind && !r.answer);
     if (!request) {
-      request = { id: crypto.randomUUID(), folder, ...(kind && { kind }) };
+      request = { id: crypto.randomUUID(), folder, ...(kind && { kind }), ...(ssh && { ssh: ssh.request }) };
       this.setMeta("access_requests", JSON.stringify([...this.accessRequests(), request]));
       const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
       const language = turn?.language ?? "en";
-      const body = kind === "command" ? commandMessage(folder, language) : accessMessage(folder, what, language);
+      const body = ssh ? ssh.body : kind === "command" ? commandMessage(folder, language) : accessMessage(folder, what, language);
       const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
       // Not news for the next turn, unless someone wrote in between.
       if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
@@ -1207,11 +1210,94 @@ export class ThreadAgent extends Agent<Env> {
     return null;
   }
 
+  /**
+   * ssh_run, on a local turn whose computer runs SSH for Myrel (feature "ssh") and holds the key of
+   * at least one of the project's servers. Each command is put to the computer's owner as a card
+   * (ssh-access.ts) unless they allowed that server for this turn; destructive ones always ask. The
+   * computer's runner runs it with Myrel's key and the server key the person confirmed, and every
+   * request goes in the project's SSH history.
+   */
+  private async sshRunTool(): Promise<Tool | null> {
+    const workspace = await this.runningWorkspace();
+    if (!workspace || !(await runnerHasFeature(this.env, workspace.runnerId, "ssh"))) return null;
+    const { projectId, threadId } = this.ids();
+    const hosts = await projectSshHostRows(this.env, projectId, workspace.runnerId);
+    if (!hosts.length) return null;
+    const usable = hosts.filter((h) => h.rule === "ask" && h.hostKey);
+    const list = hosts.map((h) => `${h.alias} (${h.user}@${h.host}${h.port === 22 ? "" : `:${h.port}`}${h.rule === "off" ? ", turned off" : !h.hostKey ? ", not set up yet" : ""})`).join(", ");
+    return tool({
+      name: "ssh_run",
+      description:
+        `Runs one shell command on one of the project's SSH servers, from ${workspace.runnerName}, after its owner allows it on a card in the thread (they may also allow the server for the rest of this turn). ` +
+        `Servers: ${list}. Only these; \`ssh <server> <command>\` in your shell goes through this tool too. One command per call, no interactive sessions, no file copies; at most 5 minutes and 200 KB of output. ` +
+        "Give the reason the person sees on the card. Before a destructive command (rm, reboot, systemctl stop, DROP…) explain in a reply why it is needed. " +
+        "Returns JSON with exit_code, stdout and stderr.",
+      input: z.object({
+        host: z.string().min(1).max(300).describe("The server's name in the project's SSH settings, e.g. prod-web."),
+        command: z.string().min(1).max(20_000).describe("The command, run by the server user's shell."),
+        reason: z.string().max(1000).default("").describe("Why, in a sentence, for the person deciding."),
+      }),
+      run: async ({ host, command, reason }) => {
+        const row = matchSshHost(await projectSshHostRows(this.env, projectId, workspace.runnerId), host);
+        if (!row) {
+          const others = matchSshHost(await projectSshHostRows(this.env, projectId), host);
+          throw new Error(
+            others
+              ? `${host} is set up on another computer of the project, and this turn runs on ${workspace.runnerName}. Say so in a reply.`
+              : `${host} is not one of the project's SSH servers${usable.length ? ` (${usable.map((h) => h.alias).join(", ")})` : ""}. Agents can only reach servers in the project's SSH settings; if this one is needed, ask the person to add it there.`,
+          );
+        }
+        const target = sshTarget(row);
+        if (row.rule === "off") throw new Error(`${row.alias} is turned off in the project's SSH settings. Carry on without it, or ask the person to turn it on.`);
+        if (!target) throw new Error(`${row.alias} is not set up yet: the person has to confirm its server key in the project's SSH settings first.`);
+        const danger = destructiveCommand(command);
+        const audit = { projectId, hostId: row.id, alias: row.alias, threadId, command, reason: reason || null };
+        const grants = JSON.parse(this.getMeta("ssh_grants") ?? "{}") as Record<string, string>;
+        let decision: "once" | "turn" = "turn";
+        let approvedBy: string | null = grants[row.id] ?? null;
+        if (danger || !approvedBy) {
+          const card = { alias: row.alias, user: row.user, host: row.host, port: row.port, computer: workspace.runnerName, hostFingerprint: row.hostFingerprint, command, reason, danger };
+          const language = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language ?? "en";
+          const key = `ssh:${row.id}:${crypto.randomUUID()}`;
+          const answer = await this.askAccess(key, command, "ssh", { request: { hostId: row.id, alias: row.alias, command, danger }, body: sshMessage(card, language) });
+          const asked = this.accessRequests().find((r) => r.folder === key);
+          approvedBy = asked?.by ?? null;
+          if (answer === null || answer === "deny") {
+            await recordSshAudit(this.env, { ...audit, decision: answer ?? "timeout", approvedBy: answer ? approvedBy : null });
+            throw new Error(
+              answer === null
+                ? "The person did not answer in time, so the command did not run. Carry on without it, and say in your reply what you could not do."
+                : "The person did not allow this command. Carry on without it; if the work cannot be done without it, say so in a reply.",
+            );
+          }
+          decision = answer === "always" ? "turn" : "once";
+          if (answer === "always" && approvedBy) this.setMeta("ssh_grants", JSON.stringify({ ...grants, [row.id]: approvedBy }));
+        }
+        const runner = await getAgentByName(this.env.RUNNER_AGENT, row.runnerId);
+        const ran = await runner.ssh(target, command);
+        const taskId = this.runningTask()?.id;
+        if (!ran.ok) {
+          await recordSshAudit(this.env, { ...audit, decision: "failed", approvedBy, output: ran.reason });
+          throw new Error(`The computer could not run it: ${ran.reason}`);
+        }
+        const { result } = ran;
+        await recordSshAudit(this.env, { ...audit, decision, approvedBy, exitCode: result.exitCode, ms: result.ms, output: result.stdout || result.stderr });
+        if (taskId) {
+          const status = result.error ? result.error : `exit ${result.exitCode}`;
+          await this.taskEvents(taskId, [{ type: "tool", name: "ssh", title: `SSH ${row.alias}: ${command.split("\n")[0]!.slice(0, 300)} (${status}, ${(result.ms / 1000).toFixed(1)} s)` }]);
+        }
+        return sshToolOutput(result);
+      },
+    });
+  }
+
   /** A person answered the running turn's folder cards. Returns false when the message is not such an answer. */
   private async answerAccess(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
     // Only one card is open at a time (see askAccess); the answer is for that one alone.
     const open = this.accessRequests().filter((r) => !r.answer).slice(0, 1);
-    const answer = open[0]?.kind === "command" ? commandAnswer(reason.body ?? "") : accessAnswer(reason.body ?? "");
+    const first = open[0];
+    const body = reason.body ?? "";
+    const answer = first?.kind === "ssh" ? sshAnswer(body, !!first.ssh?.danger) : first?.kind === "command" ? commandAnswer(body) : accessAnswer(body);
     if (!answer || !open.length || !this.runningTask()) return false;
     const { projectId } = this.ids();
     // The folders are on someone's own computer: only they answer for it. Anyone else's
@@ -1221,6 +1307,12 @@ export class ThreadAgent extends Agent<Env> {
     const given = answer;
     const grants = JSON.parse(this.getMeta("access_grants") ?? "[]") as string[];
     for (const r of open) {
+      r.by = reason.authorId;
+      // A server for the rest of the turn (never for a destructive command: its card has no such option).
+      if (r.kind === "ssh") {
+        r.answer = given;
+        continue;
+      }
       if (r.kind === "command") {
         if (given === "always") this.setMeta("access_commands", "1");
         r.answer = given;
@@ -1238,7 +1330,8 @@ export class ThreadAgent extends Agent<Env> {
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     for (const r of open) {
       if (!r.messageId) continue;
-      await project.editMessage(r.messageId, answeredAccessMessage(r, turn?.language ?? "en")).catch((err) => console.warn("access card not shortened", err));
+      const short = r.kind === "ssh" && r.ssh ? answeredSshMessage(r.ssh, turn?.language ?? "en") : answeredAccessMessage(r, turn?.language ?? "en");
+      await project.editMessage(r.messageId, short).catch((err) => console.warn("access card not shortened", err));
     }
     // The answer was for this turn: it is not news for the next one.
     if (reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) {
@@ -1369,6 +1462,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("access_grants");
     this.deleteMeta("access_requests");
     this.deleteMeta("access_commands");
+    this.deleteMeta("ssh_grants");
   }
 
   // ---- Connector suggestions -------------------------------------------------
@@ -1677,7 +1771,8 @@ export class ThreadAgent extends Agent<Env> {
         },
       }),
     );
-    return [...(local ? [this.approveAccessTool()] : []), ...delivering];
+    const ssh = local ? await this.sshRunTool() : null;
+    return [...(local ? [this.approveAccessTool()] : []), ...(ssh ? [ssh] : []), ...delivering];
   }
 
   /**

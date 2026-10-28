@@ -1,6 +1,6 @@
 import { useT } from "@myrel/i18n/react";
 import type { Decision } from "@myrel/protocol";
-import { CircleCheck, CircleHelp } from "lucide-react";
+import { CircleCheck, CircleHelp, TriangleAlert } from "lucide-react";
 import { useId } from "react";
 import { cn } from "../../lib/ui";
 
@@ -25,6 +25,7 @@ export function DecisionCard({
     ? decision.options.findIndex((o) => o.label.trim().toLocaleLowerCase() === answer.trim().toLocaleLowerCase())
     : -1;
   const answered = answer !== undefined;
+  const danger = !!decision.danger;
 
   // Answered: one line with the question and the pick, so the conversation moves on.
   if (answered) {
@@ -52,12 +53,18 @@ export function DecisionCard({
       aria-labelledby={titleId}
       className={cn(
         "flex flex-col gap-2.5 rounded-xl border p-3.5",
-        answered ? "border-line bg-raised" : "border-warn-line bg-warn-soft",
+        answered ? "border-line bg-raised" : danger ? "border-bad-line bg-bad-soft" : "border-warn-line bg-warn-soft",
       )}
     >
-      <div className={cn("flex items-center gap-2 text-xs", answered ? "text-subtle" : "text-warn")}>
-        {answered ? <CircleCheck size={14} aria-hidden="true" /> : <CircleHelp size={14} aria-hidden="true" />}
-        {answered ? t("decision.answered") : t("decision.yourCall")}
+      <div className={cn("flex items-center gap-2 text-xs", answered ? "text-subtle" : danger ? "text-bad" : "text-warn")}>
+        {answered ? (
+          <CircleCheck size={14} aria-hidden="true" />
+        ) : danger ? (
+          <TriangleAlert size={14} aria-hidden="true" />
+        ) : (
+          <CircleHelp size={14} aria-hidden="true" />
+        )}
+        {answered ? t("decision.answered") : danger ? t("decision.danger") : t("decision.yourCall")}
       </div>
       <div id={titleId} className="font-medium text-fg">
         {decision.question}

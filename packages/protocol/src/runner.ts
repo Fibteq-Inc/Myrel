@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idPattern } from "./ids";
 import { LineAgent, ProjectId, TaskId, ThreadId, Timestamp } from "./models";
+import { SshHostKey, SshHostName, SshKeyRef, SshLocalKey, SshResult, SshTarget } from "./ssh";
 
 /**
  * myrel-runner: a small daemon on the user's own computer. It opens an
@@ -118,6 +119,9 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * takes them (Codex's app server); answered "task.steered" with taken false when it does not.
  * "steer-claude": the same for Claude Code, which runs with streaming input and stops with an
  * interrupt request (runner 0.26.0).
+ * "ssh": keeps SSH keys for the project's servers and runs one command at a time on them when asked
+ * ("ssh.keygen", "ssh.keys", "ssh.hostkeys", "ssh.test", "ssh.run", "ssh.forget"); its agent runs put
+ * an `ssh` on PATH that goes through Myrel's ssh_run tool instead.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -135,6 +139,7 @@ export const RunnerFeature = z.enum([
   "git-token",
   "steer",
   "steer-claude",
+  "ssh",
 ]);
 
 /**
@@ -351,6 +356,15 @@ export const RunnerToServer = z.discriminatedUnion("type", [
   z.object({ type: z.literal("update.status"), update: RunnerUpdateState.nullable() }),
   /** Answers "task.steer": whether the running CLI took the message (feature "steer"). */
   z.object({ type: z.literal("task.steered"), requestId: RunnerRequestId, taken: z.boolean() }),
+  // Answers to the server's SSH requests (feature "ssh"); never a private key or a passphrase.
+  /** Answers "ssh.keygen": the key's public half. `protected`: it has a passphrase kept in the OS keychain. */
+  z.object({ type: z.literal("ssh.key"), requestId: RunnerRequestId, publicKey: z.string().max(16_000), fingerprint: z.string().max(200), protected: z.boolean() }),
+  /** Answers "ssh.keys". */
+  z.object({ type: z.literal("ssh.keylist"), requestId: RunnerRequestId, keys: z.array(SshLocalKey).max(100) }),
+  /** Answers "ssh.hostkeys". */
+  z.object({ type: z.literal("ssh.hostkeylist"), requestId: RunnerRequestId, keys: z.array(SshHostKey).max(10) }),
+  /** Answers "ssh.test", "ssh.run" and "ssh.forget" (exit code 0, no output). */
+  SshResult.extend({ type: z.literal("ssh.result"), requestId: RunnerRequestId }),
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServer>;
 
@@ -436,6 +450,21 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     version: z.string().regex(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/).max(50),
     now: z.boolean().default(false),
   }),
+  /**
+   * Make an ed25519 key for this project's server (feature "ssh"), or, with `existing`, use that key
+   * file in the computer's ~/.ssh for it. Answered with "ssh.key".
+   */
+  SshKeyRef.extend({ type: z.literal("ssh.keygen"), requestId: RunnerRequestId, comment: z.string().max(200), existing: z.string().min(1).max(1024).optional() }),
+  /** List the keys in the computer's ~/.ssh by name and fingerprint. Answered with "ssh.keylist". */
+  z.object({ type: z.literal("ssh.keys"), requestId: RunnerRequestId }),
+  /** Fetch a server's own keys (ssh-keyscan) for the person to confirm. Answered with "ssh.hostkeylist". */
+  z.object({ type: z.literal("ssh.hostkeys"), requestId: RunnerRequestId, host: SshHostName, port: z.number().int().min(1).max(65535) }),
+  /** Trust `hostKey` for this alias (replacing an earlier one) and try a login. Answered with "ssh.result". */
+  z.object({ type: z.literal("ssh.test"), requestId: RunnerRequestId, target: SshTarget }),
+  /** Run one command, which the person allowed. Answered with "ssh.result". */
+  z.object({ type: z.literal("ssh.run"), requestId: RunnerRequestId, target: SshTarget, command: z.string().min(1).max(20_000) }),
+  /** The server left the project: delete the key Myrel made for it and its known host. Answered with "ssh.result". */
+  SshKeyRef.extend({ type: z.literal("ssh.forget"), requestId: RunnerRequestId }),
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunner>;
 /** What a task.start gives a CLI that runs as the thread's agent. */

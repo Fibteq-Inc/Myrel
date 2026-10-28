@@ -71,6 +71,19 @@ export const billingExtensions: Extensions = {
       : refuse(`Your plan includes ${max} connectors. ${UPGRADE}, or remove a connector you no longer use.`);
   },
 
+  async canAddSshHost(env, userId) {
+    const standing = await standingOf(env, userId);
+    const max = standing.limits.sshHosts;
+    if (max === null) return OK;
+    // The servers whose keys are on this person's computers, in any project.
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM project_ssh_hosts h JOIN runners r ON r.id = h.runner_id WHERE r.user_id = ?")
+      .bind(userId)
+      .first<{ n: number }>();
+    return (row?.n ?? 0) < max
+      ? OK
+      : refuse(`Your plan includes ${max} SSH ${max === 1 ? "server" : "servers"}. ${UPGRADE}, or remove a server you no longer use.`);
+  },
+
   async canUseSandbox(env, projectId, running) {
     const project = await projectOwner(env.DB, projectId);
     if (!project) return OK;

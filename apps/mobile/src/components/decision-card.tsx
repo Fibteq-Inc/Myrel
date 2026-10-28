@@ -1,6 +1,6 @@
 import { useT } from "@myrel/i18n/react";
 import * as Haptics from "expo-haptics";
-import { CircleCheck, CircleHelp } from "lucide-react-native";
+import { CircleCheck, CircleHelp, TriangleAlert } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { chosenOption, type Decision } from "../lib/decision";
 import { makeStyles, radius, useColors } from "../theme";
@@ -25,6 +25,7 @@ export function DecisionCard({
   const styles = useStyles();
   const answered = answer !== undefined;
   const chosen = chosenOption(decision, answer);
+  const danger = !!decision.danger;
 
   // Answered: one line with the question and the pick, so the conversation moves on.
   if (answered) {
@@ -41,11 +42,17 @@ export function DecisionCard({
   }
 
   return (
-    <View accessibilityRole="none" style={[styles.card, answered ? styles.cardAnswered : styles.cardOpen]}>
+    <View accessibilityRole="none" style={[styles.card, answered ? styles.cardAnswered : danger ? styles.cardDanger : styles.cardOpen]}>
       <View style={styles.kicker}>
-        {answered ? <CircleCheck size={15} color={colors.subtle} /> : <CircleHelp size={15} color={colors.warn} />}
-        <Text style={{ fontSize: 13, color: answered ? colors.subtle : colors.warn }}>
-          {answered ? t("decision.answered") : t("decision.yourCall")}
+        {answered ? (
+          <CircleCheck size={15} color={colors.subtle} />
+        ) : danger ? (
+          <TriangleAlert size={15} color={colors.bad} />
+        ) : (
+          <CircleHelp size={15} color={colors.warn} />
+        )}
+        <Text style={{ fontSize: 13, color: answered ? colors.subtle : danger ? colors.bad : colors.warn }}>
+          {answered ? t("decision.answered") : danger ? t("decision.danger") : t("decision.yourCall")}
         </Text>
       </View>
       <Text style={styles.question}>{decision.question}</Text>
@@ -98,6 +105,7 @@ const useStyles = makeStyles((colors) =>
   StyleSheet.create({
     card: { gap: 12, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
     cardOpen: { borderColor: colors.warnLine, backgroundColor: colors.warnSoft },
+    cardDanger: { borderColor: colors.bad, backgroundColor: colors.badSoft },
     cardAnswered: { borderColor: colors.line, backgroundColor: colors.raised },
     compact: {
       flexDirection: "row",

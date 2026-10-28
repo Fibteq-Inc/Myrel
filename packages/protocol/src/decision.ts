@@ -13,6 +13,8 @@ export const Decision = z.object({
     .max(4),
   /** Index of the recommended option. */
   recommended: z.number().int().nonnegative().optional(),
+  /** The step it asks about cannot be undone (an SSH command that deletes, say): the card is red. */
+  danger: z.boolean().optional(),
 });
 export type Decision = z.infer<typeof Decision>;
 export type DecisionInput = z.input<typeof Decision>;

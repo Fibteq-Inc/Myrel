@@ -15,6 +15,12 @@ import {
   RunnerToServer,
   type RunnerUpdateState,
   ServerToRunner,
+  SSH_TIMEOUT_MS,
+  type SshHostKey,
+  type SshKeyRef,
+  type SshLocalKey,
+  type SshResult,
+  type SshTarget,
 } from "@myrel/protocol";
 import { Agent, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
@@ -193,6 +199,10 @@ export class RunnerAgent extends Agent<Env> {
         return;
       case "dirs":
       case "task.steered":
+      case "ssh.key":
+      case "ssh.keylist":
+      case "ssh.hostkeylist":
+      case "ssh.result":
       case "request.failed":
         this.waiting.get(frame.requestId)?.(frame);
         return;
@@ -330,6 +340,50 @@ export class RunnerAgent extends Agent<Env> {
     return { ok: true, update: answer.update };
   }
 
+  /** Makes a key on the computer for a project's SSH server, or takes one of its own (`existing`). Callable over RPC. */
+  async sshKeygen(ref: SshKeyRef, comment: string, existing?: string): Promise<RunnerResult<{ publicKey: string; fingerprint: string; protected: boolean }>> {
+    const answer = await this.ask({ type: "ssh.keygen", ...ref, comment, ...(existing && { existing }) }, "ssh", 60_000);
+    if (answer.ok === false) return answer;
+    if (answer.type !== "ssh.key") return { ok: false, reason: "Unexpected answer from the computer." };
+    return { ok: true, publicKey: answer.publicKey, fingerprint: answer.fingerprint, protected: answer.protected };
+  }
+
+  /** The keys in the computer's ~/.ssh, by name and fingerprint. Callable over RPC. */
+  async sshKeys(): Promise<RunnerResult<{ keys: SshLocalKey[] }>> {
+    const answer = await this.ask({ type: "ssh.keys" }, "ssh");
+    if (answer.ok === false) return answer;
+    if (answer.type !== "ssh.keylist") return { ok: false, reason: "Unexpected answer from the computer." };
+    return { ok: true, keys: answer.keys };
+  }
+
+  /** A server's own keys, fetched from the computer. Callable over RPC. */
+  async sshHostKeys(host: string, port: number): Promise<RunnerResult<{ keys: SshHostKey[] }>> {
+    const answer = await this.ask({ type: "ssh.hostkeys", host, port }, "ssh", 45_000);
+    if (answer.ok === false) return answer;
+    if (answer.type !== "ssh.hostkeylist") return { ok: false, reason: "Unexpected answer from the computer." };
+    return { ok: true, keys: answer.keys };
+  }
+
+  /**
+   * A connection test (with `command` absent), or one command the person allowed, run by the
+   * computer with its key for that server. Callable over RPC.
+   */
+  async ssh(target: SshTarget, command?: string): Promise<RunnerResult<{ result: SshResult }>> {
+    const answer = command
+      ? await this.ask({ type: "ssh.run", target, command }, "ssh", SSH_TIMEOUT_MS + 30_000)
+      : await this.ask({ type: "ssh.test", target }, "ssh", 60_000);
+    if (answer.ok === false) return answer;
+    if (answer.type !== "ssh.result") return { ok: false, reason: "Unexpected answer from the computer." };
+    const { type: _t, requestId: _r, ...result } = answer;
+    return { ok: true, result };
+  }
+
+  /** Deletes the key Myrel made on the computer for a server. Callable over RPC. */
+  async sshForget(ref: SshKeyRef): Promise<RunnerResult<object>> {
+    const answer = await this.ask({ type: "ssh.forget", ...ref }, "ssh");
+    return answer.ok === false ? answer : { ok: true };
+  }
+
   /** Stops every task and closes the connection, e.g. when the runner is removed. Callable over RPC. */
   async revoke(): Promise<void> {
     for (const task of this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running'`) {
@@ -342,6 +396,7 @@ export class RunnerAgent extends Agent<Env> {
   private async ask(
     question: DistributiveOmit<Question, "requestId">,
     feature: RunnerFeature = "folders",
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<{ ok: false; reason: string } | (Answer & { ok?: undefined })> {
     const [connection] = this.getConnections();
     if (!connection) return { ok: false, reason: "The computer is offline. Start myrel-runner on it first." };
@@ -359,12 +414,14 @@ export class RunnerAgent extends Agent<Env> {
               ? "Update myrel-runner on this computer to change its settings from here (npx myrel-runner@latest update)."
               : feature === "update"
                 ? "This runner cannot update itself from here. Run `npx myrel-runner@latest update` on the computer once."
-                : "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update).",
+                : feature === "ssh"
+                  ? "Update myrel-runner on this computer to use SSH from Myrel (npx myrel-runner@latest update)."
+                  : "Update myrel-runner on this computer to add folders from here (npx myrel-runner@latest update).",
       };
     }
     const requestId = crypto.randomUUID();
     const answer = await new Promise<Answer | null>((resolve) => {
-      const timer = setTimeout(() => resolve(null), REQUEST_TIMEOUT_MS);
+      const timer = setTimeout(() => resolve(null), timeoutMs);
       this.waiting.set(requestId, (a) => {
         clearTimeout(timer);
         resolve(a);

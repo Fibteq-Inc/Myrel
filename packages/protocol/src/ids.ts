@@ -16,6 +16,8 @@ export const ID_PREFIXES = {
   skill: "skl",
   suggestion: "sug",
   question: "qst",
+  sshHost: "ssh",
+  sshRun: "sshr",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

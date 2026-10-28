@@ -1302,3 +1302,119 @@ describe("runner settings and updates", () => {
     expect(frames.some((f) => f.type === "runner.update")).toBe(false);
   });
 });
+
+describe("SSH", () => {
+  const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl myrel:myrel:prod-web";
+  const HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFZrbg1uJZrbmBhqzqQ0RfyGYeGk1sP4dGv8Vb7Kp2xY";
+
+  it("sets a server up on the owner's computer and asks the owner before each command", { timeout: 30_000 }, async () => {
+    const res = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "İsmail" }),
+    });
+    const user = res.headers.get("set-auth-token")!;
+    const me = ((await res.json()) as { user: { id: string } }).user.id;
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "folders", "project-folders", "ssh"]);
+    const ran: string[] = [];
+    runnerSide.ws.addEventListener("message", (e) => {
+      const frame = JSON.parse(e.data as string) as ServerToRunner;
+      if (frame.type === "ssh.keygen") runnerSide.send({ type: "ssh.key", requestId: frame.requestId, publicKey: KEY, fingerprint: "SHA256:key", protected: true });
+      if (frame.type === "ssh.hostkeys") {
+        runnerSide.send({ type: "ssh.hostkeylist", requestId: frame.requestId, keys: [{ type: "ssh-ed25519", key: HOST_KEY, fingerprint: "SHA256:Q3l1x9Vb7Kp2" }] });
+      }
+      if (frame.type === "ssh.test" || frame.type === "ssh.run") {
+        expect(frame.target).toMatchObject({ alias: "prod-web", host: "203.0.113.10", user: "deploy", hostKey: HOST_KEY });
+        if (frame.type === "ssh.run") ran.push(frame.command);
+        runnerSide.send({ type: "ssh.result", requestId: frame.requestId, exitCode: 0, stdout: frame.type === "ssh.run" ? "up 3 days\n" : "", stderr: "", truncated: false, ms: 400 });
+      }
+    });
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    // Ada, an admin of the project, cannot put a key on İsmail's computer.
+    const otherEmail = `u${crypto.randomUUID()}@example.com`;
+    const other = (
+      await api("/api/auth/sign-up/email", { method: "POST", body: JSON.stringify({ email: otherEmail, password: "correct-horse-battery", name: "Ada" }) })
+    ).headers.get("set-auth-token")!;
+    const invited = await api(`/api/projects/${project.id}/invites`, { method: "POST", token: user, body: JSON.stringify({ email: otherEmail, role: "admin" }) });
+    const { invite } = (await invited.json()) as { invite: { id: string } };
+    await api(`/api/account/invites/${invite.id}/accept`, { method: "POST", token: other });
+    const host = { runnerId: runner.id, alias: "prod-web", host: "203.0.113.10", user: "deploy" };
+    expect((await api(`/api/projects/${project.id}/ssh/hosts`, { method: "POST", token: other, body: JSON.stringify(host) })).status).toBe(403);
+
+    const created = await api(`/api/projects/${project.id}/ssh/hosts`, { method: "POST", token: user, body: JSON.stringify(host) });
+    expect(created.status).toBe(201);
+    const { host: added } = (await created.json()) as { host: { id: string; publicKey: string; hostFingerprint: string | null; mine: boolean } };
+    expect(added).toMatchObject({ publicKey: KEY, hostFingerprint: null, mine: true });
+    expect((await api(`/api/projects/${project.id}/ssh/hosts/${added.id}/trust`, { method: "POST", token: other, body: JSON.stringify({ hostKey: HOST_KEY }) })).status).toBe(403);
+    const scanned = await api(`/api/projects/${project.id}/ssh/hosts/${added.id}/scan`, { method: "POST", token: user });
+    expect(((await scanned.json()) as { keys: { key: string }[] }).keys[0]!.key).toBe(HOST_KEY);
+    // Only a key the server shows can be confirmed.
+    const wrong = await api(`/api/projects/${project.id}/ssh/hosts/${added.id}/trust`, { method: "POST", token: user, body: JSON.stringify({ hostKey: "ssh-ed25519 AAAAOTHER" }) });
+    expect(wrong.status).toBe(409);
+    const trusted = await api(`/api/projects/${project.id}/ssh/hosts/${added.id}/trust`, { method: "POST", token: user, body: JSON.stringify({ hostKey: HOST_KEY }) });
+    expect(await trusted.json()).toMatchObject({ ok: true, host: { hostFingerprint: "SHA256:Q3l1x9Vb7Kp2" } });
+
+    const { projectAgent, thread } = await startThread(project.id, user);
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const start = await until(() => runnerSide.frames.find((f): f is Start => f.type === "task.start"), "task.start");
+    const mcp = async (body: unknown) =>
+      (await (await api(start.agent!.mcpPath, { method: "POST", headers: { authorization: `Bearer ${start.agent!.token}` }, body: JSON.stringify(body) })).json()) as {
+        result: { content: { text: string }[]; isError: boolean; tools?: { name: string; description: string }[] };
+      };
+    const tools = (await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" })).result.tools!;
+    expect(tools.find((t) => t.name === "ssh_run")?.description).toContain("prod-web (deploy@203.0.113.10)");
+    let id = 10;
+    const ssh = (host: string, command: string) => mcp({ jsonrpc: "2.0", id: id++, method: "tools/call", params: { name: "ssh_run", arguments: { host, command, reason: "nginx 502" } } });
+    const cards = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).filter((m) => m.body.includes("```decision"));
+    const answer = async (authorId: string, body: string) => {
+      const m = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId, body });
+      await (await getAgentByName(env.THREAD_AGENT, thread.id)).wake({ kind: "message", messageId: m.id, body, authorId, seq: m.seq });
+    };
+
+    // Not one of the project's servers: refused, no card.
+    const unknown = await ssh("evil.example.com", "id");
+    expect(unknown.result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("not one of the project's SSH servers") }] });
+
+    const first = ssh("deploy@prod-web", "journalctl -u nginx -n 200");
+    const [card] = await until(async () => ((await cards()).length ? cards() : null), "ssh card");
+    expect(card!.body).toContain("journalctl -u nginx -n 200");
+    expect(card!.body).toContain("SHA256:Q3l1x9Vb7Kp2");
+    expect(card!.body).toContain("nginx 502");
+    // Only the computer's owner answers it.
+    await answer(await idOf(other), "Çalıştır");
+    expect(await Promise.race([first.then(() => "answered"), new Promise((r) => setTimeout(() => r("waiting"), 300))])).toBe("waiting");
+    await answer(me, "Bu çalışmada bu sunucuya izin ver");
+    const out = await first;
+    expect(JSON.parse(out.result.content[0]!.text)).toMatchObject({ exit_code: 0, stdout: "up 3 days\n" });
+    // Allowed for the turn: the next command runs without a card.
+    expect(JSON.parse((await ssh("prod-web", "df -h")).result.content[0]!.text).exit_code).toBe(0);
+    expect(await cards()).toHaveLength(1);
+    // A destructive one asks anyway, on a red card that recommends not running it.
+    const rm = ssh("prod-web", "rm -rf /var/cache/app");
+    await until(async () => (await cards()).length === 2, "danger card");
+    expect((await cards())[1]!.body).toContain('"danger": true');
+    await answer(me, "Çalıştırma");
+    expect((await rm).result.isError).toBe(true);
+    expect(ran).toEqual(["journalctl -u nginx -n 200", "df -h"]);
+
+    const history = ((await (await api(`/api/projects/${project.id}/ssh`, { token: other })).json()) as { history: { command: string; decision: string; approvedBy: string | null }[] }).history;
+    expect(history.map((h) => [h.command, h.decision, h.approvedBy])).toEqual([
+      ["rm -rf /var/cache/app", "deny", "İsmail"],
+      ["df -h", "turn", "İsmail"],
+      ["journalctl -u nginx -n 200", "turn", "İsmail"],
+    ]);
+    // An admin can turn the server off, but not back on; agents then cannot use it.
+    expect((await api(`/api/projects/${project.id}/ssh/hosts/${added.id}`, { method: "PATCH", token: other, body: JSON.stringify({ rule: "off" }) })).status).toBe(200);
+    expect((await api(`/api/projects/${project.id}/ssh/hosts/${added.id}`, { method: "PATCH", token: other, body: JSON.stringify({ rule: "ask" }) })).status).toBe(403);
+    expect((await ssh("prod-web", "uptime")).result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("turned off") }] });
+    runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+    await until(async () => (await projectAgent.getThread(thread.id))?.status === "review_ready", "idle");
+    runnerSide.ws.close();
+  });
+});

@@ -70,6 +70,12 @@ import type {
   Routine,
   UpdateRoutineInputRaw,
   UsageSummary,
+  CreateSshHostInput,
+  SshHost,
+  SshHostKey,
+  SshLocalKey,
+  SshSettings,
+  SshRule,
 } from "@myrel/protocol";
 import type { TokenStore } from "./token-store";
 
@@ -798,6 +804,47 @@ export class ApiClient {
   }
 
   /** Every local folder of the project, one per computer, the default first. */
+  /** The project's SSH servers and the history of their commands. */
+  getSsh(projectId: string) {
+    return this.request<SshSettings>(`${projectPath(projectId)}/ssh`);
+  }
+
+  /** The keys in ~/.ssh on one of your computers, by name and fingerprint. */
+  async listSshKeys(projectId: string, runnerId: string) {
+    return (await this.request<{ keys: SshLocalKey[] }>(`${projectPath(projectId)}/ssh/keys?runnerId=${encodeURIComponent(runnerId)}`)).keys;
+  }
+
+  /** Adds a server; the computer makes its key (or takes `existingKey`) and only the public half comes back. */
+  createSshHost(projectId: string, input: CreateSshHostInput) {
+    return this.request<{ host: SshHost; protected: boolean }>(`${projectPath(projectId)}/ssh/hosts`, { method: "POST", body: input });
+  }
+
+  /** The server's own keys, fetched from the computer, to compare by fingerprint. */
+  async scanSshHost(projectId: string, hostId: string) {
+    return (await this.request<{ keys: SshHostKey[] }>(`${this.sshHostPath(projectId, hostId)}/scan`, { method: "POST" })).keys;
+  }
+
+  /** Keeps the server key the person confirmed and tries a login. */
+  trustSshHost(projectId: string, hostId: string, hostKey: string) {
+    return this.request<SshTestResult>(`${this.sshHostPath(projectId, hostId)}/trust`, { method: "POST", body: { hostKey } });
+  }
+
+  testSshHost(projectId: string, hostId: string) {
+    return this.request<SshTestResult>(`${this.sshHostPath(projectId, hostId)}/test`, { method: "POST" });
+  }
+
+  async updateSshHost(projectId: string, hostId: string, rule: SshRule) {
+    return (await this.request<{ host: SshHost }>(this.sshHostPath(projectId, hostId), { method: "PATCH", body: { rule } })).host;
+  }
+
+  deleteSshHost(projectId: string, hostId: string) {
+    return this.request<{ ok: true; keyDeleted: boolean }>(this.sshHostPath(projectId, hostId), { method: "DELETE" });
+  }
+
+  private sshHostPath(projectId: string, hostId: string) {
+    return `${projectPath(projectId)}/ssh/hosts/${encodeURIComponent(hostId)}`;
+  }
+
   async getWorkspaces(projectId: string) {
     return (
       await this.request<{ workspaces?: ProjectWorkspace[] }>(`/api/projects/${encodeURIComponent(projectId)}/workspace`)
@@ -953,3 +1000,6 @@ export class ApiClient {
 function projectPath(id: string) {
   return `/api/projects/${encodeURIComponent(id)}`;
 }
+
+/** How a connection test went. error: why ssh failed (see SshResult), detail: its last lines. */
+export type SshTestResult = { ok: boolean; error: string | null; detail: string; host: SshHost };

@@ -10,6 +10,7 @@ import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, ty
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { GitCredentials } from "./github";
 import { downloadSkills, type RunSkills } from "./skills";
+import { installShim } from "./ssh-shim";
 import { threadWorktree, type Worktree } from "./worktrees";
 
 type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
@@ -143,7 +144,15 @@ export class TaskRunner {
     // A session that cannot be resumed (deleted, or from another CLI version) fails before any
     // output: the turn then starts a new session with the whole thread.
     // Git clones and pushes the project's repositories with the turn's GitHub token, lent only for this run.
-    const env = task.github ? { ...agent.env, ...(await this.git.lend(task.taskId, task.github)) } : agent.env;
+    let env = task.github ? { ...agent.env, ...(await this.git.lend(task.taskId, task.github)) } : agent.env;
+    // The agent's ssh goes through Myrel's ssh_run (a card, the project's servers, Myrel's keys).
+    if (task.agent && agentDir && config.server) {
+      const shim = await installShim(agentDir, { url: `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`, token: task.agent.token }).catch((err: unknown) => {
+        log(`  could not put Myrel's ssh on PATH: ${errorLine(err)}`);
+        return {};
+      });
+      env = { ...env, ...shim };
+    }
     try {
       // Codex runs as its app server where it has one, which can ask the person about a step.
       const appServer = adapter.appServer && (await hasAppServer(adapter.bin)) ? { ...adapter.appServer({ access: config.access, dirs, asks: !!ask }), ask } : undefined;

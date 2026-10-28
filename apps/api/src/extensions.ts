@@ -36,6 +36,8 @@ export type Extensions = {
   canAddConnector?: (env: Env, owner: { userId: string } | { projectId: string }) => Promise<LimitCheck>;
   /** Before a project file is stored: `bytes` would make the project's files take `total` bytes. */
   canStoreFile?: (env: Env, projectId: string, total: number) => Promise<LimitCheck>;
+  /** Before a person sets up an SSH server on one of their computers, for any project. */
+  canAddSshHost?: (env: Env, userId: string) => Promise<LimitCheck>;
   /** Before a skill is added: a person's own, or a project's. */
   canAddSkill?: (env: Env, owner: { userId: string } | { projectId: string }) => Promise<LimitCheck>;
 };
@@ -78,6 +80,10 @@ export function legalLinks(env: Env, origin: string): LegalLinks | null {
 
 export async function canAddConnector(env: Env, owner: { userId: string } | { projectId: string }): Promise<LimitCheck> {
   return current.canAddConnector ? current.canAddConnector(env, owner) : ALLOWED;
+}
+
+export async function canAddSshHost(env: Env, userId: string): Promise<LimitCheck> {
+  return current.canAddSshHost ? current.canAddSshHost(env, userId) : ALLOWED;
 }
 
 export async function canAddSkill(env: Env, owner: { userId: string } | { projectId: string }): Promise<LimitCheck> {

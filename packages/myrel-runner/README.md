@@ -188,6 +188,23 @@ above). Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code and Kimi 
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
 
+### SSH servers
+
+A project can list servers its agents may reach over SSH (Project settings > SSH). The key for each is made on this
+computer by the runner (`ssh-keygen -t ed25519`) and kept in `~/.myrel-runner/ssh/<project>/<name>` (mode 600); its
+passphrase goes in the OS keychain (macOS Keychain, Secret Service with `secret-tool` on Linux) where there is one,
+and the key has none otherwise. You can pick a key of your own from `~/.ssh` instead (one without a passphrase).
+Myrel only ever gets the public half. The server's own key, confirmed by you by its fingerprint, is kept in
+`~/.myrel-runner/ssh/known_hosts` and checked strictly on every connection.
+
+An agent asks for one command at a time with Myrel's `ssh_run` tool; `ssh <name> <command>` in its shell does the same,
+through an `ssh` (and `scp`, `sftp`) the runner puts first on the run's PATH. Each command is put to you, the
+computer's owner, on a card in the thread (Run it, Allow this server this turn, Don't run); a command that looks
+destructive gets a red card and is never covered by the turn's allow. The runner then runs it with `ssh -F none`,
+Myrel's key and known_hosts only, no agent forwarding or port forwarding, for at most 5 minutes and 200 KB of output.
+Interactive sessions and file copies are refused. git's own SSH (`git-upload-pack` and the like) goes to the real
+`ssh` as before.
+
 ### Your CLI as the thread's agent
 
 When a project works in one of your folders, your CLI does not just run tasks: it is the thread's agent. Each turn of

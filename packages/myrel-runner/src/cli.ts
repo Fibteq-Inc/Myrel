@@ -9,6 +9,7 @@ import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFo
 import { checkPairing, pair, RESTART_EXIT_CODE, RUNNER_VERSION, startRunner } from "./runner";
 import { settingsOf } from "./self-update";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
+import { runShim } from "./ssh-shim";
 import { readRunning } from "./restart";
 import { isNewer, latestVersion, runVersion } from "./update";
 import { listWorktrees, pruneWorktrees, removeWorktree, worktreeState } from "./worktrees";
@@ -57,6 +58,11 @@ MYREL_RUNNER_HOME moves the config folder (default ~/.myrel-runner).
 `;
 
 async function main(argv: string[]) {
+  // Started by an agent run's ssh, scp or sftp (see ssh-shim.ts), with ssh's own flags. Not for people.
+  if (argv[0] === "ssh-shim") {
+    process.exitCode = await runShim(argv[1], argv.slice(2));
+    return;
+  }
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
