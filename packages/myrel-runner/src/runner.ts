@@ -21,7 +21,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.26.1";
+export const RUNNER_VERSION = "0.27.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;

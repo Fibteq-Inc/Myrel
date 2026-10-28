@@ -277,13 +277,39 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     }
   });
 
+  it("asks about SSH even with full access and never lets Claude Code read SSH keys", async () => {
+    const claude = await ADAPTERS.claude.agent({ ...mcp(), asks: true, access: "full" });
+    const allowed = claude.args[claude.args.indexOf("--allowedTools") + 1];
+    expect(allowed).toBe("mcp__myrel,Bash,WebFetch,WebSearch");
+    expect(claude.args[claude.args.indexOf("--disallowedTools") + 1]).toBe("Bash(gh pr create:*)");
+    const settings = JSON.parse(await readFile(claude.args[claude.args.indexOf("--settings") + 1]!, "utf8"));
+    expect(settings.permissions.ask).toEqual(["Bash(ssh:*)", "Bash(scp:*)", "Bash(sftp:*)", "Bash(rsync:*)"]);
+    expect(settings.permissions.deny).toEqual([
+      "Read(~/.ssh/**)",
+      "Edit(~/.ssh/**)",
+      "Read(~/.myrel-runner/ssh/**)",
+      "Edit(~/.myrel-runner/ssh/**)",
+    ]);
+
+    // Without Myrel to ask (bypassing permissions), SSH is refused outright.
+    const bypass = await ADAPTERS.claude.agent({ ...mcp(), access: "full" });
+    expect(bypass.args[bypass.args.indexOf("--disallowedTools") + 1]).toContain("Bash(ssh:*)");
+    const plain = JSON.parse(await readFile(bypass.args[bypass.args.indexOf("--settings") + 1]!, "utf8"));
+    expect(plain.permissions.ask).toBeUndefined();
+  });
+
   it("adds the thread's connectors and allows their tools", async () => {
     const connectors = [
       { transport: "http" as const, name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
       { transport: "stdio" as const, name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } },
     ];
     const claude = await ADAPTERS.claude.agent({ ...mcp(), connectors });
-    expect(claude.args.slice(-4)).toEqual(["--allowedTools", "mcp__myrel,mcp__linear,mcp__db", "--disallowedTools", "Bash(gh pr create:*)"]);
+    expect(claude.args.slice(-6, -2)).toEqual([
+      "--allowedTools",
+      "mcp__myrel,mcp__linear,mcp__db",
+      "--disallowedTools",
+      "Bash(gh pr create:*),Bash(ssh:*),Bash(scp:*),Bash(sftp:*),Bash(rsync:*)",
+    ]);
     const config = JSON.parse(await readFile(claude.args[1]!, "utf8"));
     expect(config.mcpServers.linear).toEqual({ type: "http", url: connectors[0]!.url, headers: { Authorization: `Bearer ${"t".repeat(32)}` } });
     expect(config.mcpServers.db).toEqual({ type: "stdio", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } });

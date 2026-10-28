@@ -251,6 +251,11 @@ async function privateFile(dir: string, name: string, content: unknown): Promise
   return process.platform === "win32" ? `"${path}"` : path;
 }
 
+/** Commands that open a connection to another computer over SSH. */
+const SSH_COMMANDS = ["ssh", "scp", "sftp", "rsync"].map((c) => `Bash(${c}:*)`);
+/** The person's SSH keys and the ones Myrel keeps for its SSH servers. */
+const SSH_KEY_READS = ["~/.ssh/**", "~/.myrel-runner/ssh/**"].flatMap((p) => [`Read(${p})`, `Edit(${p})`]);
+
 const claude: CliAdapter = {
   id: "claude",
   bin: "claude",
@@ -283,6 +288,11 @@ const claude: CliAdapter = {
     const allowed = [MYREL_MCP_SERVER, ...connectors.map((c) => c.name)].map((name) => `mcp__${name}`);
     // Full access: commands and the web need no question; only files outside the folders do.
     if (asks && access === "full") allowed.push("Bash", "WebFetch", "WebSearch");
+    // SSH reaches other computers, so even full access asks about it, and bypassing permissions (no
+    // way to ask) refuses it. Ask rules win over --allowedTools. The keys themselves are never read.
+    const settings = await privateFile(dir, "settings.json", {
+      permissions: { ...(asks && { ask: SSH_COMMANDS }), deny: SSH_KEY_READS },
+    });
     // The skills come as a plugin (myrel:<name>); their folder may be read without asking.
     const skillArgs = skills ? ["--plugin-dir", quotePath(skills.plugin), "--add-dir", quotePath(skills.dir)] : [];
     return {
@@ -296,7 +306,9 @@ const claude: CliAdapter = {
         "--allowedTools",
         allowed.join(","),
         "--disallowedTools",
-        "Bash(gh pr create:*)",
+        ["Bash(gh pr create:*)", ...(asks ? [] : SSH_COMMANDS)].join(","),
+        "--settings",
+        settings,
         ...skillArgs,
       ],
       env: {
