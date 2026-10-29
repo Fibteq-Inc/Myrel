@@ -383,7 +383,7 @@ export class TaskRunner {
         }
         const result =
           state.result ??
-          (ok ? stdout.trim() : `${adapter.bin} exited with ${signal ?? `code ${code}`}.\n${state.error ?? (stderr.trim() || stdout.trim())}`);
+          (ok ? stdout.trim() : exitMessage(adapter.bin, code, signal, state.error ?? (stderr.trim() || stdout.trim())));
         finish(ok, result || "(no output)");
       });
     });
@@ -431,3 +431,15 @@ export async function sharedFolder(config: RunnerConfig, requested: string): Pro
 
 const errorLine = (err: unknown) =>
   ((err as { stderr?: string }).stderr || (err as Error).message || String(err)).trim().split("\n").at(-1);
+
+/**
+ * Why a CLI failed, for the thread. A SIGKILL nobody here sent (Stop and shutdown are handled before
+ * this) is nearly always the kernel's out-of-memory killer, so it says so instead of dumping the
+ * CLI's first output lines.
+ */
+export function exitMessage(bin: string, code: number | null, signal: NodeJS.Signals | null, detail: string): string {
+  if (signal === "SIGKILL") {
+    return `${bin} was killed (SIGKILL), most likely because this computer ran out of memory. Stop programs it does not need (dev servers left running, say) or add swap, then send the message again.`;
+  }
+  return `${bin} exited with ${signal ?? `code ${code}`}.\n${detail}`;
+}
