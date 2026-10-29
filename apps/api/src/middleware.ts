@@ -1,4 +1,5 @@
 import type { InstanceRole } from "@myrel/protocol";
+import { APIError } from "better-auth/api";
 import { createMiddleware } from "hono/factory";
 import { createAuth } from "./auth";
 import { isListedAdmin } from "./instance";
@@ -20,10 +21,11 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const token = c.req.header("upgrade")?.toLowerCase() === "websocket" ? c.req.query("token") : undefined;
   if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
 
-  let session = await createAuth(c.env).api.getSession({ headers });
   // A session made a moment ago may not have reached the replica this request reads from yet.
+  const primary = c.env.DB_PRIMARY ? { ...c.env, DB: c.env.DB_PRIMARY } : c.env;
+  let session = await findSession(c.env, headers).catch(() => findSession(primary, headers));
   const signedIn = headers.has("authorization") || headers.has("cookie");
-  if (!session && signedIn && c.env.DB_PRIMARY) session = await createAuth({ ...c.env, DB: c.env.DB_PRIMARY }).api.getSession({ headers });
+  if (!session && signedIn && c.env.DB_PRIMARY) session = await findSession(primary, headers);
   if (!session) return c.json({ error: "unauthorized" }, 401);
 
   const { id, name, email, role, emailVerified } = session.user;
@@ -32,6 +34,21 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   c.set("session", { id: session.session.id, expiresAt: new Date(session.session.expiresAt).getTime() });
   await next();
 });
+
+/**
+ * Better Auth's getSession, with a session it gave up on counted as none: it throws a 401
+ * "Failed to get session" when the session vanished while being refreshed (signed out elsewhere,
+ * or the replica still had a row the primary had dropped), which would otherwise surface as a 500.
+ * Anything else (a database hiccup, the same message with a 500) still throws, for the caller to retry.
+ */
+async function findSession(env: Env, headers: Headers) {
+  try {
+    return await createAuth(env).api.getSession({ headers });
+  } catch (err) {
+    if (err instanceof APIError && err.statusCode === 401) return null;
+    throw err;
+  }
+}
 
 /** For server administration routes; runs after requireUser. */
 export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
