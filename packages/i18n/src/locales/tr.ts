@@ -1268,6 +1268,9 @@ export const tr: Catalog = {
   "routines.everyWeekday": "Her {day} {time}",
   "routines.everyHour": "Her saat",
   "routines.cronSchedule": "Cron {cron}",
+  "routines.archive": { one: "Arşiv · 1 tamamlanan", other: "Arşiv · {count} tamamlanan" },
+  "routines.archiveHint": "Çalışmış bir kerelik rutinler burada toplanır. Yeni bir zaman vererek düzenlersen geri gelir.",
+  "routines.noActive": "Çalışmayı bekleyen rutin yok.",
 
   // Connectors (MCP servers)
   "connectors.title": "Bağlayıcıların",

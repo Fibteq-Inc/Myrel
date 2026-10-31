@@ -1,13 +1,13 @@
 import type { Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import type { Routine, RoutineScheduleInput, Thread, UpdateRoutineInputRaw } from "@myrel/protocol";
-import { nextCronRun } from "@myrel/protocol";
-import { AlarmClock, Pause, Pencil, Play, Plus, Trash2, X, Zap } from "lucide-react";
+import { nextCronRun, routineFinished } from "@myrel/protocol";
+import { AlarmClock, ChevronDown, Pause, Pencil, Play, Plus, Trash2, X, Zap } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { useFormat } from "../lib/format";
-import { Button, errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
+import { Button, cn, errorMessage, GhostButton, IconButton, Input } from "../lib/ui";
 import { useConfirm } from "./ui/confirm";
 import { ThreadPicker } from "./thread-picker";
 import { Select } from "./ui/controls";
@@ -35,7 +35,10 @@ export function RoutinesButton({ onClick, count, className }: { onClick: () => v
   );
 }
 
-/** Lists, creates, edits, pauses, runs and deletes a project's routines. Live state comes from the project socket. */
+/**
+ * Lists, creates, edits, pauses, runs and deletes a project's routines. Live state comes from the project
+ * socket. One-off routines that have run are archived: kept out of the main list, under a fold at the end.
+ */
 export function RoutinesPanel({
   projectId,
   routines,
@@ -49,9 +52,12 @@ export function RoutinesPanel({
 }) {
   const t = useT();
   const format = useFormat();
-  const [creating, setCreating] = useState(routines.length === 0);
+  const active = routines.filter((r) => !routineFinished(r));
+  const archived = routines.filter(routineFinished);
+  const [creating, setCreating] = useState(active.length === 0);
   // The routine whose card is open as an edit form, in place of its card.
   const [editing, setEditing] = useState<string | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titles = useMemo(() => Object.fromEntries(threads.map((t) => [t.id, t.title])), [threads]);
 
@@ -64,6 +70,94 @@ export function RoutinesPanel({
     } catch (err) {
       setError(errorMessage(err, t));
     }
+  }
+
+  /** A routine's card, or its edit form while it is being edited. Archived cards cannot be paused. */
+  function card(r: Routine, finished = false) {
+    if (editing === r.id) {
+      return (
+        <li key={r.id}>
+          <RoutineForm
+            routine={r}
+            threads={threads}
+            className="space-y-3 rounded-xl border border-edge bg-ground p-4"
+            onCancel={() => setEditing(null)}
+            onSave={async (_, patch) => {
+              if (Object.keys(patch).length) await api.updateRoutine(projectId, r.id, patch);
+              setEditing(null);
+            }}
+          />
+        </li>
+      );
+    }
+    return (
+      <li key={r.id} className="rounded-xl border border-line bg-raised p-3.5">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className={`truncate text-[13px] font-medium ${r.paused || finished ? "text-muted" : "text-fg"}`}>{r.name}</p>
+            <p className="mt-0.5 text-xs text-subtle">
+              {describeSchedule(r, t, format)} ·{" "}
+              {r.target.kind === "thread"
+                ? t("routines.inThread", { title: titles[r.target.threadId] ?? t("routines.aThread") })
+                : t("routines.inChat")}
+            </p>
+          </div>
+          <IconButton
+            type="button"
+            className="size-7"
+            title={t("routines.edit")}
+            aria-label={`${t("routines.edit")}: ${r.name}`}
+            onClick={() => {
+              setCreating(false);
+              setEditing(r.id);
+            }}
+          >
+            <Pencil size={14} />
+          </IconButton>
+          <IconButton
+            type="button"
+            className="size-7"
+            title={t("routines.runNow")}
+            aria-label={`${t("routines.runNow")}: ${r.name}`}
+            onClick={() => act(() => api.runRoutine(projectId, r.id))}
+          >
+            <Zap size={14} />
+          </IconButton>
+          {!finished && (
+            <IconButton
+              type="button"
+              className="size-7"
+              title={r.paused ? t("routines.resume") : t("routines.pause")}
+              aria-label={`${r.paused ? t("routines.resume") : t("routines.pause")}: ${r.name}`}
+              onClick={() => act(() => api.updateRoutine(projectId, r.id, { paused: !r.paused }))}
+            >
+              {r.paused ? <Play size={14} /> : <Pause size={14} />}
+            </IconButton>
+          )}
+          <IconButton
+            type="button"
+            className="size-7 hover:text-bad"
+            title={t("routines.delete")}
+            aria-label={`${t("routines.delete")}: ${r.name}`}
+            onClick={async () => {
+              const ok = await confirm({ title: t("routines.confirmDelete", { name: r.name }), action: t("routines.delete"), danger: true });
+              if (ok) await act(() => api.deleteRoutine(projectId, r.id));
+            }}
+          >
+            <Trash2 size={14} />
+          </IconButton>
+        </div>
+        <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-muted">{r.prompt}</p>
+        <p className="mt-2 text-[11px] text-subtle">
+          {r.paused
+            ? t("routines.paused")
+            : r.nextRunAt
+              ? t("routines.nextRun", { date: format.dateTime(r.nextRunAt), relative: format.relative(r.nextRunAt) })
+              : t("routines.finished")}
+          {r.lastRunAt && ` · ${t("routines.lastRan", { relative: format.relative(r.lastRunAt) })}`}
+        </p>
+      </li>
+    );
   }
 
   // A portal, so no transformed ancestor can trap the fixed overlay inside it.
@@ -107,91 +201,29 @@ export function RoutinesPanel({
             />
           )}
           {error && <p className="px-4 pt-3 text-xs text-bad">{error}</p>}
+          {!creating && active.length === 0 && <p className="px-4 pt-3 text-xs text-subtle">{t("routines.noActive")}</p>}
           <ul className="space-y-2 p-4">
-            {routines.map((r) =>
-              editing === r.id ? (
-                <li key={r.id}>
-                  <RoutineForm
-                    routine={r}
-                    threads={threads}
-                    className="space-y-3 rounded-xl border border-edge bg-ground p-4"
-                    onCancel={() => setEditing(null)}
-                    onSave={async (_, patch) => {
-                      if (Object.keys(patch).length) await api.updateRoutine(projectId, r.id, patch);
-                      setEditing(null);
-                    }}
-                  />
-                </li>
-              ) : (
-              <li key={r.id} className="rounded-xl border border-line bg-raised p-3.5">
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className={`truncate text-[13px] font-medium ${r.paused ? "text-muted" : "text-fg"}`}>
-                      {r.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-subtle">
-                      {describeSchedule(r, t, format)} ·{" "}
-                      {r.target.kind === "thread"
-                        ? t("routines.inThread", { title: titles[r.target.threadId] ?? t("routines.aThread") })
-                        : t("routines.inChat")}
-                    </p>
-                  </div>
-                  <IconButton
-                    type="button"
-                    className="size-7"
-                    title={t("routines.edit")}
-                    aria-label={`${t("routines.edit")}: ${r.name}`}
-                    onClick={() => {
-                      setCreating(false);
-                      setEditing(r.id);
-                    }}
-                  >
-                    <Pencil size={14} />
-                  </IconButton>
-                  <IconButton
-                    type="button"
-                    className="size-7"
-                    title={t("routines.runNow")}
-                    aria-label={`${t("routines.runNow")}: ${r.name}`}
-                    onClick={() => act(() => api.runRoutine(projectId, r.id))}
-                  >
-                    <Zap size={14} />
-                  </IconButton>
-                  <IconButton
-                    type="button"
-                    className="size-7"
-                    title={r.paused ? t("routines.resume") : t("routines.pause")}
-                    aria-label={`${r.paused ? t("routines.resume") : t("routines.pause")}: ${r.name}`}
-                    onClick={() => act(() => api.updateRoutine(projectId, r.id, { paused: !r.paused }))}
-                  >
-                    {r.paused ? <Play size={14} /> : <Pause size={14} />}
-                  </IconButton>
-                  <IconButton
-                    type="button"
-                    className="size-7 hover:text-bad"
-                    title={t("routines.delete")}
-                    aria-label={`${t("routines.delete")}: ${r.name}`}
-                    onClick={async () => {
-                      const ok = await confirm({ title: t("routines.confirmDelete", { name: r.name }), action: t("routines.delete"), danger: true });
-                      if (ok) await act(() => api.deleteRoutine(projectId, r.id));
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </IconButton>
-                </div>
-                <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-muted">{r.prompt}</p>
-                <p className="mt-2 text-[11px] text-subtle">
-                  {r.paused
-                    ? t("routines.paused")
-                    : r.nextRunAt
-                      ? t("routines.nextRun", { date: format.dateTime(r.nextRunAt), relative: format.relative(r.nextRunAt) })
-                      : t("routines.finished")}
-                  {r.lastRunAt && ` · ${t("routines.lastRan", { relative: format.relative(r.lastRunAt) })}`}
-                </p>
-              </li>
-              ),
-            )}
+            {active.map((r) => card(r))}
           </ul>
+          {archived.length > 0 && (
+            <section className="border-t border-line px-4 pb-4" aria-label={t("routines.archive", { count: archived.length })}>
+              <button
+                type="button"
+                aria-expanded={archiveOpen}
+                onClick={() => setArchiveOpen((o) => !o)}
+                className="flex h-10 w-full items-center gap-1.5 text-xs text-muted hover:text-fg"
+              >
+                <ChevronDown size={14} className={cn("transition-transform", !archiveOpen && "-rotate-90")} aria-hidden="true" />
+                {t("routines.archive", { count: archived.length })}
+              </button>
+              {archiveOpen && (
+                <>
+                  <p className="pb-3 text-xs text-subtle">{t("routines.archiveHint")}</p>
+                  <ul className="space-y-2">{archived.map((r) => card(r, true))}</ul>
+                </>
+              )}
+            </section>
+          )}
         </div>
       </aside>
     </div>,

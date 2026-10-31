@@ -1,6 +1,6 @@
 import { type SocketStatus, workingCount } from "@myrel/client";
 import type { MessageKey, Translate } from "@myrel/i18n";
-import type { ProjectColor, ProjectIcon } from "@myrel/protocol";
+import { type ProjectColor, type ProjectIcon, routineFinished } from "@myrel/protocol";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -38,6 +38,8 @@ export function ProjectHeader() {
   const openSettings = useOpenProjectSettings();
   const tabs = useRef<HTMLDivElement>(null);
   const routines = Object.values(state.routines);
+  // Finished one-off routines sit in the panel's archive, so the badge counts the ones still armed or paused.
+  const activeRoutines = routines.filter((r) => !routineFinished(r)).length;
   const [routinesOpen, setRoutinesOpen] = useState(false);
   const counts: Partial<Record<ProjectView, number>> = {
     threads: Object.values(state.threads).filter((th) => !th.resolved).length,
@@ -131,7 +133,7 @@ export function ProjectHeader() {
         </div>
         <RoutinesButton
           onClick={() => setRoutinesOpen(true)}
-          count={routines.length}
+          count={activeRoutines}
           className="flex size-9 flex-none items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-fg"
         />
         <IconButton

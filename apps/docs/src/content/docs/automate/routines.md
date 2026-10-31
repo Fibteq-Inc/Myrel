@@ -28,7 +28,7 @@ Myrel can also schedule a later check inside a thread, for example "look again i
 
 ## Manage routines
 
-Each routine in the list shows when it runs next and when it last ran.
+Each routine in the list shows when it runs next and when it last ran. A routine that runs **Once** leaves the list after its time: it moves to the **Archive** fold at the end of the panel, where you can still delete it or edit it with a new time to bring it back. The count on the alarm clock icon covers only the routines still waiting to run or paused.
 
 | Action | What it does |
 |---|---|
