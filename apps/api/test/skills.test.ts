@@ -2,7 +2,7 @@ import { formatSkillMd, parseSkillMd, type Skill, type SkillDetail } from "@myre
 import { env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { parseGithubSource, readTar } from "../src/skills/github";
+import { importFromGithub, parseGithubSource, readTar } from "../src/skills/github";
 import { checkSkillFiles, tameSkillMd, turnSkills } from "../src/skills/store";
 
 const BASE = "http://myrel.test";
@@ -166,6 +166,24 @@ describe("GitHub sources", () => {
     expect(parseGithubSource("https://skills.sh/acme/skills/pdf-forms")).toEqual({ owner: "acme", repo: "skills", path: "", skill: "pdf-forms" });
     expect(parseGithubSource("https://gitlab.com/acme/skills")).toBeNull();
     expect(parseGithubSource("acme")).toBeNull();
+  });
+
+  it("finds the skill in a repository too large to hold whole, then downloads its folder alone", async () => {
+    moved = false;
+    // A skills.sh link names no folder, so the whole repository is searched: past the limit only
+    // SKILL.md files are kept, and the skill named is downloaded again on its own.
+    const named = await importFromGithub(parseGithubSource("https://skills.sh/acme/skills/pdf-forms")!, fetch, 200);
+    expect(named).toMatchObject({ ok: true, commit: COMMIT_1 });
+    expect(named.ok && named.skills.map((s) => [s.name, [...s.files.keys()]])).toEqual([["pdf-forms", ["SKILL.md", "scripts/fill.py"]]]);
+    // Several skills and none named: they come back without files, to choose from.
+    const all = await importFromGithub(parseGithubSource("acme/skills")!, fetch, 200);
+    expect(all.ok && all.skills.map((s) => [s.name, s.path, s.files.size]).sort()).toEqual([
+      ["brand", "skills/brand", 0],
+      ["pdf-forms", "skills/pdf-forms", 0],
+    ]);
+    // One skill whose own folder does not fit either.
+    const big = await importFromGithub(parseGithubSource("acme/skills/skills/brand")!, fetch, 10);
+    expect(big).toMatchObject({ ok: false, status: 413 });
   });
 
   it("reads tar archives with long names", async () => {
