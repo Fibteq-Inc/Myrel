@@ -49,7 +49,11 @@ export type GithubImport =
   | { ok: true; commit: string; skills: FoundSkill[] }
   | { ok: false; status: 400 | 404 | 413 | 502; error: string };
 
-/** Files kept from one download at most, so a large repository cannot exhaust the Worker. */
+/**
+ * Files kept from one download at most, so a large repository cannot exhaust the Worker. Past it,
+ * the download goes on only to find where the skills are (indexing), and the one wanted is
+ * downloaded again on its own.
+ */
 const MAX_KEPT_BYTES = 24 * 1024 * 1024;
 /** Folders never searched for skills. */
 const SKIP = /(^|\/)(node_modules|\.git)(\/|$)/;
@@ -58,35 +62,70 @@ const SKIP = /(^|\/)(node_modules|\.git)(\/|$)/;
  * Downloads a public repository at one commit and finds the skills in it (every folder with a
  * SKILL.md, under `source.path` when given). The commit is pinned, so the same skill comes back
  * until someone updates it.
+ *
+ * A repository too large to hold whole (a skills.sh link names no folder, so the whole repository
+ * is searched) is read once for its SKILL.md files only; the skill asked for, or the only one, is
+ * then downloaded again on its own. With several and none asked for, the skills come back without
+ * files, enough to choose one.
  */
-export async function importFromGithub(source: GithubSource, fetcher: typeof fetch = fetch): Promise<GithubImport> {
+export async function importFromGithub(source: GithubSource, fetcher: typeof fetch = fetch, maxKeptBytes = MAX_KEPT_BYTES): Promise<GithubImport> {
   const commit = await resolveCommit(source, fetcher);
   if (!commit.ok) return commit;
-  const res = await fetcher(`https://codeload.github.com/${source.owner}/${source.repo}/tar.gz/${commit.sha}`);
+  const whole = await download(source, commit.sha, fetcher, maxKeptBytes);
+  if (!whole.ok || !whole.indexed) return whole;
+  const wanted = pickSkill(whole.skills, source.skill);
+  if (!wanted) return { ok: true, commit: commit.sha, skills: whole.skills };
+  const own = await download({ ...source, path: wanted.path }, commit.sha, fetcher, maxKeptBytes);
+  if (!own.ok) return own;
+  if (own.indexed) {
+    return { ok: false, status: 413, error: `The folder ${wanted.path || "/"} is too large for a skill (a skill is at most ${SKILL_LIMITS.bytes / 1024 / 1024} MB).` };
+  }
+  return own;
+}
+
+type Downloaded = (GithubImport & { ok: true; indexed: boolean }) | (GithubImport & { ok: false });
+
+/** One download of the repository at `sha`, keeping the files under `source.path`; see importFromGithub. */
+async function download(source: GithubSource, sha: string, fetcher: typeof fetch, maxKeptBytes: number): Promise<Downloaded> {
+  const res = await fetcher(`https://codeload.github.com/${source.owner}/${source.repo}/tar.gz/${sha}`);
   if (!res.ok || !res.body) {
     return { ok: false, status: res.status === 404 ? 404 : 502, error: `Could not download ${source.owner}/${source.repo} (${res.status}).` };
   }
   const prefix = source.path ? `${source.path.replace(/^\/+|\/+$/g, "")}/` : "";
+  const isSkillMd = (path: string) => path === "SKILL.md" || path.endsWith("/SKILL.md");
   const kept = new Map<string, Uint8Array>();
   let keptBytes = 0;
+  // Once the files would not fit, only SKILL.md files are kept: enough to know where the skills are.
+  let indexed = false;
   try {
     for await (const entry of readTar(res.body.pipeThrough(new DecompressionStream("gzip")))) {
       // Every path starts with the archive's top folder (<repo>-<commit>/).
       const path = entry.path.slice(entry.path.indexOf("/") + 1);
-      if (!path || !path.startsWith(prefix) || SKIP.test(path) || entry.size > SKILL_LIMITS.fileBytes) {
+      if (!path || !path.startsWith(prefix) || SKIP.test(path) || entry.size > SKILL_LIMITS.fileBytes || (indexed && !isSkillMd(path))) {
         await entry.skip();
         continue;
       }
       keptBytes += entry.size;
-      if (keptBytes > MAX_KEPT_BYTES) {
-        return { ok: false, status: 413, error: "That repository is too large to search. Link the skill's own folder instead." };
+      if (keptBytes > maxKeptBytes) {
+        if (indexed) return { ok: false, status: 413, error: "That repository has too many skills to search. Link the skill's own folder instead." };
+        indexed = true;
+        for (const [p, bytes] of kept) {
+          if (isSkillMd(p)) continue;
+          kept.delete(p);
+          keptBytes -= bytes.length;
+        }
+        if (!isSkillMd(path)) {
+          keptBytes -= entry.size;
+          await entry.skip();
+          continue;
+        }
       }
       kept.set(path, await entry.bytes());
     }
   } catch (err) {
     return { ok: false, status: 502, error: `Could not read ${source.owner}/${source.repo}: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const dirs = [...kept.keys()].filter((p) => p === "SKILL.md" || p.endsWith("/SKILL.md")).map((p) => p.slice(0, -"SKILL.md".length).replace(/\/$/, ""));
+  const dirs = [...kept.keys()].filter(isSkillMd).map((p) => p.slice(0, -"SKILL.md".length).replace(/\/$/, ""));
   const skills: FoundSkill[] = dirs.map((dir) => {
     const front = parseSkillMd(new TextDecoder().decode(kept.get(dir ? `${dir}/SKILL.md` : "SKILL.md")));
     const within = dir ? `${dir}/` : "";
@@ -94,7 +133,7 @@ export async function importFromGithub(source: GithubSource, fetcher: typeof fet
     const nested = dirs.filter((d) => d !== dir && d.startsWith(within));
     const files: SkillFiles = new Map();
     for (const [path, bytes] of kept) {
-      if (!path.startsWith(within) || nested.some((d) => path.startsWith(`${d}/`))) continue;
+      if (indexed || !path.startsWith(within) || nested.some((d) => path.startsWith(`${d}/`))) continue;
       files.set(path.slice(within.length), bytes);
     }
     const folder = dir.split("/").pop() || source.repo;
@@ -103,7 +142,7 @@ export async function importFromGithub(source: GithubSource, fetcher: typeof fet
   if (!skills.length) {
     return { ok: false, status: 404, error: `No SKILL.md found in ${source.owner}/${source.repo}${source.path ? `/${source.path}` : ""}.` };
   }
-  return { ok: true, commit: commit.sha, skills };
+  return { ok: true, commit: sha, skills, indexed };
 }
 
 /** Picks the skill asked for among those found: by name or folder name, or the only one. */
