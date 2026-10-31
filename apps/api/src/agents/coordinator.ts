@@ -18,6 +18,7 @@ import { KNOWLEDGE_GUIDE, type KnowledgeHost, type KnowledgeSnapshot, knowledgeT
 import { authorLabel, renderMessage, renderThread } from "./render";
 import { GOAL_GUIDE, GOAL_MAX_IDLE, type Goal, renderGoal } from "./goal";
 import { renderRoutine, ROUTINE_GUIDE } from "./routine-tools";
+import { COORDINATOR_ID } from "./names";
 
 /** Something the coordinator has not seen yet. */
 export type InboxItem =
@@ -80,6 +81,11 @@ function interruptText(outcome: InterruptOutcome | void): string {
 /** The project operations the coordinator's tools act through. */
 export type CoordinatorHost = {
   getMessage(id: string): Message | null;
+  /**
+   * The CLIs the ask behind a thread's root message offered: a person's message its own; a post of
+   * yours from this turn (splitting a person's ask into several threads) that ask's; else none.
+   */
+  offeredClis(root: Message): string[];
   getThread(id: string): Thread | null;
   threadForRoot(messageId: string): Thread | null;
   /** relay: the note this line announces, which people can open under it. */
@@ -136,7 +142,7 @@ For each new message in the project chat:
 
 Emoji: a reaction is a full answer when words would add nothing. Pick it by the situation: 👀 seen (an edit, an FYI), 👍 ok or agreed, 🙏 thanks, ✅ confirms something is done, 🎉 good news. One reaction per message is enough.
 
-Picking a CLI: a person can offer CLIs from their computer with their ask, shown under the message. When it offers several, start_thread needs cli (one of them) and cli_reason: one short sentence in the person's language saying why, which people see in the thread. Pick the one that suits the work and can work right now: skip a CLI whose limits are used up or nearly so (see "The computer's CLIs"), and otherwise prefer the first one offered. With one CLI offered, or none, leave cli out.
+Picking a CLI: a person can offer CLIs from their computer with their ask, shown under the message. When it offers several, start_thread needs cli (one of them) and cli_reason: one short sentence in the person's language saying why, which people see in the thread. Pick the one that suits the work and can work right now: skip a CLI whose limits are used up or nearly so (see "The computer's CLIs"), and otherwise prefer the first one offered. With one CLI offered, or none, leave cli out. When such a message asks for the same work from two CLIs ("hem Claude'a hem Codex'e yaptır"), it is one ask per CLI: start one thread per CLI, each with that cli. A thread you start on your own post for part of such a message inherits its offer, so it needs cli and cli_reason the same way. A thread that is already working cannot be moved to another CLI by a note (its agent would only try to run that CLI itself): say so, and that the person switches a thread's CLI from the thread's own message box.
 
 Working in the cloud: a thread works on the asking person's computer when the project has a folder there and it is online, else in the cloud. Pass cloud: true to start_thread, with cloud_reason (one short sentence in the person's language, which people see in the thread), only when the person asks for the cloud or the work cannot be done on their computer (a thread there already failed for lack of something only the cloud has). Otherwise leave it out: on the computer the CLI keeps its session and the person's own logins. A cloud thread ignores the CLIs offered from the computer and runs with the project's cloud CLI.
 
@@ -386,7 +392,11 @@ export function coordinatorTools(
           .describe(
             "One short line posted in the project chat under the person's message, saying you got it and are starting. Required when the message is a person's.",
           ),
-        cli: z.string().max(40).optional().describe("Only when the message offers several CLIs: the id of the one the thread runs with."),
+        cli: z
+          .string()
+          .max(40)
+          .optional()
+          .describe("Only when the ask offers several CLIs (also for a thread on your own post splitting that ask): the id of the one the thread runs with."),
         cli_reason: z
           .string()
           .max(300)
@@ -418,7 +428,7 @@ export function coordinatorTools(
         const why = cloud_reason?.trim();
         if (cloud && !why) throw new Error("Add cloud_reason: one short sentence, in the person's language, on why this thread works in the cloud.");
         // The CLIs offered come from the person's computer; a cloud thread runs with the project's cloud CLI.
-        const threadCli = cloud ? null : pickCli(root.clis ?? [], cli, cli_reason);
+        const threadCli = cloud ? null : pickCli(host.offeredClis(root), cli, cli_reason);
         const thread = await host.startThread({
           rootMessageId: message_id,
           title,
@@ -534,6 +544,17 @@ export function coordinatorTools(
       },
     }),
   ];
+}
+
+/**
+ * The CLIs the ask behind a thread's root message offered (CoordinatorHost.offeredClis). A person's
+ * message offers its own. The coordinator's own post, made this turn to split a person's ask into
+ * several threads, carries that ask's offer (`askClis`: the CLIs the turn's new ask offered), so the
+ * extra threads can pick among them too instead of falling back to the folder's CLI.
+ */
+export function offeredFor(root: Message, postedThisTurn: ReadonlySet<string>, askClis: string[]): string[] {
+  if (root.authorKind === "user") return root.clis ?? [];
+  return root.authorKind === "agent" && root.authorId === COORDINATOR_ID && postedThisTurn.has(root.id) ? askClis : [];
 }
 
 /**

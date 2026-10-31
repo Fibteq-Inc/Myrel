@@ -55,6 +55,7 @@ import {
   type CoordinatorHost,
   coordinatorPrompt,
   coordinatorTools,
+  offeredFor,
   COORDINATOR_SYSTEM,
   type FinishedThread,
   type InboxItem,
@@ -1488,6 +1489,8 @@ export class ProjectAgent extends Agent<Env> {
       const fresh = new Set(inbox.flatMap((i) => (i.kind === "message" ? [i.messageId] : [])));
       const choosing = chat.some((m) => fresh.has(m.id) && (m.clis?.length ?? 0) > 1);
       const computerClis = choosing ? ((await workspaceClis(this.env, this.name))?.clis ?? []) : undefined;
+      // The offer a thread on the coordinator's own post inherits: the newest new ask's.
+      const askClis = chat.filter((m) => fresh.has(m.id) && m.authorKind === "user" && (m.clis?.length ?? 0) > 0).at(-1)?.clis ?? [];
       await runLoop({
         provider: meteredForTurn(
           llm.provider,
@@ -1514,7 +1517,7 @@ export class ProjectAgent extends Agent<Env> {
           computerClis,
         }),
         tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox)), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox), askClis), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
             onlyThreadUpdates,
           }),
           ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
@@ -1630,8 +1633,16 @@ export class ProjectAgent extends Agent<Env> {
     /** Collects the messages the coordinator reacted to this turn. */
     reacted?: Set<string>,
     startedFor: string | null = null,
+    /** The CLIs the turn's new ask offered, for threads split off it onto the coordinator's own posts. */
+    askClis: string[] = [],
   ): CoordinatorHost {
-    const post = (body: string, relay?: MessageRelay) => this.coordinatorPost(body, meter, relay);
+    // The posts made this turn: a thread on one of them splits off the ask this turn routes.
+    const posted = new Set<string>();
+    const post = (body: string, relay?: MessageRelay) => {
+      const m = this.coordinatorPost(body, meter, relay);
+      posted.add(m.id);
+      return m;
+    };
     // The line in the thread where a note arrived, so people can open what the coordinator said.
     const relayInThread = (relay: MessageRelay, body: string) =>
       this.sendMessage({ threadId: relay.threadId, authorKind: "agent", authorId: COORDINATOR_ID, body, relay });
@@ -1645,6 +1656,7 @@ export class ProjectAgent extends Agent<Env> {
     };
     return {
       getMessage: (id) => this.getMessage(id),
+      offeredClis: (root) => offeredFor(root, posted, askClis),
       getThread: (id) => this.getThread(id),
       threadForRoot: (messageId) => this.listThreads().find((t) => t.rootMessageId === messageId) ?? null,
       post,

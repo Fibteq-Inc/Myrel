@@ -74,7 +74,11 @@ export function closeRunners() {
  * A new project working in FOLDER on a fake computer of `token`'s user, with `play` as the
  * thread agent. `turns` lists every turn so far.
  */
-export async function agentProject(token: string, play: Play, opts: { features?: string[]; cli?: "claude" | "codex" } = {}) {
+export async function agentProject(
+  token: string,
+  play: Play,
+  opts: { features?: string[]; cli?: "claude" | "codex"; /** Other CLIs installed on the computer besides `cli`. */ clis?: ("claude" | "codex")[] } = {},
+) {
   const cli = opts.cli ?? "claude";
   const codeRes = await api("/api/runners/pairing", { method: "POST", token });
   const { code } = (await codeRes.json()) as { code: string };
@@ -129,7 +133,7 @@ export async function agentProject(token: string, play: Play, opts: { features?:
     hostname: "mbp",
     platform: "darwin",
     folders: [{ path: FOLDER, name: "myrel" }],
-    clis: [{ id: cli, version: cli === "claude" ? "2.1.0" : "0.164.0" }],
+    clis: [cli, ...(opts.clis ?? []).filter((c) => c !== cli)].map((id) => ({ id, version: id === "claude" ? "2.1.0" : "0.164.0" })),
     features: opts.features ?? ["folders", "cancel", "agent"],
     running: [],
   });

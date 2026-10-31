@@ -111,6 +111,56 @@ describe("coordinator and thread agent", () => {
     ws.close();
   });
 
+  it("runs a thread split onto the coordinator's own post with the CLI it picks from the ask's offer", async () => {
+    // One message asks for the same work from Claude Code and Codex CLI: a thread per CLI, the
+    // second on the coordinator's own line. Before, that one silently ran with the folder's CLI.
+    setFakeModel((req) => {
+      if (!isCoordinator(req)) return { text: "", toolCalls: [] };
+      if (req.turns === 1) {
+        return {
+          text: "",
+          toolCalls: [
+            call("start_thread", {
+              message_id: newMessageId(req.prompt),
+              title: "Maket (Claude)",
+              instructions: "Make the mockup with Claude Code.",
+              project_ack: "Başlıyorum.",
+              cli: "claude",
+              cli_reason: "Claude tarafı.",
+            }),
+            call("post_message", { text: "Codex tarafını da ayrı bir thread'de başlatıyorum." }),
+          ],
+        };
+      }
+      // Its own post is the newest tool result; the thread for the Codex side hangs under it.
+      const post = /Posted (cmsg_[0-9A-Z]{26})/.exec(req.last)?.[1];
+      if (!post) return { text: "", toolCalls: [] };
+      return {
+        text: "",
+        toolCalls: [call("start_thread", { message_id: post, title: "Maket (Codex)", instructions: "Make the mockup with Codex CLI.", cli: "codex", cli_reason: "Codex tarafı." })],
+      };
+    });
+    const token = await signUp();
+    const computer = await agentProject(token, async () => "Done.", { clis: ["codex"], features: ["folders", "cancel", "agent", "agent-clis"] });
+    const ws = (await api(`/api/projects/${computer.project.id}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
+    ws.accept();
+    const agent = await getAgentByName(env.PROJECT_AGENT, computer.project.id);
+    ws.send(JSON.stringify({ type: "message.send", body: "Hem Claude'a hem Codex'e maket yaptır", clis: ["claude", "codex"] }));
+
+    const threads = await until(async () => {
+      const list = await agent.listThreads();
+      return list.length === 2 && list.every((t) => t.cli) ? list : null;
+    }, "two threads with a CLI");
+    expect(threads.map((t) => [t.title, t.cli?.id, t.cli?.by, t.cli?.options])).toEqual([
+      ["Maket (Claude)", "claude", "coordinator", ["claude", "codex"]],
+      ["Maket (Codex)", "codex", "coordinator", ["claude", "codex"]],
+    ]);
+    // Each thread's turn started with its own CLI on the computer.
+    await until(() => (computer.turns.length === 2 ? computer.turns : null), "two turns");
+    expect(computer.turns.map((t) => [t.threadId, t.start.cli]).sort()).toEqual(threads.map((t) => [t.id, t.cli!.id]).sort());
+    ws.close();
+  }, 15_000);
+
   it("notes plan steps added while the plan card sits further up, one note for changes in a row", async () => {
     setFakeModel((req) => {
       if (req.turns > 1) return { text: "", toolCalls: [] };
