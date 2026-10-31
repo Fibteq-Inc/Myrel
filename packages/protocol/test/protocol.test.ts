@@ -13,6 +13,7 @@ import {
   parseCron,
   parseDecision,
   Project,
+  routineFinished,
   ServerEvent,
 } from "../src";
 
@@ -188,6 +189,18 @@ describe("Routine inputs", () => {
     expect(input.target).toEqual({ kind: "coordinator" });
     expect(input.schedule).toEqual({ kind: "cron", cron: "0 9 * * *", timezone: "UTC" });
     expect(CreateRoutineInput.safeParse({ ...input, schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Mars/Base" } }).success).toBe(false);
+  });
+});
+
+describe("routineFinished", () => {
+  const once = { schedule: { kind: "once" as const, at: "2026-01-01T09:00:00.000Z" } };
+  const cron = { schedule: { kind: "cron" as const, cron: "0 9 * * *", timezone: "UTC" } };
+  it("is true only for an unpaused one-off with no next run", () => {
+    expect(routineFinished({ ...once, paused: false, nextRunAt: null })).toBe(true);
+    expect(routineFinished({ ...once, paused: false, nextRunAt: "2026-01-01T09:00:00.000Z" })).toBe(false);
+    expect(routineFinished({ ...once, paused: true, nextRunAt: null })).toBe(false);
+    expect(routineFinished({ ...cron, paused: false, nextRunAt: null })).toBe(false);
+    expect(routineFinished({ ...cron, paused: false, nextRunAt: "2026-01-02T09:00:00.000Z" })).toBe(false);
   });
 });
 

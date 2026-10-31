@@ -62,6 +62,15 @@ export const Routine = z.object({
 });
 export type Routine = z.infer<typeof Routine>;
 
+/**
+ * A one-off routine that will not run again: its time passed and it ran (or was missed), and it is not
+ * paused. Finished routines are archived: left out of the main list and its count, shown under an
+ * archive. Repeating routines, one-offs still waiting for their time and paused ones never finish.
+ */
+export function routineFinished(r: Pick<Routine, "schedule" | "paused" | "nextRunAt">): boolean {
+  return r.schedule.kind === "once" && !r.paused && r.nextRunAt === null;
+}
+
 export const CreateRoutineInput = z.object({
   name: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(8000),

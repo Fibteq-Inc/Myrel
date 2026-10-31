@@ -1276,6 +1276,9 @@ export const en = {
   "routines.everyWeekday": "Every {day} at {time}",
   "routines.everyHour": "Every hour",
   "routines.cronSchedule": "Cron {cron}",
+  "routines.archive": { one: "Archive · 1 finished", other: "Archive · {count} finished" },
+  "routines.archiveHint": "One-off routines that have run land here. Edit one with a new time to bring it back.",
+  "routines.noActive": "No routine is waiting to run.",
 
   // Connectors (MCP servers)
   "connectors.title": "Your connectors",
