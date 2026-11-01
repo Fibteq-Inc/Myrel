@@ -7,6 +7,7 @@ import { detectClis, type MissingCli } from "./clis";
 import { runGitCredential } from "./github";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RESTART_EXIT_CODE, RUNNER_VERSION, startRunner } from "./runner";
+import { fixSandbox, sandboxProblem, sandboxProfile, sandboxState } from "./sandbox";
 import { settingsOf } from "./self-update";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
 import { runShim } from "./ssh-shim";
@@ -39,6 +40,8 @@ Usage:
   myrel-runner settings [access <level> | auto-update on|off | remote on|off]
                                  Show or change the settings (Myrel > Devices can change them too,
                                  unless remote is off)
+  myrel-runner sandbox [fix]    Linux: check, or fix once with sudo, the AppArmor restriction on Ubuntu that
+                                 stops Muse Code's and Codex's sandbox ("bwrap: ... Operation not permitted")
   myrel-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
@@ -131,6 +134,22 @@ async function main(argv: string[]) {
       console.log(`Folders: ${config.folders.map((f) => `\n  ${f.path}`).join("") || "none"}`);
       console.log(`CLIs:    ${clis.map((c) => `\n  ${CLI_NAMES[c.id]} ${c.version ?? ""}`).join("") || "none found"}`);
       console.log(`Not found: ${missing.map((m) => `\n  ${CLI_NAMES[m.id]}: ${m.reason}`).join("") || "none"}`);
+      const problem = sandboxProblem(await sandboxState());
+      if (problem) console.log(`Sandbox: ${problem}`);
+      return;
+    }
+    case "sandbox": {
+      if (arg === "fix") return fixSandbox();
+      if (arg) throw new Error("Usage: myrel-runner sandbox [fix]");
+      const state = await sandboxState();
+      if (values.json) return console.log(JSON.stringify(state));
+      if (!state.applies) return console.log("This computer does not restrict user namespaces with AppArmor; the CLIs' sandboxes need nothing.");
+      console.log(`Restriction: ${state.restricted ? "on" : "off"} (kernel.apparmor_restrict_unprivileged_userns)`);
+      console.log(`Profile:     ${state.file}`);
+      console.log(`Bubblewrap:  ${state.binaries.map((b) => `\n  ${CLI_NAMES[b.cli]}: ${b.path}${state.blocked.includes(b) ? " (not covered)" : " (covered)"}`).join("") || "none of Muse Code or Codex's own"}`);
+      const problem = sandboxProblem(state);
+      if (problem) console.log(`\n${problem}`);
+      if (state.blocked.length) console.log(`\n\`myrel-runner sandbox fix\` installs this profile with sudo:\n\n${sandboxProfile(state.binaries)}`);
       return;
     }
     case "start": {

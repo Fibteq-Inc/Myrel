@@ -10,6 +10,7 @@ import {
   ServerToRunner,
 } from "@myrel/protocol";
 import { ADAPTERS, detectClis } from "./clis";
+import { sandboxProblem, sandboxState } from "./sandbox";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
@@ -441,6 +442,10 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   connect();
 
   log(`Sharing ${config.folders.length} folder(s); CLIs found: ${clis.map((c) => c.id).join(", ") || "none"}`);
+  void sandboxState().then((s) => {
+    const problem = sandboxProblem(s);
+    if (problem) log(problem);
+  });
   return { stop, done };
 }
 

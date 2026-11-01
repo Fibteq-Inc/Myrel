@@ -9,6 +9,7 @@ import { ClaudeStreamTurn } from "./claude-stream";
 import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { GitCredentials } from "./github";
+import { sandboxed, sandboxNote } from "./sandbox";
 import { downloadSkills, type RunSkills } from "./skills";
 import { installShim } from "./ssh-shim";
 import { threadWorktree, type Worktree } from "./worktrees";
@@ -210,7 +211,10 @@ export class TaskRunner {
     const log = this.opts.log ?? (() => {});
     const { cwd, adapter, agent, dirs, skills, where, cleanup } = run;
     // The prompt lists the skills; only the runner knows where they are on this computer.
-    const text = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
+    const withSkills = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
+    // A sandbox AppArmor blocks fails every command; the agent is told why, and the fix, instead of retrying.
+    const blocked = sandboxed(adapter.id, config.access) ? await sandboxNote(adapter.id).catch(() => null) : null;
+    const text = blocked ? `${withSkills}\n\n${blocked}` : withSkills;
     const input = adapter.input ? adapter.input(text, config.access) : text;
     // A CLI that reads the prompt only from a file gets a private one, deleted when the run ends.
     const promptDir = adapter.promptFile ? await mkdtemp(join(tmpdir(), "myrel-prompt-")) : undefined;
