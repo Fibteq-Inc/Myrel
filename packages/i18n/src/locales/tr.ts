@@ -878,6 +878,7 @@ export const tr: Catalog = {
   "runners.usage.noSwap": "Swap yok: bellek bitince sistem yavaşlamak yerine bir programı durdurur.",
   "runners.usage.updated": "Ölçüm {time}",
   "runners.usage.summary": "CPU {cpu} · RAM {memory}",
+  "runners.usage.summaryShort": "{cpu} · {memory}",
   "runners.copyCommand": "Komutu kopyala",
   "runners.step1": "Bu bilgisayarı hesabınla eşleştir",
   "runners.codeExpiresIn": "Kod tek kullanımlık ve {time} içinde geçerliliğini yitirir.",

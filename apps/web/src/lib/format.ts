@@ -25,11 +25,14 @@ export function formatBytes(n: number, locale: Locale = "en") {
   return `${number(locale, { maximumFractionDigits: 0 }).format(n / 1024 ** 2)} MB`;
 }
 
-/** Two byte figures with one unit, "9.1/16 GB": for a used-of-total summary. */
-export function formatBytesOf(used: number, total: number, locale: Locale = "en") {
+/**
+ * Two byte figures with one unit, "9.1/16 GB": for a used-of-total summary. `compact` rounds figures
+ * of 10 and more to whole numbers ("14/24 GB"), for a pill.
+ */
+export function formatBytesOf(used: number, total: number, locale: Locale = "en", compact = false) {
   const GB = 1024 ** 3;
   const unit = total >= GB ? GB : 1024 ** 2;
-  const digits = (n: number) => (n >= 100 ? 0 : 1);
+  const digits = (n: number) => (n >= 100 || (compact && n >= 10) ? 0 : 1);
   const f = (n: number) => number(locale, { maximumFractionDigits: digits(n / unit) }).format(n / unit);
   return `${f(used)}/${f(total)} ${unit === GB ? "GB" : "MB"}`;
 }
@@ -81,7 +84,7 @@ export function useFormat() {
   return {
     tokens: (n: number) => formatTokens(n, locale),
     bytes: (n: number) => formatBytes(n, locale),
-    bytesOf: (used: number, total: number) => formatBytesOf(used, total, locale),
+    bytesOf: (used: number, total: number, compact = false) => formatBytesOf(used, total, locale, compact),
     cost: (micros: number) => formatCost(micros, locale),
     day: (date: string, long = false) => formatDay(date, long, locale),
     relative: (iso: string) => formatRelative(iso, locale),

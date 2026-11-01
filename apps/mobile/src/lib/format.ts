@@ -31,19 +31,26 @@ export function formatBytes(n: number, locale: Locale) {
   return `${number(locale, { maximumFractionDigits: 1 }).format(n / 1024 / 1024)} MB`;
 }
 
-/** Two byte figures with one unit, "9.1/16 GB": for a used-of-total summary. */
-export function formatBytesOf(used: number, total: number, locale: Locale) {
+/**
+ * Two byte figures with one unit, "9.1/16 GB": for a used-of-total summary. `compact` rounds figures
+ * of 10 and more to whole numbers ("14/24 GB"), for a pill.
+ */
+export function formatBytesOf(used: number, total: number, locale: Locale, compact = false) {
   const GB = 1024 ** 3;
   const unit = total >= GB ? GB : 1024 ** 2;
-  const f = (n: number) => number(locale, { maximumFractionDigits: n / unit >= 100 ? 0 : 1 }).format(n / unit);
+  const digits = (n: number) => (n >= 100 || (compact && n >= 10) ? 0 : 1);
+  const f = (n: number) => number(locale, { maximumFractionDigits: digits(n / unit) }).format(n / unit);
   return `${f(used)}/${f(total)} ${unit === GB ? "GB" : "MB"}`;
 }
 
-/** "CPU 41% · RAM 11.2/12 GB": a computer's latest sample in one line, as on the web. */
-export function usageSummary(stats: RunnerStats, t: Translate, locale: Locale): string {
-  return t("runners.usage.summary", {
+/**
+ * "CPU 41% · RAM 11.2/12 GB": a computer's latest sample in one line, as on the web. `compact` drops
+ * the words and rounds, "41% · 11/12 GB", for a pill next to a long computer name.
+ */
+export function usageSummary(stats: RunnerStats, t: Translate, locale: Locale, compact = false): string {
+  return t(compact ? "runners.usage.summaryShort" : "runners.usage.summary", {
     cpu: stats.cpu.percent === undefined ? "–" : t("runners.usage.percent", { percent: Math.round(stats.cpu.percent) }),
-    memory: formatBytesOf(stats.memory.total - stats.memory.available, stats.memory.total, locale),
+    memory: formatBytesOf(stats.memory.total - stats.memory.available, stats.memory.total, locale, compact),
   });
 }
 
