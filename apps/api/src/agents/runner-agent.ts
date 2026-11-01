@@ -12,6 +12,7 @@ import {
   type RunnerInfo,
   type RunnerSettings,
   type RunnerSettingsInput,
+  type RunnerStats,
   RunnerToServer,
   type RunnerUpdateState,
   ServerToRunner,
@@ -83,6 +84,8 @@ export class RunnerAgent extends Agent<Env> {
     )`;
     // When the computer connected lately, to tell a runner that keeps going down from one restart.
     this.sql`CREATE TABLE IF NOT EXISTS connects (at INTEGER NOT NULL)`;
+    // The computer's latest measurement (feature "stats"): one row, kept only while it is connected.
+    this.sql`CREATE TABLE IF NOT EXISTS stats (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL)`;
   }
 
   override shouldSendProtocolMessages(): boolean {
@@ -126,13 +129,15 @@ export class RunnerAgent extends Agent<Env> {
 
     switch (frame.type) {
       case "ping":
+        if (frame.stats) this.saveStats(frame.stats);
         return send(connection, { type: "pong" });
       case "hello": {
         if (frame.protocol !== RUNNER_PROTOCOL_VERSION) {
           connection.close(4400, `unsupported runner protocol ${frame.protocol}; update myrel-runner`);
           return;
         }
-        const { type: _t, protocol: _p, running, interrupted, ...info } = frame;
+        const { type: _t, protocol: _p, running, interrupted, stats, ...info } = frame;
+        this.saveStats(stats);
         await createDb(this.env.DB)
           .update(schema.runners)
           .set({ info: JSON.stringify(info), lastSeenAt: new Date() })
@@ -212,6 +217,7 @@ export class RunnerAgent extends Agent<Env> {
   override async onClose(connection: Connection) {
     const others = [...this.getConnections()].filter((c) => c.id !== connection.id);
     if (others.length > 0) return;
+    this.saveStats(undefined);
     await createDb(this.env.DB)
       .update(schema.runners)
       .set({ lastSeenAt: new Date() })
@@ -223,6 +229,23 @@ export class RunnerAgent extends Agent<Env> {
   isOnline(): boolean {
     for (const _ of this.getConnections()) return true;
     return false;
+  }
+
+  /** Whether the computer is connected, and how busy it is when its runner says. Callable over RPC. */
+  presence(): { online: boolean; stats: RunnerStats | null } {
+    const online = this.isOnline();
+    if (!online) return { online, stats: null };
+    const [row] = this.sql<{ json: string }>`SELECT json FROM stats WHERE id = 1`;
+    return { online, stats: row ? (JSON.parse(row.json) as RunnerStats) : null };
+  }
+
+  /**
+   * Keeps the latest measurement, or forgets it. In the object's own storage rather than memory: the
+   * object may be evicted between two pings while the WebSocket stays open.
+   */
+  private saveStats(stats: RunnerStats | undefined) {
+    if (stats) this.sql`INSERT OR REPLACE INTO stats (id, json) VALUES (1, ${JSON.stringify(stats)})`;
+    else this.sql`DELETE FROM stats WHERE id = 1`;
   }
 
   /** Sends a task to the computer. Callable over RPC by thread agents. */

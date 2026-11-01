@@ -228,18 +228,21 @@ async function main(argv: string[]) {
       const value = positionals[2];
       if (arg === "access" && value) {
         await saveAccess(value);
-      } else if ((arg === "auto-update" || arg === "remote") && (value === "on" || value === "off")) {
-        config[arg === "remote" ? "remoteSettings" : "autoUpdate"] = value === "on";
+      } else if ((arg === "auto-update" || arg === "remote" || arg === "stats") && (value === "on" || value === "off")) {
+        config[arg === "remote" ? "remoteSettings" : arg === "stats" ? "stats" : "autoUpdate"] = value === "on";
         await saveConfig(config);
       } else if (arg) {
-        throw new Error("Usage: myrel-runner settings [access read|edit|auto|full | auto-update on|off | remote on|off]");
+        throw new Error("Usage: myrel-runner settings [access read|edit|auto|full | auto-update on|off | remote on|off | stats on|off]");
       }
-      const settings = settingsOf(await loadConfig());
-      if (values.json) return console.log(JSON.stringify(settings));
+      const saved = await loadConfig();
+      const settings = settingsOf(saved);
+      const stats = saved.stats !== false;
+      if (values.json) return console.log(JSON.stringify({ ...settings, stats }));
       console.log(`Access:      ${settings.access}`);
       console.log(`Worktrees:   ${settings.worktrees ? "on" : "off"}`);
       console.log(`Auto-update: ${settings.autoUpdate ? "on (background runner only)" : "off"}`);
       console.log(`From Myrel:  ${settings.remote ? "can be changed in Myrel > Devices" : "off: only here"}`);
+      console.log(`Usage:       ${stats ? "CPU, memory and disk are shown in Myrel > Devices" : "off: not sent to Myrel"}`);
       return;
     }
     case "logout": {

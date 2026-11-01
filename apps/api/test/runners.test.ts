@@ -1418,3 +1418,32 @@ describe("SSH", () => {
     runnerSide.ws.close();
   });
 });
+
+describe("computer usage", () => {
+  it("shows how busy the computer is while it is connected, from its pings", async () => {
+    const user = await signUp();
+    const { token } = await pair(user);
+    const at = "2026-11-01T12:00:00.000Z";
+    const first = { at, cpu: { cores: 8 }, memory: { total: 16e9, available: 7e9 }, tasks: 0 };
+    const { ws, send } = await connectRunner(token, ["folders", "stats"], { stats: first });
+    const online = await until(async () => (await listRunners(user)).find((r) => r.features.includes("stats")), "hello");
+    expect(online.online).toBe(true);
+    expect(online.stats).toEqual(first);
+
+    const second = { ...first, cpu: { percent: 41.5, cores: 8 }, memory: { total: 16e9, available: 1e9 }, swap: { total: 0, used: 0 }, disk: { total: 5e11, free: 4e10 }, tasks: 2, runnerMemory: 9e7 };
+    send({ type: "ping", stats: second });
+    await until(async () => (await listRunners(user))[0]?.stats?.tasks === 2, "ping's stats");
+    expect((await listRunners(user))[0]?.stats).toEqual(second);
+
+    // A malformed sample is dropped, not the ping; a ping without one changes nothing.
+    send({ type: "ping", stats: { at, cpu: { cores: 0 }, memory: { total: -1 }, tasks: 1 } });
+    send({ type: "ping" });
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await listRunners(user))[0]?.stats).toEqual(second);
+
+    // Gone with the connection: a stale figure would be shown for an offline computer otherwise.
+    ws.close();
+    await until(async () => !(await listRunners(user))[0]?.online, "offline");
+    expect((await listRunners(user))[0]?.stats).toBeUndefined();
+  });
+});

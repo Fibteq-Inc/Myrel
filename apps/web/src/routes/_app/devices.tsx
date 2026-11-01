@@ -7,7 +7,7 @@ import { useState } from "react";
 import { FolderPicker, folderPickerBlocker } from "../../components/folder-picker";
 import { NavToggle } from "../../components/shell/shell";
 import { RunnerSettingsPanel, RunnerUpdate, updating } from "../../components/runner-settings";
-import { CliChips, CliLimitsList, lastSeen, OnlineDot, PairingSteps, RunnerIcon } from "../../components/runners";
+import { CliChips, CliLimitsList, lastSeen, OnlineDot, PairingSteps, RunnerIcon, RunnerUsage } from "../../components/runners";
 import { ThisComputer } from "../../components/this-computer";
 import { api, runnerListQuery, runnersQuery, server } from "../../lib/api";
 import { Button, errorMessage, GhostButton, IconButton } from "../../lib/ui";
@@ -183,6 +183,7 @@ function RunnerRow({ runner, latest, onRemoved }: { runner: Runner; latest: stri
       <RunnerUpdate runner={runner} latest={latest} />
       {settingsOpen && <RunnerSettingsPanel runner={runner} />}
       <CliChips runner={runner} />
+      <RunnerUsage runner={runner} />
       <CliLimitsList runner={runner} />
       <div className="flex flex-col gap-1 border-t border-line pt-3">
         <div className="flex items-center gap-2">

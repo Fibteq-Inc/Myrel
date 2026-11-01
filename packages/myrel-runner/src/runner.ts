@@ -18,11 +18,12 @@ import { saveInterrupted, takeInterrupted, writeRunning } from "./restart";
 import { forgetKey, listKeys, makeKey, runSsh, scanHostKeys, testSsh } from "./ssh";
 import { applySettings, settingsOf, updateMode } from "./self-update";
 import { relaunchService, upgradeService } from "./service";
+import { StatsSampler } from "./stats";
 import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.28.2";
+export const RUNNER_VERSION = "0.29.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -181,6 +182,10 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       else send(frame);
     }
   };
+  // How busy the computer is, for the Devices page: measured with each ping while it is wanted.
+  const sampler = new StatsSampler(() => tasks.runningIds().length);
+  const statsOn = () => config.stats !== false;
+  if (statsOn()) await sampler.sample().catch(() => {});
   const hello = () =>
     send({
       type: "hello",
@@ -206,12 +211,14 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "steer-claude",
         "ssh",
         ...(updates === "service" ? (["update"] as const) : []),
+        ...(statsOn() ? (["stats"] as const) : []),
       ],
       settings: settingsOf(config),
       updates,
       ...(updater.state() && { update: updater.state() }),
       running: tasks.runningIds(),
       interrupted,
+      ...(statsOn() && sampler.latest && { stats: sampler.latest }),
     });
   tasks.setSender(send);
 
@@ -222,7 +229,14 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   };
   watchFile(configPath(), { interval: 2000 }, onConfigChange);
 
-  const ping = setInterval(() => send({ type: "ping" }), 25_000);
+  const ping = setInterval(() => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    if (!statsOn()) return send({ type: "ping" });
+    void sampler.sample().then(
+      (stats) => send({ type: "ping", stats }),
+      () => send({ type: "ping" }),
+    );
+  }, 25_000);
   // Asking each CLI for its models can take a while (some go online), so hello goes first without them.
   const readModels = () =>
     void Promise.all(
