@@ -21,6 +21,10 @@ The runner didn't find a supported CLI. Install one, sign in to it in a terminal
 
 CLIs other than Claude Code can't ask mid-task. Add the folder it needs under **Also allowed**, or raise **What the CLI may do on its own** in the [runner settings](/computer/runner/). With Antigravity CLI, the run's last message says which permission stopped it.
 
+### Codex or Muse Code commands fail with "bwrap: ... Operation not permitted"
+
+On Ubuntu 23.10 and later, AppArmor stops the sandbox these two CLIs bring with them, so every command fails below full access. Run `npx myrel-runner sandbox fix` once in a terminal on that computer, as yourself (it asks for your sudo password). It lets only those CLIs' sandbox through; the rest of the computer keeps Ubuntu's restriction. `npx myrel-runner sandbox` shows what it found.
+
 ### A thread is stuck on Waiting for you
 
 It asked something or showed a draft. Open it, answer the card or reply in the thread.
