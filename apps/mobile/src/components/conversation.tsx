@@ -1,7 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import { ArrowDown } from "lucide-react-native";
-import { type ComponentRef, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentRef, memo, type ReactNode, type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
@@ -103,6 +103,11 @@ export function Conversation({
     seen.current = newest?.id;
     if (sent) list.current?.scrollToOffset({ offset: 0, animated: true });
   }, [newest, me]);
+  // Rows hold on to these while the screen redraws around them, so they stay the same functions.
+  const send = useLatest(onSend);
+  const edit = useLatest((messageId: string, body: string) => onEdit?.(messageId, body));
+  const interrupt = useLatest(() => onInterrupt?.run() ?? Promise.resolve());
+  const openPlan = useLatest(() => onOpenPlan?.());
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const loadEarlier = () => {
     if (loading || !hasEarlier || loadingEarlier || !onLoadEarlier) return;
@@ -178,30 +183,26 @@ export function Conversation({
               const footer = footerFor?.(item);
               // A pick that opened a thread keeps its bubble, which carries the thread's card.
               if (picks.has(item.id) && !footer) return null;
-              const checklist = item.authorKind === "agent" ? planChecklist(item.body) : null;
-              if (checklist !== null) {
-                const current = plan && item.id === plan.messageId ? plan : null;
-                return <PlanCard text={current?.text ?? checklist} live={current?.live ?? false} />;
-              }
-              const update = item.authorKind === "agent" ? parsePlanUpdate(item.body) : null;
-              if (update) return <PlanUpdateNote update={update} onOpenPlan={onOpenPlan} />;
+              const current = plan && item.id === plan.messageId;
               return (
-                <MessageView
+                <Row
                   message={item}
                   me={me}
                   names={names}
                   reactions={reactions[item.id]}
                   artifacts={artifacts}
+                  answer={answers.get(item.id)}
+                  planText={current ? plan.text : undefined}
+                  planLive={current ? plan.live : undefined}
+                  onOpenPlan={onOpenPlan && openPlan}
                   onLink={openLink}
                   onOpenArtifact={openArtifact}
-                  onEdit={onEdit && ((body) => onEdit(item.id, body))}
-                  onInterrupt={item.id === onInterrupt?.messageId ? onInterrupt.run : undefined}
-                  decision={
-                    item.authorKind === "agent" ? { answer: answers.get(item.id), onChoose: onSend } : undefined
-                  }
+                  onEdit={onEdit && edit}
+                  onInterrupt={item.id === onInterrupt?.messageId ? interrupt : undefined}
+                  onChoose={send}
                 >
                   {footer}
-                </MessageView>
+                </Row>
               );
             }}
           />
@@ -222,6 +223,75 @@ export function Conversation({
       </KeyboardAvoidingView>
     </View>
   );
+}
+
+/**
+ * One message of the list. Every live event (a tool step, a terminal line, another thread's reply)
+ * gives the project a new state and redraws the screen, and FlatList then redraws each row it holds;
+ * a row only draws again when its own message, reactions, answer or plan changed.
+ */
+const Row = memo(function Row({
+  message,
+  me,
+  names,
+  reactions,
+  artifacts,
+  answer,
+  planText,
+  planLive,
+  onOpenPlan,
+  onLink,
+  onOpenArtifact,
+  onEdit,
+  onInterrupt,
+  onChoose,
+  children,
+}: {
+  message: Message;
+  me: string;
+  names: Names;
+  reactions?: Reaction[];
+  artifacts: Record<string, Artifact>;
+  answer?: string;
+  /** Set on the plan card the agent is moving along: the thread's fresh checklist. */
+  planText?: string;
+  planLive?: boolean;
+  onOpenPlan?: () => void;
+  onLink: (href: string) => void;
+  onOpenArtifact: (artifactId: string, version?: number) => void;
+  onEdit?: (messageId: string, body: string) => void;
+  onInterrupt?: () => Promise<unknown>;
+  onChoose: (label: string) => void;
+  children?: ReactNode;
+}) {
+  const agent = message.authorKind === "agent";
+  const checklist = agent ? planChecklist(message.body) : null;
+  if (checklist !== null) return <PlanCard text={planText ?? checklist} live={planLive ?? false} />;
+  const update = agent ? parsePlanUpdate(message.body) : null;
+  if (update) return <PlanUpdateNote update={update} onOpenPlan={onOpenPlan} />;
+  return (
+    <MessageView
+      message={message}
+      me={me}
+      names={names}
+      reactions={reactions}
+      artifacts={artifacts}
+      onLink={onLink}
+      onOpenArtifact={onOpenArtifact}
+      onEdit={onEdit && ((body) => onEdit(message.id, body))}
+      onInterrupt={onInterrupt}
+      decision={agent ? { answer, onChoose } : undefined}
+    >
+      {children}
+    </MessageView>
+  );
+});
+
+/** A function that stays the same across renders and always calls the latest `fn`. */
+function useLatest<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const latest = useRef(fn);
+  latest.current = fn;
+  return useCallback((...args: A) => latest.current(...args), []);
 }
 
 /** How far from the newest message (in px) the reader has to be before the "jump to latest" button shows. */

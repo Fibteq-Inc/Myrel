@@ -50,11 +50,23 @@ type ProjectValue = {
 };
 
 const ProjectContext = createContext<ProjectValue | null>(null);
+/**
+ * The open project's id alone. `useProject` changes on every event the socket brings (a tool step,
+ * a terminal line), so parts drawn once per message read the id from here and stay put.
+ */
+const ProjectIdContext = createContext<string | null>(null);
 
 export function useProject() {
   const value = use(ProjectContext);
   if (!value) throw new Error("useProject outside ProjectProvider");
   return value;
+}
+
+/** The open project's id, without re-rendering on each live event as `useProject` does. */
+export function useProjectId(): string {
+  const id = use(ProjectIdContext);
+  if (!id) throw new Error("useProjectId outside ProjectProvider");
+  return id;
 }
 
 /**
@@ -140,5 +152,9 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     () => ({ projectId, state, status, ready, send, emit, loadTasks, loadConversation }),
     [projectId, state, status, ready, send, emit, loadTasks, loadConversation],
   );
-  return <ProjectContext value={value}>{children}</ProjectContext>;
+  return (
+    <ProjectIdContext value={projectId}>
+      <ProjectContext value={value}>{children}</ProjectContext>
+    </ProjectIdContext>
+  );
 }

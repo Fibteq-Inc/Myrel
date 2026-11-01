@@ -73,10 +73,9 @@ export default function ThreadScreen() {
   }, [ready, held.loaded, threadId, status, loadConversation]);
   const replies = threadMessages(state, threadId);
   // The message that opened the thread leads the conversation, once it is scrolled back to.
-  const messages = useMemo(() => {
-    const root = thread && !held.hasEarlier ? findMessage(state, thread.rootMessageId) : undefined;
-    return root ? [root, ...replies] : replies;
-  }, [state, thread, held.hasEarlier, replies]);
+  // Kept the same array until these change, not rebuilt on every live event: the list redraws when it changes.
+  const root = thread && !held.hasEarlier ? findMessage(state, thread.rootMessageId) : undefined;
+  const messages = useMemo(() => (root ? [root, ...replies] : replies), [root, replies]);
   // Messages the working agent has not taken in yet: the newest says so, with a way to send them now.
   const waiting = thread ? messages.findLast((m) => waitsForAgent(m, thread)) : undefined;
   const onSend = useCallback(
