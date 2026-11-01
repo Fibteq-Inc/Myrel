@@ -500,7 +500,7 @@ export const projectRoutes = new Hono<AppEnv>()
   .get("/:id/workspace", async (c) => {
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
-    const workspaces = await listWorkspaces(c.env, id);
+    const workspaces = await listWorkspaces(c.env, id, undefined, c.get("user").id);
     return c.json({ workspace: workspaces[0] ?? null, workspaces });
   })
   // A file in the project's local folders (or a thread's worktree of them), e.g. one an agent's
@@ -577,7 +577,7 @@ export const projectRoutes = new Hono<AppEnv>()
     if (add) await upsert;
     else await db.batch([db.delete(projectWorkspaces).where(others), upsert]);
     await notifyProject(c.env, id);
-    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId: data.runnerId }), workspaces: await listWorkspaces(c.env, id) });
+    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId: data.runnerId, viewerId: userId }), workspaces: await listWorkspaces(c.env, id, undefined, userId) });
   })
   // Makes one of the project's computers its default, where its local work goes unless a thread says otherwise.
   .put("/:id/workspace/default", async (c) => {
@@ -596,7 +596,7 @@ export const projectRoutes = new Hono<AppEnv>()
       .set({ isDefault: sql`${projectWorkspaces.runnerId} = ${input.data.runnerId}` })
       .where(eq(projectWorkspaces.projectId, id));
     await notifyProject(c.env, id);
-    const workspaces = await listWorkspaces(c.env, id);
+    const workspaces = await listWorkspaces(c.env, id, undefined, c.get("user").id);
     return c.json({ workspace: workspaces[0] ?? null, workspaces });
   })
   // Other folders on the same computer the project's agent may work in, besides its main folder.
@@ -622,7 +622,7 @@ export const projectRoutes = new Hono<AppEnv>()
       return c.json({ error: "invalid_input", message: "That folder is not shared on this computer." }, 400);
     }
     await setWorkspaceFolder(c.env, id, input.data.path, true, workspace.runnerId);
-    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId: workspace.runnerId }) });
+    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId: workspace.runnerId, viewerId: c.get("user").id }) });
   })
   .delete("/:id/workspace/folders", async (c) => {
     const id = c.req.param("id");
@@ -633,7 +633,7 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!path) return c.json({ error: "invalid_input", message: "Which folder?" }, 400);
     const runnerId = c.req.query("runner") || undefined;
     await setWorkspaceFolder(c.env, id, path, false, runnerId);
-    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId }) });
+    return c.json({ workspace: await getWorkspace(c.env, id, { runnerId, viewerId: c.get("user").id }) });
   })
   .delete("/:id/workspace", async (c) => {
     const id = c.req.param("id");
@@ -645,7 +645,7 @@ export const projectRoutes = new Hono<AppEnv>()
     const one = runnerId ? and(eq(projectWorkspaces.projectId, id), eq(projectWorkspaces.runnerId, runnerId)) : eq(projectWorkspaces.projectId, id);
     await createDb(c.env.DB).delete(projectWorkspaces).where(one);
     await notifyProject(c.env, id);
-    const workspaces = await listWorkspaces(c.env, id);
+    const workspaces = await listWorkspaces(c.env, id, undefined, c.get("user").id);
     return c.json({ workspace: workspaces[0] ?? null, workspaces });
   })
   .get("/:id/ws", async (c) => {

@@ -882,6 +882,7 @@ export const en = {
   "runners.usage.memoryLow": "Memory is nearly full: a CLI that needs more may be stopped by the system.",
   "runners.usage.noSwap": "No swap: when memory runs out, the system stops a program instead of slowing down.",
   "runners.usage.updated": "Measured {time}",
+  "runners.usage.summary": "CPU {cpu} · RAM {memory}",
   "runners.copyCommand": "Copy command",
   "runners.step1": "Pair this computer with your account",
   "runners.codeExpiresIn": "The code works once and expires in {time}.",

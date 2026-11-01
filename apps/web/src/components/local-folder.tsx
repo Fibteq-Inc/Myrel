@@ -5,9 +5,10 @@ import { Link } from "@tanstack/react-router";
 import { ChevronDown, Cloud, Folder, FolderPlus, Laptop } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, runnersQuery, workspaceQuery, workspacesQuery } from "../lib/api";
+import { useFormat } from "../lib/format";
 import { Button, errorMessage, GhostButton } from "../lib/ui";
 import { FolderPicker, folderPickerBlocker } from "./folder-picker";
-import { OnlineDot, RunnerIcon } from "./runners";
+import { memoryLow, OnlineDot, RunnerIcon, usageSummary } from "./runners";
 
 /** Header control: the project's local folder and whether its computer is connected; owners can change it. */
 export function WorkspaceButton({ project }: { project: Project }) {
@@ -93,6 +94,7 @@ export function WorkspaceButton({ project }: { project: Project }) {
 
 function WorkspaceSummary({ workspace, several = false }: { workspace: ProjectWorkspace; several?: boolean }) {
   const t = useT();
+  const format = useFormat();
   return (
     <div className="flex flex-col gap-1.5 text-[13px]">
       <span className="font-mono text-[12.5px]">{workspace.path}</span>
@@ -106,6 +108,9 @@ function WorkspaceSummary({ workspace, several = false }: { workspace: ProjectWo
         {workspace.runnerName} · {CLI_NAMES[workspace.cli] ?? workspace.cli} · {workspace.online ? t("localFolder.connected") : t("localFolder.offline")}
         {several && workspace.isDefault && ` · ${t("localFolder.default")}`}
       </span>
+      {workspace.online && workspace.stats && (
+        <span className={`pl-3.5 text-xs tabular-nums ${memoryLow(workspace.stats) ? "text-bad" : "text-subtle"}`}>{usageSummary(workspace.stats, t, format)}</span>
+      )}
     </div>
   );
 }
@@ -120,6 +125,7 @@ export function WorkspaceForm({
   onDone: () => void;
 }) {
   const t = useT();
+  const format = useFormat();
   const queryClient = useQueryClient();
   const { data: runners = [], isPending } = useQuery(runnersQuery);
   const { data: workspaces = [] } = useQuery(workspacesQuery(project.id));
@@ -192,7 +198,10 @@ export function WorkspaceForm({
                 <RunnerIcon runner={r} size={14} />
                 <span className="truncate">{r.name}</span>
                 <WorkspaceBadge workspace={workspaces.find((w) => w.runnerId === r.id)} several={workspaces.length > 1} />
-                <OnlineDot online={r.online} className="ml-auto" />
+                {r.online && r.stats && (
+                  <span className={`ml-auto truncate text-[11px] tabular-nums ${memoryLow(r.stats) ? "text-bad" : "text-subtle"}`}>{usageSummary(r.stats, t, format)}</span>
+                )}
+                <OnlineDot online={r.online} className={r.online && r.stats ? "" : "ml-auto"} />
               </Choice>
             ))}
           </div>

@@ -1,6 +1,6 @@
 import type { Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliLimitWindow, type Runner, type RunnerCli, type RunnerPairingCode } from "@myrel/protocol";
+import { CLI_NAMES, type CliLimitWindow, type Runner, type RunnerCli, type RunnerPairingCode, type RunnerStats } from "@myrel/protocol";
 import { Check, Copy, Laptop, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useFormat } from "../lib/format";
@@ -108,7 +108,20 @@ export function CliLimitsList({ runner }: { runner: Runner }) {
 }
 
 /** Memory this full is shown red, and a note says why it matters. */
-const MEMORY_LOW_PERCENT = 90;
+export const MEMORY_LOW_PERCENT = 90;
+
+/** "CPU 41% · RAM 11.2/12 GB": the computer's latest sample in one line, for pickers and lists. */
+export function usageSummary(stats: RunnerStats, t: Translate, format: ReturnType<typeof useFormat>): string {
+  return t("runners.usage.summary", {
+    cpu: stats.cpu.percent === undefined ? "–" : t("runners.usage.percent", { percent: Math.round(stats.cpu.percent) }),
+    memory: format.bytesOf(stats.memory.total - stats.memory.available, stats.memory.total),
+  });
+}
+
+/** Whether the latest sample says memory is nearly full (shown in the warning colour). */
+export function memoryLow(stats: RunnerStats): boolean {
+  return stats.memory.total > 0 && (stats.memory.total - stats.memory.available) / stats.memory.total >= MEMORY_LOW_PERCENT / 100;
+}
 
 /**
  * How busy the computer is, as its runner measured it with its last ping (feature "stats", runner

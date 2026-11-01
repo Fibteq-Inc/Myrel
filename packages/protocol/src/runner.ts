@@ -573,6 +573,8 @@ export const ProjectWorkspace = z.object({
   online: z.boolean(),
   /** The project's default computer: local work goes here unless a thread was set to another. */
   isDefault: z.boolean().default(true),
+  /** How busy the computer is, only on the viewer's own computers while online (feature "stats"). */
+  stats: RunnerStats.optional(),
 });
 export type ProjectWorkspace = z.infer<typeof ProjectWorkspace>;
 

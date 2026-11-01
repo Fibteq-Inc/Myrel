@@ -1,5 +1,5 @@
 import type { MessageKey } from "@myrel/i18n";
-import { useT } from "@myrel/i18n/react";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
 import { cliMark } from "@myrel/client";
 import { useQuery } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTer
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { memoryLow, usageSummary } from "../lib/format";
 import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors } from "../theme";
@@ -163,6 +164,7 @@ export function ThreadSettingsPicker({
   onModel: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
 }) {
   const t = useT();
+  const { locale } = useI18n();
   const styles = useStyles();
   const { api, server } = useSession();
   const [open, setOpen] = useState(false);
@@ -291,9 +293,12 @@ export function ThreadSettingsPicker({
                       checked={pickedRunner === w.runnerId}
                       onPress={() => pickedRunner !== w.runnerId && onRunner(w.runnerId)}
                       label={w.online ? w.runnerName : `${w.runnerName} (${t("localFolder.offline")})`}
+                      note={w.online && w.stats ? usageSummary(w.stats, t, locale) : undefined}
+                      warn={!!w.stats && memoryLow(w.stats)}
                     />
                   ))}
                 </Pills>
+                {open && <LiveWorkspaces projectId={projectId} />}
               </>
             )}
             <Text style={styles.section}>{t("threadSettings.cli")}</Text>
@@ -353,7 +358,8 @@ function Pills({ children }: { children: React.ReactNode }) {
 }
 
 /** `cli`: a CLI's pill, led by its mark. */
-function Pill({ checked, onPress, label, cli }: { checked: boolean; onPress: () => void; label: string; cli?: string }) {
+/** `note`: a small figure after the label (how busy a computer is); `warn` colours it. */
+function Pill({ checked, onPress, label, cli, note, warn }: { checked: boolean; onPress: () => void; label: string; cli?: string; note?: string; warn?: boolean }) {
   const styles = useStyles();
   const colors = useColors();
   return (
@@ -367,8 +373,20 @@ function Pill({ checked, onPress, label, cli }: { checked: boolean; onPress: () 
       <Text style={[styles.effortText, checked && { color: colors.onAccent }]} numberOfLines={1}>
         {label}
       </Text>
+      {note && (
+        <Text style={[styles.effortNote, { color: checked ? colors.onAccent : warn ? colors.bad : colors.subtle }]} numberOfLines={1}>
+          {note}
+        </Text>
+      )}
     </Pressable>
   );
+}
+
+/** Mounted only while the sheet is open: refreshes the computers' figures every half minute then. */
+function LiveWorkspaces({ projectId }: { projectId: string }) {
+  const { api, server } = useSession();
+  useQuery({ queryKey: [...workspaceQueryKey(server, projectId), "all"], queryFn: () => api.getWorkspaces(projectId), refetchInterval: 30_000 });
+  return null;
 }
 
 /** `cli`: the CLI it names, shown by its mark. */
@@ -609,7 +627,8 @@ const useStyles = makeStyles((colors) =>
     efforts: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     effort: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
     effortOn: { borderColor: colors.accent, backgroundColor: colors.accent },
-    effortText: { color: colors.body, fontSize: 13 },
+    effortText: { color: colors.body, fontSize: 13, flexShrink: 1 },
+    effortNote: { fontSize: 11, fontVariant: ["tabular-nums"] },
     locked: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 4 },
   }),
 );

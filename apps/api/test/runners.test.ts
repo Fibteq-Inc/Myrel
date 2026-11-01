@@ -1422,7 +1422,7 @@ describe("SSH", () => {
 describe("computer usage", () => {
   it("shows how busy the computer is while it is connected, from its pings", async () => {
     const user = await signUp();
-    const { token } = await pair(user);
+    const { runner, token } = await pair(user);
     const at = "2026-11-01T12:00:00.000Z";
     const first = { at, cpu: { cores: 8 }, memory: { total: 16e9, available: 7e9 }, tasks: 0 };
     const { ws, send } = await connectRunner(token, ["folders", "stats"], { stats: first });
@@ -1441,9 +1441,27 @@ describe("computer usage", () => {
     await new Promise((r) => setTimeout(r, 100));
     expect((await listRunners(user))[0]?.stats).toEqual(second);
 
+    // In a project, the computer's figures go with its folder to its owner only: a member sees the
+    // folder, online, without them.
+    const project = await createProject(user);
+    expect(
+      (await api(`/api/projects/${project.id}/workspace`, { method: "PUT", token: user, body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }) })).status,
+    ).toBe(200);
+    const workspacesFor = async (token: string) =>
+      ((await (await api(`/api/projects/${project.id}/workspace`, { token })).json()) as { workspaces: ProjectWorkspace[] }).workspaces;
+    expect((await workspacesFor(user))[0]).toMatchObject({ online: true, stats: second });
+    const member = await signUp();
+    await env.DB.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
+      .bind(project.id, await idOf(member), Date.now())
+      .run();
+    const seen = (await workspacesFor(member))[0]!;
+    expect(seen.online).toBe(true);
+    expect(seen.stats).toBeUndefined();
+
     // Gone with the connection: a stale figure would be shown for an offline computer otherwise.
     ws.close();
     await until(async () => !(await listRunners(user))[0]?.online, "offline");
     expect((await listRunners(user))[0]?.stats).toBeUndefined();
+    expect((await workspacesFor(user))[0]?.stats).toBeUndefined();
   });
 });
