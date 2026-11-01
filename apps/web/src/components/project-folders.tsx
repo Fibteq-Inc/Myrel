@@ -4,10 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Folder, FolderPlus, X } from "lucide-react";
 import { useState } from "react";
 import { api, runnersQuery, workspaceQuery } from "../lib/api";
+import { useFormat } from "../lib/format";
 import { Button, errorMessage, GhostButton, IconButton } from "../lib/ui";
 import { FolderPicker, folderPickerBlocker } from "./folder-picker";
 import { WorkspaceForm } from "./local-folder";
-import { OnlineDot } from "./runners";
+import { memoryLow, OnlineDot, usageSummary } from "./runners";
 import { List, Notice, Row, Section } from "./settings";
 
 /**
@@ -16,6 +17,7 @@ import { List, Notice, Row, Section } from "./settings";
  */
 export function ProjectFolders({ project, canManage }: { project: Project; canManage: boolean }) {
   const t = useT();
+  const format = useFormat();
   const queryClient = useQueryClient();
   const { data: workspace, isPending } = useQuery(workspaceQuery(project.id));
   const { data: runners = [] } = useQuery({ ...runnersQuery, enabled: canManage });
@@ -72,6 +74,9 @@ export function ProjectFolders({ project, canManage }: { project: Project; canMa
           <span className="truncate">{folderName(workspace.path)}</span>
           <span className="flex-none text-xs font-normal text-subtle">
             {t("projectFolders.main")} · {t("projectFolders.mainHint", { computer: workspace.runnerName, cli: CLI_NAMES[workspace.cli] ?? workspace.cli })}
+            {workspace.online && workspace.stats && (
+              <span className={`tabular-nums ${memoryLow(workspace.stats) ? "text-bad" : ""}`}> · {usageSummary(workspace.stats, t, format)}</span>
+            )}
           </span>
         </div>
         <FolderPath path={workspace.path} />

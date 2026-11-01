@@ -1,5 +1,5 @@
 import type { Translate } from "@myrel/i18n";
-import { useT } from "@myrel/i18n/react";
+import { useI18n, useT } from "@myrel/i18n/react";
 import { CLI_NAMES, type CliId, type Project, type ProjectWorkspace, type Runner } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as WebBrowser from "expo-web-browser";
@@ -7,6 +7,7 @@ import { ArrowUp, Check, ChevronRight, Folder, FolderPlus, House, X } from "luci
 import { type ReactNode, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { memoryLow, usageSummary } from "../../lib/format";
 import { runnersQueryKey, workspaceQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
@@ -41,6 +42,7 @@ function useRefreshFolders(projectId: string) {
  */
 export function FolderSettings({ project, canManage }: { project: Project; canManage: boolean }) {
   const t = useT();
+  const { locale } = useI18n();
   const colors = useColors();
   const styles = useStyles();
   const { api, server } = useSession();
@@ -105,6 +107,9 @@ export function FolderSettings({ project, canManage }: { project: Project; canMa
           <Text style={styles.sub}>
             {t("projectFolders.main")} · {t("projectFolders.mainHint", { computer: workspace.runnerName, cli })}
           </Text>
+          {workspace.online && workspace.stats && (
+            <Text style={[styles.sub, memoryLow(workspace.stats) && { color: colors.bad }]}>{usageSummary(workspace.stats, t, locale)}</Text>
+          )}
           <FolderPath path={workspace.path} />
         </View>
         {canManage && (
@@ -158,6 +163,7 @@ export function FolderSettings({ project, canManage }: { project: Project; canMa
 /** Connects or changes the project's folder on one of the person's computers, as the web's WorkspaceForm. */
 function WorkspaceForm({ project, workspace, onDone }: { project: Project; workspace: ProjectWorkspace | null; onDone: () => void }) {
   const t = useT();
+  const { locale } = useI18n();
   const colors = useColors();
   const styles = useStyles();
   const { api, server } = useSession();
@@ -239,6 +245,11 @@ function WorkspaceForm({ project, workspace, onDone }: { project: Project; works
                   <Text style={styles.badge}>{workspaces.length > 1 && w.isDefault ? t("localFolder.default") : t("localFolder.inProject")}</Text>
                 )}
                 <View style={{ flex: 1 }} />
+                {r.online && r.stats && (
+                  <Text style={[styles.usage, memoryLow(r.stats) && { color: colors.bad }]} numberOfLines={1}>
+                    {usageSummary(r.stats, t, locale)}
+                  </Text>
+                )}
                 <OnlineDot online={r.online} />
               </Choice>
             );
@@ -500,6 +511,7 @@ const useStyles = makeStyles((colors) =>
     label: { color: colors.subtle, fontSize: 12 },
     action: { color: colors.accent, fontSize: 14, fontWeight: "500" },
     path: { flexShrink: 1, color: colors.subtle, fontFamily: mono, fontSize: 12 },
+    usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"], flexShrink: 1 },
     badge: { color: colors.muted, fontSize: 11, backgroundColor: colors.hover, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden" },
     choice: {
       flexDirection: "row",

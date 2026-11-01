@@ -44,11 +44,6 @@ export function parseInfo(raw: string | null): RunnerInfo | null {
   return parsed.success ? parsed.data : null;
 }
 
-export async function isRunnerOnline(env: Env, runnerId: string): Promise<boolean> {
-  const agent = await getAgentByName(env.RUNNER_AGENT, runnerId);
-  return agent.isOnline();
-}
-
 /**
  * A computer that went offline this recently is most likely coming back: the runner restarts
  * itself after an update (about ten seconds) and reconnects within seconds when its connection
@@ -108,27 +103,34 @@ export async function latestRunnerVersion(now = Date.now()): Promise<string | nu
   return version;
 }
 
-/** Which of a project's local folders: one computer's, or the one to use for a person's work. */
-export type WorkspacePick = { runnerId?: string; ownerId?: string | null };
+/**
+ * Which of a project's local folders: one computer's, or the one to use for a person's work.
+ * `viewerId`: who will see it (their own computers come with how busy they are).
+ */
+export type WorkspacePick = { runnerId?: string; ownerId?: string | null; viewerId?: string };
 
 const workspaceColumns = {
   runnerId: projectWorkspaces.runnerId,
   runnerName: runners.name,
+  ownerId: runners.userId,
   path: projectWorkspaces.path,
   folders: projectWorkspaces.folders,
   cli: projectWorkspaces.cli,
   isDefault: projectWorkspaces.isDefault,
 };
 
-type WorkspaceRow = { runnerId: string; runnerName: string; path: string; folders: string; cli: string; isDefault: boolean };
+type WorkspaceRow = { runnerId: string; runnerName: string; ownerId: string; path: string; folders: string; cli: string; isDefault: boolean };
 
-async function toWorkspace(env: Env, projectId: string, row: WorkspaceRow): Promise<ProjectWorkspace> {
+/** `viewerId`: who asks; how busy a computer is goes only to its owner. */
+async function toWorkspace(env: Env, projectId: string, { ownerId, ...row }: WorkspaceRow, viewerId?: string): Promise<ProjectWorkspace> {
+  const { online, stats } = await (await getAgentByName(env.RUNNER_AGENT, row.runnerId)).presence();
   return {
     projectId,
     ...row,
     folders: parseFolders(row.folders),
     cli: row.cli as CliId,
-    online: await isRunnerOnline(env, row.runnerId),
+    online,
+    ...(stats && viewerId === ownerId && { stats }),
   };
 }
 
@@ -152,18 +154,21 @@ export async function getWorkspace(env: Env, projectId: string, pick: WorkspaceP
       asc(projectWorkspaces.createdAt),
     )
     .limit(1);
-  return row ? toWorkspace(env, projectId, row) : null;
+  return row ? toWorkspace(env, projectId, row, pick.viewerId) : null;
 }
 
-/** Every local folder of the project, one per computer, the default first; with `ownerId`, only on their computers. */
-export async function listWorkspaces(env: Env, projectId: string, ownerId?: string): Promise<ProjectWorkspace[]> {
+/**
+ * Every local folder of the project, one per computer, the default first; with `ownerId`, only on
+ * their computers. `viewerId`: who will see the list (see WorkspacePick).
+ */
+export async function listWorkspaces(env: Env, projectId: string, ownerId?: string, viewerId?: string): Promise<ProjectWorkspace[]> {
   const rows = await createDb(env.DB)
     .select(workspaceColumns)
     .from(projectWorkspaces)
     .innerJoin(runners, eq(runners.id, projectWorkspaces.runnerId))
     .where(and(eq(projectWorkspaces.projectId, projectId), ownerId ? eq(runners.userId, ownerId) : undefined))
     .orderBy(desc(projectWorkspaces.isDefault), asc(projectWorkspaces.createdAt));
-  const all = await Promise.all(rows.map((r) => toWorkspace(env, projectId, r)));
+  const all = await Promise.all(rows.map((r) => toWorkspace(env, projectId, r, viewerId)));
   // Only one reads as the default, also when none is marked.
   return ownerId ? all : all.map((w, i) => ({ ...w, isDefault: i === 0 }));
 }

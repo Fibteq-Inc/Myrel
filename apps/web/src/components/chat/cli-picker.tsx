@@ -19,7 +19,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 import { projectSettingsQuery, runnersQuery, workspaceQuery, workspacesQuery } from "../../lib/api";
+import { useFormat } from "../../lib/format";
 import { CliMark, cn } from "../../lib/ui";
+import { memoryLow, usageSummary } from "../runners";
 import { Menu, MenuLabel, MenuSeparator } from "../ui/menu";
 import { ContextRing, ContextSection } from "./context-gauge";
 
@@ -189,6 +191,7 @@ export function ThreadSettingsPicker({
   onModel: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
 }) {
   const t = useT();
+  const format = useFormat();
   const { data: folder } = useQuery(workspaceQuery(project.id));
   const { data: all = [] } = useQuery({ ...workspacesQuery(project.id), enabled: !!folder });
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!folder });
@@ -279,9 +282,12 @@ export function ThreadSettingsPicker({
                     checked={pickedRunner === w.runnerId}
                     onSelect={() => pickedRunner !== w.runnerId && onRunner(w.runnerId)}
                     label={w.online ? w.runnerName : `${w.runnerName} (${t("localFolder.offline")})`}
+                    note={w.online && w.stats ? usageSummary(w.stats, t, format) : undefined}
+                    warn={!!w.stats && memoryLow(w.stats)}
                   />
                 ))}
               </Pills>
+              <LiveWorkspaces project={project} />
               <MenuSeparator />
             </>
           )}
@@ -383,8 +389,8 @@ function Pills({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap gap-1.5 px-2.5 pb-2 pt-1">{children}</div>;
 }
 
-/** `cli`: a CLI's pill, led by its mark. */
-function Pill({ checked, onSelect, label, cli }: { checked: boolean; onSelect: () => void; label: string; cli?: string }) {
+/** `cli`: a CLI's pill, led by its mark. `note`: a small figure after the label (how busy a computer is); `warn` colours it. */
+function Pill({ checked, onSelect, label, cli, note, warn }: { checked: boolean; onSelect: () => void; label: string; cli?: string; note?: string; warn?: boolean }) {
   return (
     <button
       type="button"
@@ -398,8 +404,18 @@ function Pill({ checked, onSelect, label, cli }: { checked: boolean; onSelect: (
     >
       {cli && <CliMark cli={cli} size={13} />}
       <span className="truncate">{label}</span>
+      {note && <span className={cn("flex-none text-[11px] tabular-nums", checked ? "opacity-80" : warn ? "text-bad" : "text-subtle")}>{note}</span>}
     </button>
   );
+}
+
+/**
+ * Mounted only while the panel is open: refreshes the computers' figures every half minute then, and
+ * never otherwise (the list is otherwise only refetched when a computer connects or goes away).
+ */
+function LiveWorkspaces({ project }: { project: Project }) {
+  useQuery({ ...workspacesQuery(project.id), refetchInterval: 30_000 });
+  return null;
 }
 
 function Locked({ children }: { children: ReactNode }) {
