@@ -122,6 +122,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "ssh": keeps SSH keys for the project's servers and runs one command at a time on them when asked
  * ("ssh.keygen", "ssh.keys", "ssh.hostkeys", "ssh.test", "ssh.run", "ssh.forget"); its agent runs put
  * an `ssh` on PATH that goes through Myrel's ssh_run tool instead.
+ * "stats": measures how busy the computer is and sends it with each "ping" (RunnerStats).
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -140,6 +141,7 @@ export const RunnerFeature = z.enum([
   "steer",
   "steer-claude",
   "ssh",
+  "stats",
 ]);
 
 /**
@@ -238,6 +240,37 @@ export const RunnerInfo = z.object({
 });
 export type RunnerInfo = z.infer<typeof RunnerInfo>;
 
+/** A number of bytes, as JSON carries it. */
+const Bytes = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * How busy the computer is, as the runner measured it (feature "stats"): with every "ping", and with
+ * hello. Numbers only, never a process name, a path or a user name. The server keeps the latest
+ * sample only while the computer is connected; nothing is stored for later.
+ */
+export const RunnerStats = z.object({
+  at: Timestamp,
+  cpu: z.object({
+    /** Of all cores together since the previous sample, 0–100. Absent in the first sample after a start. */
+    percent: z.number().min(0).max(100).optional(),
+    cores: z.number().int().min(1).max(1024),
+  }),
+  /**
+   * `available`: what programs can still take without swapping (Linux MemAvailable; macOS: not
+   * active, wired or compressed; elsewhere the OS's free figure), so used = total - available.
+   */
+  memory: z.object({ total: Bytes, available: Bytes }),
+  /** Linux only; total 0 means the computer has no swap, so an out-of-memory kill comes sooner. */
+  swap: z.object({ total: Bytes, used: Bytes }).optional(),
+  /** The volume the runner's home folder is on. */
+  disk: z.object({ total: Bytes, free: Bytes }).optional(),
+  /** CLIs running tasks from Myrel right now. */
+  tasks: z.number().int().nonnegative().max(1000),
+  /** The runner process's own resident memory. */
+  runnerMemory: Bytes.optional(),
+});
+export type RunnerStats = z.infer<typeof RunnerStats>;
+
 /** Longest prompt (and result) a task carries; the server fits an agent's prompt within it. */
 export const MAX_TASK_TEXT = 100_000;
 
@@ -318,6 +351,8 @@ export const RunnerToServer = z.discriminatedUnion("type", [
      * server can continue them instead of failing them. Older runners never send it.
      */
     interrupted: z.array(TaskId).max(100).default([]),
+    /** The first measurement (feature "stats"); a malformed one is dropped, not the hello. */
+    stats: RunnerStats.optional().catch(undefined),
   }),
   /** A line of progress from the CLI (what it is doing now). Empty when only its usage changed. */
   z.object({
@@ -340,7 +375,8 @@ export const RunnerToServer = z.discriminatedUnion("type", [
     /** Stopped because the server asked ("task.cancel"). */
     cancelled: z.boolean().optional(),
   }),
-  z.object({ type: z.literal("ping") }),
+  /** Every 25 seconds; carries the computer's latest measurement (feature "stats"). */
+  z.object({ type: z.literal("ping"), stats: RunnerStats.optional().catch(undefined) }),
   /** The folders a task's CLI can work in without asking: where it runs first (feature "project-folders"). */
   z.object({ type: z.literal("task.folders"), taskId: TaskId, folders: z.array(z.string().min(1).max(1024)).max(60) }),
   // Answers to the server's folder requests (feature "folders").
@@ -481,6 +517,8 @@ export const Runner = RunnerInfo.extend({
   online: z.boolean(),
   lastSeenAt: Timestamp.nullable(),
   createdAt: Timestamp,
+  /** The computer's latest measurement, while it is online and its runner sends them (feature "stats"). */
+  stats: RunnerStats.optional(),
 });
 export type Runner = z.infer<typeof Runner>;
 

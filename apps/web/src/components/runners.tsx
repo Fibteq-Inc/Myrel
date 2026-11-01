@@ -107,6 +107,82 @@ export function CliLimitsList({ runner }: { runner: Runner }) {
   );
 }
 
+/** Memory this full is shown red, and a note says why it matters. */
+const MEMORY_LOW_PERCENT = 90;
+
+/**
+ * How busy the computer is, as its runner measured it with its last ping (feature "stats", runner
+ * 0.29.0): only while it is online, since a figure from before it went away would mislead.
+ */
+export function RunnerUsage({ runner }: { runner: Runner }) {
+  const t = useT();
+  const format = useFormat();
+  const stats = runner.online ? runner.stats : undefined;
+  if (!stats) return null;
+  const memoryUsed = stats.memory.total - stats.memory.available;
+  const memoryPercent = percentOf(memoryUsed, stats.memory.total);
+  const noSwap = stats.swap?.total === 0;
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-line pt-3">
+      <div className="flex items-center gap-2 text-xs">
+        <h3 className="text-subtle">{t("runners.usageTitle")}</h3>
+        <span className="text-muted">{stats.tasks > 0 ? t("runners.usage.tasks", { count: stats.tasks }) : t("runners.usage.idle")}</span>
+        <span className="ml-auto text-[11px] text-subtle" title={format.dateTime(stats.at)}>
+          {t("runners.usage.updated", { time: format.relative(stats.at) })}
+        </span>
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        <UsageBar
+          label={t("runners.usage.cpu", { count: stats.cpu.cores })}
+          value={stats.cpu.percent === undefined ? "–" : t("runners.usage.percent", { percent: Math.round(stats.cpu.percent) })}
+          percent={stats.cpu.percent ?? null}
+        />
+        <UsageBar
+          label={t("runners.usage.memory")}
+          value={t("runners.usage.ofTotal", { used: format.bytes(memoryUsed), total: format.bytes(stats.memory.total) })}
+          percent={memoryPercent}
+          note={memoryPercent !== null && memoryPercent >= MEMORY_LOW_PERCENT ? t("runners.usage.memoryLow") : noSwap && memoryPercent !== null && memoryPercent >= 70 ? t("runners.usage.noSwap") : undefined}
+        />
+        {stats.swap && stats.swap.total > 0 && (
+          <UsageBar
+            label={t("runners.usage.swap")}
+            value={t("runners.usage.ofTotal", { used: format.bytes(stats.swap.used), total: format.bytes(stats.swap.total) })}
+            percent={percentOf(stats.swap.used, stats.swap.total)}
+          />
+        )}
+        {stats.disk && (
+          <UsageBar
+            label={t("runners.usage.disk")}
+            value={t("runners.usage.free", { amount: format.bytes(stats.disk.free) })}
+            percent={percentOf(stats.disk.total - stats.disk.free, stats.disk.total)}
+            // A disk is usually quite full; only a nearly full one is worth a colour.
+            warnAt={90}
+            badAt={97}
+          />
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function percentOf(part: number, whole: number): number | null {
+  return whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : null;
+}
+
+function UsageBar({ label, value, percent, note, warnAt = 70, badAt = 90 }: { label: string; value: string; percent: number | null; note?: string; warnAt?: number; badAt?: number }) {
+  const tone = percent === null ? "bg-edge" : percent >= badAt ? "bg-bad" : percent >= warnAt ? "bg-warn" : "bg-ok";
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-xs">
+      <span className="truncate text-muted">{label}</span>
+      <span className="text-right tabular-nums text-muted">{value}</span>
+      <span className="col-span-2 h-1.5 overflow-hidden rounded-full bg-panel" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
+        <span className={`block h-full rounded-full ${tone}`} style={{ width: `${percent ?? 0}%` }} />
+      </span>
+      {note && <span className={`col-span-2 text-[11px] ${percent !== null && percent >= badAt ? "text-bad" : "text-subtle"}`}>{note}</span>}
+    </li>
+  );
+}
+
 function LimitBar({ window: w, label }: { window: CliLimitWindow; label: string }) {
   const t = useT();
   const format = useFormat();

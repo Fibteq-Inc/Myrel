@@ -65,6 +65,7 @@ export async function isRunnerReconnecting(env: Env, runnerId: string, now = Dat
 
 export async function toRunner(env: Env, row: RunnerRow): Promise<Runner> {
   const info = parseInfo(row.info);
+  const { online, stats } = await (await getAgentByName(env.RUNNER_AGENT, row.id)).presence();
   return {
     id: row.id,
     name: row.name,
@@ -77,9 +78,10 @@ export async function toRunner(env: Env, row: RunnerRow): Promise<Runner> {
     ...(info?.settings && { settings: info.settings }),
     ...(info?.updates && { updates: info.updates }),
     ...(info?.update && { update: info.update }),
-    online: await isRunnerOnline(env, row.id),
+    online,
     lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    ...(stats && { stats }),
   };
 }
 

@@ -69,6 +69,13 @@ From runner 0.14.0 the background runner can be updated and set up from **Myrel 
   `myrel-runner settings` shows and changes the same ones here, and `myrel-runner settings remote off` stops Myrel from
   changing them (only this computer can turn it back on).
 
+- **Usage** (from runner 0.29.0): the card shows how busy the computer is: CPU since the last reading, memory used
+  of the total (on Linux what the kernel says is still available, on macOS what Activity Monitor counts as used), swap
+  on Linux, free space on the disk the runner's home is on, and how many CLIs it is running for Myrel. The runner
+  measures with each of its pings (every 25 seconds, with the connection it keeps anyway) and sends numbers only: no
+  process names, paths or user names. Myrel keeps the latest reading while the computer is connected and stores
+  nothing; only you see it, on your own Devices page. `myrel-runner settings stats off` stops sending it.
+
 A runner started with `myrel-runner start` in a terminal cannot restart itself, so the card shows the command
 instead; the desktop app's runner updates with the app. Runners before 0.14.0 need `npx myrel-runner@latest update`
 once.

@@ -17,6 +17,14 @@ export function formatCost(micros: number, locale: Locale = "en") {
   return `$${number(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(usd)}`;
 }
 
+/** Bytes as "9.1 GB", "512 MB": for memory and disk figures. */
+export function formatBytes(n: number, locale: Locale = "en") {
+  const GB = 1024 ** 3;
+  if (n >= 100 * GB) return `${number(locale, { maximumFractionDigits: 0 }).format(n / GB)} GB`;
+  if (n >= GB) return `${number(locale, { maximumFractionDigits: 1 }).format(n / GB)} GB`;
+  return `${number(locale, { maximumFractionDigits: 0 }).format(n / 1024 ** 2)} MB`;
+}
+
 /** "2026-10-19" → "Oct 19" (or "Mon, Oct 19" when long). Dates are already local calendar days. */
 export function formatDay(date: string, long = false, locale: Locale = "en") {
   const d = new Date(`${date}T00:00:00Z`);
@@ -63,6 +71,7 @@ export function useFormat() {
   const { locale } = useI18n();
   return {
     tokens: (n: number) => formatTokens(n, locale),
+    bytes: (n: number) => formatBytes(n, locale),
     cost: (micros: number) => formatCost(micros, locale),
     day: (date: string, long = false) => formatDay(date, long, locale),
     relative: (iso: string) => formatRelative(iso, locale),

@@ -37,6 +37,12 @@ Choose **Settings** on your computer's card.
 
 The computer has to be online to change these. To allow changes only at the computer itself, run `myrel-runner settings remote off` there.
 
+## Usage
+
+While the computer is online, its card shows how busy it is: CPU, memory used of the total, swap on Linux, free space on the disk the runner is on, and how many CLIs it is running for Myrel. The bars turn yellow at 70% and red at 90% (a disk only when it is nearly full); with memory nearly full, or no swap at all, a note says a CLI may be stopped by the system when memory runs out.
+
+The runner measures every 25 seconds and sends numbers only, never process names or paths. Myrel keeps the latest reading only while the computer is connected, and only you see it, on your Devices page. To stop sending it, run `myrel-runner settings stats off` on the computer. Needs runner 0.29.0 or newer.
+
 ## Usage limits
 
 For Claude Code and Codex, the card shows the 5-hour and weekly limits, how much you used and when they reset.

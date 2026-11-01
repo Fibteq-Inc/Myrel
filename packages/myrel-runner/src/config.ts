@@ -27,6 +27,8 @@ export type RunnerConfig = {
   autoUpdate?: boolean;
   /** false: settings cannot be changed from Myrel, only here. Default on. */
   remoteSettings?: boolean;
+  /** false: do not tell Myrel how busy this computer is (CPU, memory, disk; shown in Devices). Default on. */
+  stats?: boolean;
 };
 
 /** ~/.myrel-runner, or MYREL_RUNNER_HOME. Holds config.json (mode 600) and sessions.json. */
