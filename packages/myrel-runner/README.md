@@ -167,6 +167,14 @@ that run only. With `read` its write and shell tools are taken away (its `:read-
 a command's approval). `full` is `--yolo`: no approval, no sandbox. Muse Code has no `--add-dir`, so below `full` it
 writes only in the project's main folder.
 
+On Ubuntu 23.10 and later, Codex's and Muse Code's sandboxes can fail every command with `bwrap: loopback: Failed
+RTM_NEWADDR: Operation not permitted`. Ubuntu's AppArmor gives programs without a profile no capabilities in a new user
+namespace (`kernel.apparmor_restrict_unprivileged_userns = 1`) and exempts only `/usr/bin/bwrap`, while both CLIs
+bring their own bubblewrap. `myrel-runner status` and the runner's log say so, and their runs are told to stop
+retrying commands. `myrel-runner sandbox` shows what it found; `myrel-runner sandbox fix`, run as yourself, installs
+`/etc/apparmor.d/myrel-runner-<you>` with sudo: a profile that lets only those binaries (by a pattern that still
+matches after they update) make user namespaces, while the rest of the computer keeps the restriction.
+
 Kimi Code runs as an ACP server (`kimi acp`) like Hermes Agent, whose session takes a permission mode: `plan` with
 `read` (no edits but its own plan file), `default` with `edit` and `auto` (reads and edits inside the folder's git
 repository run, the rest asks) and `auto` ("never ask") with `full`. What it asks permission for is declined below

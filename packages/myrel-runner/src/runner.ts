@@ -10,6 +10,7 @@ import {
   ServerToRunner,
 } from "@myrel/protocol";
 import { ADAPTERS, detectClis } from "./clis";
+import { sandboxProblem, sandboxState } from "./sandbox";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
@@ -23,7 +24,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.29.0";
+export const RUNNER_VERSION = "0.30.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -441,6 +442,10 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   connect();
 
   log(`Sharing ${config.folders.length} folder(s); CLIs found: ${clis.map((c) => c.id).join(", ") || "none"}`);
+  void sandboxState().then((s) => {
+    const problem = sandboxProblem(s);
+    if (problem) log(problem);
+  });
   return { stop, done };
 }
 
