@@ -108,6 +108,14 @@ describe("opencode", () => {
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
   });
 
+  it("puts Anthropic models on OpenCode's own provider, over the task's endpoint", () => {
+    const s = spec({ model: { kind: "anthropic", provider: "anthropic", id: "claude-sonnet-x", baseUrl: "https://myrel.test/api/agent/model//" } });
+    expect(opencode.command(s)).toContain("--model 'anthropic/claude-sonnet-x'");
+    expect(opencodeConfig(s).providers).toEqual({
+      anthropic: { settings: { apiKey: "{env:MYREL_MODEL_API_KEY}", baseURL: "https://myrel.test/api/agent/model/v1" } },
+    });
+  });
+
   it("lets a model that reads images see the images OpenCode reads", () => {
     const model = { kind: "openai" as const, provider: "fireworks", id: "qwen-vl", baseUrl: "https://api.fireworks.ai/inference/v1" };
     const entry = (images?: boolean) =>

@@ -158,6 +158,13 @@ export const PLAN_PLUGIN = `export default {
 };
 `;
 
+/** A base URL without its trailing slashes, so a path joins it with exactly one. */
+function trimSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
+}
+
 export function opencodeModel(spec: TaskSpec): string | null {
   const m = spec.model;
   if (!m) return null;
@@ -205,7 +212,7 @@ export function opencodeConfig(spec: TaskSpec): Record<string, unknown> {
   config.agents = { title: { model: opencodeModel(spec) } };
   config.providers =
     m.kind === "anthropic"
-      ? { anthropic: { settings: { apiKey, ...(m.baseUrl ? { baseURL: `${m.baseUrl.replace(/\/+$/, "")}/v1` } : {}) } } }
+      ? { anthropic: { settings: { apiKey, ...(m.baseUrl ? { baseURL: `${trimSlashes(m.baseUrl)}/v1` } : {}) } } }
       : {
           [CUSTOM_PROVIDER]: {
             package: "@opencode/ai/providers/openai-compatible",
