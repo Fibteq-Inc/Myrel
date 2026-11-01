@@ -1,7 +1,7 @@
 import { cliMark } from "@myrel/client";
 import { LoaderCircle } from "lucide-react-native";
 import { useI18n } from "@myrel/i18n/react";
-import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   type TextInputProps,
+  type TextStyle,
   View,
   type ViewStyle,
 } from "react-native";
@@ -163,6 +164,38 @@ export function CliMark({ cli, size = 28, tile = false, color }: { cli: string |
       )}
     </View>
   );
+}
+
+/**
+ * One clock for every time label on screen, ticking once a minute while any is mounted, so labels
+ * in rows that otherwise stay put ("now", "5m") still move on.
+ */
+const minute = {
+  now: Date.now(),
+  listeners: new Set<() => void>(),
+  timer: undefined as ReturnType<typeof setInterval> | undefined,
+  subscribe(listener: () => void) {
+    minute.listeners.add(listener);
+    minute.timer ??= setInterval(() => {
+      minute.now = Date.now();
+      for (const l of minute.listeners) l();
+    }, 60_000);
+    return () => {
+      minute.listeners.delete(listener);
+      if (minute.listeners.size === 0 && minute.timer) {
+        clearInterval(minute.timer);
+        minute.timer = undefined;
+      }
+    };
+  },
+  get: () => minute.now,
+};
+
+/** `iso` as "now", "5m", "3h", "2d" or a short date, kept current by the shared minute clock. */
+export function RelativeTime({ iso, style }: { iso: string; style?: StyleProp<TextStyle> }) {
+  const relativeTime = useRelativeTime();
+  useSyncExternalStore(minute.subscribe, minute.get);
+  return <Text style={style}>{relativeTime(iso)}</Text>;
 }
 
 /** "now", "5m", "3h", "2d", then a short date, in the app's language. */

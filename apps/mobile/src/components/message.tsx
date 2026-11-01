@@ -23,7 +23,7 @@ import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
 import { StopButton } from "./stop-button";
-import { CliMark, Spinner, useRelativeTime } from "./ui";
+import { CliMark, RelativeTime, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
 
@@ -66,7 +66,6 @@ export function MessageView({
   const t = useT();
   const colors = useColors();
   const styles = useStyles();
-  const relativeTime = useRelativeTime();
 
   if (message.authorKind === "system") {
     return (
@@ -104,7 +103,7 @@ export function MessageView({
           {message.stats && <MessageStatsLine stats={message.stats} />}
           <View style={styles.meta}>
             <Reactions reactions={reactions} />
-            <Text style={styles.time}>{relativeTime(message.createdAt)}</Text>
+            <RelativeTime iso={message.createdAt} style={styles.time} />
           </View>
         </View>
       </View>
