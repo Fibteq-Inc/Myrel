@@ -143,11 +143,13 @@ and Myrel's tools, and a run that still stops says which permission stopped it. 
 commands, or allow single ones under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (e.g.
 `command(git)`).
 
-OpenCode has no sandbox for commands either, so below `full` its bash tool is denied: OpenCode then does not
+OpenCode has no sandbox for commands either, so below `full` its command tool is denied: OpenCode then does not
 offer it at all, and the run goes on with files and Myrel's tools. Anything else that would ask (for example a
-permission you set to `ask` yourself) is declined and the run goes on too
-(`experimental.continue_loop_on_deny`). With `full`, `--auto` approves what would ask, but rules you set to `deny`
-still hold.
+permission you set to `ask` yourself) is declined; on OpenCode 1 the run goes on too
+(`experimental.continue_loop_on_deny`). OpenCode 2 dropped that flag and allows folders outside the project by
+default, so there the runner writes OpenCode 2's native permission rules instead: below `full`, folders outside
+the project's stay closed except the ones the run was given. With `full`, `--auto` approves what would ask, but
+rules you set to `deny` still hold.
 
 Hermes Agent runs as an ACP server (`hermes acp`), whose session takes an edit mode: `default` (asks before
 edits) with `read`, `accept_edits` with `edit` and `auto`, `dont_ask` with `full`. What it asks permission for
@@ -243,7 +245,9 @@ OpenCode takes a whole config for one run in `OPENCODE_CONFIG_CONTENT`, so nothi
 `~/.config/opencode`: the run's servers, connectors, permission rules and skills folder (`skills.paths`) go there,
 merged over your own config, and the token stays in `MYREL_MCP_TOKEN`. Your model and provider logins are your own.
 opencode 2 runs `opencode run` through its background service, which would ignore that config, so the runner adds
-`--standalone` when `opencode --version` says 2 or later. Connectors' tools show up as `<connector>_<tool>`.
+`--standalone` when `opencode --version` says 2 or later, and writes that config in OpenCode 2's native shape
+(servers under `mcp.servers` with Code Mode off, so the run's tools stay tools of their own, and ordered
+`permissions` rules). Connectors' tools show up as `<connector>_<tool>`.
 
 Hermes Agent's `hermes chat` runs every turn in a shared background gateway that takes MCP servers only from
 `~/.hermes/config.yaml`, so the runner uses its ACP server instead (`hermes acp`, which needs

@@ -579,6 +579,7 @@ const opencode: CliAdapter = {
   ],
   // Servers, permissions and skills for one run, in the environment: nothing goes into the person's config.
   async agent({ url, token, connectors = [], skills, access = "edit", dirs = [] }) {
+    const version = await cliVersion("opencode");
     const auth = { Authorization: `Bearer {env:${TOKEN_VAR}}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "remote", url, headers: auth, oauth: false } };
     for (const c of connectors) {
@@ -587,21 +588,26 @@ const opencode: CliAdapter = {
           ? { type: "remote", url: c.url, headers: auth, oauth: false }
           : { type: "local", command: [c.command, ...c.args], environment: c.env };
     }
-    // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
-    const permission: Record<string, unknown> = { ...OPENCODE_ACCESS[access] };
-    for (const name of Object.keys(servers)) permission[`${name}_*`] = "allow";
     const folders = [...dirs, ...(skills ? [skills.dir] : [])];
-    if (folders.length) permission.external_directory = Object.fromEntries(folders.flatMap((d) => [[d, "allow"], [join(d, "*"), "allow"]]));
-    const config = {
-      mcp: servers,
-      permission,
-      ...(skills && { skills: { paths: [skills.dir] } }),
-      // Headless, a step that would ask is declined; by default that also ends the run with no answer.
-      experimental: { continue_loop_on_deny: true },
-    };
+    let config: Record<string, unknown>;
+    if (opencodeMajor(version) >= 2) {
+      config = opencodeV2Config(servers, access, folders, skills?.dir);
+    } else {
+      // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
+      const permission: Record<string, unknown> = { ...OPENCODE_ACCESS[access] };
+      for (const name of Object.keys(servers)) permission[`${name}_*`] = "allow";
+      if (folders.length) permission.external_directory = Object.fromEntries(folders.flatMap((d) => [[d, "allow"], [join(d, "*"), "allow"]]));
+      config = {
+        mcp: servers,
+        permission,
+        ...(skills && { skills: { paths: [skills.dir] } }),
+        // Headless, a step that would ask is declined; by default that also ends the run with no answer.
+        experimental: { continue_loop_on_deny: true },
+      };
+    }
     return {
       // opencode 2 runs through its background service otherwise, which ignores the run's config.
-      args: opencodeServerArgs(await cliVersion("opencode")),
+      args: opencodeServerArgs(version),
       env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config), [TOKEN_VAR]: token },
     };
   },
@@ -639,9 +645,41 @@ const opencode: CliAdapter = {
 };
 
 /** `opencode --version` prints "1.19.4"; opencode 2 prints "opencode v2.0.28": the first number is the major. */
+export function opencodeMajor(version: string | null): number {
+  return Number(/\d+/.exec(version ?? "")?.[0] ?? 0);
+}
+
 export function opencodeServerArgs(version: string | null): string[] {
-  const major = Number(/\d+/.exec(version ?? "")?.[0] ?? 0);
-  return major >= 2 ? ["--standalone"] : [];
+  return opencodeMajor(version) >= 2 ? ["--standalone"] : [];
+}
+
+/**
+ * The same run in opencode 2's native config shape. Servers sit under `mcp.servers` with Code Mode
+ * off, so the run's tools stay tools of their own instead of calls inside one `execute` script, and
+ * skills are one array. Permissions are ordered rules where the last match wins; its `bash` action
+ * is `shell` there. opencode 2 ignores `continue_loop_on_deny` and allows folders outside the
+ * project by default, so below full access outside folders are denied first and the run's own
+ * folders allowed after; full access keeps --auto's reach, which never overrides a deny.
+ */
+function opencodeV2Config(servers: Record<string, unknown>, access: Access, folders: string[], skillsDir?: string): Record<string, unknown> {
+  const permissions: Array<{ action: string; resource: string; effect: string }> = [];
+  if (access !== "full") permissions.push({ action: "external_directory", resource: "*", effect: "deny" });
+  for (const dir of folders) {
+    permissions.push({ action: "external_directory", resource: dir, effect: "allow" });
+    permissions.push({ action: "external_directory", resource: join(dir, "*"), effect: "allow" });
+  }
+  const accessRules = OPENCODE_ACCESS[access];
+  permissions.push({ action: "edit", resource: "*", effect: accessRules.edit! });
+  permissions.push({ action: "shell", resource: "*", effect: accessRules.bash! });
+  // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
+  for (const name of Object.keys(servers)) permissions.push({ action: `${name}_*`, resource: "*", effect: "allow" });
+  const native: Record<string, unknown> = {};
+  for (const [name, server] of Object.entries(servers)) native[name] = { ...(server as Record<string, unknown>), codemode: false };
+  return {
+    mcp: { servers: native },
+    permissions,
+    ...(skillsDir && { skills: [skillsDir] }),
+  };
 }
 
 /**
