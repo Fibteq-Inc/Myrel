@@ -110,11 +110,14 @@ export function CliLimitsList({ runner }: { runner: Runner }) {
 /** Memory this full is shown red, and a note says why it matters. */
 export const MEMORY_LOW_PERCENT = 90;
 
-/** "CPU 41% · RAM 11.2/12 GB": the computer's latest sample in one line, for pickers and lists. */
-export function usageSummary(stats: RunnerStats, t: Translate, format: ReturnType<typeof useFormat>): string {
-  return t("runners.usage.summary", {
+/**
+ * "CPU 41% · RAM 11.2/12 GB": the computer's latest sample in one line, for lists. `compact` drops
+ * the words and rounds, "41% · 11/12 GB", for a pill next to a long computer name.
+ */
+export function usageSummary(stats: RunnerStats, t: Translate, format: ReturnType<typeof useFormat>, compact = false): string {
+  return t(compact ? "runners.usage.summaryShort" : "runners.usage.summary", {
     cpu: stats.cpu.percent === undefined ? "–" : t("runners.usage.percent", { percent: Math.round(stats.cpu.percent) }),
-    memory: format.bytesOf(stats.memory.total - stats.memory.available, stats.memory.total),
+    memory: format.bytesOf(stats.memory.total - stats.memory.available, stats.memory.total, compact),
   });
 }
 

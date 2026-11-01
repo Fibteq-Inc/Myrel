@@ -282,7 +282,8 @@ export function ThreadSettingsPicker({
                     checked={pickedRunner === w.runnerId}
                     onSelect={() => pickedRunner !== w.runnerId && onRunner(w.runnerId)}
                     label={w.online ? w.runnerName : `${w.runnerName} (${t("localFolder.offline")})`}
-                    note={w.online && w.stats ? usageSummary(w.stats, t, format) : undefined}
+                    note={w.online && w.stats ? usageSummary(w.stats, t, format, true) : undefined}
+                    title={w.online && w.stats ? `${w.runnerName} · ${usageSummary(w.stats, t, format)}` : undefined}
                     warn={!!w.stats && memoryLow(w.stats)}
                   />
                 ))}
@@ -389,21 +390,26 @@ function Pills({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap gap-1.5 px-2.5 pb-2 pt-1">{children}</div>;
 }
 
-/** `cli`: a CLI's pill, led by its mark. `note`: a small figure after the label (how busy a computer is); `warn` colours it. */
-function Pill({ checked, onSelect, label, cli, note, warn }: { checked: boolean; onSelect: () => void; label: string; cli?: string; note?: string; warn?: boolean }) {
+/**
+ * `cli`: a CLI's pill, led by its mark. `note`: a short figure after the label (how busy a computer
+ * is), with `title` saying it in full; `warn` colours it. The label gives way, the note keeps its
+ * width, and the pill never grows past the panel.
+ */
+function Pill({ checked, onSelect, label, cli, note, title, warn }: { checked: boolean; onSelect: () => void; label: string; cli?: string; note?: string; title?: string; warn?: boolean }) {
   return (
     <button
       type="button"
       role="menuitemradio"
       aria-checked={checked}
       onClick={onSelect}
+      title={title}
       className={cn(
-        "flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+        "flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
         checked ? "border-accent bg-accent text-ground" : "border-edge text-body hover:bg-hover hover:text-fg",
       )}
     >
       {cli && <CliMark cli={cli} size={13} />}
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {note && <span className={cn("flex-none text-[11px] tabular-nums", checked ? "opacity-80" : warn ? "text-bad" : "text-subtle")}>{note}</span>}
     </button>
   );

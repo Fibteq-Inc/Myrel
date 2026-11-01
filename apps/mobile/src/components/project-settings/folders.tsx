@@ -238,17 +238,19 @@ function WorkspaceForm({ project, workspace, onDone }: { project: Project; works
             const w = workspaces.find((x) => x.runnerId === r.id);
             return (
               <Choice key={r.id} checked={r.id === runner.id} onPress={() => pickRunner(r.id)}>
-                <Text style={[styles.name, { flexShrink: 1 }]} numberOfLines={1}>
-                  {r.name}
-                </Text>
+                {/* Name over usage, both giving way, so a long host name never pushes the row wider than the sheet. */}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {r.name}
+                  </Text>
+                  {r.online && r.stats && (
+                    <Text style={[styles.usage, memoryLow(r.stats) && { color: colors.bad }]} numberOfLines={1}>
+                      {usageSummary(r.stats, t, locale)}
+                    </Text>
+                  )}
+                </View>
                 {w && (
                   <Text style={styles.badge}>{workspaces.length > 1 && w.isDefault ? t("localFolder.default") : t("localFolder.inProject")}</Text>
-                )}
-                <View style={{ flex: 1 }} />
-                {r.online && r.stats && (
-                  <Text style={[styles.usage, memoryLow(r.stats) && { color: colors.bad }]} numberOfLines={1}>
-                    {usageSummary(r.stats, t, locale)}
-                  </Text>
                 )}
                 <OnlineDot online={r.online} />
               </Choice>
@@ -511,7 +513,7 @@ const useStyles = makeStyles((colors) =>
     label: { color: colors.subtle, fontSize: 12 },
     action: { color: colors.accent, fontSize: 14, fontWeight: "500" },
     path: { flexShrink: 1, color: colors.subtle, fontFamily: mono, fontSize: 12 },
-    usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"], flexShrink: 1 },
+    usage: { color: colors.subtle, fontSize: 11, fontVariant: ["tabular-nums"] },
     badge: { color: colors.muted, fontSize: 11, backgroundColor: colors.hover, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden" },
     choice: {
       flexDirection: "row",

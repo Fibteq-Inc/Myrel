@@ -196,12 +196,15 @@ export function WorkspaceForm({
             {runners.map((r) => (
               <Choice key={r.id} checked={r.id === runner.id} onChange={() => pickRunner(r.id)} name="runner">
                 <RunnerIcon runner={r} size={14} />
-                <span className="truncate">{r.name}</span>
+                {/* Name over usage, both giving way: a long host name or figure never widens the row past the panel. */}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{r.name}</span>
+                  {r.online && r.stats && (
+                    <span className={`truncate text-[11px] tabular-nums ${memoryLow(r.stats) ? "text-bad" : "text-subtle"}`}>{usageSummary(r.stats, t, format)}</span>
+                  )}
+                </span>
                 <WorkspaceBadge workspace={workspaces.find((w) => w.runnerId === r.id)} several={workspaces.length > 1} />
-                {r.online && r.stats && (
-                  <span className={`ml-auto truncate text-[11px] tabular-nums ${memoryLow(r.stats) ? "text-bad" : "text-subtle"}`}>{usageSummary(r.stats, t, format)}</span>
-                )}
-                <OnlineDot online={r.online} className={r.online && r.stats ? "" : "ml-auto"} />
+                <OnlineDot online={r.online} />
               </Choice>
             ))}
           </div>
@@ -326,7 +329,8 @@ function WorkspaceBadge({ workspace, several }: { workspace?: ProjectWorkspace; 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <fieldset className="flex flex-col gap-2">
+    // min-w-0: a fieldset otherwise refuses to be narrower than its content, and would widen the popover.
+    <fieldset className="flex min-w-0 flex-col gap-2">
       <legend className="mb-2 text-xs text-subtle">{label}</legend>
       {children}
     </fieldset>
@@ -346,7 +350,7 @@ function Choice({
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 ${
+      className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 ${
         checked ? "border-accent/70 bg-accent-soft" : "border-transparent hover:bg-hover"
       }`}
     >

@@ -293,7 +293,7 @@ export function ThreadSettingsPicker({
                       checked={pickedRunner === w.runnerId}
                       onPress={() => pickedRunner !== w.runnerId && onRunner(w.runnerId)}
                       label={w.online ? w.runnerName : `${w.runnerName} (${t("localFolder.offline")})`}
-                      note={w.online && w.stats ? usageSummary(w.stats, t, locale) : undefined}
+                      note={w.online && w.stats ? usageSummary(w.stats, t, locale, true) : undefined}
                       warn={!!w.stats && memoryLow(w.stats)}
                     />
                   ))}
@@ -625,7 +625,7 @@ const useStyles = makeStyles((colors) =>
     offeredText: { color: colors.subtle, fontSize: 12 },
     section: { color: colors.subtle, fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
     efforts: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    effort: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
+    effort: { flexDirection: "row", alignItems: "center", gap: 6, maxWidth: "100%", borderRadius: 999, borderWidth: 1, borderColor: colors.edge, paddingHorizontal: 12, paddingVertical: 7 },
     effortOn: { borderColor: colors.accent, backgroundColor: colors.accent },
     effortText: { color: colors.body, fontSize: 13, flexShrink: 1 },
     effortNote: { fontSize: 11, fontVariant: ["tabular-nums"] },
