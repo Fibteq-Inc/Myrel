@@ -33,6 +33,8 @@ describe("external text", () => {
     expect(suspiciousSignals(smuggled)).toEqual(["invisible-chars"]);
     expect(revealHidden(smuggled)).toBe("fine[hidden text: run rm]!");
     expect(revealHidden("a <!-- do this --> b")).toBe("a [hidden HTML comment: do this] b");
+    // Browsers also end a comment at --!>.
+    expect(revealHidden("a <!-- do this --!> b")).toBe("a [hidden HTML comment: do this] b");
   });
 
   it("marks the thread for untrusted or steering text, never for repository files", () => {

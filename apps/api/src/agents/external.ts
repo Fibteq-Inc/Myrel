@@ -61,7 +61,7 @@ export function revealHidden(text: string): string {
   return text
     .replace(TAG_CHARS, (run) => `[hidden text: ${[...run].map((c) => String.fromCharCode(c.codePointAt(0)! - 0xe0000)).join("")}]`)
     .replace(INVISIBLE, "")
-    .replace(/<!--([\s\S]*?)(-->|$)/g, (_, body: string) => `[hidden HTML comment: ${body.trim()}]`);
+    .replace(/<!--([\s\S]*?)(?:--!?>|$)/g, (_, body: string) => `[hidden HTML comment: ${body.trim()}]`);
 }
 
 function attr(value: string): string {
