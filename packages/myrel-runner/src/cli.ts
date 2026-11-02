@@ -2,6 +2,7 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@myrel/protocol";
+import { addAccount, claudeAuthStatus, claudeLogin, claudeOwnDir, findAccount, removeAccount, renameAccount } from "./accounts";
 import { readBridgeRun, runBridge } from "./bridge";
 import { detectClis, type MissingCli } from "./clis";
 import { runGitCredential } from "./github";
@@ -40,6 +41,9 @@ Usage:
   myrel-runner settings [access <level> | auto-update on|off | remote on|off]
                                  Show or change the settings (Myrel > Devices can change them too,
                                  unless remote is off)
+  myrel-runner claude [list | add <name> [--dir <folder>] | login <name> | rename <name|default> <new name> | remove <name>]
+                                 Other Claude Code accounts (e.g. a work one next to your own), each signed
+                                 in with Claude Code's own login in a folder of its own; threads choose one
   myrel-runner sandbox [fix]    Linux: check, or fix once with sudo, the AppArmor restriction on Ubuntu that
                                  stops Muse Code's and Codex's sandbox ("bwrap: ... Operation not permitted")
   myrel-runner logout           Forget the pairing on this computer
@@ -76,6 +80,7 @@ async function main(argv: string[]) {
       json: { type: "boolean" },
       force: { type: "boolean" },
       now: { type: "boolean" },
+      dir: { type: "string" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -133,6 +138,9 @@ async function main(argv: string[]) {
       console.log(`Access:  ${config.access}${config.autoUpdate ? " · auto-update on" : ""}`);
       console.log(`Folders: ${config.folders.map((f) => `\n  ${f.path}`).join("") || "none"}`);
       console.log(`CLIs:    ${clis.map((c) => `\n  ${CLI_NAMES[c.id]} ${c.version ?? ""}`).join("") || "none found"}`);
+      if (config.claudeAccounts?.length) {
+        console.log(`Claude Code accounts: \n  ${config.claudeDefaultName ?? "its own login"}${config.claudeAccounts.map((a) => `\n  ${a.name}`).join("")}`);
+      }
       console.log(`Not found: ${missing.map((m) => `\n  ${CLI_NAMES[m.id]}: ${m.reason}`).join("") || "none"}`);
       const problem = sandboxProblem(await sandboxState());
       if (problem) console.log(`Sandbox: ${problem}`);
@@ -264,6 +272,8 @@ async function main(argv: string[]) {
       console.log(`Usage:       ${stats ? "CPU, memory and disk are shown in Myrel > Devices" : "off: not sent to Myrel"}`);
       return;
     }
+    case "claude":
+      return claudeAccounts(positionals.slice(1), values);
     case "logout": {
       const config = await loadConfig();
       delete config.token;
@@ -274,6 +284,67 @@ async function main(argv: string[]) {
     }
     default:
       throw new Error(`Unknown command "${command}". Run myrel-runner --help.`);
+  }
+}
+
+const CLAUDE_USAGE =
+  'Usage: myrel-runner claude [list | add <name> [--dir <folder>] | login <name> | rename <name|default> <new name> | remove <name>]';
+
+/** `myrel-runner claude …`: the other Claude Code logins threads can run with (see accounts.ts). */
+async function claudeAccounts([action = "list", ref, name]: string[], values: { dir?: string; json?: boolean }) {
+  const config = await loadConfig();
+  switch (action) {
+    case "list": {
+      const own = { id: null, name: config.claudeDefaultName ?? null, dir: claudeOwnDir() };
+      const all = [own, ...(config.claudeAccounts ?? [])];
+      const states = await Promise.all(all.map((a) => claudeAuthStatus(a.id ? a.dir : undefined)));
+      if (values.json) return console.log(JSON.stringify(all.map((a, i) => ({ ...a, auth: states[i] }))));
+      for (const [i, a] of all.entries()) {
+        const s = states[i];
+        const auth = !s ? "could not ask Claude Code" : s.loggedIn ? `signed in${s.subscriptionType ? ` (${s.subscriptionType})` : ""}` : "not signed in";
+        console.log(`${a.name ?? "Claude Code's own login"}${a.id ? ` [${a.id}]` : " (default)"}: ${auth}\n  ${a.dir}`);
+      }
+      if (!config.claudeAccounts?.length) console.log('\nAdd another account with: myrel-runner claude add "Work"');
+      return;
+    }
+    case "add": {
+      if (!ref) throw new Error(CLAUDE_USAGE);
+      const account = await addAccount(config, ref, values.dir);
+      if (!(await claudeAuthStatus(account.dir))?.loggedIn) {
+        console.log(`Signing in to Claude Code for "${account.name}". Use the account you want threads to run with.`);
+        await claudeLogin(account.dir);
+        if (!(await claudeAuthStatus(account.dir))?.loggedIn) {
+          throw new Error(`Not added: Claude Code did not finish signing in. Run \`myrel-runner claude add "${account.name}"\` again.`);
+        }
+      }
+      await saveConfig(config);
+      console.log(`Added "${account.name}" (${account.dir}). Threads in Myrel can now choose Claude Code · ${account.name}.`);
+      if (!config.claudeDefaultName) console.log('Name your own login too, e.g.: myrel-runner claude rename default "Personal"');
+      return;
+    }
+    case "login": {
+      const account = ref ? findAccount(config, ref) : undefined;
+      if (!account) throw new Error(ref ? `No Claude Code account "${ref}". See myrel-runner claude list.` : CLAUDE_USAGE);
+      process.exitCode = await claudeLogin(account.dir);
+      return;
+    }
+    case "rename": {
+      if (!ref || !name) throw new Error(CLAUDE_USAGE);
+      if (!renameAccount(config, ref, name)) throw new Error(`No Claude Code account "${ref}". See myrel-runner claude list.`);
+      await saveConfig(config);
+      console.log(`Renamed it to "${name.trim()}".`);
+      return;
+    }
+    case "remove": {
+      const account = ref ? removeAccount(config, ref) : undefined;
+      if (!account) throw new Error(ref ? `No Claude Code account "${ref}". See myrel-runner claude list.` : CLAUDE_USAGE);
+      await saveConfig(config);
+      console.log(`Removed "${account.name}": threads that chose it run with Claude Code's own login from their next turn.`);
+      console.log(`Its login is still in ${account.dir}; delete that folder to remove it from this computer too.`);
+      return;
+    }
+    default:
+      throw new Error(CLAUDE_USAGE);
   }
 }
 

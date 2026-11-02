@@ -83,6 +83,22 @@ export function effortsFor(models: CliModel[], model: string | null): string[] {
   return taking.reduce<string[]>((all, m, i) => (i === 0 ? [...m.efforts] : all.filter((e) => m.efforts.includes(e))), []);
 }
 
+/**
+ * A login of a CLI the person added on the computer besides the CLI's own (`myrel-runner claude add
+ * <name>`), e.g. a work account next to a personal one. Only its name and id leave the computer; the
+ * login itself stays in its own config folder there (Claude Code's CLAUDE_CONFIG_DIR).
+ */
+export const CliAccountId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
+export type CliAccountId = z.infer<typeof CliAccountId>;
+
+export const CliAccount = z.object({
+  id: CliAccountId,
+  name: z.string().min(1).max(80),
+  /** This login's limits, as the CLI last reported them in a run with it. */
+  limits: CliLimits.optional().catch(undefined),
+});
+export type CliAccount = z.infer<typeof CliAccount>;
+
 /** A CLI the runner found installed on the computer. */
 export const RunnerCli = z.object({
   id: CliId,
@@ -94,6 +110,13 @@ export const RunnerCli = z.object({
    * Absent when the CLI lists none or could not be asked: then nothing is offered and it runs with its own default.
    */
   models: z.array(CliModel).max(100).optional().catch(undefined),
+  /**
+   * The CLI's other logins on the computer (feature "cli-accounts"; Claude Code only so far): each runs
+   * with the same version and models, but has limits of its own. `limits` above stay the CLI's own login's.
+   */
+  accounts: z.array(CliAccount).max(10).optional().catch(undefined),
+  /** The name the person gave the CLI's own login when it has other accounts too, e.g. "Personal". */
+  defaultAccount: z.string().min(1).max(80).optional().catch(undefined),
 });
 export type RunnerCli = z.infer<typeof RunnerCli>;
 
@@ -123,6 +146,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * ("ssh.keygen", "ssh.keys", "ssh.hostkeys", "ssh.test", "ssh.run", "ssh.forget"); its agent runs put
  * an `ssh` on PATH that goes through Myrel's ssh_run tool instead.
  * "stats": measures how busy the computer is and sends it with each "ping" (RunnerStats).
+ * "cli-accounts": lists a CLI's other logins (RunnerCli.accounts) and runs the one in task.start's `account`.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -142,6 +166,7 @@ export const RunnerFeature = z.enum([
   "steer-claude",
   "ssh",
   "stats",
+  "cli-accounts",
 ]);
 
 /**
@@ -229,7 +254,7 @@ export const RunnerInfo = z.object({
   /** Unknown features from newer runners are dropped, not refused. */
   features: z
     .array(z.string().max(50))
-    .max(20)
+    .max(40)
     .default([])
     .transform((all) => all.filter((f): f is RunnerFeature => RunnerFeature.safeParse(f).success)),
   // Older runners never send these; a malformed one is dropped, not the whole hello.
@@ -418,6 +443,11 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
     /** The model and effort to run with (feature "models"); absent: the CLI's own default. */
     model: TaskModel.optional(),
+    /**
+     * Which of the CLI's logins runs the turn (feature "cli-accounts"): one of RunnerCli.accounts.
+     * Absent: the CLI's own. The runner fails a task naming one it no longer has.
+     */
+    account: CliAccountId.optional(),
     /** The project's other folders the CLI may also work in; each must be shared too (feature "project-folders"). */
     folders: z.array(z.string().min(1).max(1024)).max(50).optional(),
     /**

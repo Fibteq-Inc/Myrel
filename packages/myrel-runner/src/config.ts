@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { CliId, RunnerAccess, RunnerFolder } from "@myrel/protocol";
+import type { ClaudeAccount } from "./accounts";
 
 /**
  * What the CLI may do without asking. read: look only. edit (default): change files, but not run
@@ -29,6 +30,13 @@ export type RunnerConfig = {
   remoteSettings?: boolean;
   /** false: do not tell Myrel how busy this computer is (CPU, memory, disk; shown in Devices). Default on. */
   stats?: boolean;
+  /**
+   * Claude Code logins besides its own, each in its own config folder (`myrel-runner claude add`),
+   * which a thread can choose to run with. Myrel only keeps their names and folders, never the login.
+   */
+  claudeAccounts?: ClaudeAccount[];
+  /** The name of Claude Code's own login when there are others too, e.g. "Personal" (`claude rename default`). */
+  claudeDefaultName?: string;
 };
 
 /** ~/.myrel-runner, or MYREL_RUNNER_HOME. Holds config.json (mode 600) and sessions.json. */
@@ -101,21 +109,25 @@ export type StoredSession = { id: string; task?: string };
 export class SessionStore {
   constructor(private readonly path = join(runnerHome(), "sessions.json")) {}
 
-  async get(threadId: string, cli: CliId = "claude"): Promise<StoredSession | undefined> {
-    const value = (await readJson<Record<string, string | StoredSession>>(this.path))?.[sessionKey(threadId, cli)];
+  async get(threadId: string, cli: CliId = "claude", account?: string): Promise<StoredSession | undefined> {
+    const value = (await readJson<Record<string, string | StoredSession>>(this.path))?.[sessionKey(threadId, cli, account)];
     // Runners before 0.11.1 kept only the id.
     return typeof value === "string" ? { id: value } : value;
   }
 
-  async set(threadId: string, cli: CliId, session: StoredSession): Promise<void> {
+  async set(threadId: string, cli: CliId, session: StoredSession, account?: string): Promise<void> {
     const all = (await readJson<Record<string, string | StoredSession>>(this.path)) ?? {};
-    all[sessionKey(threadId, cli)] = session;
+    all[sessionKey(threadId, cli, account)] = session;
     await writeJson(this.path, all);
   }
 }
 
-/** Claude Code's sessions keep the bare thread id they always had. */
-const sessionKey = (threadId: string, cli: CliId) => (cli === "claude" ? threadId : `${cli}:${threadId}`);
+/**
+ * Claude Code's sessions keep the bare thread id they always had. A session lives in its login's
+ * config folder, so another login (`<cli>@<account>:`) never resumes it: switching starts a new one.
+ */
+export const sessionKey = (threadId: string, cli: CliId, account?: string) =>
+  account ? `${cli}@${account}:${threadId}` : cli === "claude" ? threadId : `${cli}:${threadId}`;
 
 export async function readJson<T>(path: string): Promise<T | undefined> {
   try {
