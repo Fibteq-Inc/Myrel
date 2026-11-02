@@ -112,15 +112,20 @@ Read-only tasks (`--access read`) always run in the folder itself.
 | `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` | `--yolo` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
-the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode. For Codex
-and Antigravity CLI `auto` is the same as `edit` (Antigravity's own auto mode needs its terminal sandbox and is
-missing on business accounts).
+the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode. Codex uses
+**Approve for me** (`approvalsReviewer: "auto_review"`): its reviewer evaluates sandbox-boundary approvals while
+the main agent stays in `workspace-write`. This requires a Codex app server with auto-review support (verified with
+Codex 0.166.0); if it does not enable the reviewer, the task stops with an update instruction. `MYREL_CODEX_EXEC=1`
+and older versions without an app server cannot run Codex auto access; choose `edit` to use exec instead.
+For Antigravity CLI `auto` is the same as `edit` (its own auto mode needs its terminal sandbox and is missing on
+business accounts).
 
 Codex runs as its app server (`codex app-server`, one process per turn) where the installed Codex has one, and as
 `codex exec --json` otherwise. The sandbox is the same either way (the table above). As a thread's agent with `edit`
 or `auto`, the app server runs with approval policy `on-request`: a step its sandbox does not allow (a command that
-needs the network such as `git push`, a file outside the folders) comes to you as the same card Claude Code's
-questions use, and the step waits for your answer. With `read` and `full`, and with `codex exec`, nothing is asked:
+needs the network such as `git push`, a file outside the folders) is reviewed by Codex with `auto`, or comes to you
+as a card with `edit`. Switching from `auto` to `edit` restores manual approval even when resuming a session.
+With `read` and `full`, and with `codex exec`, nothing is asked:
 such a step fails and the run goes on. Stopping a turn from Myrel interrupts it the way Codex's own Stop does, so the
 session is whole for the next turn. A message you write in the thread while it works goes into the running turn at
 once (`turn/steer`, runner 0.23.0 or later), instead of with its next call to one of Myrel's tools. Set `MYREL_CODEX_EXEC=1` in the runner's environment to keep `codex exec`.

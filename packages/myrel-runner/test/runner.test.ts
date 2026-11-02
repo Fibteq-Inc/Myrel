@@ -81,7 +81,7 @@ describe("CLI output parsing", () => {
     expect(ADAPTERS.codex.args({ access: "edit", resume: "s-2" }).slice(-3)).toEqual(["resume", "s-2", "-"]);
   });
 
-  it("runs Claude Code in auto mode with auto access, asking Myrel about the rest; other CLIs stay at edit", () => {
+  it("runs Claude Code in auto mode and keeps Codex's auto sandbox at workspace-write", () => {
     const args = ADAPTERS.claude.args({ access: "auto", asks: true });
     expect(args).toEqual(expect.arrayContaining(["--permission-mode", "auto", "--permission-prompt-tool", "mcp__myrel__approve_access"]));
     expect(ADAPTERS.codex.args({ access: "auto" })).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));

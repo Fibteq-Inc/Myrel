@@ -931,7 +931,7 @@ export const tr: Catalog = {
   "runnerSettings.edit": "Dosyaları düzenlesin",
   "runnerSettings.editBody": "Projenin klasörlerindeki dosyaları değiştirir, komut çalıştırmadan önce size sorar.",
   "runnerSettings.auto": "Otomatik",
-  "runnerSettings.autoBody": "Claude Code güvenli bulduğu adımları (test, build, commit) kendisi çalıştırır, gerisini size sorar. Diğer CLI'lar Dosyaları düzenlesin gibi çalışır.",
+  "runnerSettings.autoBody": "Claude Code güvenli bulduğu adımları kendisi çalıştırır, gerisini size sorar. Codex, izin isteklerini Approve for me ile otomatik değerlendirir. Diğer CLI'lar Dosyaları düzenlesin gibi çalışır.",
   "runnerSettings.full": "Tam yetki",
   "runnerSettings.fullBody": "Her komutu sormadan çalıştırır. Yalnızca güvendiğiniz projeler için.",
   "runnerSettings.recommended": "Önerilen",
