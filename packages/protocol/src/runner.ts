@@ -164,7 +164,7 @@ export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /**
  * What the CLI may do without asking. read: look only. edit: change files in the folders. auto: Claude
- * Code's auto mode (it runs the steps it judges safe and asks about the rest; edit for other CLIs).
+ * Code's auto mode or Codex's Approve for me (edit for other CLIs).
  * full: also run any command.
  */
 export const RunnerAccess = z.enum(["read", "edit", "auto", "full"]);

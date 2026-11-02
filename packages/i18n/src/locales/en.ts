@@ -939,7 +939,7 @@ export const en = {
   "runnerSettings.edit": "Edit files",
   "runnerSettings.editBody": "Changes files in the project's folders and asks you before running commands.",
   "runnerSettings.auto": "Automatic",
-  "runnerSettings.autoBody": "Claude Code runs the steps it judges safe (tests, builds, commits) and asks you about the rest. Other CLIs work as with Edit files.",
+  "runnerSettings.autoBody": "Claude Code runs the steps it judges safe and asks you about the rest. Codex evaluates approval requests automatically with Approve for me. Other CLIs work as with Edit files.",
   "runnerSettings.full": "Full access",
   "runnerSettings.fullBody": "Runs any command without asking. Only for projects you trust.",
   "runnerSettings.recommended": "Recommended",

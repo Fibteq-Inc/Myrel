@@ -22,8 +22,10 @@ export type AppServerTurnOptions = {
   /** A session (Codex thread) to continue instead of starting one. */
   resume?: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
-  /** "on-request" only when `ask` can put a step to the person; nobody can answer otherwise. */
+  /** "on-request" when Codex's reviewer or `ask` can answer approval requests. */
   approvalPolicy: "never" | "on-request";
+  /** Auto access uses Codex's Approve for me; other levels route approvals to the person. */
+  approvalsReviewer?: "user" | "auto_review";
   model?: TaskModel;
   /** Config overrides for the session, as dotted keys (like `-c`). */
   config?: Record<string, unknown>;
@@ -62,8 +64,8 @@ export class AppServerTurn {
   start(): void {
     this.call("initialize", { clientInfo: { name: "myrel-runner", title: "Myrel", version: this.opts.clientVersion } }, () => {
       this.send({ jsonrpc: "2.0", method: "initialized" });
-      const { cwd, resume, sandbox, approvalPolicy, model, config } = this.opts;
-      const params = { cwd, sandbox, approvalPolicy, ...(model?.model && { model: model.model }), ...(config && { config }) };
+      const { cwd, resume, sandbox, approvalPolicy, approvalsReviewer, model, config } = this.opts;
+      const params = { cwd, sandbox, approvalPolicy, ...(approvalsReviewer && { approvalsReviewer }), ...(model?.model && { model: model.model }), ...(config && { config }) };
       if (resume) this.call("thread/resume", { ...params, threadId: resume }, (r) => this.opened(r));
       else this.call("thread/start", params, (r) => this.opened(r));
     });
@@ -115,6 +117,10 @@ export class AppServerTurn {
   }
 
   private opened(result: unknown) {
+    // Older servers can ignore an unknown parameter. Do not silently run auto access in manual mode.
+    if (this.opts.approvalsReviewer === "auto_review" && !["auto_review", "guardian_subagent"].includes(String(obj(result).approvalsReviewer))) {
+      return this.fail("Codex did not enable Approve for me. Update Codex to a version with auto-review support, or choose edit access for manual approvals.");
+    }
     const thread = obj(obj(result).thread);
     const id = str(thread.id);
     if (!id) return this.fail("Codex started no session.");

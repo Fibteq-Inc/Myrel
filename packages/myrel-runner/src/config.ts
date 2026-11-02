@@ -5,8 +5,8 @@ import type { CliId, RunnerAccess, RunnerFolder } from "@myrel/protocol";
 
 /**
  * What the CLI may do without asking. read: look only. edit (default): change files, but not run
- * arbitrary commands. auto: Claude Code's auto mode, where it decides itself which steps are safe and
- * asks (through Myrel) about the rest; other CLIs treat it like edit. full: anything, no prompts.
+ * arbitrary commands. auto: Claude Code's auto mode or Codex's Approve for me; other CLIs treat it
+ * like edit. full: anything, no prompts.
  */
 export type Access = RunnerAccess;
 

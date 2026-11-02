@@ -91,7 +91,7 @@ export type CliAdapter = {
    * installed version has one (see hasAppServer). `asks`: steps the sandbox does not allow can be put
    * to the person, so the app server may ask instead of failing them.
    */
-  appServer?(opts: { access: Access; dirs: string[]; asks: boolean }): Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config">;
+  appServer?(opts: { access: Access; dirs: string[]; asks: boolean }): Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "approvalsReviewer" | "config">;
   /**
    * For Claude Code: the prompt goes in as streaming input on a stdin that stays open (see
    * claude-stream.ts), so new messages can go in mid-turn, when the installed version takes it
@@ -382,7 +382,7 @@ const claude: CliAdapter = {
   modelArgs: ({ model, effort }) => [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])],
 };
 
-/** Codex's sandbox for each access level: auto stays in the workspace like edit, asking about the rest where it can. */
+/** Auto keeps edit's sandbox; its app server uses Codex's reviewer for boundary approvals. */
 const CODEX_SANDBOX = { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" } as const;
 
 const codex: CliAdapter = {
@@ -431,13 +431,14 @@ const codex: CliAdapter = {
     if (access && access !== "read") args.push("-c", 'apps._default.default_tools_approval_mode="approve"');
     return { args, env: { [TOKEN_VAR]: token } };
   },
-  // The sandbox is as with exec; below full access, a step it does not allow is asked about in the
-  // thread instead of failing. Full access has no sandbox, so nothing to ask.
+  // Auto uses Approve for me inside edit's sandbox. Explicitly reset the reviewer for other levels,
+  // including resumed sessions, so switching back to edit restores the person's approval prompts.
   // The other folders go in the session's config, not on the command line, where a shell could split them.
   appServer: ({ access, dirs, asks }) => ({
     ...(dirs.length && { config: { "sandbox_workspace_write.writable_roots": dirs } }),
     sandbox: CODEX_SANDBOX[access],
-    approvalPolicy: asks && (access === "edit" || access === "auto") ? "on-request" : "never",
+    approvalPolicy: access === "auto" || (asks && access === "edit") ? "on-request" : "never",
+    approvalsReviewer: access === "auto" ? "auto_review" : "user",
   }),
   line(line, state) {
     if (state.appServer) return state.appServer.receive(line);

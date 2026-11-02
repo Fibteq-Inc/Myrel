@@ -100,6 +100,10 @@ export class TaskRunner {
     }
 
     const adapter = ADAPTERS[task.cli];
+    const appServerAvailable = !!adapter.appServer && (await hasAppServer(adapter.bin));
+    if (task.cli === "codex" && config.access === "auto" && !appServerAvailable) {
+      return fail("Codex auto access needs its app server for Approve for me. Update Codex and unset MYREL_CODEX_EXEC, or choose edit access for codex exec.");
+    }
     // Claude Code asks the person through Myrel before stepping outside those folders.
     const asks = !!task.agent && task.cli === "claude";
     // A CLI session belongs to the folder it ran in, so a new worktree starts a new one.
@@ -156,7 +160,7 @@ export class TaskRunner {
     }
     try {
       // Codex runs as its app server where it has one, which can ask the person about a step.
-      const appServer = adapter.appServer && (await hasAppServer(adapter.bin)) ? { ...adapter.appServer({ access: config.access, dirs, asks: !!ask }), ask } : undefined;
+      const appServer = appServerAvailable ? { ...adapter.appServer!({ access: config.access, dirs, asks: !!ask }), ask } : undefined;
       if (appServer) log("  as its app server");
       // Claude Code keeps its stdin open while the turn runs, so new messages can go in mid-turn.
       const stream = !!adapter.streamInput && (await hasStreamInput(adapter.bin));
@@ -200,7 +204,7 @@ export class TaskRunner {
       where: string;
       cleanup: () => Promise<unknown>;
       /** How to run the CLI as Codex's app server, instead of args(). */
-      appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config" | "ask">;
+      appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "approvalsReviewer" | "config" | "ask">;
       /** Claude Code's streaming input instead of a prompt on a stdin that ends at once. */
       stream?: boolean;
     },
