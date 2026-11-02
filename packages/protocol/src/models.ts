@@ -470,6 +470,32 @@ export const ProjectRepo = z.object({
 });
 export type ProjectRepo = z.infer<typeof ProjectRepo>;
 
+/** An issue of a connected repository, as the project's Issues tab lists it. Its text stays on GitHub. */
+export const ProjectIssue = z.object({
+  /** owner/name. */
+  repo: z.string(),
+  number: z.number().int(),
+  title: z.string(),
+  state: z.enum(["open", "closed"]),
+  url: z.string(),
+  author: z.string(),
+  /** Whether its author has a hand in the repository (owner, member or collaborator). */
+  member: z.boolean(),
+  labels: z.array(z.string()),
+  comments: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ProjectIssue = z.infer<typeof ProjectIssue>;
+
+/** One connected repository's issues; `error` when GitHub would not list them. */
+export const ProjectRepoIssues = z.object({
+  repo: z.string(),
+  issues: z.array(ProjectIssue),
+  error: z.enum(["no_access", "failed"]).optional(),
+});
+export type ProjectRepoIssues = z.infer<typeof ProjectRepoIssues>;
+
 /** A pull request a thread's task opened, with its live state from GitHub. */
 export const PullRequest = z.object({
   /** owner/name. */

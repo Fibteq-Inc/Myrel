@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import type { KnowledgeSection } from "./project-knowledge";
 
 /** The tabs across the top of a project. The conversation is the default and has no `view`. */
-export type ProjectView = "chat" | "threads" | "artifacts" | "files" | "knowledge" | "usage";
+export type ProjectView = "chat" | "threads" | "issues" | "artifacts" | "files" | "knowledge" | "usage";
 
 /**
  * The open tab and what it shows, kept in the URL of every project page so an
@@ -21,7 +21,7 @@ export type ProjectSearch = {
 
 export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section"] as const;
 
-const VIEWS = ["threads", "artifacts", "files", "knowledge", "usage"];
+const VIEWS = ["threads", "issues", "artifacts", "files", "knowledge", "usage"];
 const SECTIONS = ["memory", "instructions"];
 
 export function validateProjectSearch(s: Record<string, unknown>): ProjectSearch {
