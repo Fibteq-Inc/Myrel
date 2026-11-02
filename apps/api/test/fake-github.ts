@@ -38,6 +38,10 @@ export const fakeGithub = {
   userPush: [7, 8],
   /** Whether installation 42 accepted the app's workflows permission. */
   workflowsGranted: true,
+  /** Issues by "owner/name", in GitHub's REST shape, each with its `comment_list`. */
+  issues: {} as Record<string, ({ number: number; comment_list?: unknown[] } & Record<string, unknown>)[]>,
+  /** Whether installation 42 accepted the app's issues permission. */
+  issuesGranted: true,
 };
 
 const realFetch = globalThis.fetch;
@@ -69,6 +73,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (Number(tokenMatch[1]) !== 42) return new Response("{}", { status: 404 });
     const ids: number[] | undefined = body?.repository_ids;
     if (ids?.some((id) => !fakeGithub.repos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
+    if (body?.permissions?.issues && !fakeGithub.issuesGranted) {
+      return Response.json({ message: "The permissions requested are not granted to this installation." }, { status: 422 });
+    }
     if (body?.permissions?.workflows && !fakeGithub.workflowsGranted) {
       return Response.json({ message: "The permissions requested are not granted to this installation." }, { status: 422 });
     }
@@ -117,7 +124,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     return Response.json({ name: decodeURIComponent(branch[3]!), protected: b.protected ?? false });
   }
-  if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) return Response.json({}, { status: 201 });
+  if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) return Response.json({}, { status: 201 });
   if (/^\/repos\/[^/]+\/[^/]+\/(issues\/\d+\/assignees|pulls\/\d+\/requested_reviewers)$/.test(url.pathname)) {
     return Response.json({}, { status: 201 });
   }
@@ -174,6 +181,15 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (body.sha && body.sha !== p.head.sha) return new Response(JSON.stringify({ message: "Head branch was modified" }), { status: 409 });
     fakeGithub.pulls[key] = { ...p, state: "closed", merged: true };
     return Response.json({ merged: true, sha: "merge-sha" });
+  }
+  const issues = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+)(\/comments)?)?$/);
+  if (issues && method === "GET") {
+    const all = fakeGithub.issues[issues[1]!] ?? [];
+    const strip = ({ comment_list: _, ...i }: (typeof all)[number]) => ({ ...i, comments: (_ ?? []).length });
+    if (!issues[2]) return Response.json(all.map(strip));
+    const issue = all.find((i) => i.number === Number(issues[2]));
+    if (!issue) return new Response("{}", { status: 404 });
+    return Response.json(issues[3] ? (issue.comment_list ?? []) : strip(issue));
   }
   const repoMatch = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)$/);
   if (repoMatch && method === "GET") {
