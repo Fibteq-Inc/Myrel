@@ -91,6 +91,12 @@ export function effortsFor(models: CliModel[], model: string | null): string[] {
 export const CliAccountId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
 export type CliAccountId = z.infer<typeof CliAccountId>;
 
+/**
+ * A thread's pick of the CLI's own login even where the project's default is another one. Never an
+ * account's id (the runner makes "default-2" of that name), never sent to a runner.
+ */
+export const OWN_ACCOUNT = "default";
+
 export const CliAccount = z.object({
   id: CliAccountId,
   name: z.string().min(1).max(80),
@@ -98,6 +104,32 @@ export const CliAccount = z.object({
   limits: CliLimits.optional().catch(undefined),
 });
 export type CliAccount = z.infer<typeof CliAccount>;
+
+/**
+ * One login a thread can run a CLI with: `account` null for the CLI's own, with `name` the one the
+ * person gave it (or null); limits are that login's.
+ */
+export type CliLogin = { account: CliAccountId | null; name: string | null; limits?: CliLimits };
+
+/** A CLI's logins, its own first; just its own when it has no other (feature "cli-accounts"). */
+export function cliLogins(cli: Pick<RunnerCli, "limits" | "accounts" | "defaultAccount">): CliLogin[] {
+  const own: CliLogin = { account: null, name: cli.accounts?.length ? (cli.defaultAccount ?? null) : null, ...(cli.limits && { limits: cli.limits }) };
+  return [own, ...(cli.accounts ?? []).map((a) => ({ account: a.id, name: a.name, ...(a.limits && { limits: a.limits }) }))];
+}
+
+/**
+ * The login a turn runs `cli` with: the thread's pick, else the project's default for the CLI, when
+ * the computer still has it; else the CLI's own (undefined). `missing`: the account asked for that the
+ * computer no longer has, so the turn can say it falls back.
+ */
+export function resolveAccount(
+  wanted: { thread?: string | null; project?: string | null },
+  installed: Pick<RunnerCli, "accounts"> | undefined,
+): { account?: CliAccountId; missing?: string } {
+  const id = wanted.thread ?? wanted.project ?? null;
+  if (!id || id === OWN_ACCOUNT) return {};
+  return installed?.accounts?.some((a) => a.id === id) ? { account: id } : { missing: id };
+}
 
 /** A CLI the runner found installed on the computer. */
 export const RunnerCli = z.object({

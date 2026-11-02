@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import { type CliId, effortsFor, type RunnerCli } from "@myrel/protocol";
+import { type CliId, cliLogins, effortsFor, type RunnerCli } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text } from "react-native";
@@ -32,8 +32,12 @@ export function CliModelSettings({ projectId, canManage }: { projectId: string; 
 
   const set = (cli: Listing, model: string | null, effort: string | null) => {
     // An effort the model does not take would be dropped when it runs: clear it here instead.
-    const next = { model, effort: effort && effortsFor(cli.models, model).includes(effort) ? effort : null };
+    const next = { ...value[cli.id], model, effort: effort && effortsFor(cli.models, model).includes(effort) ? effort : null };
     save.mutate({ cliModels: { ...value, [cli.id]: next } });
+    setOpen(null);
+  };
+  const setAccount = (cli: Listing, account: string | null) => {
+    save.mutate({ cliModels: { ...value, [cli.id]: { model: value[cli.id]?.model ?? null, effort: value[cli.id]?.effort ?? null, account } } });
     setOpen(null);
   };
   const openCli = open && listing.find((c) => c.id === open);
@@ -49,11 +53,15 @@ export function CliModelSettings({ projectId, canManage }: { projectId: string; 
           const efforts = effortsFor(c.models, own.model);
           const modelName = own.model ? (c.models.find((m) => m.id === own.model)?.name ?? own.model) : t("modelPicker.cliDefault");
           const effort = own.effort ? effortName(own.effort, t) : t("modelPicker.effortDefault");
+          // The login it runs with, when the computer has several (`myrel-runner claude add`).
+          const logins = cliLogins(c);
+          const login = logins.length > 1 ? logins.find((l) => l.account === (own.account ?? null)) : undefined;
+          const loginLabel = login ? (login.name ?? t("cliPicker.ownLogin")) : logins.length > 1 && own.account ? own.account : null;
           return (
             <ValueRow
               key={c.id}
               label={cliName(c.id)}
-              value={efforts.length > 0 ? `${modelName} · ${effort}` : modelName}
+              value={[loginLabel, modelName, efforts.length > 0 && effort].filter(Boolean).join(" · ")}
               onPress={canManage ? () => setOpen(c.id) : undefined}
             />
           );
@@ -63,6 +71,21 @@ export function CliModelSettings({ projectId, canManage }: { projectId: string; 
 
       {openCli && current && (
         <Sheet open onClose={() => setOpen(null)} title={cliName(openCli.id)}>
+          {!!openCli.accounts?.length && (
+            <>
+              <Text style={styles.part}>{t("projectSettings.cliAccount", { cli: cliName(openCli.id) })}</Text>
+              {cliLogins(openCli).map((l) => (
+                <Option
+                  key={l.account ?? ""}
+                  kind="radio"
+                  checked={(current.account ?? null) === l.account}
+                  title={l.name ?? t("cliPicker.ownLogin")}
+                  onPress={() => setAccount(openCli, l.account)}
+                />
+              ))}
+              <Text style={styles.part}>{t("threadSettings.model")}</Text>
+            </>
+          )}
           <ScrollView style={{ maxHeight: 280 }}>
             <Option kind="radio" checked={!current.model} title={t("modelPicker.cliDefault")} onPress={() => set(openCli, null, current.effort)} />
             {/* A default the CLI no longer lists stays visible until someone changes it. */}

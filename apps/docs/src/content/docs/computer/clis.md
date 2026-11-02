@@ -44,6 +44,25 @@ The panel stays open while you pick, so you can switch the CLI and then pick its
 
 Only the person whose computer the thread works on can change these; others see the same button read-only. In the cloud, any member can pick the CLI and the project's model runs.
 
+## More than one Claude Code account
+
+If you have two Claude Code logins, for example a personal one and one from work, the computer can keep both and each thread picks one. Add the second on the computer:
+
+```sh
+npx myrel-runner claude add "Work"
+npx myrel-runner claude rename default "Personal"
+```
+
+`claude add` opens Claude Code's own sign-in in a folder of its own (`~/.myrel-runner/claude/work`). The login stays in that folder: neither the runner nor Myrel reads or keeps it. `rename default` names the login you already had. `npx myrel-runner claude list` shows each account and whether it is signed in, `claude login "Work"` signs in again, and `claude remove "Work"` forgets one.
+
+Then:
+
+- **How this thread works** lists **Claude Code · Personal** and **Claude Code · Work** under **CLI**, each with how much of its 5-hour limit is used.
+- **Project settings › Models on the computer** sets which account the project's threads use by default.
+- **Devices** shows each account's limits on its own.
+
+A thread that switches accounts starts a new Claude Code session, with the thread's history. A new account has none of your `~/.claude` settings or plugins. If an account is removed from the computer, the thread's next turn runs with Claude Code's own login and says so. Use accounts that are all yours: Claude's terms don't allow sharing a login with someone else. Needs runner 0.34.0 or newer.
+
 ## Usage limits
 
-For Claude Code and Codex, **Devices** shows how much of the 5-hour and weekly limits you have used. The CLI picker marks a CLI **near its limit** or **at its limit**.
+For Claude Code and Codex, **Devices** shows how much of the 5-hour and weekly limits you have used, for each Claude Code account on its own. The CLI picker marks a CLI **near its limit** or **at its limit**.

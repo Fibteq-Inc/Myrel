@@ -510,7 +510,7 @@ function Conversation({
               thread={thread}
               prompt={lastPromptSize(messages)}
               onRunner={(runnerId) => emit({ type: "thread.runner", threadId: thread.id, runnerId })}
-              onCli={(cli) => emit({ type: "thread.cli", threadId: thread.id, cli })}
+              onCli={(cli, account) => emit({ type: "thread.cli", threadId: thread.id, cli, ...(account && { account }) })}
               onModel={(pick) => emit({ type: "thread.model", threadId: thread.id, ...pick })}
             />
           }

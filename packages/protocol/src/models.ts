@@ -185,6 +185,12 @@ export const ThreadCli = z.object({
   options: z.array(z.string().max(40)).max(MAX_THREAD_CLIS),
   by: z.enum(["person", "coordinator"]),
   reason: z.string().max(300).nullable(),
+  /**
+   * Which of the CLI's logins on the computer runs it (RunnerCli.accounts' id, or OWN_ACCOUNT for the
+   * CLI's own); null: the project's default for the CLI, else the CLI's own login (and from older
+   * servers, which leave it out). One the computer no longer has falls back to the CLI's own.
+   */
+  account: z.string().max(40).nullable().optional(),
 });
 export type ThreadCli = z.infer<typeof ThreadCli>;
 

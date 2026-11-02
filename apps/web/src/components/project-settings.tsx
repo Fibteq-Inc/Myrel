@@ -1,6 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import {
   type CliId,
+  cliLogins,
   type CliModelDefaults,
   type CloudCli,
   effortsFor,
@@ -428,8 +429,10 @@ function CliModels({
   const set = (cli: CliId, model: string | null, effort: string | null) => {
     // An effort the model does not take would be dropped when it runs: clear it here instead.
     const models = listing.find((c) => c.id === cli)!.models;
-    onChange({ ...value, [cli]: { model, effort: effort && effortsFor(models, model).includes(effort) ? effort : null } });
+    onChange({ ...value, [cli]: { ...value[cli], model, effort: effort && effortsFor(models, model).includes(effort) ? effort : null } });
   };
+  const setAccount = (cli: CliId, account: string | null) =>
+    onChange({ ...value, [cli]: { model: value[cli]?.model ?? null, effort: value[cli]?.effort ?? null, account } });
   return (
     <Section title={t("projectSettings.cliModels")} description={t("projectSettings.cliModelsDescription", { computer: runner.name })}>
       {listing.length === 0 ? (
@@ -453,6 +456,19 @@ function CliModels({
                     ))}
                   </Select>
                 </Field>
+                {!!c.accounts?.length && (
+                  <Field label={t("projectSettings.cliAccount", { cli: cliName(c.id) })} hint={t("projectSettings.cliAccountHint")}>
+                    <Select value={current.account ?? ""} disabled={disabled} onChange={(e) => setAccount(c.id, e.target.value || null)}>
+                      {cliLogins(c).map((l) => (
+                        <option key={l.account ?? ""} value={l.account ?? ""}>
+                          {l.name ?? t("cliPicker.ownLogin")}
+                        </option>
+                      ))}
+                      {/* A default the computer no longer has stays visible until someone changes it. */}
+                      {current.account && !c.accounts.some((a) => a.id === current.account) && <option value={current.account}>{current.account}</option>}
+                    </Select>
+                  </Field>
+                )}
                 <Field label={t("modelPicker.effort")} hint={efforts.length === 0 ? t("modelPicker.noEffort") : undefined}>
                   <Select
                     value={current.effort ?? ""}

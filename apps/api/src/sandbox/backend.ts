@@ -31,9 +31,9 @@ export function sandboxBackend(env: Env, threadId: string, principal = ""): Runn
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel; github?: TaskGithub | null },
+  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel; github?: TaskGithub | null; account?: string },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent, model, github } = where;
+  const { projectId, threadId, workspace, agent, model, github, account } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -51,6 +51,7 @@ export function localBackend(
         agent,
         model,
         ...(github && { github }),
+        ...(account && { account }),
       });
       if (!started.ok) throw new Error(started.reason);
     },

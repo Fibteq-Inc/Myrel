@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProjectColor, ProjectIcon, ProjectRole } from "./models";
-import { CliId } from "./runner";
+import { CliAccountId, CliId } from "./runner";
 
 /** Model providers a server can call. Each has its own key format and default model. */
 export const ProviderId = z.enum(["fireworks", "anthropic", "openai"]);
@@ -51,10 +51,15 @@ export type TaskTarget = z.infer<typeof TaskTarget>;
 export const CloudCli = z.enum(["opencode", "claude", "codex"]);
 export type CloudCli = z.infer<typeof CloudCli>;
 
-/** A project's default model and effort for one CLI; null: the CLI's own default. */
+/**
+ * A project's default model and effort for one CLI; null: the CLI's own default. `account`: the login
+ * the project's threads run it with (RunnerCli.accounts' id) on a computer that has it; null or
+ * absent: the CLI's own. Absent in an update: the saved one stays.
+ */
 export const CliModelDefault = z.object({
   model: z.string().trim().min(1).max(200).nullable(),
   effort: z.string().trim().min(1).max(20).nullable(),
+  account: CliAccountId.nullable().optional(),
 });
 export type CliModelDefault = z.infer<typeof CliModelDefault>;
 

@@ -1,7 +1,7 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
-import { cliMark } from "@myrel/client";
+import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliLimits, type CliLogin, cliLogins, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, OWN_ACCOUNT, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
+import { cliMark, sessionUse, threadLogin as loginOf } from "@myrel/client";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
@@ -22,6 +22,15 @@ const CLOUD_CLIS: RunnerCli[] = CloudCli.options.map((id) => ({ id, version: nul
 export function cliName(id: string): string {
   return CLI_NAMES[id as CliId] ?? id;
 }
+
+/** "Claude Code · Work": a CLI's login by its name; just the CLI's name when it has no other. */
+export function loginName(cli: string, login: CliLogin | undefined, several: boolean, t: ReturnType<typeof useT>): string {
+  if (!several || !login) return cliName(cli);
+  return `${cliName(cli)} · ${login.name ?? t("cliPicker.ownLogin")}`;
+}
+
+/** The login the thread's `cli` runs with from its next turn (none in the cloud), as on the web. */
+const threadLogin = (pickable: Pickable, thread: Thread, cli: string) => loginOf(pickable.cloud ? undefined : pickable.clis, pickable.defaults, thread, cli);
 
 /**
  * The CLIs the signed-in person can pick for this project's threads, as on the web: those on the
@@ -87,7 +96,7 @@ export function AskCliPicker({ pickable, value, onChange }: { pickable: Pickable
       <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.askTitle")} hint={[pickable.clis.length > 1 && t("cliPicker.askHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ") || undefined}>
         <Option kind="radio" checked={value.length === 0} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => onChange([])} />
         {pickable.clis.map((c) => (
-          <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} cli={c.id} note={limitNote(c, t)} onPress={() => toggle(c.id)} />
+          <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} cli={c.id} note={limitNote(c.limits, t)} onPress={() => toggle(c.id)} />
         ))}
       </Sheet>
     </>
@@ -160,7 +169,8 @@ export function ThreadSettingsPicker({
   /** What the agent's prompt held on its last turn, once it had one. */
   prompt?: PromptSize | null;
   onRunner: (runnerId: string | null) => void;
-  onCli: (cli: CliId | null) => void;
+  /** `account`: one of the CLI's logins on the computer, or OWN_ACCOUNT for its own; absent: the project's default. */
+  onCli: (cli: CliId | null, account?: string) => void;
   onModel: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
 }) {
   const t = useT();
@@ -227,7 +237,8 @@ export function ThreadSettingsPicker({
   const choice = modelChoice(pickable, thread);
   const active = !!pickedRunner || !!currentCli || !!choice?.own;
   const where = cloud ? t("runnerPicker.cloud") : showRunner && computer && computer !== workspaces[0] ? computer.runnerName : null;
-  const label = [where, cliName(currentCli ?? pickable.folderCli), choice?.model?.name, choice?.effort && effortName(choice.effort, t)]
+  const running = threadLogin(pickable, thread, currentCli ?? pickable.folderCli);
+  const label = [where, loginName(currentCli ?? pickable.folderCli, running.login, running.logins.length > 1, t), choice?.model?.name, choice?.effort && effortName(choice.effort, t)]
     .filter(Boolean)
     .join(" · ");
   const hint = [showRunner && cloud ? t("runnerPicker.hint") : t("cliPicker.threadHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ");
@@ -304,17 +315,38 @@ export function ThreadSettingsPicker({
             <Text style={styles.section}>{t("threadSettings.cli")}</Text>
             <Pills>
               <Pill checked={!currentCli} onPress={() => currentCli && onCli(null)} label={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} />
-              {pickable.clis.map((c) => {
-                const note = limitNote(c, t);
-                return (
-                  <Pill
-                    key={c.id}
-                    checked={currentCli === c.id}
-                    onPress={() => currentCli !== c.id && onCli(c.id)}
-                    label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
-                    cli={c.id}
-                  />
-                );
+              {pickable.clis.flatMap((c) => {
+                const logins = cliLogins(c);
+                // A CLI with several logins on the computer is one pill per login, each with its own limits.
+                if (logins.length === 1) {
+                  const note = limitNote(c.limits, t);
+                  return [
+                    <Pill
+                      key={c.id}
+                      checked={currentCli === c.id}
+                      onPress={() => currentCli !== c.id && onCli(c.id)}
+                      label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
+                      cli={c.id}
+                    />,
+                  ];
+                }
+                const picked = currentCli === c.id ? threadLogin(pickable, thread, c.id).login : undefined;
+                return logins.map((login) => {
+                  const name = loginName(c.id, login, true, t);
+                  const status = limitNote(login.limits, t);
+                  const session = sessionUse(login.limits);
+                  return (
+                    <Pill
+                      key={`${c.id}@${login.account ?? ""}`}
+                      checked={picked === login}
+                      onPress={() => picked !== login && onCli(c.id, login.account ?? OWN_ACCOUNT)}
+                      label={status ? `${name} (${status})` : name}
+                      cli={c.id}
+                      note={session === null ? undefined : t("runners.usage.percent", { percent: session })}
+                      warn={login.limits?.status === "limited" || login.limits?.status === "warning"}
+                    />
+                  );
+                });
               })}
             </Pills>
             <Text style={styles.section}>{t("threadSettings.model")}</Text>
@@ -567,9 +599,9 @@ export function Option({
   );
 }
 
-function limitNote(cli: RunnerCli, t: ReturnType<typeof useT>): string | undefined {
-  if (cli.limits?.status === "limited") return t("cliPicker.limited");
-  if (cli.limits?.status === "warning") return t("cliPicker.nearLimit");
+function limitNote(limits: CliLimits | undefined, t: ReturnType<typeof useT>): string | undefined {
+  if (limits?.status === "limited") return t("cliPicker.limited");
+  if (limits?.status === "warning") return t("cliPicker.nearLimit");
   return undefined;
 }
 
