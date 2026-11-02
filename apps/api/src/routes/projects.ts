@@ -803,7 +803,10 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
 function mergeCliModels(current: CliModelDefaults, changes: CliModelDefaults): string | null {
   const next: CliModelDefaults = { ...current };
   for (const [cli, value] of Object.entries(changes) as [keyof CliModelDefaults, CliModelDefaults[keyof CliModelDefaults]][]) {
-    if (value && (value.model || value.effort)) next[cli] = value;
+    // A client that does not know accounts leaves the saved one as it is.
+    const account = value?.account === undefined ? current[cli]?.account : value.account;
+    const merged = value && { model: value.model, effort: value.effort, ...(account && { account }) };
+    if (merged && (merged.model || merged.effort || merged.account)) next[cli] = merged;
     else delete next[cli];
   }
   return Object.keys(next).length ? JSON.stringify(next) : null;

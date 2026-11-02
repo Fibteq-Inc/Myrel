@@ -5,6 +5,7 @@ import {
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
+  resolveAccount,
   CloudCli,
   type CliUsage,
   type ConnectorOffer,
@@ -625,6 +626,7 @@ export class ThreadAgent extends Agent<Env> {
       attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
       threadModel: ctx.thread.model,
       threadCli: ctx.thread.cli?.id ?? null,
+      threadAccount: ctx.thread.cli?.account ?? null,
       threadRunner: ctx.thread.runner?.id ?? null,
     });
   }
@@ -688,6 +690,8 @@ export class ThreadAgent extends Agent<Env> {
     threadRunner?: string | null;
     /** The CLI picked for the thread, if any: in the cloud, one of CloudCli replaces the project's. */
     threadCli: string | null;
+    /** The login picked for the thread's CLI, if any (see resolveAccount). */
+    threadAccount?: string | null;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -791,14 +795,21 @@ export class ThreadAgent extends Agent<Env> {
           ...(resume && { resume }),
         };
         const installed = (await workspaceClis(this.env, projectId, { runnerId: workspace.runnerId }))?.clis.find((c) => c.id === workspace.cli);
-        const model = resolveTaskModel(workspace.cli, input.threadModel, await projectCliModels(this.env, projectId), installed);
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github });
+        const defaults = await projectCliModels(this.env, projectId);
+        const model = resolveTaskModel(workspace.cli, input.threadModel, defaults, installed);
+        // The thread's login for the CLI, else the project's; one the computer lost runs the CLI's own.
+        const login = resolveAccount({ thread: input.threadAccount, project: defaults[workspace.cli]?.account }, installed);
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
         const run = { ...spec, title: CLI_NAMES[workspace.cli] };
         await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName }), backend.id, () => backend.start(run, {}), language);
         await this.taskEvents(taskId, LOCAL_PHASES);
+        if (login.missing) {
+          const text = `${CLI_NAMES[workspace.cli]} has no account "${login.missing}" on ${workspace.runnerName} anymore, so this turn runs with its own login there. Pick another account for this thread from its message box if you like.`;
+          await this.taskEvents(taskId, [{ type: "log", stream: "system", text }]);
+        }
         // Its CLI session and uncommitted work are on this computer now: later turns stay here.
         if (input.threadRunner !== workspace.runnerId) await project.updateThread(threadId, { runner: { id: workspace.runnerId, by: "auto", reason: null } });
         if (github && this.runningTask()?.id === taskId) await this.schedule(GITHUB_RENEW_SEC, "renewGithub", { taskId, requester: input.requester });

@@ -4,7 +4,7 @@ import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
 import { Routine, RoutineId } from "./routines";
 import { Goal } from "./goal";
-import { CliId, RunnerId } from "./runner";
+import { CliAccountId, CliId, RunnerId } from "./runner";
 import { CLOUD_RUNNER, MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
 export const SYNC_PAGE_SIZE = 200;
@@ -63,11 +63,16 @@ export const ClientEvent = z.discriminatedUnion("type", [
     resolved: z.boolean(),
     reason: ThreadCloseReason.optional(),
   }),
-  /** The computer's owner picks the CLI a thread runs with from now on; null: the project folder's again. */
+  /**
+   * The computer's owner picks the CLI a thread runs with from now on; null: the project folder's again.
+   * `account`: one of that CLI's logins on the computer (RunnerCli.accounts' id, or OWN_ACCOUNT for its
+   * own even where the project's default is another); null or absent: the project's default for it.
+   */
   z.object({
     type: z.literal("thread.cli"),
     threadId: ThreadId,
     cli: CliId.nullable(),
+    account: CliAccountId.nullable().optional(),
   }),
   /**
    * The owner of one of the project's computers sets a thread to work there from its next turn, or

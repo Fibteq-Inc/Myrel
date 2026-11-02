@@ -43,6 +43,8 @@ export type TaskStart = {
   model?: TaskModel;
   /** The turn's GitHub token (only runners with feature "git-token"). Never stored or logged here. */
   github?: TaskGithub;
+  /** The CLI's other login to run with, only one the runner listed (so only runners with feature "cli-accounts"). */
+  account?: string;
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
@@ -264,6 +266,7 @@ export class RunnerAgent extends Agent<Env> {
       ...(input.agent && { agent: input.agent }),
       ...(input.model && { model: input.model }),
       ...(input.github && { github: input.github }),
+      ...(input.account && { account: input.account }),
     };
     // A runner drops a frame it cannot read, and the task would then wait for output forever.
     const checked = ServerToRunner.safeParse(frame);

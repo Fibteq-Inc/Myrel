@@ -221,7 +221,7 @@ export default function ThreadScreen() {
                 thread={thread}
                 prompt={lastPromptSize(messages)}
                 onRunner={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })}
-                onCli={(cli) => emit({ type: "thread.cli", threadId, cli })}
+                onCli={(cli, account) => emit({ type: "thread.cli", threadId, cli, ...(account && { account }) })}
                 onModel={(pick) => emit({ type: "thread.model", threadId, ...pick })}
               />
             )

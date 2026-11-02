@@ -816,6 +816,8 @@ export const tr: Catalog = {
   "projectSettings.cliModels": "Bilgisayardaki modeller",
   "projectSettings.cliModelsDescription":
     "{computer} üzerindeki her kodlama CLI'ının bu projenin thread'lerini hangi model ve effort ile çalıştıracağı. Bir thread kendi seçimini mesaj kutusundan yapabilir. Listeler CLI'ların kendisinden gelir.",
+  "projectSettings.cliAccount": "{cli} hesabı",
+  "projectSettings.cliAccountHint": "Bilgisayardaki hangi girişle çalışacağı (`myrel-runner claude add` ile eklenir).",
   "projectSettings.cliModelsEmpty":
     "{computer} üzerindeki hiçbir CLI henüz model listesini bildirmedi. Burada seçebilmek için oradaki myrel-runner'ı güncelle.",
   "cliPicker.askTitle": "Bu iş hangi CLI ile çalışsın?",
@@ -855,6 +857,7 @@ export const tr: Catalog = {
   "cliPicker.cloudHint": "Bulutta projenin modeliyle çalışır: Claude Code Claude ya da Fireworks modeli, Codex OpenAI uyumlu bir model ister; yoksa OpenCode çalışır.",
   "cliPicker.limited": "limiti dolu",
   "cliPicker.nearLimit": "limite yakın",
+  "cliPicker.ownLogin": "kendi girişi",
   "cliPicker.picked": "Bu thread {cli} ile çalışıyor. Myrel bunu {options} arasından seçti.",
   "cliPicker.offered": "Myrel {clis} arasından seçecek",
   "composer.attach": "Dosya ekle",
@@ -870,6 +873,7 @@ export const tr: Catalog = {
   "runners.offlineSince": "{date} tarihinden beri çevrimdışı",
   "runners.noCli": "Kodlama CLI'ı bulunamadı",
   "runners.notConnectedYet": "Henüz bağlanmadı",
+  "runners.accounts": { one: "1 hesap", other: "{count} hesap" },
   "runners.limitsTitle": "Kullanım limitleri",
   "runners.limit.session": "5 saatlik oturum",
   "runners.limit.weekly": "Haftalık",

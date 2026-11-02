@@ -818,6 +818,8 @@ export const en = {
   "projectSettings.cliModels": "Models on the computer",
   "projectSettings.cliModelsDescription":
     "The model and effort each coding CLI on {computer} runs this project's threads with. A thread can pick its own from its message box. The lists come from the CLIs themselves.",
+  "projectSettings.cliAccount": "{cli} account",
+  "projectSettings.cliAccountHint": "Which login on the computer runs it, from `myrel-runner claude add`.",
   "projectSettings.cliModelsEmpty":
     "No CLI on {computer} has listed its models yet. Update myrel-runner there to pick them here.",
   "cliPicker.askTitle": "Which CLI should this ask run with?",
@@ -860,6 +862,7 @@ export const en = {
   "cliPicker.cloudHint": "In the cloud it runs with the project's model: Claude Code needs a Claude or Fireworks model and Codex an OpenAI-compatible one, otherwise OpenCode runs.",
   "cliPicker.limited": "at its limit",
   "cliPicker.nearLimit": "near its limit",
+  "cliPicker.ownLogin": "own login",
   "cliPicker.picked": "Myrel picked {cli} for this thread, out of {options}.",
   "cliPicker.offered": "Myrel picks one of {clis}",
   "composer.attach": "Attach files",
@@ -875,6 +878,7 @@ export const en = {
   "runners.offlineSince": "Offline since {date}",
   "runners.noCli": "No coding CLI found",
   "runners.notConnectedYet": "Not connected yet",
+  "runners.accounts": { one: "1 account", other: "{count} accounts" },
   "runners.limitsTitle": "Usage limits",
   "runners.limit.session": "5-hour session",
   "runners.limit.weekly": "Weekly",

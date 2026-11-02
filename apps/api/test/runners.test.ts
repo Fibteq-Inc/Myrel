@@ -1,5 +1,5 @@
-import type { Project, ProjectSettings, ProjectWorkspace, Runner, ServerToRunner } from "@myrel/protocol";
-import { MAX_TASK_TEXT, RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
+import type { Project, ProjectSettings, ProjectWorkspace, Runner, ServerToRunner, Task } from "@myrel/protocol";
+import { MAX_TASK_TEXT, OWN_ACCOUNT, RUNNER_PROTOCOL_VERSION } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -1182,6 +1182,70 @@ describe("local workspace", () => {
     await settings({ cliModels: { codex: { model: null, effort: null } } });
     expect(((await (await api(`/api/projects/${project.id}/settings`, { token: user })).json()) as { settings: ProjectSettings }).settings.cliModels).toEqual({});
     expect(await turn(5)).toBeUndefined();
+    chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("runs a thread with the Claude Code account picked for it, else the project's, else Claude Code's own login", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const clis = [{ id: "claude", version: "2.1.316", defaultAccount: "Personal", accounts: [{ id: "work", name: "Work" }, { id: "side", name: "Side" }] }];
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "agent-clis", "models", "cli-accounts"], { clis });
+    await until(async () => (await listRunners(user)).find((r) => r.online && r.clis[0]?.accounts?.length === 2), "hello");
+    expect((await listRunners(user))[0]!.clis[0]).toMatchObject({ defaultAccount: "Personal", accounts: [{ id: "work", name: "Work" }, { id: "side", name: "Side" }] });
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const settings = (body: unknown) => api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify(body) });
+    await settings({ cliModels: { claude: { model: null, effort: null, account: "side" } } });
+    // A client that does not know accounts keeps the saved one when it changes the model.
+    const saved = (await (await settings({ cliModels: { claude: { model: "opus", effort: null } } })).json()) as { settings: ProjectSettings };
+    expect(saved.settings.cliModels).toEqual({ claude: { model: "opus", effort: null, account: "side" } });
+
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const author = await idOf(user);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: author, body: "x" });
+    const thread = await projectAgent.createThread(root.id, "Account", null);
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    const turn = async (n: number) => {
+      if (n === 1) await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "x" });
+      else {
+        const m = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: author, body: `again ${n}` });
+        await threadAgent.wake({ kind: "message", messageId: m.id, body: m.body, authorId: author, seq: m.seq });
+      }
+      const starts = await until(() => {
+        const all = runnerSide.frames.filter((f): f is Extract<ServerToRunner, { type: "task.start" }> => f.type === "task.start");
+        return all.length >= n ? all : null;
+      }, `task.start ${n}`);
+      const start = starts[n - 1]!;
+      runnerSide.send({ type: "task.done", taskId: start.taskId, ok: true, result: "done" });
+      await until(async () => (await threadAgent.getTasks()).filter((t) => t.status === "done").length >= n, `turn ${n}`);
+      const task = (await threadAgent.getTasks()).find((t) => t.id === start.taskId) as Task & { log: { text: string }[] };
+      return { account: start.account, log: task.log.map((l) => l.text).join("\n") };
+    };
+
+    // The project's default account for Claude Code.
+    expect((await turn(1)).account).toBe("side");
+
+    // The thread picks another; then Claude Code's own login, even with the project's default set.
+    const chat = await openChat(project.id, user);
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "claude", account: "work" }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.cli?.account === "work", "the pick");
+    expect((await projectAgent.getThread(thread.id))?.cli).toMatchObject({ id: "claude", by: "person", account: "work" });
+    expect((await turn(2)).account).toBe("work");
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "claude", account: OWN_ACCOUNT }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.cli?.account === OWN_ACCOUNT, "own login");
+    expect((await turn(3)).account).toBeUndefined();
+
+    // An account the computer no longer has: Claude Code's own login runs, and the turn says so.
+    chat.send(JSON.stringify({ type: "thread.cli", threadId: thread.id, cli: "claude", account: "gone" }));
+    await until(async () => (await projectAgent.getThread(thread.id))?.cli?.account === "gone", "gone");
+    const gone = await turn(4);
+    expect(gone.account).toBeUndefined();
+    expect(gone.log).toContain('Claude Code has no account "gone"');
     chat.close();
     runnerSide.ws.close();
   });

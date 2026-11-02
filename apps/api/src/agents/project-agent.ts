@@ -440,7 +440,7 @@ export class ProjectAgent extends Agent<Env> {
             message: "This thread cannot run with that CLI: in the cloud it takes OpenCode, Claude Code or Codex; on the project's computer only its owner picks, among the CLIs installed there.",
           });
         }
-        this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null } });
+        this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null, ...(event.account && { account: event.account }) } });
         return;
       }
       case "thread.runner": {
