@@ -4,7 +4,7 @@ import { type ProjectColor, type ProjectIcon, routineFinished } from "@myrel/pro
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { BarChart3, Blocks, Brain, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
+import { BarChart3, Blocks, Brain, Check, CircleDot, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -24,6 +24,7 @@ export const PROJECT_TABPANEL = "project-tabpanel";
 const TABS: { id: ProjectView; label: MessageKey; icon: typeof List }[] = [
   { id: "chat", label: "tabs.chat", icon: MessageSquareText },
   { id: "threads", label: "sidebar.threads", icon: List },
+  { id: "issues", label: "tabs.issues", icon: CircleDot },
   { id: "artifacts", label: "sidebar.artifacts", icon: Blocks },
   { id: "files", label: "tabs.files", icon: FolderOpen },
   { id: "knowledge", label: "tabs.knowledge", icon: Brain },

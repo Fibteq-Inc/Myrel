@@ -100,4 +100,41 @@ describe("issue tools", () => {
     expect(tokens.some((r) => JSON.stringify(r.body) === JSON.stringify({ repository_ids: [7], permissions: { issues: "read", metadata: "read" } }))).toBe(true);
     close();
   });
+
+  it("lists each connected repository's issues for the project's members, without their text", { timeout: 30_000 }, async () => {
+    fakeGithub.issues["acme/app"] = [
+      issue(5, "Outsider's report", "secret body", "NONE"),
+      { ...issue(6, "A pull request", "", "MEMBER"), pull_request: { url: "x" } },
+    ];
+    const token = await signUp();
+    await connectGithub(token);
+    const created = (await (await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Issues" }) })).json()) as { project: { id: string } };
+    const id = created.project.id;
+    for (const repoId of [7, 8]) await api(`/api/projects/${id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId }) });
+
+    const res = await api(`/api/projects/${id}/issues`, { token });
+    expect(res.status).toBe(200);
+    const { repos } = (await res.json()) as { repos: { repo: string; issues: Record<string, unknown>[]; error?: string }[] };
+    expect(repos.map((r) => r.repo).sort()).toEqual(["acme/app", "acme/docs"]);
+    const app = repos.find((r) => r.repo === "acme/app")!;
+    expect(app.issues).toEqual([
+      {
+        repo: "acme/app",
+        number: 5,
+        title: "Outsider's report",
+        state: "open",
+        url: "https://github.com/acme/app/issues/5",
+        author: "stranger",
+        member: false,
+        labels: ["bug"],
+        comments: 0,
+        createdAt: "2026-11-01T10:00:00Z",
+        updatedAt: "2026-11-02T10:00:00Z",
+      },
+    ]);
+    expect(repos.find((r) => r.repo === "acme/docs")).toEqual({ repo: "acme/docs", issues: [] });
+
+    const stranger = await signUp("Eve");
+    expect((await api(`/api/projects/${id}/issues`, { token: stranger })).status).toBe(404);
+  });
 });

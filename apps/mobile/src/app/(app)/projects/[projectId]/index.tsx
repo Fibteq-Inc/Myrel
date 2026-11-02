@@ -1,9 +1,9 @@
-import { conversationState, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { conversationState, draftKey, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
 import { Settings } from "lucide-react-native";
-import type { CliId } from "@myrel/protocol";
+import type { CliId, ProjectIssue } from "@myrel/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AskCliPicker, OfferedClis, usePickableClis } from "../../../../components/cli-picker";
@@ -11,6 +11,7 @@ import type { ComposerHandle } from "../../../../components/composer";
 import { Conversation } from "../../../../components/conversation";
 import { ArtifactsTab } from "../../../../components/project/artifacts-tab";
 import { FilesTab } from "../../../../components/project/files-tab";
+import { IssuesTab } from "../../../../components/project/issues-tab";
 import { ProjectBadge } from "../../../../components/project-badge";
 import { GoalBanner } from "../../../../components/project/goal-banner";
 import { StarterExamples, StarterList } from "../../../../components/project/starter";
@@ -19,14 +20,15 @@ import { ThreadsTab } from "../../../../components/project/threads-tab";
 import { UsageTab } from "../../../../components/project/usage-tab";
 import { ThreadCard } from "../../../../components/thread-card";
 import { ComputerTip } from "../../../../components/tips";
+import { drafts } from "../../../../lib/drafts";
 import { useProject } from "../../../../lib/project";
 import { useSession } from "../../../../lib/session";
 import { useNames } from "../../../../lib/use-names";
 import { makeStyles, useColors } from "../../../../theme";
 
-type Tab = "chat" | "threads" | "artifacts" | "files" | "usage";
+type Tab = "chat" | "threads" | "issues" | "artifacts" | "files" | "usage";
 
-/** A project: its conversation and the Threads, Artifacts, Files and Usage tabs, as on the web. */
+/** A project: its conversation and the Threads, Issues, Artifacts, Files and Usage tabs, as on the web. */
 export default function ProjectScreen() {
   const t = useT();
   const styles = useStyles();
@@ -36,6 +38,17 @@ export default function ProjectScreen() {
   const { projectId, status } = useProject();
   const project = useQuery({ queryKey: ["projects", server, projectId], queryFn: () => api.getProject(projectId) });
   const [tab, setTab] = useState<Tab>("chat");
+  /** An issue's "Work on it": a request naming it waits in the conversation's composer, after anything typed there. */
+  const workOn = useCallback(
+    (issue: ProjectIssue) => {
+      const key = draftKey(projectId);
+      const ask = t("issues.workDraft", { ref: `${issue.repo}#${issue.number}`, url: issue.url });
+      const typed = drafts.get(key).trim();
+      drafts.set(key, typed ? `${typed}\n\n${ask}` : ask);
+      setTab("chat");
+    },
+    [projectId, t],
+  );
 
   return (
     <View style={{ flex: 1 }}>
@@ -77,6 +90,7 @@ export default function ProjectScreen() {
         tabs={[
           { key: "chat", label: t("tabs.chat") },
           { key: "threads", label: t("sidebar.threads") },
+          { key: "issues", label: t("tabs.issues") },
           { key: "artifacts", label: t("sidebar.artifacts") },
           { key: "files", label: t("tabs.files") },
           { key: "usage", label: t("tabs.usage") },
@@ -86,6 +100,8 @@ export default function ProjectScreen() {
         <ChatTab owner={project.data?.role === "owner"} />
       ) : tab === "threads" ? (
         <ThreadsTab />
+      ) : tab === "issues" ? (
+        <IssuesTab onWork={workOn} />
       ) : tab === "artifacts" ? (
         <ArtifactsTab />
       ) : tab === "files" ? (

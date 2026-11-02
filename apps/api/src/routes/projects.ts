@@ -32,6 +32,7 @@ import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
+import { projectIssues } from "../github/issues";
 import { listPullRequests, MergeError, mergePullRequest, pullFiles, pullMergeState } from "../github/pulls";
 import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
@@ -336,6 +337,14 @@ export const projectRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
     return c.json({ repos: await listProjectRepos(c.env.DB, id) });
+  })
+  // The Issues tab: each connected repository's issues, read with a token limited to issues (github/issues.ts).
+  .get("/:id/issues", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const state = c.req.query("state");
+    const repos = (await listProjectRepos(c.env.DB, id)).map((r) => r.fullName);
+    return c.json({ repos: await projectIssues(c.env, id, repos, state === "closed" || state === "all" ? state : "open") });
   })
   .post("/:id/repos", async (c) => {
     const id = c.req.param("id");
