@@ -859,6 +859,15 @@ const MUSE_ACCESS: Record<Access, string[]> = {
   full: ["--yolo"],
 };
 
+/**
+ * Muse Code puts a temp folder with a new random name into its instructions on every start, ahead of the
+ * conversation, so a resumed turn's first model call finds none of the session in the provider's prompt
+ * cache and reads all of it again: about 2.5 minutes at 350k tokens. Its own compaction waits until 75%
+ * of a 1M window; summarizing from 15% (about 150k tokens) keeps that first call under a minute. Soft
+ * compaction runs in the background during a turn and takes effect on the next one.
+ */
+const MUSE_COMPACTION = ["--context-compaction-soft-threshold", "0.15"];
+
 /** Env var that carries the Authorization header for Muse Code, which takes a secret only as a whole `${VAR}`. */
 const MUSE_AUTH_VAR = "MYREL_MCP_AUTH";
 
@@ -870,6 +879,7 @@ const muse: CliAdapter = {
   args: ({ access, resume, extra = [], promptFile }) => [
     "exec",
     "--json",
+    ...MUSE_COMPACTION,
     ...MUSE_ACCESS[access],
     ...(resume ? ["--session-id", resume] : []),
     ...extra,

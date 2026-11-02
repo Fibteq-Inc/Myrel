@@ -31,10 +31,12 @@ async function fakeMuse(script: string) {
 describe("Muse Code arguments", () => {
   it("runs exec with JSON events and the prompt in a file", () => {
     const file = ["--prompt-file", "/tmp/p/prompt.md"];
+    const compact = ["--context-compaction-soft-threshold", "0.15"];
     // Its read-only profile would wait forever on a command, so read takes writes and the shell away.
     expect(muse.args({ access: "read", promptFile: "/tmp/p/prompt.md" })).toEqual([
       "exec",
       "--json",
+      ...compact,
       "--approval-mode",
       "never",
       "--disable-write",
@@ -42,13 +44,14 @@ describe("Muse Code arguments", () => {
       ...file,
     ]);
     // Its sandbox keeps writes in the workspace; nothing waits for approval.
-    expect(muse.args({ access: "edit", promptFile: "/tmp/p/prompt.md" })).toEqual(["exec", "--json", "--approval-mode", "never", "--trust-workspace", ...file]);
-    expect(muse.args({ access: "auto", promptFile: "/tmp/p/prompt.md" })).toEqual(["exec", "--json", "--approval-mode", "never", "--trust-workspace", ...file]);
-    expect(muse.args({ access: "full", promptFile: "/tmp/p/prompt.md" })).toEqual(["exec", "--json", "--yolo", ...file]);
+    expect(muse.args({ access: "edit", promptFile: "/tmp/p/prompt.md" })).toEqual(["exec", "--json", ...compact, "--approval-mode", "never", "--trust-workspace", ...file]);
+    expect(muse.args({ access: "auto", promptFile: "/tmp/p/prompt.md" })).toEqual(["exec", "--json", ...compact, "--approval-mode", "never", "--trust-workspace", ...file]);
+    expect(muse.args({ access: "full", promptFile: "/tmp/p/prompt.md" })).toEqual(["exec", "--json", ...compact, "--yolo", ...file]);
     // The session continues with --session-id; the prompt file comes last.
     expect(muse.args({ access: "full", resume: "01a1-s", extra: ["-c", "x"], promptFile: "/tmp/p/prompt.md" })).toEqual([
       "exec",
       "--json",
+      ...compact,
       "--yolo",
       "--session-id",
       "01a1-s",
@@ -57,6 +60,15 @@ describe("Muse Code arguments", () => {
       ...file,
     ]);
     expect(muse.promptFile).toBe(true);
+  });
+
+  it("summarizes the session from 15% of the window, so a resumed turn's first call stays short", () => {
+    // Each start puts a new random temp folder ahead of the conversation, so the history is read again
+    // on every turn; compaction keeps that history around 150k tokens instead of up to 750k.
+    for (const access of ["read", "edit", "auto", "full"] as const) {
+      const args = muse.args({ access, resume: "01a1-s", promptFile: "/tmp/p/prompt.md" });
+      expect(args[args.indexOf("--context-compaction-soft-threshold") + 1]).toBe("0.15");
+    }
   });
 
   it("gives each server its own -c override, with secrets only as ${VAR}", async () => {

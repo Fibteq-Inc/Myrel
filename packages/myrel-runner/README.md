@@ -169,6 +169,11 @@ that run only. With `read` its write and shell tools are taken away (its `:read-
 a command's approval). `full` is `--yolo`: no approval, no sandbox. Muse Code has no `--add-dir`, so below `full` it
 writes only in the project's main folder.
 
+Every `muse exec` writes a temp folder with a new random name into its instructions, ahead of the conversation, so
+the first model call of a resumed turn misses the provider's prompt cache and reads the whole session again (about
+2.5 minutes at 350k tokens). The runner passes `--context-compaction-soft-threshold 0.15`, so Muse Code summarizes
+the session from about 150k tokens instead of 750k and that first call stays under a minute.
+
 On Ubuntu 23.10 and later, Codex's and Muse Code's sandboxes can fail every command with `bwrap: loopback: Failed
 RTM_NEWADDR: Operation not permitted`. Ubuntu's AppArmor gives programs without a profile no capabilities in a new user
 namespace (`kernel.apparmor_restrict_unprivileged_userns = 1`) and exempts only `/usr/bin/bwrap`, while both CLIs
