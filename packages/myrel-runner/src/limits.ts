@@ -1,7 +1,7 @@
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { CliId, CliLimits, CliLimitWindow } from "@myrel/protocol";
+import type { CliLimits, CliLimitWindow } from "@myrel/protocol";
 import { readJson, runnerHome, writeJson } from "./config";
 
 /**
@@ -155,11 +155,14 @@ export async function readCodexLimits(sessionId?: string): Promise<CliLimits | u
 
 const limitsPath = () => join(runnerHome(), "limits.json");
 
-/** The last limits each CLI reported, kept across restarts so the web app still shows them. */
-export async function loadLimits(): Promise<Partial<Record<CliId, CliLimits>>> {
-  return (await readJson<Partial<Record<CliId, CliLimits>>>(limitsPath()).catch(() => undefined)) ?? {};
+/**
+ * The last limits each CLI's login reported, kept across restarts so the web app still shows them:
+ * by CLI id for the CLI's own login, by `<cli>@<account>` for another (see accounts.ts limitsKey).
+ */
+export async function loadLimits(): Promise<Partial<Record<string, CliLimits>>> {
+  return (await readJson<Partial<Record<string, CliLimits>>>(limitsPath()).catch(() => undefined)) ?? {};
 }
 
-export async function saveLimits(limits: Partial<Record<CliId, CliLimits>>): Promise<void> {
+export async function saveLimits(limits: Partial<Record<string, CliLimits>>): Promise<void> {
   await writeJson(limitsPath(), limits);
 }

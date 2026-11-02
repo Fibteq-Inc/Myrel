@@ -99,6 +99,28 @@ automatically, with its branch. `myrel-runner worktrees` lists them, `worktrees 
 `worktrees remove <path or branch>` removes one, and `worktrees off` makes threads work in the folder itself again.
 Read-only tasks (`--access read`) always run in the folder itself.
 
+### More than one Claude Code account
+
+A thread can run with another Claude Code login than your own, e.g. a work account next to your personal one.
+Each login lives in a config folder of its own, which Claude Code takes from `CLAUDE_CONFIG_DIR`
+([its own way](https://code.claude.com/docs/en/authentication) to sign in with several accounts):
+
+```sh
+myrel-runner claude add "Work"                # a new folder, ~/.myrel-runner/claude/work, then Claude Code's own sign-in
+myrel-runner claude add "Work" --dir ~/.claude-work   # or a folder you already signed in with
+myrel-runner claude rename default "Personal"  # name your own login (~/.claude) too
+myrel-runner claude list                       # each login, its folder and whether it is signed in
+myrel-runner claude login "Work"               # sign in again, e.g. after its login expired
+myrel-runner claude remove "Work"              # forget it; its folder (and login) stays until you delete it
+```
+
+The sign-in is Claude Code's own `claude auth login`: the login stays in that folder, and neither the runner nor
+Myrel ever reads or keeps it. The runner only tells Myrel each account's name, and its usage limits as Claude Code
+reports them in a turn with it. A thread that chose an account runs Claude Code with its folder; its sessions are
+kept apart from your own login's, so a thread that switches accounts starts a new session (with the thread's
+history). A new folder has none of your `~/.claude` settings, hooks or plugins. Use accounts that are all yours:
+Claude's consumer terms do not allow sharing a login with someone else. Needs runner 0.34.0 or newer.
+
 ### What the CLI may do
 
 `myrel-runner start --access <level>`, or for the background runner `myrel-runner service install --access <level>` or

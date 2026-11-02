@@ -9,6 +9,7 @@ import {
   type RunnerToServer,
   ServerToRunner,
 } from "@myrel/protocol";
+import { helloAccounts, limitsKey } from "./accounts";
 import { ADAPTERS, detectClis } from "./clis";
 import { sandboxProblem, sandboxState } from "./sandbox";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
@@ -24,7 +25,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.33.0";
+export const RUNNER_VERSION = "0.34.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -115,10 +116,11 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   const clis = await detectClis();
   // The last limits each CLI reported; hello carries them with the CLI's version.
   const limits = await loadLimits();
-  const setLimits = (cli: CliId, next: CliLimits | undefined) => {
-    const prev = limits[cli];
+  const setLimits = (cli: CliId, next: CliLimits | undefined, account?: string) => {
+    const key = limitsKey(cli, account);
+    const prev = limits[key];
     if (!next || (prev && prev.at >= next.at)) return;
-    limits[cli] = next;
+    limits[key] = next;
     void saveLimits(limits).catch(() => {});
     if (JSON.stringify({ ...prev, at: "" }) !== JSON.stringify({ ...next, at: "" })) hello();
   };
@@ -195,7 +197,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       hostname: hostname(),
       platform: platform(),
       folders: config.folders,
-      clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
+      clis: clis.map((c) => ({ ...c, ...(limits[c.id] && { limits: limits[c.id] }), ...helloAccounts(config, c.id, limits) })),
       features: [
         "folders",
         "cancel",
@@ -211,6 +213,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "steer",
         "steer-claude",
         "ssh",
+        "cli-accounts",
         ...(updates === "service" ? (["update"] as const) : []),
         ...(statsOn() ? (["stats"] as const) : []),
       ],

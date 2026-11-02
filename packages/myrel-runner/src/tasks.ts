@@ -6,6 +6,7 @@ import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } fro
 import { type AcpMcpServer, AcpTurn } from "./acp";
 import { type AppServerAsk, AppServerTurn, type AppServerTurnOptions, approveAccess } from "./app-server";
 import { ClaudeStreamTurn } from "./claude-stream";
+import { accountEnv } from "./accounts";
 import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore } from "./config";
 import { GitCredentials } from "./github";
@@ -34,8 +35,8 @@ export type TaskRunnerOptions = {
   /** For tests: replaces child_process.spawn. */
   spawn?: typeof spawn;
   log?: (line: string) => void;
-  /** The subscription limits a CLI reported during or after a run. */
-  onLimits?: (cli: CliId, limits: CliLimits) => void;
+  /** The subscription limits a CLI reported during or after a run, with the login it ran with (task.start's `account`). */
+  onLimits?: (cli: CliId, limits: CliLimits, account?: string) => void;
   /** This runner's version, which it gives the CLIs that ask (Codex's app server). */
   version?: string;
 };
@@ -76,6 +77,9 @@ export class TaskRunner {
     const config = this.opts.config();
     const folder = await sharedFolder(config, task.folder);
     if (!folder) return fail(`The folder ${task.folder} is not shared on this computer. Run \`myrel-runner share\` in it.`);
+    // The login the CLI runs with: its own, or another the person added (Claude Code's config folder).
+    const login = accountEnv(config, task.cli, task.account);
+    if ("error" in login) return fail(login.error);
 
     // Read-only tasks change nothing, so they can share the folder.
     let isolated: Awaited<ReturnType<typeof threadWorktree>> = null;
@@ -107,10 +111,10 @@ export class TaskRunner {
     // Claude Code asks the person through Myrel before stepping outside those folders.
     const asks = !!task.agent && task.cli === "claude";
     // A CLI session belongs to the folder it ran in, so a new worktree starts a new one.
-    const session = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli) : undefined;
+    const session = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli, task.account) : undefined;
     // A session that saw the thread's last turn already holds the thread: it only needs what is new.
     const short = session && task.agent?.resume && session.task === task.agent.resume.after ? task.agent.resume.prompt : undefined;
-    log(`▶ ${adapter.id} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
+    log(`▶ ${adapter.id}${task.account ? `@${task.account}` : ""} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
 
     // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
     let agentDir: string | undefined;
@@ -149,7 +153,7 @@ export class TaskRunner {
     // A session that cannot be resumed (deleted, or from another CLI version) fails before any
     // output: the turn then starts a new session with the whole thread.
     // Git clones and pushes the project's repositories with the turn's GitHub token, lent only for this run.
-    let env = task.github ? { ...agent.env, ...(await this.git.lend(task.taskId, task.github)) } : agent.env;
+    let env = { ...login, ...agent.env, ...(task.github && (await this.git.lend(task.taskId, task.github))) };
     // The agent's ssh goes through Myrel's ssh_run (a card, the project's servers, Myrel's keys).
     if (task.agent && agentDir && config.server) {
       const shim = await installShim(agentDir, { url: `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`, token: task.agent.token }).catch((err: unknown) => {
@@ -254,7 +258,7 @@ export class TaskRunner {
     const reportLimits = (limits: CliLimits | undefined) => {
       if (!limits || limits === sentLimits) return;
       sentLimits = limits;
-      this.opts.onLimits?.(task.cli, limits);
+      this.opts.onLimits?.(task.cli, limits, task.account);
     };
     /** The CLI's usage so far, for the server to show under the agent's replies. */
     const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
@@ -289,7 +293,7 @@ export class TaskRunner {
       // restarting for an update) is then continued in the same session instead of a new one.
       if (state.sessionId && state.sessionId !== savedSession && RESUMES.has(task.cli)) {
         savedSession = state.sessionId;
-        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }).catch(() => {});
+        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }, task.account).catch(() => {});
       }
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
@@ -387,7 +391,7 @@ export class TaskRunner {
         }
         // The session now holds this turn too, so the next one can continue it with only what is new.
         if (state.sessionId && RESUMES.has(task.cli)) {
-          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }).catch(() => {});
+          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }, task.account).catch(() => {});
         }
         const result =
           state.result ??
