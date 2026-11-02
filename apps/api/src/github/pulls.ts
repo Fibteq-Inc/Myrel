@@ -3,6 +3,7 @@ import type { MergeMethod, MergePullInput, MergePullResult, PullFile, PullFiles,
 import { getAgentByName } from "agents";
 import { and, eq } from "drizzle-orm";
 import { GithubError, githubFetch, installationToken, type RepoPermissions } from "./app";
+import { wrapExternal } from "../agents/external";
 import { type PullCredit, hasAttribution, withAttribution } from "./attribution";
 import { githubAccountOf, listProjectRepos, projectRepoToken } from "./store";
 
@@ -680,10 +681,12 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
     } else if (payload.action === "submitted" && (state === "approved" || state === "changes_requested")) {
       await save(env, row, { review: state });
       if (state === "changes_requested") {
-        await wake(env, row, `got a review from ${payload.review.user.login} asking for changes:\n${quote(payload.review.body)}`);
+        const q = quote(payload.review.body, "github-pr-review", row, payload.review.user.login);
+        await wake(env, row, `got a review from ${payload.review.user.login} asking for changes:\n${q.text}`, undefined, q.external);
       }
     } else if (payload.action === "submitted" && payload.review.body?.trim()) {
-      await wake(env, row, `got a review comment from ${payload.review.user.login}:\n${quote(payload.review.body)}`);
+      const q = quote(payload.review.body, "github-pr-review", row, payload.review.user.login);
+      await wake(env, row, `got a review comment from ${payload.review.user.login}:\n${q.text}`, undefined, q.external);
     }
     return;
   }
@@ -694,7 +697,8 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
     const row = await find(number);
     if (!row) return;
     const where = payload.comment.path ? ` on ${payload.comment.path}` : "";
-    await wake(env, row, `got a comment from ${payload.comment.user.login}${where}:\n${quote(payload.comment.body)}`);
+    const q = quote(payload.comment.body, "github-pr-comment", row, payload.comment.user.login);
+    await wake(env, row, `got a comment from ${payload.comment.user.login}${where}:\n${q.text}`, undefined, q.external);
   }
 }
 
@@ -711,9 +715,15 @@ function trusted(association?: string) {
   return association === "OWNER" || association === "MEMBER" || association === "COLLABORATOR";
 }
 
-function quote(text: string | null) {
+/**
+ * Their words as data (see agents/external.ts), at most 2000 characters. Only members get here, but
+ * text that looks like steering still marks the thread (`external`).
+ */
+function quote(text: string | null, source: string, row: Row, author: string): { text: string; external?: string } {
   const body = (text ?? "").trim().slice(0, 2000);
-  return body ? body.split("\n").map((l) => `> ${l}`).join("\n") : "> (no text)";
+  if (!body) return { text: "(no text)" };
+  const wrapped = wrapExternal({ source, ref: `${row.fullName}#${row.number}`, author, trust: "member" }, body);
+  return { text: wrapped.text, ...(wrapped.taints && { external: `${source}:${row.fullName}#${row.number}` }) };
 }
 
 async function save(env: PullsEnv, row: Row, set: Partial<Row>): Promise<Row> {
@@ -731,9 +741,9 @@ async function broadcast(env: PullsEnv, projectId: string, pr: PullRequest) {
   await project.broadcastPullRequest(pr);
 }
 
-async function wake(env: PullsEnv, row: Row, what: string, settled?: { pr: string; merged: boolean }) {
+async function wake(env: PullsEnv, row: Row, what: string, settled?: { pr: string; merged: boolean }, external?: string) {
   const agent = await getAgentByName(env.THREAD_AGENT, row.threadId);
   const event = `Pull request ${row.fullName}#${row.number} "${row.title}" (${row.url}, branch ${row.headRef}) ${what}`;
-  await agent.wake({ kind: "github", event, ...(settled && { settled }) });
+  await agent.wake({ kind: "github", event, ...(settled && { settled }), ...(external && { external }) });
 }
 

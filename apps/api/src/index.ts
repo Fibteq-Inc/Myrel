@@ -99,7 +99,8 @@ const app = new Hono<AppEnv>()
       return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message } }, 502);
     }
     if (!target.ok) return c.json({ error: target.error }, target.error === "unauthorized" ? 401 : 404);
-    return proxyMcp(c.req.raw, target);
+    // A tool's answer is outside text: the thread is marked before it reaches the agent (agents/external.ts).
+    return proxyMcp(c.req.raw, target, fetch, () => thread.markExternal(`connector:${target.title}`));
   })
   // The model of a cloud turn's harness, through Myrel: the turn's token in, the project's key added
   // here, and each call's cost counted on the turn (see proxyModel).

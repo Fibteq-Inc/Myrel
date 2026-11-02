@@ -227,7 +227,10 @@ describe("project repositories", () => {
     await api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId: 7 }) });
 
     expect(await listRepoFiles(env, project.id, "acme/app", "")).toBe("src/\nREADME.md (11 bytes)");
-    expect(await readRepoFile(env, project.id, "ACME/app", "src/index.ts")).toBe("export const x = 1;\n");
+    // As data the agent works with, not instructions (agents/external.ts).
+    expect(await readRepoFile(env, project.id, "ACME/app", "src/index.ts")).toMatch(
+      /^<external source="github-repo-file" ref="acme\/app\/src\/index\.ts" trust="repository" id="(\w+)">\nexport const x = 1;\n\n<\/external id="\1">$/,
+    );
     await expect(readRepoFile(env, project.id, "acme/docs", "README.md")).rejects.toThrow(/not connected/);
 
     const tokenRequest = fakeGithub.requests.findLast((r) => r.url.endsWith("/access_tokens"));
@@ -406,7 +409,7 @@ describe("pull requests", () => {
 
     const woken = await githubEvents(thread.id);
     expect(woken).toHaveLength(3);
-    expect(woken[1]).toContain("mona asking for changes:\n> Please add a test.");
+    expect(woken[1]).toMatch(/mona asking for changes:\n<external source="github-pr-review" ref="acme\/app#\d+" author="mona" trust="member" id="\w+">\nPlease add a test\.\n<\/external/);
     expect(woken[2]).toContain("was merged.");
   });
 
