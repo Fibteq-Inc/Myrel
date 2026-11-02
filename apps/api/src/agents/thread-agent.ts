@@ -48,6 +48,7 @@ import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
+import { listRepoIssues, readRepoIssue } from "../github/issues";
 import type { PullCredit } from "../github/attribution";
 import {
   CONFLICT_RETRY_SEC,
@@ -1827,6 +1828,17 @@ export class ThreadAgent extends Agent<Env> {
         },
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+        // Issue text from outside the repository's people marks the thread before it reaches the agent.
+        listRepoIssues: async (repo, opts) => {
+          const read = await listRepoIssues(this.env, projectId, repo, opts);
+          if (read.external) await this.markExternal(read.external);
+          return read.text;
+        },
+        readRepoIssue: async (repo, number, page) => {
+          const read = await readRepoIssue(this.env, projectId, repo, number, page);
+          if (read.external) await this.markExternal(read.external);
+          return read.text;
+        },
         trackPullRequest: async (url) => {
           const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
