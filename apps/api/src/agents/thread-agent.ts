@@ -48,6 +48,7 @@ import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
+import { listRepoIssues, readRepoIssue } from "../github/issues";
 import type { PullCredit } from "../github/attribution";
 import {
   CONFLICT_RETRY_SEC,
@@ -106,6 +107,16 @@ import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } f
 import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, type ResumeWhere, resumeNote, resumingMessage } from "./auto-resume";
 import { SEEN_EMOJI, THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
+import {
+  answeredApprovalMessage,
+  approvalAnswer,
+  approvalMessage,
+  approvalResultMessage,
+  type ExternalApproval,
+  GUARDED_TOOLS,
+  markedMessage,
+  wrapExternal,
+} from "./external";
 import { type BranchRequest, branchAnswer, branchBlockText, branchRequestMessage, branchResultMessage } from "./branch-request";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
@@ -359,6 +370,9 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     // A tap on the branch card deletes it (or keeps it) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
+    // A tap on a card for a memory or routine change in a marked thread makes the change (or not) without a turn.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerExternalApproval(reason))) return;
+    if (reason.kind === "github" && reason.external) await this.markExternal(reason.external);
     if (reason.kind === "coordinator") {
       const forwarded = reason.forwardedFor !== undefined;
       this.sql`INSERT INTO notes (body, created_at, forwarded, actor)
@@ -1129,14 +1143,16 @@ export class ThreadAgent extends Agent<Env> {
     token: string,
     name: string,
   ): Promise<
-    { ok: true; url: string; headers: Record<string, string> } | { ok: false; error: "unauthorized" | "not_found" } | { ok: false; error: "signed_out"; title: string }
+    | { ok: true; url: string; headers: Record<string, string>; title: string }
+    | { ok: false; error: "unauthorized" | "not_found" }
+    | { ok: false; error: "signed_out"; title: string }
   > {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false, error: "unauthorized" };
     const given = JSON.parse(this.getMeta("agent_connectors") ?? "[]") as { id: string; name: string; transport: string }[];
     const connector = given.find((c) => c.name === name && c.transport === "http");
     const target = connector ? await remoteTarget(this.env, connector.id) : null;
-    if (target) return { ok: true, ...target };
+    if (target) return { ok: true, ...target, title: name };
     // Its sign-in ended during the turn: the person gets a card to sign in again, the agent a reason.
     const [row] = connector ? await createDb(this.env.DB).select().from(schema.connectors).where(eq(schema.connectors.id, connector.id)) : [];
     if (row?.enabled && row.auth === "oauth" && row.status === "needs_auth") {
@@ -1618,7 +1634,102 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
-  private async agentToolset(): Promise<Tool[]> {
+  /** Where the thread read untrusted or suspicious text, oldest first; empty for a thread that did not. */
+  private externalSources(): string[] {
+    return JSON.parse(this.getMeta("external_seen") ?? "[]") as string[];
+  }
+
+  /**
+   * Marks the thread as having read text from outside the project (see external.ts): from then on
+   * memory and routine changes go to a person on a card. Said once in the thread. Callable over RPC.
+   */
+  async markExternal(source: string): Promise<void> {
+    const seen = this.externalSources();
+    if (seen.includes(source)) return;
+    this.setMeta("external_seen", JSON.stringify([...seen, source].slice(-20)));
+    if (seen.length || !this.getMeta("thread_id")) return;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: markedMessage(source, this.language()) });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+  }
+
+  private language(): string {
+    return (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language ?? this.getMeta("language") ?? "en";
+  }
+
+  /**
+   * A guarded tool's call in a marked thread: put to a person on a card instead of run. Myrel runs it
+   * once they allow it (answerExternalApproval), so the agent does not call it again.
+   */
+  private async askExternalApproval(name: string, input: Record<string, unknown>): Promise<string> {
+    const open = JSON.parse(this.getMeta("external_approval") ?? "null") as ExternalApproval | null;
+    if (open) return "Not done yet: a card for another memory or routine change is already waiting for the person. Mention this change in your reply; it can be asked for once that card is answered.";
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const body = approvalMessage(name, input, this.externalSources(), this.language());
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    this.setMeta("external_approval", JSON.stringify({ tool: name, input, requester: this.getMeta("requester") || null, messageId: m.id } satisfies ExternalApproval));
+    await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
+    return "Not done yet: this thread read content from outside the project, so this change waits for a person's OK on a card in the thread. Myrel makes it exactly as you asked once they allow it; do not call the tool again. Carry on with the rest of the work and say in your reply that the change waits for their approval.";
+  }
+
+  /**
+   * A person answered the card for a memory or routine change. "Allow" from the person the thread
+   * works for, or a project owner or admin, runs the call as the agent made it; anyone else's tap is
+   * refused. Neither needs a turn. Returns true when it was an answer.
+   */
+  private async answerExternalApproval(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const request = JSON.parse(this.getMeta("external_approval") ?? "null") as ExternalApproval | null;
+    const answer = request ? approvalAnswer(reason.body ?? "") : null;
+    if (!request || !answer) return false;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const language = this.language();
+    let body: string;
+    if (!(await this.mayAnswerFor(reason.authorId, request.requester))) {
+      // The card stays for someone who may answer it.
+      body = approvalResultMessage({ forbidden: true }, language);
+    } else {
+      this.deleteMeta("external_approval");
+      await project.editMessage(request.messageId, answeredApprovalMessage(request.tool, request.input, language)).catch((err) => console.warn("approval card not shortened", err));
+      if (answer === "deny") {
+        body = language === "tr" ? "Değişiklik yapılmadı." : "Nothing was changed.";
+      } else {
+        const t = (await this.agentToolset({ guarded: false })).find((x) => x.name === request.tool);
+        try {
+          if (!t) throw new Error("the tool is not available any more");
+          const out = await t.run(t.input.parse(request.input));
+          body = approvalResultMessage({ tool: request.tool, input: request.input, done: true, output: typeof out === "string" ? out : out.output }, language);
+        } catch (err) {
+          body = approvalResultMessage({ tool: request.tool, input: request.input, failed: err instanceof Error ? err.message : String(err) }, language);
+        }
+      }
+    }
+    const line = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
+    // Neither the answer nor the line after it is news for the next turn, unless someone wrote in between.
+    if (reason.seq !== undefined && reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1 && line.seq <= reason.seq + 1) {
+      this.setMeta("last_seen_seq", String(line.seq));
+      await project.updateThread(threadId, { seenSeq: line.seq });
+    }
+    return true;
+  }
+
+  /** Whether `userId` may answer for this thread: the person it works for, or a project owner or admin. */
+  private async mayAnswerFor(userId: string | undefined, requester: string | null): Promise<boolean> {
+    if (!userId) return false;
+    if (userId === requester) return true;
+    const [row] = await createDb(this.env.DB)
+      .select({ role: schema.projectMembers.role })
+      .from(schema.projectMembers)
+      .where(and(eq(schema.projectMembers.projectId, this.ids().projectId), eq(schema.projectMembers.userId, userId)))
+      .limit(1);
+    return row?.role === "owner" || row?.role === "admin";
+  }
+
+  private async agentToolset(opts: { guarded?: boolean } = {}): Promise<Tool[]> {
+    const guarded = opts.guarded ?? true;
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
@@ -1717,6 +1828,17 @@ export class ThreadAgent extends Agent<Env> {
         },
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+        // Issue text from outside the repository's people marks the thread before it reaches the agent.
+        listRepoIssues: async (repo, opts) => {
+          const read = await listRepoIssues(this.env, projectId, repo, opts);
+          if (read.external) await this.markExternal(read.external);
+          return read.text;
+        },
+        readRepoIssue: async (repo, number, page) => {
+          const read = await readRepoIssue(this.env, projectId, repo, number, page);
+          if (read.external) await this.markExternal(read.external);
+          return read.text;
+        },
         trackPullRequest: async (url) => {
           const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
@@ -1789,9 +1911,32 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
       }),
     ];
+    // A call a person allowed runs as made, without delivering news to a turn (there may be none).
+    if (!guarded) return tools;
+    // In a thread that read outside text, memory and routine changes wait for a person's card; files
+    // people uploaded (often from outside) come back as data.
+    const checked = tools.map((t): Tool => {
+      if (GUARDED_TOOLS.has(t.name)) {
+        return { ...t, run: async (input) => (this.externalSources().length ? this.askExternalApproval(t.name, input as Record<string, unknown>) : t.run(input)) };
+      }
+      if (t.name === "read_file") {
+        return {
+          ...t,
+          run: async (input) => {
+            const out = await t.run(input);
+            const path = String((input as { path?: unknown }).path ?? "").replace(/^\/+/, "");
+            if (typeof out !== "string" || !path.startsWith("uploads/") || out.includes(" is a binary file (")) return out;
+            const wrapped = wrapExternal({ source: "project-upload", ref: path, trust: "member" }, out);
+            if (wrapped.taints) await this.markExternal(`project-upload:${path}`);
+            return wrapped.text;
+          },
+        };
+      }
+      return t;
+    });
     // What people wrote since the turn started reaches it with its next call to Myrel, without stopping it.
     // The folder-approval tool is left out: the CLI reads its answer as JSON.
-    const delivering = tools.map(
+    const delivering = checked.map(
       (t): Tool => ({
         ...t,
         run: async (input) => {

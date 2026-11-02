@@ -2081,7 +2081,8 @@ export type ThreadWake =
    * Something happened on a pull request the thread opened (github/pulls.ts). settled: it was merged
    * or closed, which needs no turn of its own unless the thread's plan still has work.
    */
-  | { kind: "github"; event: string; settled?: { pr: string; merged: boolean } };
+  /** external: the event quotes text that marks the thread (see external.ts), named by where it came from. */
+  | { kind: "github"; event: string; settled?: { pr: string; merged: boolean }; external?: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));
