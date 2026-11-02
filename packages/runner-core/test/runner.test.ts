@@ -62,6 +62,11 @@ describe("opencode", () => {
       { type: "tool", name: "bash", title: "pnpm test" },
       { type: "log", stream: "stdout", text: "ok" },
     ]);
+    // opencode 2 calls the command tool shell; its output still shows as terminal lines.
+    expect(line({ type: "tool_use", part: { tool: "shell", state: { title: "pnpm test", output: "ok\n" } } })).toEqual([
+      { type: "tool", name: "shell", title: "pnpm test" },
+      { type: "log", stream: "stdout", text: "ok" },
+    ]);
     // git redraws its progress with carriage returns: only the last state of each line is kept.
     const clone = "Cloning into 'flow'...\nUpdating files:  15% (665/4323)\rUpdating files: 100% (4323/4323), done.\r\n";
     expect(line({ type: "tool_use", part: { tool: "bash", state: { title: "git clone", output: clone } } })[1]).toEqual({
@@ -85,36 +90,52 @@ describe("opencode", () => {
   });
 
   it("works in the folders next to its own (repos, files, skills) without asking", () => {
-    expect(opencodeConfig(spec()).permission).toMatchObject({ external_directory: "allow", bash: "allow", edit: "allow" });
+    expect(opencodeConfig(spec()).permissions).toEqual([
+      { action: "edit", resource: "*", effect: "allow" },
+      { action: "shell", resource: "*", effect: "allow" },
+      { action: "webfetch", resource: "*", effect: "allow" },
+      { action: "external_directory", resource: "*", effect: "allow" },
+    ]);
   });
 
   it("registers OpenAI-compatible models as a custom provider without the key", () => {
     const s = spec({ model: { kind: "openai", provider: "fireworks", id: "firerouter/opus", baseUrl: "https://api.fireworks.ai/inference/v1" } });
-    expect(opencode.command(s)).toBe(`opencode run --format json --model 'myrel/firerouter/opus' "$MYREL_PROMPT"`);
+    expect(opencode.command(s)).toBe(`opencode run --standalone --format json --model 'myrel/firerouter/opus' "$MYREL_PROMPT"`);
     // Titles use the task's model too, the only one Myrel's proxy lets through.
-    expect(opencodeConfig(s).small_model).toBe("myrel/firerouter/opus");
+    expect(opencodeConfig(s).agents).toEqual({ title: { model: "myrel/firerouter/opus" } });
     const config = JSON.stringify(opencodeConfig(s));
     expect(config).toContain("{env:MYREL_MODEL_API_KEY}");
     expect(config).toContain("https://api.fireworks.ai/inference/v1");
   });
 
+  it("puts Anthropic models on OpenCode's own provider, over the task's endpoint", () => {
+    const s = spec({ model: { kind: "anthropic", provider: "anthropic", id: "claude-sonnet-x", baseUrl: "https://myrel.test/api/agent/model//" } });
+    expect(opencode.command(s)).toContain("--model 'anthropic/claude-sonnet-x'");
+    expect(opencodeConfig(s).providers).toEqual({
+      anthropic: { settings: { apiKey: "{env:MYREL_MODEL_API_KEY}", baseURL: "https://myrel.test/api/agent/model/v1" } },
+    });
+  });
+
   it("lets a model that reads images see the images OpenCode reads", () => {
     const model = { kind: "openai" as const, provider: "fireworks", id: "qwen-vl", baseUrl: "https://api.fireworks.ai/inference/v1" };
     const entry = (images?: boolean) =>
-      (opencodeConfig(spec({ model: { ...model, images } })).provider as Record<string, { models: Record<string, unknown> }>).myrel!.models["qwen-vl"];
-    expect(entry(true)).toMatchObject({ attachment: true, modalities: { input: ["text", "image"], output: ["text"] } });
-    expect(entry()).not.toHaveProperty("modalities");
+      (opencodeConfig(spec({ model: { ...model, images } })).providers as Record<string, { models: Record<string, unknown> }>).myrel!.models["qwen-vl"];
+    expect(entry(true)).toMatchObject({ capabilities: { tools: true, input: ["text", "image"], output: ["text"] } });
+    expect(entry()).toMatchObject({ capabilities: { tools: true, input: ["text"], output: ["text"] } });
   });
 
   it("connects to the thread's MCP endpoint as the thread's agent, with the token from the environment", () => {
     expect(opencodeConfig(spec()).mcp).toBeUndefined();
     const config = opencodeConfig(spec({ mcp: { url: "https://myrel.test/api/agent-mcp/thr_1" } }));
     expect(config.mcp).toEqual({
-      myrel: {
-        type: "remote",
-        url: "https://myrel.test/api/agent-mcp/thr_1",
-        enabled: true,
-        headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" },
+      servers: {
+        myrel: {
+          type: "remote",
+          url: "https://myrel.test/api/agent-mcp/thr_1",
+          headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" },
+          oauth: false,
+          codemode: false,
+        },
       },
     });
   });
@@ -131,14 +152,15 @@ describe("opencode", () => {
         },
       }),
     );
-    const mcp = config.mcp as Record<string, unknown>;
-    expect(mcp.linear).toEqual({
+    const servers = (config.mcp as { servers: Record<string, unknown> }).servers;
+    expect(servers.linear).toEqual({
       type: "remote",
       url: "https://myrel.test/api/agent-mcp/thr_1/c/linear",
-      enabled: true,
       headers: { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" },
+      oauth: false,
+      codemode: false,
     });
-    expect(mcp.db).toEqual({ type: "local", command: ["npx", "-y", "pg-mcp"], enabled: true, environment: { DATABASE_URL: "{env:MYREL_CONNECTOR_1_0}" } });
+    expect(servers.db).toEqual({ type: "local", command: ["npx", "-y", "pg-mcp"], environment: { DATABASE_URL: "{env:MYREL_CONNECTOR_1_0}" }, codemode: false });
   });
 });
 
@@ -538,32 +560,50 @@ describe("task script", () => {
 });
 
 describe("OpenCode plan plugin", () => {
-  it("reminds the agent of its active step after a few tool calls, until it updates the plan", async () => {
+  it("reminds the agent of its active step after a few model calls, until it updates the plan", async () => {
     const mod = await import(`data:text/javascript,${encodeURIComponent(PLAN_PLUGIN)}`);
-    const hooks = await mod.MyrelPlan({});
-    const after = hooks["tool.execute.after"];
-    const call = async (tool: string, args: unknown = {}) => {
-      const output = { title: tool, output: "ok", metadata: {} };
-      await after({ tool, sessionID: "s", callID: "c", args }, output);
-      return output.output;
+    const hooks: Record<string, (event: { system: Array<{ type: string; text: string }>; messages: unknown[] }) => unknown> = {};
+    await mod.default.setup({
+      session: {
+        hook: async (name: string, fn: (event: unknown) => unknown) => {
+          hooks[name] = fn as (typeof hooks)[string];
+        },
+      },
+    });
+    const context = hooks.context!;
+    const toolPart = (tool: string, input: unknown = {}) => ({ role: "assistant", parts: [{ type: "tool", tool, state: { input } }] });
+    const messages: unknown[] = [];
+    const dispatch = async () => {
+      const event = { system: [] as Array<{ type: string; text: string }>, messages: [...messages] };
+      await context(event);
+      return event.system.map((p) => p.text).join("\n");
     };
-    expect(await call("bash")).toBe("ok"); // no plan yet
-    await call("myrel_update_plan", { title: "Bump", steps: [{ text: "Find the version", state: "done" }, { text: "Open the PR", state: "active" }] });
-    expect(await call("bash")).toBe("ok");
-    const reminded = await call("bash");
-    expect(reminded).toContain('[Myrel] Your plan still shows "Open the PR" as the active step.');
-    expect(await call("read")).toBe("ok");
-    await call("myrel_update_plan", { title: "Bump", steps: [{ text: "Open the PR", state: "done" }] });
-    expect(await call("bash")).toBe("ok");
-    expect(await call("bash")).toBe("ok"); // nothing active any more
+    messages.push(toolPart("shell"));
+    expect(await dispatch()).toBe(""); // no plan yet
+    messages.push(toolPart("myrel_update_plan", { title: "Bump", steps: [{ text: "Find the version", state: "done" }, { text: "Open the PR", state: "active" }] }));
+    // The call's result carries the tool's name too; it is not a second plan call.
+    messages.push({ role: "tool", content: [{ type: "tool-result", name: "myrel_update_plan", result: { type: "text", value: "saved" } }] });
+    expect(await dispatch()).toBe(""); // the plan was just set
+    messages.push(toolPart("shell"));
+    expect(await dispatch()).toBe("");
+    messages.push(toolPart("shell"));
+    expect(await dispatch()).toContain('[Myrel] Your plan still shows "Open the PR" as the active step.');
+    messages.push(toolPart("read"));
+    expect(await dispatch()).toBe("");
+    messages.push(toolPart("myrel_update_plan", { title: "Bump", steps: [{ text: "Open the PR", state: "done" }] }));
+    expect(await dispatch()).toBe("");
+    messages.push(toolPart("shell"));
+    expect(await dispatch()).toBe(""); // nothing active any more
+    messages.push(toolPart("shell"));
+    expect(await dispatch()).toBe("");
   });
 
   it("is written and loaded only when the task has Myrel's tools", () => {
     const withTools = spec({ harness: "opencode", mcp: { url: "https://myrel.example/mcp" } });
-    expect(opencode.command(withTools)).toContain('printf \'%s\' "$MYREL_PLAN_PLUGIN" > "$HOME/.cache/myrel/opencode-plan.js" && opencode run');
-    expect(opencodeConfig(withTools).plugin).toEqual(["file://{env:HOME}/.cache/myrel/opencode-plan.js"]);
+    expect(opencode.command(withTools)).toContain('printf \'%s\' "$MYREL_PLAN_PLUGIN" > "$HOME/.cache/myrel/opencode-plan/index.js" && opencode run');
+    expect(opencodeConfig(withTools).plugins).toEqual([{ package: "{env:HOME}/.cache/myrel/opencode-plan" }]);
     const bare = spec({ harness: "opencode" });
-    expect(opencode.command(bare)).toMatch(/^opencode run/);
+    expect(opencode.command(bare)).toMatch(/^opencode run --standalone/);
     expect(opencode.env(bare).MYREL_PLAN_PLUGIN).toBeUndefined();
   });
 });
