@@ -410,6 +410,25 @@ export function indexListsNotes(content: string, names: string[]): number {
   return n;
 }
 
+const STATUS_WORDS = /\b(?:merged?|open(?:ed)?|closed|pending|released|deployed|published|live|draft|on npm)\b|açık|yayında|kapandı/i;
+const ISSUE_REF = /(?:#|\bPR\s?)\d+/i;
+const VERSION = /\bv?\d+\.\d+\.\d+\b/;
+/** A note with this many status-looking lines gets a nudge back to decisions. */
+export const STATUS_LINES_WARN = 2;
+
+/**
+ * Lines that read like a snapshot of the work rather than a decision: a pull request or issue
+ * number next to its state ("PR #12 merged", "#40 still open"), or a version number. A hint for
+ * memory_write's reply, not a rule: a line can cite a pull request as the reason for a decision.
+ */
+export function statusLines(content: string): number {
+  let n = 0;
+  for (const line of content.split("\n")) {
+    if ((ISSUE_REF.test(line) && STATUS_WORDS.test(line)) || VERSION.test(line)) n++;
+  }
+  return n;
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -435,8 +454,8 @@ export type KnowledgeHost = {
 
 export const KNOWLEDGE_GUIDE = `Project knowledge:
 - Project instructions are set by members. Follow them in everything you do.
-- Project memory is shared by every agent in this project and outlives this conversation. Save what a later agent would otherwise have to ask again or rediscover: how people want you to work, decisions they made, facts about the project. Keep one memory file per subject (memory_write replaces the whole file, so read it first and keep what is still true). Every note is listed for every agent with its description and date, so make the description say when to read it and its key fact; keep MEMORY short and for project-wide rules, not a list of the other notes. Write time-bound facts with their date ("merged 2026-10-22", "still open on 2026-10-22"), never just "now" or "pending". Do not save what only matters to this conversation, and never save secrets.
-- Memory goes stale. When a note disagrees with what you see (the code, a file, a pull request, a newer decision), fix it in the same turn. When you cannot tell whether it still holds, or it no longer applies, mark it with memory_mark as stale with the reason instead of deleting it; a person deletes it, or you do once they agreed. When you checked a note and it still holds, memory_mark it ok.
+- Project memory is shared by every agent in this project and outlives this conversation. It keeps what stays true as the project moves on: decisions people made and why, the direction the project is taking, how people want you to work, and facts a later agent would otherwise have to ask again or rediscover (a name, an address, a constraint, something tried and dropped and why). It is not a status board: do not write pull request or issue numbers with their state (open, merged, closed), version numbers, what is released, deployed or live, "open since", "not built yet" or other snapshots of the work, which go out of date within days. That state is kept current elsewhere: pull requests, CI and releases on GitHub and in the thread's PR tab, versions in the repository and the package registry, ongoing work in its thread; look it up there when you need it. A pull request or version goes in a note only as the reason behind a decision, never as its state. Keep one memory file per subject (memory_write replaces the whole file, so read it first and keep what is still true). Every note is listed for every agent with its description and date, so make the description say when to read it and the decision or fact it holds; keep MEMORY short and for project-wide rules, not a list of the other notes. Date each decision ("chosen on 2026-10-22"), never just "now". Do not save what only matters to this conversation, and never save secrets.
+- Memory goes stale. When a note disagrees with what you see (the code, a file, a newer decision), fix it in the same turn, and when you rewrite a note, drop any live status lines it still carries. When you cannot tell whether it still holds, or it no longer applies, mark it with memory_mark as stale with the reason instead of deleting it; a person deletes it, or you do once they agreed. When you checked a note and it still holds, memory_mark it ok.
 - Project files are the project's shared folder. Files people attach to messages land in uploads/. Read a file before relying on it (read_file hands you a download command for images, PDFs and other binary files); put results others will need in a file under a folder named for the work (write_file for text, file_upload_url for anything else), and mention it in your reply as a link with its path, such as [rapor.md](notes/rapor.md), which opens it for people.`;
 
 export function knowledgeTools(host: KnowledgeHost): Tool[] {
@@ -454,21 +473,30 @@ export function knowledgeTools(host: KnowledgeHost): Tool[] {
     }),
     tool({
       name: "memory_write",
-      description: `Create or replace a project memory file. Use name "${MEMORY_INDEX}" for the short index everyone reads.`,
+      description: `Create or replace a project memory file: decisions and their reasons, direction and lasting facts, not live status (pull request or merge state, versions, what is open or released). Use name "${MEMORY_INDEX}" for the short index everyone reads.`,
       input: z.object({
         name: MemoryName,
-        description: z.string().max(300).describe("One line saying when to read this file and its key fact; every agent sees it."),
+        description: z.string().max(300).describe("One line saying when to read this file and the decision or fact it holds; every agent sees it."),
         content: z.string().max(16_000),
       }),
       run: async ({ name, description, content }) => {
         await host.memoryWrite(name, description, content);
+        const warnings: string[] = [];
         if (name === MEMORY_INDEX) {
           const listed = indexListsNotes(content, await host.memoryNames());
           if (listed >= 3) {
-            return `Saved memory ${name}. It lists ${listed} other notes by name, but every note is already shown under the index with its description and date, so these lines only drift out of step. Keep MEMORY for project-wide rules and put each note's key fact in its description.`;
+            warnings.push(
+              `It lists ${listed} other notes by name, but every note is already shown under the index with its description and date, so these lines only drift out of step. Keep MEMORY for project-wide rules and put each note's key fact in its description.`,
+            );
           }
         }
-        return `Saved memory ${name}.`;
+        const status = statusLines(`${description}\n${content}`);
+        if (status >= STATUS_LINES_WARN) {
+          warnings.push(
+            `${status} lines look like live status (a pull request's state or a version number). That state goes out of date within days and is kept current on GitHub and in the PR tab; keep the decision and its reason here and drop the status, unless a line is the reason behind a decision.`,
+          );
+        }
+        return [`Saved memory ${name}.`, ...warnings].join(" ");
       },
     }),
     tool({
@@ -478,7 +506,7 @@ export function knowledgeTools(host: KnowledgeHost): Tool[] {
       input: z.object({
         name: z.string(),
         status: z.enum(["ok", "stale"]),
-        reason: z.string().max(300).optional().describe("Why it may be stale, e.g. \"PR #12 was merged since\". Required for stale."),
+        reason: z.string().max(300).optional().describe("Why it may be stale, e.g. \"the setting was removed from the code\". Required for stale."),
       }),
       run: async ({ name, status, reason }) => {
         if (status === "stale" && !reason?.trim()) throw new Error("Say why the note may be stale.");
