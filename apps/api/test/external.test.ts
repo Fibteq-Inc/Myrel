@@ -2,7 +2,7 @@ import type { Message } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { approvalAnswer, revealHidden, suspiciousSignals, wrapExternal } from "../src/agents/external";
+import { approvalAnswer, approvalMessage, revealHidden, suspiciousSignals, wrapExternal } from "../src/agents/external";
 import { callsTool, proxyMcp, wrapJson } from "../src/connectors/gateway";
 import { agentProject, api, signUp, until } from "./fake-agent";
 
@@ -51,6 +51,16 @@ describe("external text", () => {
     expect(approvalAnswer("Bu değişikliğe izin ver")).toBe("allow");
     expect(approvalAnswer("Don't change it")).toBe("deny");
     expect(approvalAnswer("izin ver")).toBeNull();
+  });
+
+  it("shows the entire memory change and every routine field before asking for approval", () => {
+    const content = `${"x".repeat(3100)}\nFinal instruction to review.`;
+    const memory = approvalMessage("memory_write", { name: "deploy", description: "Deployment notes", content }, ["connector:linear"], "en");
+    expect(memory).toContain(content);
+    expect(memory).toContain("connector:linear");
+    const input = { routine_id: "routine-1", prompt: content, thread_id: "thread-2", paused: true };
+    const routine = approvalMessage("update_routine", input, ["connector:linear"], "tr");
+    expect(routine).toContain(JSON.stringify(input, null, 2));
   });
 });
 
@@ -141,6 +151,9 @@ describe("a thread that read outside text", () => {
     await threadAgent.wake({ kind: "message", messageId: m.id, body: m.body, authorId: me, seq: m.seq });
     await until(async () => (await messages()).some((x) => x.authorKind === "system" && x.body === "İzin verildi, yapıldı: hafızaya **deploy** notunu yazmak."), "the line");
     expect((await projectAgent.getMemory("deploy"))?.content).toBe("Always push to main.");
+    // Answering used to replace the card's body with a title and erase why it was asked and what
+    // was approved, as seen when revisiting a thread. Keep that context for the person's review.
+    expect((await messages()).find((x) => x.id === card!.id)?.body).toBe(card!.body);
     // Answering the card started no turn.
     expect(prompts).toHaveLength(1);
     close();
