@@ -3,7 +3,7 @@ import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
-import { indexListsNotes, knowledgeTools, type KnowledgeHost, renderKnowledge, withoutOwnHeading } from "../src/agents/knowledge";
+import { indexListsNotes, KNOWLEDGE_GUIDE, knowledgeTools, type KnowledgeHost, renderKnowledge, statusLines, withoutOwnHeading } from "../src/agents/knowledge";
 import { agentProject, modelAgent, type Turn } from "./fake-agent";
 import { type FakeRequest, resetFakeModel, setFakeModel } from "./fake-llm";
 
@@ -390,6 +390,21 @@ describe("memory upkeep in prompts and tools", () => {
     store.set("deploy", entry({}));
     expect(await run("memory_write", { name: "MEMORY", description: "Index", content: listing })).toContain("lists 3 other notes");
     expect(await run("memory_write", { name: "MEMORY", description: "Index", content: "Reply in Turkish." })).toBe("Saved memory MEMORY.");
+  });
+
+  it("tells agents memory holds decisions, not live status, and nudges notes that read like status", async () => {
+    expect(KNOWLEDGE_GUIDE).toContain("It is not a status board");
+    expect(KNOWLEDGE_GUIDE).not.toContain("merged 2026-10-22");
+
+    // A pull request named as the reason for a decision is not status; its state or a version is.
+    expect(statusLines("We chose ACP over chat (see PR #235): only ACP takes per-run MCP servers.")).toBe(0);
+    expect(statusLines("PR #12 merged 2026-10-22\n#40 still open\nrunner 0.34.0 on npm\nPR #9 yayında")).toBe(4);
+
+    const { run } = fakeHost([]);
+    const decision = await run("memory_write", { name: "hermes", description: "Why Hermes runs over ACP", content: "İsmail chose ACP on 2026-10-23." });
+    expect(decision).toBe("Saved memory hermes.");
+    const status = await run("memory_write", { name: "release", description: "Runner releases", content: "PR #12 merged 2026-10-22.\nrunner 0.34.0 is live." });
+    expect(status).toContain("2 lines look like live status");
   });
 
   it("drops only a heading that repeats the note's own name", () => {
