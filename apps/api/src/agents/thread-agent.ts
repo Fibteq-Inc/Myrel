@@ -109,7 +109,6 @@ import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, type 
 import { SEEN_EMOJI, THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
 import {
-  answeredApprovalMessage,
   approvalAnswer,
   approvalMessage,
   approvalResultMessage,
@@ -1704,7 +1703,8 @@ export class ThreadAgent extends Agent<Env> {
       body = approvalResultMessage({ forbidden: true }, language);
     } else {
       this.deleteMeta("external_approval");
-      await project.editMessage(request.messageId, answeredApprovalMessage(request.tool, request.input, language)).catch((err) => console.warn("approval card not shortened", err));
+      // Clients compact the decision itself after an answer. Keep the original message so the
+      // reason and exact change remain available after either answer.
       if (answer === "deny") {
         body = language === "tr" ? "Değişiklik yapılmadı." : "Nothing was changed.";
       } else {
