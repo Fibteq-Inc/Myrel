@@ -478,7 +478,7 @@ export const ProjectRepo = z.object({
 });
 export type ProjectRepo = z.infer<typeof ProjectRepo>;
 
-/** An issue of a connected repository, as the project's Issues tab lists it. Its text stays on GitHub. */
+/** An issue of a connected repository, as the project's Issues tab lists it. The list carries no text (ProjectIssueDetail does). */
 export const ProjectIssue = z.object({
   /** owner/name. */
   repo: z.string(),
@@ -503,6 +503,27 @@ export const ProjectRepoIssues = z.object({
   error: z.enum(["no_access", "failed"]).optional(),
 });
 export type ProjectRepoIssues = z.infer<typeof ProjectRepoIssues>;
+
+/** One comment on an issue, for people to read. */
+export const ProjectIssueComment = z.object({
+  author: z.string(),
+  member: z.boolean(),
+  body: z.string(),
+  createdAt: z.string(),
+});
+export type ProjectIssueComment = z.infer<typeof ProjectIssueComment>;
+
+/**
+ * One issue for people to read in the Issues tab, with a page of its comments. It never reaches an
+ * agent's prompt this way: agents read issues with repo_read_issue, as data.
+ */
+export const ProjectIssueDetail = ProjectIssue.extend({
+  body: z.string(),
+  commentList: z.array(ProjectIssueComment),
+  /** Whether a later page of comments exists. */
+  moreComments: z.boolean(),
+});
+export type ProjectIssueDetail = z.infer<typeof ProjectIssueDetail>;
 
 /** A pull request a thread's task opened, with its live state from GitHub. */
 export const PullRequest = z.object({

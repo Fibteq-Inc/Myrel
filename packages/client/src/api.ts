@@ -36,6 +36,7 @@ import type {
   Project,
   ProjectFile,
   ProjectRepo,
+  ProjectIssueDetail,
   ProjectRepoIssues,
   ProjectRole,
   ProjectSettings,
@@ -544,6 +545,12 @@ export class ApiClient {
   /** Each connected repository's issues, open ones unless `state` says otherwise. */
   async listProjectIssues(projectId: string, state: "open" | "closed" | "all" = "open") {
     return (await this.request<{ repos: ProjectRepoIssues[] }>(`/api/projects/${encodeURIComponent(projectId)}/issues?state=${state}`)).repos;
+  }
+
+  /** One issue of a connected repository (owner/name) with a page of its comments. */
+  async getProjectIssue(projectId: string, repo: string, number: number, page = 1) {
+    const path = repo.split("/").map(encodeURIComponent).join("/");
+    return (await this.request<{ issue: ProjectIssueDetail }>(`/api/projects/${encodeURIComponent(projectId)}/issues/${path}/${number}?page=${page}`)).issue;
   }
 
   async addProjectRepo(projectId: string, input: AddProjectRepoInput) {
