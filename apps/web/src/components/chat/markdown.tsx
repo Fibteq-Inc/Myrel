@@ -96,6 +96,49 @@ const MarkdownBody = memo(function MarkdownBody({
   );
 });
 
+const OUTSIDE_LINK = /^(https?:|mailto:)/i;
+
+/**
+ * Markdown from outside the project (an issue, its comments), read by people. Unlike an agent's
+ * message it can open nothing of the project: no decision cards, thread or file links. Only web and
+ * mail links work, and an image stays a link: loading it would tell its host who read this.
+ */
+export const OutsideMarkdown = memo(function OutsideMarkdown({ body }: { body: string }) {
+  const t = useT();
+  const components: Components = {
+    pre: ({ children }) => <>{children}</>,
+    code: ({ className, children }) => {
+      const lang = /language-([\w-]+)/.exec(className ?? "")?.[1];
+      const text = String(children ?? "");
+      if (!lang && !text.includes("\n")) return <code>{children}</code>;
+      return <CodeBlock lang={lang}>{text.replace(/\n$/, "")}</CodeBlock>;
+    },
+    a: ({ href, children }) =>
+      href && OUTSIDE_LINK.test(href) ? (
+        <a href={href} target="_blank" rel="noreferrer nofollow">
+          {children}
+        </a>
+      ) : (
+        <>{children}</>
+      ),
+    img: ({ src, alt }) =>
+      typeof src === "string" && OUTSIDE_LINK.test(src) ? (
+        <a href={src} target="_blank" rel="noreferrer nofollow">
+          {t("issues.image", { alt: alt || src })}
+        </a>
+      ) : (
+        <>{alt}</>
+      ),
+  };
+  return (
+    <div className="prose-myrel break-words">
+      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+        {body}
+      </Markdown>
+    </div>
+  );
+});
+
 /** The project's file paths; none outside a project. */
 function useProjectFiles(projectId: string | undefined): ReadonlySet<string> {
   const files = useQuery({ ...filesQuery(projectId ?? ""), staleTime: 30_000, enabled: !!projectId });

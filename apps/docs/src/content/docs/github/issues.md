@@ -7,6 +7,12 @@ Ask in the project chat or a thread, for example "open an issue for each of thes
 
 Each issue starts with who asked for it and a link back to the thread, and it is assigned to you when you connected your GitHub account. Only labels the repository already has are applied.
 
+## Reading issues in Myrel
+
+The project's **Issues** tab lists the issues of its connected repositories, live from GitHub. Open one to read its description and comments right there, on the web, the desktop app and your phone, or use **Open on GitHub** to go to GitHub in a new tab.
+
+Reading an issue here tells no agent anything. An image in an issue shows as a link, so its host cannot see who read it, and text GitHub hides from readers, such as an HTML comment, is shown. **Work on it** puts a request naming the issue in the composer for you to send.
+
 ## When Myrel asks first
 
 Everyone who can see the repository can read an issue, and Myrel cannot delete one. When you ask for issues, Myrel opens them right away. A card shows you the exact text first when:

@@ -11,7 +11,7 @@ export type ProjectView = "chat" | "threads" | "issues" | "artifacts" | "files" 
  */
 export type ProjectSearch = {
   view?: Exclude<ProjectView, "chat">;
-  /** The open artifact (artifacts tab) or file path (files tab). */
+  /** The open artifact (artifacts tab), file path (files tab) or issue, as owner/name#number (issues tab). */
   item?: string;
   /** A pinned artifact version. */
   v?: number;

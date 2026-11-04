@@ -2,7 +2,7 @@ export { Checklist, PlanCard, PlanProgress, PlanUpdateNote } from "./checklist";
 export { Composer } from "./composer";
 export { DecisionCard } from "./decision-card";
 export { EarlierMessages, useHistoryWindow } from "./history";
-export { CopyButton, MessageMarkdown } from "./markdown";
+export { CopyButton, MessageMarkdown, OutsideMarkdown } from "./markdown";
 export { decisionAnswers, MessageView, type Names, Thinking } from "./message";
 export { mentionedPullRequests, PullRequestCards } from "./pull-request-card";
 export { ScrollToEnd } from "./scroll-to-end";

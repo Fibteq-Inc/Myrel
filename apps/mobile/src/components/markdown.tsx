@@ -5,7 +5,7 @@ import { mayBeFileName, resolveFileCode, splitFilePaths } from "@myrel/protocol"
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
-import { type ImageStyle, Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
+import { type ImageStyle, Linking, Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
 import { type MarkedStyles, MarkedTokenizer, Renderer, useMarkdown } from "react-native-marked";
 import { DECISION_LANG, parseDecision } from "../lib/decision";
 import { useFileRefContext } from "../lib/file-refs";
@@ -84,6 +84,61 @@ class MyrelRenderer extends Renderer {
       </Pressable>
     );
   }
+}
+
+const OUTSIDE_LINK = /^(https?:|mailto:)/i;
+
+function openOutside(href: string) {
+  if (OUTSIDE_LINK.test(href)) void Linking.openURL(href).catch(() => {});
+}
+
+/** See OutsideMarkdown. */
+class OutsideRenderer extends Renderer {
+  constructor(private readonly imageLabel: (alt: string) => string) {
+    super({ selectable: true });
+  }
+
+  override code(text: string, language?: string, containerStyle?: ViewStyle, textStyle?: TextStyle): ReactNode {
+    return <CodeBlock key={this.getKey()} text={text} language={language} containerStyle={containerStyle} textStyle={textStyle} />;
+  }
+
+  override link(children: string | ReactNode[], href: string, styles?: TextStyle): ReactNode {
+    const target = unwrapHref(href);
+    if (!OUTSIDE_LINK.test(target)) return <Text key={this.getKey()}>{children}</Text>;
+    return (
+      <Text key={this.getKey()} accessibilityRole="link" style={styles} onPress={() => openOutside(target)}>
+        {children}
+      </Text>
+    );
+  }
+
+  override image(uri: string, alt?: string, _style?: ImageStyle): ReactNode {
+    return (
+      <Text key={this.getKey()} accessibilityRole="link" style={outsideImage} onPress={() => openOutside(unwrapHref(uri))}>
+        {this.imageLabel(alt || unwrapHref(uri))}
+      </Text>
+    );
+  }
+
+  override linkImage(href: string, imageUrl: string, alt?: string, style?: ImageStyle): ReactNode {
+    return this.image(imageUrl, alt, style);
+  }
+}
+
+const outsideImage: TextStyle = { textDecorationLine: "underline" };
+
+/**
+ * Markdown from outside the project (an issue, its comments), read by people. Unlike an agent's
+ * message it can open nothing of the project: no decision cards, thread or file links. Only web and
+ * mail links work, and an image stays a link: loading it would tell its host who read this.
+ */
+export function OutsideMarkdown({ body }: { body: string }) {
+  const t = useT();
+  const theme = useTheme();
+  const markedStyles = useMarkedStyles();
+  const renderer = useMemo(() => new OutsideRenderer((alt) => t("issues.image", { alt })), [t]);
+  const elements = useMarkdown(body, { colorScheme: theme, renderer, tokenizer, styles: markedStyles });
+  return <View>{elements}</View>;
 }
 
 /** Inline code naming a file: tappable when the file can be opened (see useOpenLink), otherwise just code. */

@@ -1,5 +1,5 @@
-import { type ExternalTrust, wrapExternal } from "../agents/external";
-import type { ProjectRepoIssues } from "@myrel/protocol";
+import { type ExternalTrust, revealHidden, wrapExternal } from "../agents/external";
+import type { ProjectIssue, ProjectIssueDetail, ProjectRepoIssues } from "@myrel/protocol";
 import { GithubError, type GithubEnv, appSlug, githubFetch } from "./app";
 import { type PullCredit, creditLine } from "./attribution";
 import { projectRepoToken } from "./store";
@@ -82,6 +82,51 @@ async function fetchRepoIssues(env: IssuesEnv, projectId: string, repo: string, 
   return { r, issues };
 }
 
+function toProjectIssue(repo: string, i: ApiIssue, trust: (author: User, association?: string) => ExternalTrust): ProjectIssue {
+  return {
+    repo,
+    number: i.number,
+    title: i.title,
+    state: i.state === "closed" ? "closed" : "open",
+    url: i.html_url,
+    author: i.user?.login ?? "ghost",
+    member: trust(i.user, i.author_association) === "member",
+    labels: i.labels.map((l) => (typeof l === "string" ? l : l.name)).filter((l): l is string => !!l),
+    comments: i.comments,
+    createdAt: i.created_at,
+    updatedAt: i.updated_at,
+  };
+}
+
+/**
+ * For people: one issue as the Issues tab opens it, with a page of comments. What GitHub hides from
+ * its readers is shown here too, so someone reading it sees what an agent would. Null when it is not
+ * an issue of that repository: a pull request, or one that does not exist.
+ */
+export async function projectIssue(env: IssuesEnv, projectId: string, repo: string, number: number, page = 1): Promise<ProjectIssueDetail | null> {
+  const { token, repo: r } = await issuesToken(env, projectId, repo);
+  const issue = await githubFetch<ApiIssue>(token, `/repos/${r.fullName}/issues/${number}`).catch((err) => {
+    if (err instanceof GithubError && (err.status === 404 || err.status === 410)) return null;
+    throw err;
+  });
+  if (!issue || issue.pull_request) return null;
+  const comments = issue.comments
+    ? await githubFetch<ApiComment[]>(token, `/repos/${r.fullName}/issues/${number}/comments?per_page=${COMMENTS_PER_PAGE}&page=${page}`)
+    : [];
+  const trust = await authorTrust(env);
+  return {
+    ...toProjectIssue(r.fullName, issue, trust),
+    body: revealHidden(issue.body ?? ""),
+    commentList: comments.map((c) => ({
+      author: c.user?.login ?? "ghost",
+      member: trust(c.user, c.author_association) === "member",
+      body: revealHidden(c.body ?? ""),
+      createdAt: c.created_at,
+    })),
+    moreComments: (page - 1) * COMMENTS_PER_PAGE + comments.length < issue.comments,
+  };
+}
+
 /** For people: each connected repository's issues as the Issues tab shows them, without their text. */
 export async function projectIssues(env: IssuesEnv, projectId: string, repos: string[], state: ListOpts["state"]): Promise<ProjectRepoIssues[]> {
   const trust = await authorTrust(env);
@@ -91,19 +136,7 @@ export async function projectIssues(env: IssuesEnv, projectId: string, repos: st
         const { r, issues } = await fetchRepoIssues(env, projectId, repo, { state, limit: 50 });
         return {
           repo: r.fullName,
-          issues: issues.map((i) => ({
-            repo: r.fullName,
-            number: i.number,
-            title: i.title,
-            state: i.state === "closed" ? "closed" : "open",
-            url: i.html_url,
-            author: i.user?.login ?? "ghost",
-            member: trust(i.user, i.author_association) === "member",
-            labels: i.labels.map((l) => (typeof l === "string" ? l : l.name)).filter((l): l is string => !!l),
-            comments: i.comments,
-            createdAt: i.created_at,
-            updatedAt: i.updated_at,
-          })),
+          issues: issues.map((i) => toProjectIssue(r.fullName, i, trust)),
         };
       } catch (err) {
         const noAccess = err instanceof Error && err.message.includes("has no access to");

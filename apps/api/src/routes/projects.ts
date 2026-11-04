@@ -32,7 +32,7 @@ import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
-import { projectIssues } from "../github/issues";
+import { projectIssue, projectIssues } from "../github/issues";
 import { listPullRequests, MergeError, mergePullRequest, pullFiles, pullMergeState } from "../github/pulls";
 import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
@@ -352,6 +352,24 @@ export const projectRoutes = new Hono<AppEnv>()
     const state = c.req.query("state");
     const repos = (await listProjectRepos(c.env.DB, id)).map((r) => r.fullName);
     return c.json({ repos: await projectIssues(c.env, id, repos, state === "closed" || state === "all" ? state : "open") });
+  })
+  // One issue, opened in the Issues tab. A repository that is not connected is as unknown as a missing issue.
+  .get("/:id/issues/:owner/:name/:number", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`.toLowerCase();
+    const number = Number(c.req.param("number"));
+    const page = Number(c.req.query("page") ?? 1);
+    if (!Number.isInteger(number) || number < 1 || !Number.isInteger(page) || page < 1) return c.json({ error: "not_found" }, 404);
+    const connected = (await listProjectRepos(c.env.DB, id)).some((r) => r.fullName.toLowerCase() === repo);
+    if (!connected) return c.json({ error: "not_found" }, 404);
+    try {
+      const issue = await projectIssue(c.env, id, repo, number, page);
+      return issue ? c.json({ issue }) : c.json({ error: "not_found" }, 404);
+    } catch (err) {
+      console.warn("reading an issue failed", repo, number, err);
+      return c.json({ error: "github_failed" }, 502);
+    }
   })
   .post("/:id/repos", async (c) => {
     const id = c.req.param("id");

@@ -229,7 +229,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!issues[2]) return Response.json(all.map(strip));
     const issue = all.find((i) => i.number === Number(issues[2]));
     if (!issue) return new Response("{}", { status: 404 });
-    return Response.json(issues[3] ? (issue.comment_list ?? []) : strip(issue));
+    if (!issues[3]) return Response.json(strip(issue));
+    const perPage = Number(url.searchParams.get("per_page") ?? 30);
+    const from = (Number(url.searchParams.get("page") ?? 1) - 1) * perPage;
+    return Response.json((issue.comment_list ?? []).slice(from, from + perPage));
   }
   const repoMatch = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)$/);
   if (repoMatch && method === "GET") {

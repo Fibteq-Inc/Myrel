@@ -1,6 +1,7 @@
 import { useT } from "@myrel/i18n/react";
 import type { ProjectIssue } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
+import { type Href, useRouter } from "expo-router";
 import { CircleCheck, CircleDot, ExternalLink, GitBranch, MessageSquare, SquarePen } from "lucide-react-native";
 import { useState } from "react";
 import { Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
@@ -14,8 +15,8 @@ type State = "open" | "closed" | "all";
 
 /**
  * The issues of the project's connected repositories, live from GitHub, as on the web. "Work on it"
- * hands a request naming the issue to the conversation's composer (`onWork`); the issue's text stays
- * on GitHub, and the thread's agent reads it as data.
+ * hands a request naming the issue to the conversation's composer (`onWork`), and the thread's agent
+ * reads it as data. Tapping one opens it in its own screen; reading it there sends nothing to an agent.
  */
 export function IssuesTab({ onWork }: { onWork: (issue: ProjectIssue) => void }) {
   const t = useT();
@@ -83,6 +84,8 @@ export function IssuesTab({ onWork }: { onWork: (issue: ProjectIssue) => void })
 
 function IssueRow({ issue, onWork }: { issue: ProjectIssue; onWork: () => void }) {
   const t = useT();
+  const router = useRouter();
+  const projectId = useProjectId();
   const colors = useColors();
   const styles = useStyles();
   const relativeTime = useRelativeTime();
@@ -90,35 +93,44 @@ function IssueRow({ issue, onWork }: { issue: ProjectIssue; onWork: () => void }
   const Icon = open ? CircleDot : CircleCheck;
   return (
     <View style={styles.row}>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityHint={t("issues.openOnGithub")}
-        onPress={() => void Linking.openURL(issue.url).catch(() => {})}
-        style={({ pressed }) => [styles.main, pressed && { opacity: 0.6 }]}
-      >
-        <Icon size={16} color={open ? colors.ok : colors.subtle} style={{ marginTop: 2 }} />
-        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-          <Text style={[styles.title, !open && { color: colors.muted, fontWeight: "400" }]}>{issue.title}</Text>
-          <View style={styles.metaRow}>
-            <Text style={[styles.meta, { fontFamily: mono }]}>#{issue.number}</Text>
-            <Text style={styles.meta}>{issue.author}</Text>
-            {!issue.member && <Text style={styles.chip}>{t("issues.outside")}</Text>}
-            {issue.labels.map((l) => (
-              <Text key={l} style={styles.chip}>
-                {l}
-              </Text>
-            ))}
-            {issue.comments > 0 && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                <MessageSquare size={11} color={colors.subtle} />
-                <Text style={styles.meta}>{issue.comments}</Text>
-              </View>
-            )}
-            <Text style={styles.meta}>{relativeTime(issue.updatedAt)}</Text>
+      <View style={styles.head}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(`/projects/${projectId}/issue?repo=${encodeURIComponent(issue.repo)}&number=${issue.number}` as Href)}
+          style={({ pressed }) => [styles.main, pressed && { opacity: 0.6 }]}
+        >
+          <Icon size={16} color={open ? colors.ok : colors.subtle} style={{ marginTop: 2 }} />
+          <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+            <Text style={[styles.title, !open && { color: colors.muted, fontWeight: "400" }]}>{issue.title}</Text>
+            <View style={styles.metaRow}>
+              <Text style={[styles.meta, { fontFamily: mono }]}>#{issue.number}</Text>
+              <Text style={styles.meta}>{issue.author}</Text>
+              {!issue.member && <Text style={styles.chip}>{t("issues.outside")}</Text>}
+              {issue.labels.map((l) => (
+                <Text key={l} style={styles.chip}>
+                  {l}
+                </Text>
+              ))}
+              {issue.comments > 0 && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                  <MessageSquare size={11} color={colors.subtle} />
+                  <Text style={styles.meta}>{issue.comments}</Text>
+                </View>
+              )}
+              <Text style={styles.meta}>{relativeTime(issue.updatedAt)}</Text>
+            </View>
           </View>
-        </View>
-        <ExternalLink size={14} color={colors.subtle} style={{ marginTop: 2 }} />
-      </Pressable>
+        </Pressable>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={t("issues.openOnGithub")}
+          hitSlop={10}
+          onPress={() => void Linking.openURL(issue.url).catch(() => {})}
+          style={({ pressed }) => [{ marginTop: 2 }, pressed && { opacity: 0.6 }]}
+        >
+          <ExternalLink size={14} color={colors.subtle} />
+        </Pressable>
+      </View>
       {open && (
         <Pressable accessibilityRole="button" onPress={onWork} style={({ pressed }) => [styles.work, pressed && { backgroundColor: colors.hover }]}>
           <SquarePen size={14} color={colors.fg} />
@@ -141,7 +153,8 @@ const useStyles = makeStyles((colors) =>
     sectionHead: { paddingTop: 14, paddingBottom: 4, gap: 4 },
     sectionTitle: { color: colors.subtle, fontSize: 12, fontWeight: "500" },
     row: { gap: 10, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.raised, marginBottom: 8 },
-    main: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+    head: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+    main: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "flex-start", gap: 10 },
     title: { color: colors.fg, fontSize: 14, fontWeight: "500" },
     metaRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
     meta: { color: colors.subtle, fontSize: 12 },
