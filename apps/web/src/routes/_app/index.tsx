@@ -4,6 +4,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { Project } from "@myrel/protocol";
 import { ArrowRight, FolderPlus, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { LiveThreads } from "../../components/live-threads";
 import { PinButton } from "../../components/project-pin";
 import { ProjectBadge } from "../../components/project-badge";
 import { NavToggle, PaneHeader } from "../../components/shell/shell";
@@ -88,6 +89,8 @@ function ProjectsPage() {
           )}
           {create.error && <p className="-mt-5 text-sm text-bad">{errorMessage(create.error, t)}</p>}
 
+          <LiveThreads projects={projects} />
+
           {projects.length > 0 && (
             <section aria-labelledby="recent" className="flex flex-col gap-2.5">
               <h2 id="recent" className="text-xs text-subtle">
@@ -133,9 +136,11 @@ function ProjectsPage() {
 function ProjectActivity({ project }: { project: Project }) {
   const t = useT();
   const relativeTime = useRelativeTime();
-  const working = project.activity?.working ?? 0;
+  // The threads when the server lists them, so the coordinator alone does not read as a job.
+  const working = project.live ? project.live.filter((l) => l.state === "working").length : (project.activity?.working ?? 0);
+  const queued = project.live?.filter((l) => l.state === "queued").length ?? 0;
   const waiting = project.activity?.waiting ?? 0;
-  if (!working && !waiting) {
+  if (!working && !queued && !waiting) {
     return (
       <span className="truncate text-xs text-subtle" title={project.role === "owner" ? t("projects.owner") : t("projects.member")}>
         {relativeTime(project.lastActivityAt ?? project.createdAt)}
@@ -148,6 +153,12 @@ function ProjectActivity({ project }: { project: Project }) {
         <span className="flex items-center gap-1.5 text-accent">
           <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent" aria-hidden="true" />
           <span className="truncate">{t("projects.working", { count: working })}</span>
+        </span>
+      )}
+      {queued > 0 && (
+        <span className="flex items-center gap-1.5 text-subtle">
+          <span className="size-1.5 flex-none rounded-full bg-subtle" aria-hidden="true" />
+          <span className="truncate">{t("projects.queued", { count: queued })}</span>
         </span>
       )}
       {waiting > 0 && (

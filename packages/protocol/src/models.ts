@@ -366,6 +366,20 @@ export const ProjectActivity = z.object({
 });
 export type ProjectActivity = z.infer<typeof ProjectActivity>;
 
+/** An open thread as the project list shows it. */
+export const LiveThread = z.object({
+  id: ThreadId,
+  title: z.string(),
+  /** working: mid-turn. queued: marked working with no turn running yet. waiting, failed: a person has to act. */
+  state: z.enum(["working", "queued", "waiting", "failed"]),
+  needs: ThreadNeeds.nullable(),
+  /** The step its plan is on, and how far the plan is ("2/5"). */
+  step: z.string().nullable(),
+  progress: z.string().nullable(),
+  updatedAt: Timestamp,
+});
+export type LiveThread = z.infer<typeof LiveThread>;
+
 /** What a project's model calls have cost, for the project list. Priced calls only. */
 export const ProjectCost = z.object({
   /** Since the start of this calendar month (UTC), the period plan limits count. */
@@ -420,6 +434,11 @@ export const Project = z.object({
   createdAt: Timestamp,
   /** Missing from servers older than this field. */
   activity: ProjectActivity.optional(),
+  /**
+   * Its threads waiting on a person, then those at work, each oldest first, without the coordinator. A project
+   * with a great many lists only the first of each. Missing from older servers and until the project next syncs.
+   */
+  live: z.array(LiveThread).optional(),
   /** When an agent last started or stopped working in the project, else when it was made. Missing from older servers. */
   lastActivityAt: Timestamp.optional(),
   /** Missing from servers older than this field. */
