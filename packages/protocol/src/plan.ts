@@ -53,3 +53,44 @@ export function parsePlanUpdate(body: string): PlanUpdate | null {
 export function isPlanMessage(body: string): boolean {
   return planChecklist(body) !== null || parsePlanUpdate(body) !== null;
 }
+
+export type ChecklistItem = {
+  state: "done" | "active" | "todo" | "skipped" | "failed";
+  text: string;
+  /** 0 for a step of the agent's plan; 1 and 2 for the steps of a task nested under it. */
+  depth: number;
+};
+
+/**
+ * Parses a thread's checklist: a header line, then ✓ / ✱ / ○ steps (✗ marks a
+ * failed step, – one the agent decided to skip). Indented steps belong to the
+ * step above them.
+ */
+export function parseChecklist(text: string): { title: string; items: ChecklistItem[] } {
+  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo", "–": "skipped", "✗": "failed" };
+  const items: ChecklistItem[] = [];
+  let title = "";
+  for (const raw of text.split("\n")) {
+    const indent = raw.length - raw.trimStart().length;
+    // The just-finished step may be bolded: **✓ step**.
+    const line = raw.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim();
+    if (!line) continue;
+    const state = marks[line[0]!];
+    if (state) items.push({ state, text: line.slice(1).trim(), depth: Math.min(2, Math.floor(indent / 2)) });
+    else if (!title && items.length === 0) title = line;
+  }
+  return { title, items };
+}
+
+/** How far a checklist is: its top-level steps done, out of those not skipped. */
+export function checklistProgress(items: ChecklistItem[]): { done: number; total: number } {
+  const steps = items.filter((i) => i.depth === 0 && i.state !== "skipped");
+  return { done: steps.filter((i) => i.state === "done").length, total: steps.length };
+}
+
+/** The step a thread's checklist is on, the innermost active one, and how far its plan is ("2/5"). */
+export function checklistStep(text: string): { step: string | null; progress: string | null } {
+  const { items } = parseChecklist(text);
+  const { done, total } = checklistProgress(items);
+  return { step: items.findLast((i) => i.state === "active")?.text ?? null, progress: total > 1 ? `${done}/${total}` : null };
+}

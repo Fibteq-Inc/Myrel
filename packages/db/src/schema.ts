@@ -128,6 +128,8 @@ export const projects = sqliteTable("projects", {
   waitingCount: integer("waiting_count").notNull().default(0),
   /** When an agent last started or stopped working here, kept by ProjectAgent; null = nothing since the project was made. */
   lastActivityAt: integer("last_activity_at", { mode: "timestamp_ms" }),
+  /** Threads at work or waiting on a person, JSON LiveThread[] in @myrel/protocol, kept by ProjectAgent; null until it first syncs. */
+  liveThreads: text("live_threads"),
   ...timestamps,
 });
 

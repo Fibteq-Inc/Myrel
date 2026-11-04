@@ -288,6 +288,13 @@
       "when": 1793777719194,
       "tag": "0040_project_last_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1793811437881,
+      "tag": "0041_live_threads",
+      "breakpoints": true
     }
   ]
 }

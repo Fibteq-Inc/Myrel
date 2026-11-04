@@ -38,6 +38,8 @@ import {
   type ThreadRunner,
   type ThreadModel,
   type ThreadCloseReason,
+  checklistStep,
+  type LiveThread,
   type ThreadNeeds,
   threadWaitsOnPerson,
   type ThreadStatus,
@@ -201,6 +203,24 @@ const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 /** Most recent project-chat messages the coordinator sees each turn. */
 const COORDINATOR_HISTORY = 40;
 
+/** A plan step moving alone reaches the project list at most this often, the rate the list refreshes. */
+const LIVE_STEP_WRITE_MS = 15_000;
+/** Threads the project list carries per group (waiting on a person, at work), so a long backlog cannot crowd out the rest. */
+const MAX_LIVE_THREADS = 12;
+
+function toLiveThread(
+  row: Pick<ThreadRow, "id" | "title" | "needs" | "status_text" | "updated_at">,
+  state: LiveThread["state"],
+): LiveThread {
+  const { step, progress } = state === "working" && row.status_text ? checklistStep(row.status_text) : { step: null, progress: null };
+  return { id: row.id, title: row.title.slice(0, 120), state, needs: row.needs ?? null, step: step?.slice(0, 80) ?? null, progress, updatedAt: row.updated_at };
+}
+
+function capLiveThreads(live: LiveThread[]): LiveThread[] {
+  const waits = (t: LiveThread) => t.state === "waiting" || t.state === "failed";
+  return [...live.filter(waits).slice(0, MAX_LIVE_THREADS), ...live.filter((t) => !waits(t)).slice(0, MAX_LIVE_THREADS)];
+}
+
 /**
  * One instance per project (named by project id). Owns the project chat and
  * thread index: messages live in this DO's SQLite with a monotonically
@@ -217,6 +237,10 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Activity counts last written to D1 for the project list, and the write in flight. */
   private syncedActivity: string | null = null;
+  /** The plan steps at that sync. A step moving alone writes at most once per LIVE_STEP_WRITE_MS. */
+  private syncedSteps: string | null = null;
+  private syncedAt = 0;
+  private stepTimer: ReturnType<typeof setTimeout> | null = null;
   /** How many agents worked at the last sync; null until the first one after a start, which tells nothing about work. */
   private syncedWorking: number | null = null;
   private activityWrite: Promise<void> = Promise.resolve();
@@ -1016,19 +1040,37 @@ export class ProjectAgent extends Agent<Env> {
     const working = new Set<string>();
     for (const threadId of this.active.keys()) working.add(threadId ?? "coordinator");
     let waiting = 0;
-    for (const row of this.sql<{ id: string; status: ThreadStatus; needs: ThreadNeeds | null }>`
-      SELECT id, status, needs FROM threads WHERE resolved = 0`) {
+    const live: LiveThread[] = [];
+    for (const row of this.sql<Pick<ThreadRow, "id" | "title" | "status" | "needs" | "status_text" | "updated_at">>`
+      SELECT id, title, status, needs, status_text, updated_at FROM threads WHERE resolved = 0 ORDER BY created_at`) {
       if (row.status === "working") working.add(row.id);
-      else if (threadWaitsOnPerson({ ...row, resolved: false })) waiting++;
+      const waits = threadWaitsOnPerson({ ...row, resolved: false });
+      if (waits) waiting++;
+      const state = waits ? (row.status === "failed" ? "failed" : "waiting") : this.active.has(row.id) ? "working" : row.status === "working" ? "queued" : null;
+      if (state) live.push(toLiveThread(row, state));
     }
     const activeCount = working.size;
     const counts = { activeCount, waitingCount: waiting };
-    const key = `${counts.activeCount}/${counts.waitingCount}`;
-    if (key === this.syncedActivity) return;
+    const rows = capLiveThreads(live);
+    const key = `${activeCount}/${waiting}/${JSON.stringify(rows.map((r) => [r.id, r.title, r.state, r.needs]))}`;
+    const steps = JSON.stringify(rows.map((r) => [r.step, r.progress]));
+    if (key === this.syncedActivity) {
+      if (steps === this.syncedSteps) return;
+      const wait = this.syncedAt + LIVE_STEP_WRITE_MS - Date.now();
+      if (wait > 0) {
+        this.stepTimer ??= setTimeout(() => {
+          this.stepTimer = null;
+          this.syncActivity();
+        }, wait);
+        return;
+      }
+    }
     this.syncedActivity = key;
+    this.syncedSteps = steps;
+    this.syncedAt = Date.now();
     const changed = this.syncedWorking !== null && this.syncedWorking !== activeCount;
     this.syncedWorking = activeCount;
-    const values = changed ? { ...counts, lastActivityAt: new Date() } : counts;
+    const values = { ...counts, liveThreads: JSON.stringify(rows), ...(changed && { lastActivityAt: new Date() }) };
     // Chained so an older count never lands after a newer one.
     this.activityWrite = this.activityWrite.then(async () => {
       try {

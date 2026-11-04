@@ -20,6 +20,7 @@ import {
   WorkspaceFolderInput,
   CloudCli,
   ProjectColor,
+  LiveThread,
   ProjectIcon,
   TaskTarget,
   UpdateProjectSettingsInput,
@@ -56,6 +57,7 @@ const projectColumns = {
   activeCount: projects.activeCount,
   waitingCount: projects.waitingCount,
   lastActivityAt: projects.lastActivityAt,
+  liveThreads: projects.liveThreads,
 };
 
 export const projectRoutes = new Hono<AppEnv>()
@@ -95,7 +97,7 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
     return c.json(
-      { project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0, lastActivityAt: null }) },
+      { project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0, lastActivityAt: null, liveThreads: null }) },
       201,
     );
   })
@@ -734,6 +736,17 @@ async function findThread(env: Env, projectId: string, threadId: string, userId:
   return (await project.getThread(threadId)) ? threadId : null;
 }
 
+/** Null until the project first syncs; written by ProjectAgent, so a bad value only hides the list. */
+function parseLiveThreads(json: string | null): LiveThread[] | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = LiveThread.array().safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toProject(row: {
   id: string;
   name: string;
@@ -745,8 +758,9 @@ function toProject(row: {
   activeCount: number;
   waitingCount: number;
   lastActivityAt: Date | null;
+  liveThreads: string | null;
 }): Project {
-  const { activeCount, waitingCount, lastActivityAt, pinnedAt, icon, color, ...rest } = row;
+  const { activeCount, waitingCount, lastActivityAt, liveThreads, pinnedAt, icon, color, ...rest } = row;
   return {
     ...rest,
     icon: ProjectIcon.nullable().catch(null).parse(icon),
@@ -754,6 +768,7 @@ function toProject(row: {
     createdAt: row.createdAt.toISOString(),
     pinned: pinnedAt !== null,
     activity: { working: activeCount, waiting: waitingCount },
+    live: parseLiveThreads(liveThreads),
     lastActivityAt: (lastActivityAt ?? row.createdAt).toISOString(),
   };
 }
