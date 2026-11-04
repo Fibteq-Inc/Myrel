@@ -306,7 +306,7 @@ export const en = {
 
   // Thread status
   "status.working": "Working",
-  "status.blocked": "Checking with the coordinator",
+  "status.replied": "Replied",
   "status.reviewReady": "Waiting for you",
   "status.done": "Resolved",
   "status.failed": "Failed",

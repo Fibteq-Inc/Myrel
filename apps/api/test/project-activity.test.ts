@@ -44,6 +44,32 @@ describe("project activity", () => {
     await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
   });
 
+  it("counts a thread as waiting only when a person has to act", async () => {
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "T" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Waiting" }) });
+    const { project } = (await res.json()) as { project: Project };
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "do it" });
+    const thread = await agent.createThread(root.id, "First");
+
+    await agent.updateThread(thread.id, { status: "review_ready" });
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 0 }));
+
+    await agent.updateThread(thread.id, { status: "review_ready", needs: "decision" });
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
+
+    // Back at work, what it asked is settled.
+    expect((await agent.updateThread(thread.id, { status: "working" }))?.needs).toBeNull();
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 1, waiting: 0 }));
+
+    await agent.updateThread(thread.id, { status: "failed" });
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
+  });
+
   it("marks the latest activity when an agent starts or stops, not on anything else", async () => {
     const signUp = await api("/api/auth/sign-up/email", {
       method: "POST",

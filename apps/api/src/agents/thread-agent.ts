@@ -494,7 +494,7 @@ export class ThreadAgent extends Agent<Env> {
       // A turn still running says it when it ends, so the thread does not read "working" over the card.
       this.setMeta("agent_turn", JSON.stringify({ ...turn, needs: louder("decision", turn.needs), lastReply: q.question }));
     } else {
-      await project.updateThread(threadId, { status: "review_ready" });
+      await project.updateThread(threadId, { status: "review_ready", needs: "decision" });
       await project.notifyThread(threadId, "decision", q.question);
     }
     return true;
@@ -1062,6 +1062,8 @@ export class ThreadAgent extends Agent<Env> {
       // A question to the coordinator is answered by the coordinator, so the thread is not waiting on a
       // person, unless something it asked or showed people this turn is.
       status: resolved ? "done" : asked && !turn?.needs ? "working" : failed ? "failed" : "review_ready",
+      // An artifact or a repository card waits on people even when the reply did not say so.
+      needs: failed ? null : (turn?.needs ?? (this.getMeta("repo_request") ? "blocked" : turn?.published ? "review" : null)),
       resolved,
     });
     const kind = failed ? "failed" : resolved ? "done" : ((turn?.needs === "review" ? "ready" : turn?.needs) ?? ((replied || lastText) && !asked ? "ready" : null));
