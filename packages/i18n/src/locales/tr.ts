@@ -303,7 +303,7 @@ export const tr: Catalog = {
 
   // Thread status
   "status.working": "Çalışıyor",
-  "status.blocked": "Koordinatöre danışıyor",
+  "status.replied": "Yanıtladı",
   "status.reviewReady": "Seni bekliyor",
   "status.done": "Çözüldü",
   "status.failed": "Başarısız",
