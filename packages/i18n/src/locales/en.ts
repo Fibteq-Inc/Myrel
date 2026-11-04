@@ -145,7 +145,7 @@ export const en = {
   "issues.notFound": "This issue could not be opened. It may be gone, or a pull request.",
   "issues.image": "Image: {alt}",
   "issues.outside": "Outside",
-  "issues.outsideHint": "Written by someone without access to the repository. An agent that reads it asks before changing memory or routines, or opening issues.",
+  "issues.outsideHint": "Written by someone without access to the repository. An agent that reads it asks before changing memory or routines, or changing issues.",
   "threads.open": "Open",
   "connection.connecting": "Connecting",
   "connection.connectingDetail": "Reaching the server",

@@ -10,7 +10,7 @@ import {
   type Thread,
 } from "@myrel/protocol";
 import { z } from "zod";
-import { MAX_NEW_ISSUE_BODY } from "../github/issues";
+import { type IssueComment, type IssueUpdate, MAX_NEW_ISSUE_BODY, type PullLink } from "../github/issues";
 import { type Tool, tool } from "../llm";
 import { type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
 import { Plan } from "./plan";
@@ -52,6 +52,12 @@ export type ThreadHost = {
   readRepoIssue(repo: string, number: number, page?: number): Promise<string>;
   /** Opens issues on a connected repository through Myrel's GitHub App; one line per issue. */
   openIssues(repo: string, issues: { title: string; body?: string; labels?: string[] }[]): Promise<string>;
+  /** Comments on an issue of a connected repository through Myrel's GitHub App. */
+  commentOnIssue(input: IssueComment): Promise<string>;
+  /** Changes an issue's text, labels, assignees or state through Myrel's GitHub App. */
+  updateIssue(input: IssueUpdate): Promise<string>;
+  /** Links a pull request to an issue, in the pull request's description. */
+  linkPullRequest(input: PullLink): Promise<string>;
 };
 
 export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean };
@@ -409,6 +415,46 @@ export function threadTools(host: ThreadHost): Tool[] {
           .max(10),
       }),
       run: ({ repo, issues }) => host.openIssues(repo, issues),
+    }),
+    tool({
+      name: "comment_on_issue",
+      description:
+        "Comment on an issue of a connected GitHub repository through Myrel's GitHub App, crediting the person this thread works for. Not for pull requests. Everyone who can see the repository can read it: no secrets or private details, and no @mentions. Sometimes a person's OK comes first: the tool says so, and Myrel posts it once they allow it. Do not call it again then.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        number: z.number().int().min(1),
+        body: z.string().trim().min(1).max(MAX_NEW_ISSUE_BODY).describe("In Markdown. Myrel adds the credit line on top itself."),
+      }),
+      run: (input) => host.commentOnIssue(input),
+    }),
+    tool({
+      name: "update_issue",
+      description:
+        "Change an issue of a connected GitHub repository through Myrel's GitHub App: its title, description, labels or assignees, or close or reopen it. Give only what changes; labels and assignees replace the current ones. To close with an explanation, pass comment in the same call. Sometimes a person's OK comes first: the tool says so, and Myrel makes the change once they allow it. Do not call it again then.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        number: z.number().int().min(1),
+        title: z.string().trim().min(1).max(256).optional(),
+        body: z.string().max(MAX_NEW_ISSUE_BODY).optional().describe("The whole new description. Read the issue first: this replaces it."),
+        labels: z.array(z.string().min(1).max(50)).max(20).optional().describe("The full new list. Only labels the repository already has are applied."),
+        assignees: z.array(z.string().min(1).max(39)).max(10).optional().describe("GitHub logins, the full new list. An empty list clears it."),
+        state: z.enum(["open", "closed"]).optional(),
+        state_reason: z.enum(["completed", "not_planned"]).optional().describe("Why it is closed."),
+        comment: z.string().trim().min(1).max(MAX_NEW_ISSUE_BODY).optional().describe("Posted before the change, as with comment_on_issue."),
+      }),
+      run: (input) => host.updateIssue(input),
+    }),
+    tool({
+      name: "link_pull_request",
+      description:
+        "Link an open pull request to an issue of the same connected repository, by adding a line to the pull request's description. With closes (the default), merging it into the default branch closes the issue; otherwise it only refers to it. When you open a pull request yourself, write \"Closes #n\" in its body instead.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        pull_number: z.number().int().min(1),
+        issue_number: z.number().int().min(1),
+        closes: z.boolean().default(true),
+      }),
+      run: (input) => host.linkPullRequest(input),
     }),
     tool({
       name: "request_repo_connection",

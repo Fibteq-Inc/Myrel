@@ -324,6 +324,68 @@ describe("open_issues", () => {
     t.close();
   });
 
+  it("comments, changes and closes an issue and links a pull request for the person", { timeout: 30_000 }, async () => {
+    fakeGithub.issues["acme/app"] = [issue(1, "Member's issue", "_Requested by **Ada**_\n\nOld text", "MEMBER")];
+    fakeGithub.labels["acme/app"] = ["bug", "docs"];
+    fakeGithub.pulls["acme/app#70"] = { number: 70, html_url: "https://github.com/acme/app/pull/70", state: "open", body: "The change.", user: { login: "mona" }, author_association: "MEMBER" };
+    const results: { isError: boolean; text: string }[] = [];
+    const t = await issueThread(async (turn) => {
+      results.push(await turn.call("comment_on_issue", { repo: "acme/app", number: 1, body: "Looking into it." }));
+      results.push(await turn.call("comment_on_issue", { repo: "acme/app", number: 1, body: "Looking into it." }));
+      results.push(await turn.call("update_issue", { repo: "acme/app", number: 1, title: "New title", body: "New text", labels: ["DOCS", "made-up"] }));
+      results.push(await turn.call("link_pull_request", { repo: "acme/app", pull_number: 70, issue_number: 1 }));
+      results.push(await turn.call("link_pull_request", { repo: "acme/app", pull_number: 70, issue_number: 1 }));
+      results.push(await turn.call("update_issue", { repo: "acme/app", number: 1, state: "closed", state_reason: "completed", comment: "Fixed by the pull request." }));
+    });
+    const before = fakeGithub.requests.length;
+    await t.start();
+    await until(() => results.length === 6, "the calls");
+    for (const r of results) expect(r.isError).toBe(false);
+    const sent = fakeGithub.requests.slice(before);
+    const comments = sent.filter((r) => r.method === "POST" && r.url.endsWith("/issues/1/comments")).map((r) => (r.body as { body: string }).body);
+    // The repeated comment is not posted twice; each carries the credit.
+    expect(comments).toHaveLength(2);
+    expect(comments[0]).toMatch(/^_Requested by \*\*.+\*\*_\n\nLooking into it\.$/);
+    const patches = sent.filter((r) => r.method === "PATCH" && r.url.endsWith("/issues/1")).map((r) => r.body as Record<string, unknown>);
+    expect(patches[0]).toEqual({ title: "New title", body: "_Requested by **Ada**_\n\nNew text", labels: ["docs"] });
+    expect(patches[1]).toEqual({ state: "closed", state_reason: "completed" });
+    expect(results[2]!.text).toContain("no such label: made-up");
+    expect(results[5]!.text).toContain("· closed, comment posted");
+    expect((fakeGithub.pulls["acme/app#70"] as { body: string }).body).toBe("The change.\n\nCloses #1");
+    expect(results[4]!.text).toContain("already linked");
+    // The pull request's description is written with a token limited to that (the issue's is above, for open_issues).
+    const tokens = sent.filter((r) => r.url.endsWith("/access_tokens")).map((r) => (r.body as { permissions: Record<string, string> }).permissions);
+    expect(tokens).toContainEqual({ pull_requests: "write", metadata: "read" });
+    t.close();
+  });
+
+  it("asks before changing what an outsider wrote or writing in a marked thread, and refuses pull requests and secrets", { timeout: 30_000 }, async () => {
+    fakeGithub.issues["acme/app"] = [issue(2, "Outsider's issue", "Text", "NONE"), issue(3, "Member's", "Text", "MEMBER"), { ...issue(4, "A pull request", "", "MEMBER"), pull_request: { url: "x" } }];
+    const results: { isError: boolean; text: string }[] = [];
+    const t = await issueThread(async (turn) => {
+      results.push(await turn.call("comment_on_issue", { repo: "acme/app", number: 4, body: "Hello" }));
+      results.push(await turn.call("comment_on_issue", { repo: "acme/app", number: 3, body: "cc @octocat" }));
+      results.push(await turn.call("update_issue", { repo: "acme/app", number: 3 }));
+      results.push(await turn.call("update_issue", { repo: "acme/app", number: 2, state: "closed" }));
+    });
+    const before = fakeGithub.requests.length;
+    await t.start();
+    await until(() => results.length === 4, "the calls");
+    expect(results[0]).toMatchObject({ isError: true, text: expect.stringContaining("is a pull request") });
+    expect(results[1]).toMatchObject({ isError: true, text: expect.stringContaining("@mention") });
+    expect(results[2]).toMatchObject({ isError: true, text: expect.stringContaining("Nothing to change") });
+    expect(results[3]!.text).toContain("waits for a person's OK");
+    const card = (await t.messages()).find((m) => m.authorKind === "agent" && m.body.includes("```decision"))!;
+    expect(card.body).toContain("#2");
+    expect(fakeGithub.requests.slice(before).some((r) => r.method === "PATCH" || (r.method === "POST" && r.url.includes("/comments")))).toBe(false);
+
+    await until(async () => (await t.projectAgent.getThread(t.thread.id))?.status !== "working", "the turn to end");
+    await t.answer("Allow this change");
+    await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("https://github.com/acme/app/issues/2 · closed")), "the line");
+    expect(fakeGithub.requests.slice(before).find((r) => r.method === "PATCH")?.body).toEqual({ state: "closed" });
+    t.close();
+  });
+
   it("says so when the repository has issues turned off", { timeout: 30_000 }, async () => {
     fakeGithub.issuesOff = ["acme/app"];
     const results: { isError: boolean; text: string }[] = [];

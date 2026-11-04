@@ -10,8 +10,9 @@ import { projectRepoToken } from "./store";
  * reaches the agent as data (agents/external.ts). On a public repository anyone can open an issue
  * or comment: text from people without a hand in the repository is untrusted and marks the thread.
  *
- * The open_issues tool writes with a token of its own too (issues: write), made for that one call on
- * the server, so the turn's token stays without issues and gh cannot go around the tool or its card.
+ * The tools that write (open_issues, comment_on_issue, update_issue, link_pull_request) have tokens of
+ * their own too, made for that one call on the server, so the turn's token stays without issues and
+ * gh cannot go around the tools or their card.
  */
 
 type IssuesEnv = GithubEnv & { DB: D1Database };
@@ -212,11 +213,12 @@ const MENTION = /(?:^|[^\w`/.-])@[a-z0-9][a-z0-9-]*/im;
 export function checkNewIssues(issues: NewIssue[]): void {
   const total = issues.reduce((sum, i) => sum + i.title.length + (i.body?.length ?? 0), 0);
   if (total > MAX_NEW_ISSUES_TOTAL) throw new Error(`These issues are too long together (${total} characters, at most ${MAX_NEW_ISSUES_TOTAL}). Shorten them or open them in two calls.`);
-  for (const { title, body } of issues) {
-    const text = `${title}\n${body ?? ""}`;
-    if (SECRET.test(text)) throw new Error(`Nothing was opened: "${title.replace(SECRET, "[secret]")}" contains what looks like a token or private key. Take it out and call again.`);
-    if (MENTION.test(text.replace(CODE, " "))) throw new Error(`Nothing was opened: "${title}" has an @mention, which would notify that person on GitHub. Write the name without @, or in backticks if it is code, and call again.`);
-  }
+  for (const { title, body } of issues) checkIssueText(`${title}\n${body ?? ""}`, `"${title.replace(SECRET, "[secret]")}"`);
+}
+
+function checkIssueText(text: string, what: string): void {
+  if (SECRET.test(text)) throw new Error(`Nothing was done: ${what} contains what looks like a token or private key. Take it out and call again.`);
+  if (MENTION.test(text.replace(CODE, " "))) throw new Error(`Nothing was done: ${what} has an @mention, which would notify that person on GitHub. Write the name without @, or in backticks if it is code, and call again.`);
 }
 
 /**
@@ -276,4 +278,128 @@ export async function openRepoIssues(
     }
   }
   return lines.join("\n");
+}
+
+export type IssueComment = { repo: string; number: number; body: string };
+export type IssueUpdate = {
+  repo: string;
+  number: number;
+  title?: string;
+  body?: string;
+  labels?: string[];
+  assignees?: string[];
+  state?: "open" | "closed";
+  state_reason?: "completed" | "not_planned";
+  /** Posted first, so closing with a reason is one call and, when a person is asked, one card. */
+  comment?: string;
+};
+export type PullLink = { repo: string; pull_number: number; issue_number: number; closes: boolean };
+
+const CLOSE_KEYWORD = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi;
+
+/** An issue to write on: a pull request's number is refused, since this tool would act on the pull request. */
+async function targetIssue(token: string, fullName: string, number: number) {
+  const issue = await githubFetch<ApiIssue>(token, `/repos/${fullName}/issues/${number}`).catch((err) => {
+    if (err instanceof GithubError && err.status === 404) throw new Error(`${fullName} has no issue #${number}.`);
+    if (err instanceof GithubError && err.status === 410) throw new Error(`${fullName}#${number} was deleted, or issues are turned off.`);
+    throw err;
+  });
+  if (issue.pull_request) throw new Error(`${fullName}#${number} is a pull request, not an issue.`);
+  return issue;
+}
+
+type PullTarget = { number: number; html_url: string; state: string; merged?: boolean; body?: string | null; user?: User; author_association?: string; base?: { ref: string } };
+
+/**
+ * Checks a write before it can reach a card: its text, and that its target is an issue. True when a
+ * person should allow it whatever else holds, because it changes what someone outside the repository
+ * wrote (their issue's text or state, their pull request's description). A comment changes nothing of theirs.
+ */
+export async function checkIssueWrite(env: IssuesEnv, projectId: string, tool: "comment_on_issue" | "update_issue" | "link_pull_request", input: IssueComment | IssueUpdate | PullLink): Promise<boolean> {
+  const { token, repo: r } = await issuesToken(env, projectId, input.repo);
+  const trust = await authorTrust(env);
+  if (tool === "comment_on_issue") {
+    const { number, body } = input as IssueComment;
+    checkIssueText(body, "the comment");
+    await targetIssue(token, r.fullName, number);
+    return false;
+  }
+  if (tool === "update_issue") {
+    const { number, title, body, comment, labels, assignees, state } = input as IssueUpdate;
+    if (title === undefined && body === undefined && !labels && !assignees && !state && !comment) throw new Error("Nothing to change: give at least one of title, body, labels, assignees, state or comment.");
+    checkIssueText([title, body, comment].filter(Boolean).join("\n"), `the change to #${number}`);
+    const issue = await targetIssue(token, r.fullName, number);
+    return trust(issue.user, issue.author_association) !== "member";
+  }
+  const { pull_number, issue_number } = input as PullLink;
+  await targetIssue(token, r.fullName, issue_number);
+  const { token: pullToken } = await projectRepoToken(env, projectId, r.fullName, { pull_requests: "read", metadata: "read" });
+  const pull = await githubFetch<PullTarget>(pullToken, `/repos/${r.fullName}/pulls/${pull_number}`).catch((err) => {
+    if (err instanceof GithubError && err.status === 404) throw new Error(`${r.fullName} has no pull request #${pull_number}.`);
+    throw err;
+  });
+  return trust(pull.user ?? null, pull.author_association) !== "member";
+}
+
+/** Comments on an issue, crediting the person. `opened` keeps a turn repeating itself from saying it twice. */
+export async function commentOnIssue(env: IssuesEnv, projectId: string, input: IssueComment, credit: PullCredit, opened: { get(key: string): string | undefined; add(key: string, url: string): void }): Promise<string> {
+  checkIssueText(input.body, "the comment");
+  const { token, repo: r } = await issuesToken(env, projectId, input.repo, "write");
+  await targetIssue(token, r.fullName, input.number);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.body));
+  const key = `comment\n${r.fullName}#${input.number}\n${btoa(String.fromCharCode(...new Uint8Array(digest)))}`.toLowerCase();
+  const already = opened.get(key);
+  if (already) return `${already} · this thread already wrote this comment`;
+  const made = await githubFetch<{ html_url: string }>(token, `/repos/${r.fullName}/issues/${input.number}/comments`, {
+    method: "POST",
+    body: { body: [creditLine(credit), input.body.trim()].filter(Boolean).join("\n\n") },
+  });
+  opened.add(key, made.html_url);
+  return `${made.html_url} · commented on #${input.number}`;
+}
+
+/** Changes an issue's text, labels, assignees or state, after posting `comment`. One line says what happened. */
+export async function updateIssue(env: IssuesEnv, projectId: string, input: IssueUpdate, credit: PullCredit): Promise<string> {
+  const { repo, number, title, body, labels, assignees, state, state_reason, comment } = input;
+  checkIssueText([title, body, comment].filter(Boolean).join("\n"), `the change to #${number}`);
+  const { token, repo: r } = await issuesToken(env, projectId, repo, "write");
+  const issue = await targetIssue(token, r.fullName, number);
+  const patch: Record<string, unknown> = {};
+  const notes: string[] = [];
+  if (title !== undefined) patch.title = title;
+  // A new description keeps the line saying who asked for the issue.
+  if (body !== undefined) patch.body = [issue.body?.match(/^_(?:Requested by|Opened by) [^\n]*_$/m)?.[0], body.trim()].filter(Boolean).join("\n\n");
+  if (assignees) patch.assignees = assignees;
+  if (state) patch.state = state;
+  if (state === "closed" && state_reason) patch.state_reason = state_reason;
+  if (labels) {
+    const known = await githubFetch<{ name: string }[]>(token, `/repos/${r.fullName}/labels?per_page=100`);
+    const byName = new Map(known.map((l) => [l.name.toLowerCase(), l.name]));
+    patch.labels = labels.map((l) => byName.get(l.toLowerCase())).filter(Boolean);
+    const dropped = labels.filter((l) => !byName.has(l.toLowerCase()));
+    if (dropped.length) notes.push(`no such label: ${dropped.join(", ")}`);
+  }
+  if (comment) {
+    await githubFetch(token, `/repos/${r.fullName}/issues/${number}/comments`, { method: "POST", body: { body: [creditLine(credit), comment.trim()].filter(Boolean).join("\n\n") } });
+    notes.push("comment posted");
+  }
+  if (Object.keys(patch).length) await githubFetch(token, `/repos/${r.fullName}/issues/${number}`, { method: "PATCH", body: patch });
+  const did = [state === "closed" ? "closed" : state === "open" ? "reopened" : "", ...Object.keys(patch).filter((k) => k !== "state" && k !== "state_reason"), ...notes].filter(Boolean);
+  return `${issue.html_url} · ${did.join(", ")}`;
+}
+
+/**
+ * Links a pull request to an issue the one way GitHub offers: a line in the pull request's description.
+ * "Closes #n" closes the issue when it merges into the default branch; "Refs #n" only links them.
+ */
+export async function linkPullRequest(env: IssuesEnv, projectId: string, input: PullLink): Promise<string> {
+  const { token, repo: r } = await projectRepoToken(env, projectId, input.repo, { pull_requests: "write", metadata: "read" });
+  const pull = await githubFetch<PullTarget>(token, `/repos/${r.fullName}/pulls/${input.pull_number}`);
+  if (pull.merged || pull.state !== "open") throw new Error(`${r.fullName}#${input.pull_number} is not open any more, so a link in its description would not close anything. Comment on the issue instead.`);
+  const body = pull.body ?? "";
+  const line = `${input.closes ? "Closes" : "Refs"} #${input.issue_number}`;
+  const linked = [...body.matchAll(CLOSE_KEYWORD)].some((m) => Number(m[1]) === input.issue_number) || (!input.closes && body.includes(line));
+  if (!linked) await githubFetch(token, `/repos/${r.fullName}/pulls/${input.pull_number}`, { method: "PATCH", body: { body: body.trim() ? `${body.trim()}\n\n${line}` : line } });
+  const note = input.closes ? `merging it into ${r.fullName}'s default branch closes #${input.issue_number}` : `it refers to #${input.issue_number}`;
+  return `${pull.html_url} · ${linked ? "already linked" : "linked"}: ${note}`;
 }
