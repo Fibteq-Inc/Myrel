@@ -233,7 +233,7 @@ function ProjectSwitcher({
 /**
  * The switcher's projects, each with how many agents work in it. Mounted only while the menu is open,
  * so it fetches fresh counts on opening and polls like the project list, without polling in the background.
- * Pinned projects come first, in the server's order; each row has its own pin toggle.
+ * Pinned projects come first, then working ones and the latest activity, in the server's order; each row has its own pin toggle.
  */
 function ProjectList({ current, working, onSelect }: { current: string; working: number; onSelect: (projectId: string) => void }) {
   const t = useT();

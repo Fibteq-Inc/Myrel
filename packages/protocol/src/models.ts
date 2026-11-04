@@ -408,6 +408,8 @@ export const Project = z.object({
   createdAt: Timestamp,
   /** Missing from servers older than this field. */
   activity: ProjectActivity.optional(),
+  /** When an agent last started or stopped working in the project, else when it was made. Missing from older servers. */
+  lastActivityAt: Timestamp.optional(),
   /** Missing from servers older than this field. */
   cost: ProjectCost.optional(),
   /** Pinned to the top of this user's own project lists; every member pins for themselves. Missing from older servers. */

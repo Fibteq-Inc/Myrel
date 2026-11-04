@@ -126,6 +126,8 @@ export const projects = sqliteTable("projects", {
   activeCount: integer("active_count").notNull().default(0),
   /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */
   waitingCount: integer("waiting_count").notNull().default(0),
+  /** When an agent last started or stopped working here, kept by ProjectAgent; null = nothing since the project was made. */
+  lastActivityAt: integer("last_activity_at", { mode: "timestamp_ms" }),
   ...timestamps,
 });
 

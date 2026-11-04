@@ -281,6 +281,13 @@
       "when": 1793197030324,
       "tag": "0039_error_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1793777719194,
+      "tag": "0040_project_last_activity",
+      "breakpoints": true
     }
   ]
 }
