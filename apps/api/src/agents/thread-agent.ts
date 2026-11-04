@@ -65,7 +65,7 @@ import { connectRepoByName, githubLogin, listProjectRepos } from "../github/stor
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
-import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
+import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { projectCliModels, resolveTaskModel } from "../task-model";
@@ -711,7 +711,7 @@ export class ThreadAgent extends Agent<Env> {
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     const taskId = createId("task");
-    if (github) this.githubTokens.set(taskId, [github.token]);
+    if (github) this.githubTokens.set(taskId, taskGithubTokens(github));
     // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
     const previousTask = this.getMeta("agent_last_task");
     this.setMeta("agent_last_task", taskId);
@@ -849,11 +849,11 @@ export class ThreadAgent extends Agent<Env> {
         // The sandbox's disk does not outlive it; the thread's workspace keeps the work outside the
         // repositories between turns (the repositories' own work goes to GitHub, see saveRepos).
         const [github, files, workspace] = await Promise.all([
-          projectGithubToken(this.env, projectId, spec.timeoutSec),
+          projectGithubSecrets(this.env, projectId, spec.timeoutSec),
           this.attachmentLinks(origin, input.attachments),
           threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC),
         ]);
-        if (github) secrets.GITHUB_TOKEN = github;
+        Object.assign(secrets, github);
         if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
         const backend = sandboxBackend(this.env, threadId, input.requester ?? "");
         const unavailable = backend.unavailable(spec);
@@ -2477,9 +2477,9 @@ export class ThreadAgent extends Agent<Env> {
     if (!github) return;
     const runner = await getAgentByName(this.env.RUNNER_AGENT, runnerId);
     const sent = await runner.renewGithub(row.id, github);
-    if (!sent.ok) return void (await revokeInstallationToken(github.token).catch(() => {}));
+    if (!sent.ok) return void (await Promise.all(taskGithubTokens(github).map((t) => revokeInstallationToken(t).catch(() => {}))));
     // The last one stays valid until the turn ends or it expires, so a push already under way finishes.
-    this.githubTokens.set(row.id, [...(this.githubTokens.get(row.id) ?? []), github.token]);
+    this.githubTokens.set(row.id, [...(this.githubTokens.get(row.id) ?? []), ...taskGithubTokens(github)]);
     await this.schedule(GITHUB_RENEW_SEC, "renewGithub", payload);
   }
 

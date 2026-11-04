@@ -437,17 +437,20 @@ type Outbox = {
 };
 
 
+/** MYREL_FILES is a list of links and GITHUB_REPOS_<n> a list of repository names, neither one secret. */
+const scrubbed = ([name, value]: [string, string]) => name !== "MYREL_FILES" && !name.startsWith("GITHUB_REPOS_") && value.length >= MIN_SCRUBBED;
+
 /** The secrets the container's own filter hides (SCRUB_JS), by name. */
 export function scrubbedNames(secrets: Record<string, string>): string[] {
   return Object.entries(secrets)
-    .filter(([name, value]) => name !== "MYREL_FILES" && value.length >= MIN_SCRUBBED)
+    .filter(scrubbed)
     .map(([name]) => name);
 }
 
-/** Replaces the run's secret values in a line of its output. MYREL_FILES is a list of links, not one secret. */
+/** Replaces the run's secret values in a line of its output. */
 export function secretScrubber(secrets: Record<string, string>): (line: string) => string {
   const values = Object.entries(secrets)
-    .filter(([name, value]) => name !== "MYREL_FILES" && value.length >= MIN_SCRUBBED)
+    .filter(scrubbed)
     .map(([, value]) => value)
     .sort((a, b) => b.length - a.length);
   if (!values.length) return (line) => line;

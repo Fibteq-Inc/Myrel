@@ -6,6 +6,9 @@
 /** An installation token in GitHub's stateless format (ghs_<app id>_<JWT>, about 520 characters). */
 export const INSTALLATION_TOKEN = `ghs_1234567_eyJhbGciOiJSUzI1NiJ9.${"eyJpbnN0YWxsYXRpb24iOjF9".repeat(18)}.${"c2lnbmF0dXJl".repeat(5)}`;
 
+/** The token of the second installation, to tell them apart. */
+export const OTHER_INSTALLATION_TOKEN = `${INSTALLATION_TOKEN}.other`;
+
 export const fakeGithub = {
   installations: [{ id: 42, account: { login: "acme", type: "Organization", avatar_url: "https://avatars.test/acme" } }],
   repos: [
@@ -32,6 +35,9 @@ export const fakeGithub = {
     { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
   requests: [] as { method: string; url: string; body?: unknown; auth?: string }[],
+  /** A second installation ("zeta", with repo 9): off unless a test opens it, as installs are read from `installations`. */
+  otherInstallation: { id: 43, account: { login: "zeta", type: "Organization", avatar_url: "https://avatars.test/zeta" } },
+  otherRepos: [{ id: 9, full_name: "zeta/site", default_branch: "main", private: true, description: null }],
   /** The repositories of installation 42 the signed-in user can reach themselves. */
   userRepos: [7, 8],
   /** Of those, the ones they can push to; the rest they can only read. */
@@ -65,13 +71,23 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       .map((r) => ({ ...r, permissions: { admin: false, maintain: false, push: fakeGithub.userPush.includes(r.id), triage: true, pull: true } }));
     return Response.json({ total_count: repositories.length, repositories });
   }
+  if (url.pathname === "/user/installations/43/repositories") {
+    const repositories = fakeGithub.otherRepos.map((r) => ({ ...r, permissions: { admin: false, maintain: false, push: true, triage: true, pull: true } }));
+    return Response.json({ total_count: repositories.length, repositories });
+  }
   if (url.pathname === "/user/installations") {
     return Response.json({ total_count: fakeGithub.installations.length, installations: fakeGithub.installations });
   }
   const tokenMatch = url.pathname.match(/^\/app\/installations\/(\d+)\/access_tokens$/);
   if (tokenMatch) {
-    if (Number(tokenMatch[1]) !== 42) return new Response("{}", { status: 404 });
+    const installation = Number(tokenMatch[1]);
+    if (installation !== 42 && installation !== 43) return new Response("{}", { status: 404 });
     const ids: number[] | undefined = body?.repository_ids;
+    if (installation === 43) {
+      if (ids?.some((id) => !fakeGithub.otherRepos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
+      const repositories = ids ? fakeGithub.otherRepos.filter((r) => ids.includes(r.id)) : undefined;
+      return Response.json({ token: OTHER_INSTALLATION_TOKEN, expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
+    }
     if (ids?.some((id) => !fakeGithub.repos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
     if (body?.permissions?.issues && !fakeGithub.issuesGranted) {
       return Response.json({ message: "The permissions requested are not granted to this installation." }, { status: 422 });
@@ -84,6 +100,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname === "/installation/token" && method === "DELETE") return new Response(null, { status: 204 });
   if (url.pathname === "/installation/repositories") {
+    if (auth === OTHER_INSTALLATION_TOKEN) return Response.json({ total_count: fakeGithub.otherRepos.length, repositories: fakeGithub.otherRepos });
     return Response.json({ total_count: fakeGithub.repos.length, repositories: fakeGithub.repos });
   }
   const pulls = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls$/);

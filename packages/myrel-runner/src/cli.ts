@@ -100,7 +100,7 @@ async function main(argv: string[]) {
       });
     // Started by git as the credential helper of a run's GitHub token (see github.ts). Not for people.
     case "git-credential":
-      return runGitCredential(arg, process.stdin, (text) => process.stdout.write(text));
+      return runGitCredential(arg, positionals[2], process.stdin, (text) => process.stdout.write(text));
     case "pair": {
       const server = values.server ?? (await loadConfig()).server;
       if (!arg || !server) throw new Error("Usage: myrel-runner pair <code> --server <url>");

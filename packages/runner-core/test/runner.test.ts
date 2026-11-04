@@ -369,6 +369,28 @@ describe("task script", () => {
     }
   });
 
+  it("sends each repository of another installation its own token, and forgets it on the next turn", () => {
+    const home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+    const workdir = mkdtempSync(join(tmpdir(), "myrel-work-"));
+    const s = spec({ harness: "shell", prompt: "true" });
+    const tokens = { GITHUB_TOKEN: "sentinel-first-token", GITHUB_TOKEN_1: "sentinel-other-token" };
+    expect(runScript({ ...taskEnv(s, shell, { workdir }), HOME: home, ...tokens, GITHUB_REPOS_1: "Zeta/Site zeta/docs" }).code).toBe(0);
+    const url = (path: string) =>
+      spawnSync("git", ["credential", "fill"], {
+        input: `url=https://github.com/${path}\n\n`,
+        env: { PATH: process.env.PATH, HOME: home, ...tokens, GIT_TERMINAL_PROMPT: "0" },
+        encoding: "utf8",
+      }).stdout;
+    expect(url("Zeta/Site.git")).toContain("password=sentinel-other-token");
+    expect(url("zeta/site")).toContain("password=sentinel-other-token");
+    expect(url("zeta/docs.git")).toContain("password=sentinel-other-token");
+    expect(url("acme/app.git")).toContain("password=sentinel-first-token");
+
+    // The next turn, with the repositories of only one installation.
+    expect(runScript({ ...taskEnv(s, shell, { workdir }), HOME: home, GITHUB_TOKEN: "sentinel-first-token" }).code).toBe(0);
+    expect(url("zeta/site.git")).toContain("password=sentinel-first-token");
+  });
+
   it("clones the repository, runs the harness on a fresh branch and reports phases", () => {
     const origin = mkdtempSync(join(tmpdir(), "myrel-origin-"));
     const git = (...args: string[]) => execFileSync("git", args, { cwd: origin, stdio: "pipe" });
