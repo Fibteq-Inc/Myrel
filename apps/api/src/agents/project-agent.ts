@@ -38,6 +38,8 @@ import {
   type ThreadRunner,
   type ThreadModel,
   type ThreadCloseReason,
+  type ThreadNeeds,
+  threadWaitsOnPerson,
   type ThreadStatus,
   type ThreadSummary,
   summarizeThread,
@@ -114,6 +116,7 @@ type ThreadRow = {
   title: string;
   status: ThreadStatus;
   status_text: string | null;
+  needs: ThreadNeeds | null;
   resolved: number;
   close_reason: ThreadCloseReason | null;
   duplicate_of: string | null;
@@ -156,7 +159,7 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
 };
 
 export type ThreadPatch = Partial<
-  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "runner" | "model" | "seenSeq">
+  Pick<Thread, "title" | "status" | "statusText" | "needs" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "runner" | "model" | "seenSeq">
 >;
 
 /** What a thread agent reads at the start of each turn. */
@@ -284,6 +287,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!threadColumns.some((c) => c.name === "seen_seq")) this.sql`ALTER TABLE threads ADD COLUMN seen_seq INTEGER`;
     // Added with projects on several computers.
     if (!threadColumns.some((c) => c.name === "runner")) this.sql`ALTER TABLE threads ADD COLUMN runner TEXT`;
+    // Added with telling threads waiting on a person from ones that only delivered something.
+    if (!threadColumns.some((c) => c.name === "needs")) this.sql`ALTER TABLE threads ADD COLUMN needs TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -819,7 +824,9 @@ export class ProjectAgent extends Agent<Env> {
       next.closeReason = null;
       next.duplicateOf = null;
     }
-    this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
+    // Back at work or finished, the thread no longer waits on anyone.
+    if (next.status === "working" || next.resolved) next.needs = null;
+    this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText}, needs = ${next.needs},
       resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
       label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null}, runner = ${next.runner ? JSON.stringify(next.runner) : null},
       model = ${next.model ? JSON.stringify(next.model) : null}, seen_seq = ${next.seenSeq}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
@@ -1009,10 +1016,10 @@ export class ProjectAgent extends Agent<Env> {
     const working = new Set<string>();
     for (const threadId of this.active.keys()) working.add(threadId ?? "coordinator");
     let waiting = 0;
-    for (const row of this.sql<{ id: string; status: ThreadStatus }>`
-      SELECT id, status FROM threads WHERE resolved = 0 AND status IN ('working', 'blocked')`) {
+    for (const row of this.sql<{ id: string; status: ThreadStatus; needs: ThreadNeeds | null }>`
+      SELECT id, status, needs FROM threads WHERE resolved = 0`) {
       if (row.status === "working") working.add(row.id);
-      else waiting++;
+      else if (threadWaitsOnPerson({ ...row, resolved: false })) waiting++;
     }
     const activeCount = working.size;
     const counts = { activeCount, waitingCount: waiting };
@@ -2020,6 +2027,7 @@ export class ProjectAgent extends Agent<Env> {
       title: r.title,
       status: r.status,
       statusText: r.status_text,
+      needs: r.needs ?? null,
       resolved: r.resolved === 1,
       closeReason: r.close_reason ?? null,
       duplicateOf: r.duplicate_of ?? null,

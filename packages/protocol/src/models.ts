@@ -169,6 +169,10 @@ export type Message = z.infer<typeof Message>;
 export const ThreadStatus = z.enum(["working", "blocked", "review_ready", "done", "failed"]);
 export type ThreadStatus = z.infer<typeof ThreadStatus>;
 
+/** What a thread that finished its turn asks of a person: a decision, unblocking it, or a look at what it showed. */
+export const ThreadNeeds = z.enum(["decision", "blocked", "review"]);
+export type ThreadNeeds = z.infer<typeof ThreadNeeds>;
+
 /**
  * Why a resolved thread was closed without its work being done: it repeated another thread's ask,
  * it was opened for something another thread covers, or the ask was dropped. Null when it was
@@ -251,6 +255,8 @@ export const Thread = z.object({
   status: ThreadStatus,
   /** The thread agent's progress checklist (`update_status`), shown while it works. */
   statusText: z.string().nullable(),
+  /** What it waits on a person for; null while it works, and when its turn only delivered something. */
+  needs: ThreadNeeds.nullable().default(null),
   resolved: z.boolean(),
   closeReason: ThreadCloseReason.nullable().default(null),
   /** For a duplicate: the thread that carries the work. */
@@ -273,6 +279,12 @@ export const Thread = z.object({
   updatedAt: Timestamp,
 });
 export type Thread = z.infer<typeof Thread>;
+
+/** Whether a person has to act for an open thread to go on. The project list counts the same threads. */
+export function threadWaitsOnPerson(thread: Pick<Thread, "status" | "needs" | "resolved">): boolean {
+  if (thread.resolved) return false;
+  return thread.status === "blocked" || thread.status === "failed" || (thread.status === "review_ready" && thread.needs !== null);
+}
 
 /** running: the runner is working. The other states are final. */
 export const TaskStatus = z.enum(["running", "done", "failed", "cancelled"]);

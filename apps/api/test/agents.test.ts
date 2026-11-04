@@ -603,6 +603,7 @@ describe("coordinator and thread agent", () => {
       return t?.status === "review_ready" ? t : null;
     }, "waiting on the person");
     expect(waiting.resolved).toBe(false);
+    expect(waiting.needs).toBe("review");
     expect(refusals[0]).toContain("Not resolved");
 
     ws.send(JSON.stringify({ type: "message.send", threadId: waiting.id, body: "looks good, thanks" }));
