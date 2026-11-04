@@ -1,31 +1,74 @@
-import { liveThreadGroups, type LiveThreadRow } from "@myrel/client";
+import { liveThreadGroups, type LiveThreadRow, type RecentThread } from "@myrel/client";
 import type { LiveThread, Project } from "@myrel/protocol";
 import { useT } from "@myrel/i18n/react";
 import { Link } from "@tanstack/react-router";
-import { CircleAlert, CircleDashed, CirclePause, LoaderCircle } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleDashed, CirclePause, LoaderCircle, MessageSquareText } from "lucide-react";
 import { useState } from "react";
-import { useRelativeTime } from "../lib/ui";
+import { cn, useRelativeTime } from "../lib/ui";
 import { ProjectBadge } from "./project-badge";
 
 /** Rows a group shows before "N more". */
 const GROUP_ROWS = 4;
 
-/** Threads across the person's projects that are at work or wait on them. Draws nothing when none do. */
+/** Threads across the person's projects that are at work or wait on them. */
 export function LiveThreads({ projects }: { projects: Project[] }) {
   const t = useT();
   const { waiting, working } = liveThreadGroups(projects);
   const total = waiting.length + working.length;
-  if (total === 0) return null;
   return (
-    <section aria-labelledby="live" className="flex flex-col gap-2.5">
-      <h2 id="live" className="flex items-center justify-between text-xs text-subtle">
+    <section aria-labelledby="live" className="flex flex-col gap-3">
+      <h2 id="live" className="flex h-8 items-center justify-between text-[15px] font-semibold">
         {t("projects.live")}
-        <span className="font-mono">{total}</span>
+        {total > 0 && <span className="font-mono text-xs font-normal text-subtle">{total}</span>}
       </h2>
-      <div className="flex flex-col gap-1 rounded-xl border border-line bg-raised p-1">
-        <Group title={t("status.reviewReady")} tone="text-warn" rows={waiting} />
-        <Group title={t("status.working")} tone="text-subtle" rows={working} />
-      </div>
+      {total === 0 ? (
+        <p className="rounded-xl border border-line bg-raised px-3.5 py-3 text-[13px] text-subtle">{t("projects.liveEmpty")}</p>
+      ) : (
+        <div className="flex flex-col gap-1 rounded-xl border border-line bg-raised p-1">
+          <Group title={t("status.reviewReady")} tone="text-warn" rows={waiting} />
+          <Group title={t("status.working")} tone="text-subtle" rows={working} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The threads that last finished or answered. Comes from the person's notifications; opening one does not mark it read. */
+export function RecentThreads({ rows, className }: { rows: RecentThread[]; className?: string }) {
+  const t = useT();
+  const relativeTime = useRelativeTime();
+  if (rows.length === 0) return null;
+  return (
+    <section aria-label={t("projects.recent")} className={cn("flex-col gap-3", className ?? "flex")}>
+      <h2 className="flex h-8 items-center text-[15px] font-semibold">{t("projects.recent")}</h2>
+      <ul className="flex flex-col rounded-xl border border-line bg-raised p-1">
+        {rows.map(({ project, notification: n }) => (
+          <li key={n.id}>
+            <Link
+              to="/projects/$projectId/threads/$threadId"
+              params={{ projectId: project.id, threadId: n.threadId! }}
+              className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 outline-none hover:bg-hover focus-visible:ring-1 focus-visible:ring-accent"
+            >
+              {n.kind === "done" ? (
+                <CircleCheck size={15} aria-hidden="true" className="flex-none text-ok" />
+              ) : (
+                <MessageSquareText size={15} aria-hidden="true" className="flex-none text-accent" />
+              )}
+              <ProjectBadge name={project.name} icon={project.icon} color={project.color} size={22} />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[13px] font-medium text-fg">{n.title}</span>
+                <span className="flex min-w-0 gap-2 text-xs text-subtle">
+                  <span className="max-w-[45%] flex-none truncate">{project.name}</span>
+                  <span className="truncate">{n.kind === "done" ? t("status.done") : t("status.replied")}</span>
+                </span>
+              </span>
+              <time dateTime={n.createdAt} className="flex-none text-xs tabular-nums text-subtle">
+                {relativeTime(n.createdAt)}
+              </time>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
