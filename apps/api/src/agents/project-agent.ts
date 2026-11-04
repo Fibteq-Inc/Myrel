@@ -214,6 +214,8 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Activity counts last written to D1 for the project list, and the write in flight. */
   private syncedActivity: string | null = null;
+  /** How many agents worked at the last sync; null until the first one after a start, which tells nothing about work. */
+  private syncedWorking: number | null = null;
   private activityWrite: Promise<void> = Promise.resolve();
 
   /**
@@ -1001,6 +1003,7 @@ export class ProjectAgent extends Agent<Env> {
   /**
    * Copies how many agents are working and how many threads wait on a person into the project's D1 row,
    * so the project list can show it without waking every project. Only writes when the counts change.
+   * An agent starting or stopping also marks the project's latest activity, which orders the list.
    */
   private syncActivity(): void {
     const working = new Set<string>();
@@ -1011,14 +1014,18 @@ export class ProjectAgent extends Agent<Env> {
       if (row.status === "working") working.add(row.id);
       else waiting++;
     }
-    const counts = { activeCount: working.size, waitingCount: waiting };
+    const activeCount = working.size;
+    const counts = { activeCount, waitingCount: waiting };
     const key = `${counts.activeCount}/${counts.waitingCount}`;
     if (key === this.syncedActivity) return;
     this.syncedActivity = key;
+    const changed = this.syncedWorking !== null && this.syncedWorking !== activeCount;
+    this.syncedWorking = activeCount;
+    const values = changed ? { ...counts, lastActivityAt: new Date() } : counts;
     // Chained so an older count never lands after a newer one.
     this.activityWrite = this.activityWrite.then(async () => {
       try {
-        await createDb(this.env.DB).update(schema.projects).set(counts).where(eq(schema.projects.id, this.name));
+        await createDb(this.env.DB).update(schema.projects).set(values).where(eq(schema.projects.id, this.name));
       } catch (err) {
         console.error("project activity sync failed", err);
         if (this.syncedActivity === key) this.syncedActivity = null;

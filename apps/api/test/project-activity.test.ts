@@ -44,6 +44,38 @@ describe("project activity", () => {
     await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
   });
 
+  it("marks the latest activity when an agent starts or stops, not on anything else", async () => {
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "T" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Latest" }) });
+    const { project } = (await res.json()) as { project: Project };
+    const latest = async () => {
+      const { projects } = (await (await api("/api/projects", { token })).json()) as { projects: Project[] };
+      return projects.find((p) => p.id === project.id);
+    };
+
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    await agent.setActivity(null, false);
+    expect((await latest())?.lastActivityAt).toBe(project.createdAt);
+
+    await agent.setActivity(null, true);
+    await vi.waitFor(async () => expect((await latest())?.activity?.working).toBe(1));
+    const started = (await latest())?.lastActivityAt ?? "";
+    expect(started > project.createdAt).toBe(true);
+
+    // A new label on the same work is not a new activity.
+    await agent.setActivity(null, true, "Reading");
+    expect((await latest())?.lastActivityAt).toBe(started);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await agent.setActivity(null, false);
+    await vi.waitFor(async () => expect((await latest())?.activity?.working).toBe(0));
+    expect(((await latest())?.lastActivityAt ?? "") > started).toBe(true);
+  });
+
   it("shows this month's and all-time model cost on the project list", async () => {
     const signUp = await api("/api/auth/sign-up/email", {
       method: "POST",

@@ -55,6 +55,7 @@ const projectColumns = {
   pinnedAt: projectMembers.pinnedAt,
   activeCount: projects.activeCount,
   waitingCount: projects.waitingCount,
+  lastActivityAt: projects.lastActivityAt,
 };
 
 export const projectRoutes = new Hono<AppEnv>()
@@ -67,8 +68,14 @@ export const projectRoutes = new Hono<AppEnv>()
         .from(projectMembers)
         .innerJoin(projects, eq(projects.id, projectMembers.projectId))
         .where(eq(projectMembers.userId, userId))
-        // Pinned first (in the order they were pinned), then the rest newest first as before.
-        .orderBy(sql`${projectMembers.pinnedAt} IS NULL`, projectMembers.pinnedAt, desc(projects.createdAt)),
+        // Pinned first (in the order they were pinned), then the rest: working ones, then latest activity.
+        // Mirrored by compareUnpinnedProjects in @myrel/client.
+        .orderBy(
+          sql`${projectMembers.pinnedAt} IS NULL`,
+          projectMembers.pinnedAt,
+          sql`${projects.activeCount} > 0 DESC`,
+          sql`COALESCE(${projects.lastActivityAt}, ${projects.createdAt}) DESC`,
+        ),
       projectCosts(c.env.DB, userId),
     ]);
     return c.json({ projects: rows.map((row) => ({ ...toProject(row), cost: costs.get(row.id) ?? emptyCost })) });
@@ -88,7 +95,7 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
     return c.json(
-      { project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0 }) },
+      { project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0, lastActivityAt: null }) },
       201,
     );
   })
@@ -719,8 +726,9 @@ function toProject(row: {
   pinnedAt: Date | null;
   activeCount: number;
   waitingCount: number;
+  lastActivityAt: Date | null;
 }): Project {
-  const { activeCount, waitingCount, pinnedAt, icon, color, ...rest } = row;
+  const { activeCount, waitingCount, lastActivityAt, pinnedAt, icon, color, ...rest } = row;
   return {
     ...rest,
     icon: ProjectIcon.nullable().catch(null).parse(icon),
@@ -728,6 +736,7 @@ function toProject(row: {
     createdAt: row.createdAt.toISOString(),
     pinned: pinnedAt !== null,
     activity: { working: activeCount, waiting: waitingCount },
+    lastActivityAt: (lastActivityAt ?? row.createdAt).toISOString(),
   };
 }
 
