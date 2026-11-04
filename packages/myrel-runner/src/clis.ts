@@ -252,6 +252,9 @@ async function privateFile(dir: string, name: string, content: unknown): Promise
 }
 
 /** Commands that open a connection to another computer over SSH. */
+/** gh commands that change an issue: Myrel's tools do that, with their card. Reading stays allowed. */
+const GH_ISSUE_WRITES = ["create", "comment", "edit", "close", "reopen", "delete"].map((c) => `Bash(gh issue ${c}:*)`);
+
 const SSH_COMMANDS = ["ssh", "scp", "sftp", "rsync"].map((c) => `Bash(${c}:*)`);
 /** The person's SSH keys and the ones Myrel keeps for its SSH servers. */
 const SSH_KEY_READS = ["~/.ssh/**", "~/.myrel-runner/ssh/**"].flatMap((p) => [`Read(${p})`, `Edit(${p})`]);
@@ -306,7 +309,7 @@ const claude: CliAdapter = {
         "--allowedTools",
         allowed.join(","),
         "--disallowedTools",
-        ["Bash(gh pr create:*)", "Bash(gh issue create:*)", ...(asks ? [] : SSH_COMMANDS)].join(","),
+        ["Bash(gh pr create:*)", ...GH_ISSUE_WRITES, ...(asks ? [] : SSH_COMMANDS)].join(","),
         "--settings",
         settings,
         ...skillArgs,

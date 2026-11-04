@@ -49,7 +49,20 @@ import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
-import { type NewIssue, checkNewIssues, listRepoIssues, openRepoIssues, readRepoIssue } from "../github/issues";
+import {
+  type IssueComment,
+  type IssueUpdate,
+  type NewIssue,
+  type PullLink,
+  checkIssueWrite,
+  checkNewIssues,
+  commentOnIssue,
+  linkPullRequest,
+  listRepoIssues,
+  openRepoIssues,
+  readRepoIssue,
+  updateIssue,
+} from "../github/issues";
 import type { PullCredit } from "../github/attribution";
 import {
   CONFLICT_RETRY_SEC,
@@ -116,6 +129,7 @@ import {
   approvalResultMessage,
   type ExternalApproval,
   GUARDED_TOOLS,
+  ISSUE_WRITE_TOOLS,
   MAX_THREAD_ISSUES,
   markedMessage,
   wrapExternal,
@@ -1791,6 +1805,11 @@ export class ThreadAgent extends Agent<Env> {
       for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
       return m;
     };
+    // What the thread wrote on GitHub's issues: it spots a repeat after a restart and counts towards the limit.
+    const issueWrites = {
+      get: (key: string) => this.openedIssues()[key],
+      add: (key: string, url: string) => this.setMeta("opened_issues", JSON.stringify({ ...this.openedIssues(), [key]: url })),
+    };
     const tools: Tool[] = [
       ...threadTools({
         reply,
@@ -1861,11 +1880,14 @@ export class ThreadAgent extends Agent<Env> {
           if (read.external) await this.markExternal(read.external);
           return read.text;
         },
-        openIssues: async (repo, issues) =>
-          openRepoIssues(this.env, projectId, repo, issues, await this.pullCredit(), {
-            get: (key) => this.openedIssues()[key],
-            add: (key, url) => this.setMeta("opened_issues", JSON.stringify({ ...this.openedIssues(), [key]: url })),
-          }),
+        openIssues: async (repo, issues) => openRepoIssues(this.env, projectId, repo, issues, await this.pullCredit(), issueWrites),
+        commentOnIssue: async (input) => commentOnIssue(this.env, projectId, input, await this.pullCredit(), issueWrites),
+        updateIssue: async (input) => {
+          const out = await updateIssue(this.env, projectId, input, await this.pullCredit());
+          issueWrites.add(`update\n${input.repo}#${input.number}\n${Date.now()}`, out);
+          return out;
+        },
+        linkPullRequest: (input) => linkPullRequest(this.env, projectId, input),
         trackPullRequest: async (url) => {
           const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
@@ -1953,6 +1975,18 @@ export class ThreadAgent extends Agent<Env> {
             checkNewIssues(issues);
             const many = Object.keys(this.openedIssues()).length + issues.length > MAX_THREAD_ISSUES;
             const ask = this.externalSources().length > 0 || !this.getMeta("requester") || many;
+            return ask ? this.askExternalApproval(t.name, input as Record<string, unknown>) : t.run(input);
+          },
+        };
+      }
+      // The same for the writes on existing issues, and a card too when it changes what an outsider wrote.
+      if (ISSUE_WRITE_TOOLS.has(t.name)) {
+        return {
+          ...t,
+          run: async (input) => {
+            const outsider = await checkIssueWrite(this.env, projectId, t.name as "comment_on_issue" | "update_issue" | "link_pull_request", input as IssueComment | IssueUpdate | PullLink);
+            const many = Object.keys(this.openedIssues()).length >= MAX_THREAD_ISSUES;
+            const ask = outsider || this.externalSources().length > 0 || !this.getMeta("requester") || many;
             return ask ? this.askExternalApproval(t.name, input as Record<string, unknown>) : t.run(input);
           },
         };

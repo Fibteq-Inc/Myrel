@@ -144,7 +144,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     return Response.json({ name: decodeURIComponent(branch[3]!), protected: b.protected ?? false });
   }
-  if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) return Response.json({}, { status: 201 });
+  const commented = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)\/comments$/);
+  if (method === "POST" && commented) return Response.json({ html_url: `https://github.com/${commented[1]}/issues/${commented[2]}#issuecomment-1` }, { status: 201 });
   if (/^\/repos\/[^/]+\/[^/]+\/(issues\/\d+\/assignees|pulls\/\d+\/requested_reviewers)$/.test(url.pathname)) {
     return Response.json({}, { status: 201 });
   }
@@ -222,6 +223,13 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     };
     all.push(made);
     return Response.json(made, { status: 201 });
+  }
+  if (issues && issues[2] && !issues[3] && method === "PATCH") {
+    const all = fakeGithub.issues[issues[1]!] ?? [];
+    const index = all.findIndex((i) => i.number === Number(issues[2]));
+    if (index < 0) return new Response("{}", { status: 404 });
+    all[index] = { ...all[index]!, ...(body as object), labels: ((body as { labels?: string[] }).labels ?? (all[index]!.labels as unknown[])) as never };
+    return Response.json(all[index]);
   }
   if (issues && method === "GET") {
     const all = fakeGithub.issues[issues[1]!] ?? [];

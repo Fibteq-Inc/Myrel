@@ -142,7 +142,7 @@ export const tr: Catalog = {
   "issues.notFound": "Bu issue açılamadı. Kaldırılmış ya da bir pull request olabilir.",
   "issues.image": "Görsel: {alt}",
   "issues.outside": "Dışarıdan",
-  "issues.outsideHint": "Repoya erişimi olmayan biri yazmış. Bunu okuyan ajan hafıza veya rutin değiştirmeden ya da issue açmadan önce sorar.",
+  "issues.outsideHint": "Repoya erişimi olmayan biri yazmış. Bunu okuyan ajan hafıza veya rutin değiştirmeden ya da issue değiştirmeden önce sorar.",
   "threads.open": "Açık",
   "connection.connecting": "Bağlanıyor",
   "connection.connectingDetail": "Sunucuya ulaşılıyor",
