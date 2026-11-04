@@ -34,7 +34,7 @@ export default defineConfig({
           label: "Your computer",
           items: ["computer/connect", "computer/folders", "computer/clis", "computer/approvals", "computer/runner"],
         },
-        { label: "GitHub", items: ["github/connect", "github/pull-requests"] },
+        { label: "GitHub", items: ["github/connect", "github/pull-requests", "github/issues"] },
         {
           label: "Automate and extend",
           items: ["automate/routines", "automate/skills", "automate/connectors", "automate/notifications"],

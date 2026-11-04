@@ -634,6 +634,7 @@ describe("local workspace", () => {
     expect((await cards())[5]!.body.startsWith("`git push -u origin myrel/readme`")).toBe(true);
     // Pull requests go through Myrel's GitHub App, never gh, whatever the person allowed.
     expect(await ask("Bash", { command: "git push && gh pr create --fill" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("open_pull_request") });
+    expect(await ask("Bash", { command: "gh issue create --title x" })).toMatchObject({ behavior: "deny", message: expect.stringContaining("open_issues") });
     const denied = ask("Bash", { command: "rm -rf build" });
     await until(async () => (await cards()).length === 7, "second command card");
     await answer("Çalıştırma");

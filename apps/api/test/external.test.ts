@@ -61,6 +61,15 @@ describe("external text", () => {
     const input = { routine_id: "routine-1", prompt: content, thread_id: "thread-2", paused: true };
     const routine = approvalMessage("update_routine", input, ["connector:linear"], "tr");
     expect(routine).toContain(JSON.stringify(input, null, 2));
+    // New issues: all of their text, and why a person allows them, with or without outside text.
+    const issues = { repo: "acme/app", issues: [{ title: "One", body: content, labels: ["bug"] }, { title: "Two" }] };
+    const card = approvalMessage("open_issues", issues, [], "tr");
+    expect(card).toContain("**acme/app** deposunda 2 issue açmak");
+    expect(card).toContain(content);
+    expect(card).toContain("[bug]");
+    expect(card).toContain("Two");
+    expect(card).not.toContain("dışarıdan gelen");
+    expect(approvalMessage("open_issues", issues, ["connector:linear"], "en")).toContain("Open these issues?");
   });
 });
 
