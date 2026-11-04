@@ -166,6 +166,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "settings": reports its settings in hello and changes them when asked ("settings.set").
  * "update": updates itself to a newer version when asked ("runner.update"), if it can (`updates`).
  * "models": lists each CLI's models (RunnerCli.models) and runs the one in task.start's `model`.
+ * "git-tokens": also takes the tokens of the project's other GitHub App installations (`github.more`).
  * "git-token": lends git the turn's GitHub token (task.start's `github`, renewed by "task.github")
  * for the project's repositories on github.com, without writing it anywhere.
  * "github-token": the same in runner 0.21.0 only, which takes tokens of up to 255 characters and so
@@ -194,6 +195,7 @@ export const RunnerFeature = z.enum([
   "models",
   "github-token",
   "git-token",
+  "git-tokens",
   "steer",
   "steer-claude",
   "ssh",
@@ -388,11 +390,18 @@ export type TaskModel = z.infer<typeof TaskModel>;
  * when the computer's own git login does not answer first. `repos` (owner/name) are the ones it
  * covers; their SSH addresses are sent over HTTPS for the turn.
  */
-export const TaskGithub = z.object({
+const TaskGithubToken = z.object({
   // GitHub's installation tokens are about 520 characters since its 2026 format (ghs_<app id>_<JWT>).
   token: z.string().min(20).max(4096),
   expiresAt: Timestamp,
   repos: z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/).max(200)).max(100),
+});
+export const TaskGithub = TaskGithubToken.extend({
+  /**
+   * A token reaches one GitHub App installation, so the project's repositories of any other have
+   * their own here (feature "git-tokens").
+   */
+  more: z.array(TaskGithubToken).max(20).optional(),
 });
 export type TaskGithub = z.infer<typeof TaskGithub>;
 

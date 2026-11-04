@@ -6,11 +6,12 @@ import { describe, expect, it } from "vitest";
 import { appJwt, pemToPkcs8 } from "../src/github/app";
 import type { ThreadAgent } from "../src/agents/thread-agent";
 import { listRepoFiles, readRepoFile } from "../src/github/files";
+import { projectGithubSecrets } from "../src/sandbox/backend";
 import { attributionBlock, withAttribution } from "../src/github/attribution";
 import { closePullRequest, deletePullBranch, listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
 import { githubLogin, projectRepoToken } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
-import { fakeGithub, INSTALLATION_TOKEN } from "./fake-github";
+import { fakeGithub, INSTALLATION_TOKEN, OTHER_INSTALLATION_TOKEN } from "./fake-github";
 
 const BASE = "http://myrel.test";
 // The GitHub settings are secrets (src/env.d.ts), which the generated test Env does not list.
@@ -682,11 +683,12 @@ describe("GitHub on the person's computer", () => {
   type Start = Extract<ServerToRunner, { type: "task.start" }>;
 
   /** A project with acme/app connected, worked on by `user`'s paired computer, whose runner announces `features`. */
-  async function localProject(features: string[]) {
+  async function localProject(features: string[], connectMore?: (user: string, projectId: string) => Promise<void>) {
     const user = await signUp();
     await connect(user);
     const project = await createProject(user);
     await api(`/api/projects/${project.id}/repos`, { method: "POST", token: user, body: JSON.stringify({ installationId: 42, repoId: 7 }) });
+    await connectMore?.(user, project.id);
     const { code } = (await (await api("/api/runners/pairing", { method: "POST", token: user })).json()) as { code: string };
     const paired = (await (await api("/api/runner/pair", { method: "POST", body: JSON.stringify({ code, name: "Laptop" }) })).json()) as {
       runner: { id: string };
@@ -727,6 +729,7 @@ describe("GitHub on the person's computer", () => {
     return { frames, send, ws, start, threadAgent, author };
   }
 
+  let restore = () => {};
   const revoked = () => fakeGithub.requests.filter((r) => r.method === "DELETE" && r.url.endsWith("/installation/token"));
 
   it("lends a local turn a token of its own for the project's repositories, renews it and revokes it when the turn ends", { timeout: 30_000 }, async () => {
@@ -751,6 +754,91 @@ describe("GitHub on the person's computer", () => {
     await until(() => revoked().length === before + 2, "tokens revoked at the end of the turn");
     expect(revoked().at(-1)?.auth).toBe(INSTALLATION_TOKEN);
     ws.close();
+  });
+
+  /** Connects acme/app first and then zeta/site, of another installation, whose name sorts after it. */
+  async function twoInstallations(run: (user: string, projectId: string) => Promise<void>) {
+    fakeGithub.installations.push(fakeGithub.otherInstallation);
+    try {
+      const user = await signUp();
+      await connect(user);
+      const project = await createProject(user);
+      for (const body of [
+        { installationId: 42, repoId: 7 },
+        { installationId: 43, repoId: 9 },
+      ]) {
+        expect((await api(`/api/projects/${project.id}/repos`, { method: "POST", token: user, body: JSON.stringify(body) })).status).toBe(201);
+      }
+      await run(user, project.id);
+    } finally {
+      fakeGithub.installations.pop();
+    }
+  }
+
+  it("keeps every repository reachable when a second one comes from another installation", { timeout: 30_000 }, async () => {
+    const before = revoked().length;
+    fakeGithub.installations.push(fakeGithub.otherInstallation);
+    try {
+      const { frames, send, ws, start, threadAgent, author } = await localProject(["cancel", "agent", "git-token", "git-tokens"], async (user, projectId) => {
+        await api(`/api/projects/${projectId}/repos`, { method: "POST", token: user, body: JSON.stringify({ installationId: 43, repoId: 9 }) });
+      });
+      expect(start.github).toMatchObject({ token: INSTALLATION_TOKEN, repos: ["acme/app"], more: [{ token: OTHER_INSTALLATION_TOKEN, repos: ["zeta/site"] }] });
+      expect(ServerToRunner.safeParse(start).success).toBe(true);
+
+      // A renewal keeps both, and the turn's end revokes all four.
+      await threadAgent.renewGithub({ taskId: start.taskId, requester: author });
+      const renewed = await until(() => frames.find((f) => f.type === "task.github"), "task.github");
+      expect(renewed).toMatchObject({ github: { repos: ["acme/app"], more: [{ repos: ["zeta/site"] }] } });
+      send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+      await until(() => revoked().length === before + 4, "tokens revoked at the end of the turn");
+      ws.close();
+    } finally {
+      fakeGithub.installations.pop();
+    }
+  });
+
+  it("gives an older runner the token of the first connected repository, whichever name sorts first", { timeout: 30_000 }, async () => {
+    fakeGithub.installations.push(fakeGithub.otherInstallation);
+    const renamed = fakeGithub.otherRepos[0]!;
+    const name = renamed.full_name;
+    // The new repository sorts before the first one: it used to take the token from it.
+    renamed.full_name = "aaa/site";
+    try {
+      const { send, ws, start } = await localProject(["cancel", "agent", "git-token"], async (user, projectId) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await api(`/api/projects/${projectId}/repos`, { method: "POST", token: user, body: JSON.stringify({ installationId: 43, repoId: 9 }) });
+      });
+      expect(start.github).toMatchObject({ token: INSTALLATION_TOKEN, repos: ["acme/app"] });
+      expect(start.github!.more).toBeUndefined();
+      send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+      ws.close();
+    } finally {
+      renamed.full_name = name;
+      fakeGithub.installations.pop();
+    }
+  });
+
+  it("does not lose the other repositories over one its installation no longer covers", { timeout: 30_000 }, async () => {
+    const { send, ws, start } = await localProject(["cancel", "agent", "git-token", "git-tokens"], async (user, projectId) => {
+      await api(`/api/projects/${projectId}/repos`, { method: "POST", token: user, body: JSON.stringify({ installationId: 42, repoId: 8 }) });
+      // GitHub's webhook about it never came.
+      const docs = fakeGithub.repos.splice(1, 1)[0]!;
+      restore = () => fakeGithub.repos.push(docs);
+    });
+    restore();
+    expect(start.github).toMatchObject({ token: INSTALLATION_TOKEN, repos: ["acme/app"] });
+    send({ type: "task.done", taskId: start.taskId, ok: true, result: "Done." });
+    ws.close();
+  });
+
+  it("gives a cloud turn a token per installation", { timeout: 30_000 }, async () => {
+    await twoInstallations(async (_user, projectId) => {
+      expect(await projectGithubSecrets(env, projectId, 600)).toEqual({
+        GITHUB_TOKEN: INSTALLATION_TOKEN,
+        GITHUB_TOKEN_1: OTHER_INSTALLATION_TOKEN,
+        GITHUB_REPOS_1: "zeta/site",
+      });
+    });
   });
 
   it("lends the token without workflows while the installation has not accepted that permission", { timeout: 30_000 }, async () => {

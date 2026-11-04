@@ -21,7 +21,16 @@ export const CREDENTIALS_VAR = "MYREL_GIT_CREDENTIALS";
 /** More repositories than this would make the git settings too long for one environment variable. */
 const MAX_REPOS = 40;
 
-type Lent = { token: string; expiresAt: number };
+/** A run's tokens by repository in lower case: each covers its own installation's (see TaskGithub). */
+type Lent = Map<string, { token: string; expiresAt: number }>;
+
+function lentOf(github: TaskGithub): Lent {
+  const lent: Lent = new Map();
+  for (const { token, expiresAt, repos } of [github, ...(github.more ?? [])]) {
+    for (const repo of repos) lent.set(repo.toLowerCase(), { token, expiresAt: Date.parse(expiresAt) });
+  }
+  return lent;
+}
 
 export class GitCredentials {
   private readonly lent = new Map<string, Lent>();
@@ -29,23 +38,24 @@ export class GitCredentials {
   private port: Promise<number> | null = null;
   private server: Server | null = null;
 
-  /** Lends the token to a task's run; returns the environment variables its CLI gets. */
+  /** Lends the tokens to a task's run; returns the environment variables its CLI gets. */
   async lend(taskId: string, github: TaskGithub): Promise<Record<string, string>> {
     const key = randomBytes(32).toString("hex");
     this.keyOf.set(taskId, key);
-    this.lent.set(key, { token: github.token, expiresAt: Date.parse(github.expiresAt) });
+    this.lent.set(key, lentOf(github));
     try {
-      return gitEnv(`http://127.0.0.1:${await this.listen()}/${key}`, github.repos);
+      const repos = [github, ...(github.more ?? [])].flatMap((g) => g.repos);
+      return gitEnv(`http://127.0.0.1:${await this.listen()}/${key}`, repos);
     } catch (err) {
       this.end(taskId);
       throw err;
     }
   }
 
-  /** A new token for a running task, from "task.github". */
+  /** New tokens for a running task, from "task.github". */
   renew(taskId: string, github: TaskGithub) {
     const key = this.keyOf.get(taskId);
-    if (key) this.lent.set(key, { token: github.token, expiresAt: Date.parse(github.expiresAt) });
+    if (key) this.lent.set(key, lentOf(github));
   }
 
   /** The run ended: its address answers no more. */
@@ -65,7 +75,9 @@ export class GitCredentials {
   private listen(): Promise<number> {
     this.port ??= new Promise<number>((resolve, reject) => {
       const server = createServer((req, res) => {
-        const lent = req.method === "GET" ? this.lent.get((req.url ?? "").slice(1)) : undefined;
+        // /<the run's key>/<owner>/<name>
+        const [key = "", ...repo] = (req.url ?? "").slice(1).split("/");
+        const lent = req.method === "GET" ? this.lent.get(key)?.get(repo.join("/").toLowerCase()) : undefined;
         if (!lent || lent.expiresAt <= Date.now()) {
           res.writeHead(404).end();
           return;
@@ -99,14 +111,14 @@ export function gitEnv(
   base = process.env.GIT_CONFIG_PARAMETERS,
   self = selfCommand(),
 ): Record<string, string> {
-  const helper = `!${[self.command, ...self.args].map(shellWord).join(" ")} git-credential`;
+  const helper = (repo: string) => `!${[self.command, ...self.args].map(shellWord).join(" ")} git-credential ${shellWord(repo)}`;
   const entries: [string, string][] = [];
   // The folder's remote may spell the name in another case (a renamed repository, say).
   const names = [...new Set(repos.slice(0, MAX_REPOS).flatMap((r) => [r, r.toLowerCase()]))];
   for (const name of names) {
     for (const https of [`https://github.com/${name}`, `https://github.com/${name}.git`]) {
       // An empty helper drops the ones set before it, so only Myrel's answers for this repository.
-      entries.push([`credential.${https}.helper`, ""], [`credential.${https}.helper`, helper]);
+      entries.push([`credential.${https}.helper`, ""], [`credential.${https}.helper`, helper(name)]);
     }
     entries.push(
       [`url.https://github.com/${name}.git.insteadOf`, `git@github.com:${name}.git`],
@@ -127,14 +139,15 @@ function shellWord(s: string): string {
 }
 
 /**
- * `myrel-runner git-credential <operation>`: started by git, never by people. Answers "get" for
- * github.com over HTTPS with the token of the run it was started in; ignores "store" and "erase".
+ * `myrel-runner git-credential <owner/name> <operation>`: started by git, never by people. Answers
+ * "get" for github.com over HTTPS with the token that covers that repository in the run it was
+ * started in; ignores "store" and "erase".
  */
-export async function runGitCredential(operation: string | undefined, input: NodeJS.ReadableStream, out: (text: string) => void) {
+export async function runGitCredential(repo: string | undefined, operation: string | undefined, input: NodeJS.ReadableStream, out: (text: string) => void) {
   let text = "";
   for await (const chunk of input) text += String(chunk);
   const url = process.env[CREDENTIALS_VAR];
-  if (operation !== "get" || !url) return;
+  if (operation !== "get" || !url || !repo) return;
   const fields = new Map(
     text
       .split("\n")
@@ -143,7 +156,7 @@ export async function runGitCredential(operation: string | undefined, input: Nod
   );
   if (fields.get("protocol") !== "https" || fields.get("host") !== "github.com") return;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${url}/${repo}`, { signal: AbortSignal.timeout(5000) });
     if (res.ok) out(await res.text());
   } catch {
     // The run is over or the runner is gone: git asks for a login the usual way.
