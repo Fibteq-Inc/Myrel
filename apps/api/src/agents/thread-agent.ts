@@ -49,7 +49,7 @@ import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
-import { listRepoIssues, readRepoIssue } from "../github/issues";
+import { type NewIssue, checkNewIssues, listRepoIssues, openRepoIssues, readRepoIssue } from "../github/issues";
 import type { PullCredit } from "../github/attribution";
 import {
   CONFLICT_RETRY_SEC,
@@ -97,7 +97,9 @@ import {
   describeCommand,
   describeRequest,
   insideAny,
+  opensIssue,
   opensPullRequest,
+  USE_OPEN_ISSUES,
   USE_OPEN_PULL_REQUEST,
 } from "./folder-access";
 import { answeredSshMessage, sshAnswer, sshMessage, sshToolOutput } from "./ssh-access";
@@ -114,6 +116,7 @@ import {
   approvalResultMessage,
   type ExternalApproval,
   GUARDED_TOOLS,
+  MAX_THREAD_ISSUES,
   markedMessage,
   wrapExternal,
 } from "./external";
@@ -370,7 +373,7 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     // A tap on the branch card deletes it (or keeps it) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
-    // A tap on a card for a memory or routine change in a marked thread makes the change (or not) without a turn.
+    // A tap on a card for a guarded call (memory, routine, new issues) makes the change (or not) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerExternalApproval(reason))) return;
     if (reason.kind === "github" && reason.external) await this.markExternal(reason.external);
     if (reason.kind === "coordinator") {
@@ -1203,6 +1206,8 @@ export class ThreadAgent extends Agent<Env> {
         if (!outside.length) {
           // Pull requests go through Myrel's GitHub App, which credits the person and follows them.
           if (opensPullRequest(input)) return denyAnswer(USE_OPEN_PULL_REQUEST);
+          // Issues too, or the person's own gh would go around the tool's card.
+          if (opensIssue(input)) return denyAnswer(USE_OPEN_ISSUES);
           if (this.getMeta("access_commands")) return allowAnswer(input);
           const command = describeCommand(tool_name, input);
           const answer = await this.askAccess(command, command, "command");
@@ -1664,6 +1669,11 @@ export class ThreadAgent extends Agent<Env> {
     if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
   }
 
+  /** The issues this thread opened, by repository and title (see openRepoIssues). */
+  private openedIssues(): Record<string, string> {
+    return JSON.parse(this.getMeta("opened_issues") ?? "{}") as Record<string, string>;
+  }
+
   private language(): string {
     return (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language ?? this.getMeta("language") ?? "en";
   }
@@ -1674,7 +1684,7 @@ export class ThreadAgent extends Agent<Env> {
    */
   private async askExternalApproval(name: string, input: Record<string, unknown>): Promise<string> {
     const open = JSON.parse(this.getMeta("external_approval") ?? "null") as ExternalApproval | null;
-    if (open) return "Not done yet: a card for another memory or routine change is already waiting for the person. Mention this change in your reply; it can be asked for once that card is answered.";
+    if (open) return "Not done yet: a card for another change is already waiting for the person. Mention this change in your reply; it can be asked for once that card is answered.";
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const body = approvalMessage(name, input, this.externalSources(), this.language());
@@ -1682,11 +1692,12 @@ export class ThreadAgent extends Agent<Env> {
     if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
     this.setMeta("external_approval", JSON.stringify({ tool: name, input, requester: this.getMeta("requester") || null, messageId: m.id } satisfies ExternalApproval));
     await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
-    return "Not done yet: this thread read content from outside the project, so this change waits for a person's OK on a card in the thread. Myrel makes it exactly as you asked once they allow it; do not call the tool again. Carry on with the rest of the work and say in your reply that the change waits for their approval.";
+    const why = this.externalSources().length ? "this thread read content from outside the project, so this change" : "this change";
+    return `Not done yet: ${why} waits for a person's OK on a card in the thread. Myrel makes it exactly as you asked once they allow it; do not call the tool again. Carry on with the rest of the work and say in your reply that the change waits for their approval.`;
   }
 
   /**
-   * A person answered the card for a memory or routine change. "Allow" from the person the thread
+   * A person answered the card for a guarded call. "Allow" from the person the thread
    * works for, or a project owner or admin, runs the call as the agent made it; anyone else's tap is
    * refused. Neither needs a turn. Returns true when it was an answer.
    */
@@ -1850,6 +1861,11 @@ export class ThreadAgent extends Agent<Env> {
           if (read.external) await this.markExternal(read.external);
           return read.text;
         },
+        openIssues: async (repo, issues) =>
+          openRepoIssues(this.env, projectId, repo, issues, await this.pullCredit(), {
+            get: (key) => this.openedIssues()[key],
+            add: (key, url) => this.setMeta("opened_issues", JSON.stringify({ ...this.openedIssues(), [key]: url })),
+          }),
         trackPullRequest: async (url) => {
           const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
@@ -1927,6 +1943,20 @@ export class ThreadAgent extends Agent<Env> {
     // In a thread that read outside text, memory and routine changes wait for a person's card; files
     // people uploaded (often from outside) come back as data.
     const checked = tools.map((t): Tool => {
+      // The turn works for a person and read nothing from outside: opened like a pull request.
+      // Otherwise a card: a marked thread, a turn that works for nobody, or very many issues.
+      if (t.name === "open_issues") {
+        return {
+          ...t,
+          run: async (input) => {
+            const { issues } = input as { issues: NewIssue[] };
+            checkNewIssues(issues);
+            const many = Object.keys(this.openedIssues()).length + issues.length > MAX_THREAD_ISSUES;
+            const ask = this.externalSources().length > 0 || !this.getMeta("requester") || many;
+            return ask ? this.askExternalApproval(t.name, input as Record<string, unknown>) : t.run(input);
+          },
+        };
+      }
       if (GUARDED_TOOLS.has(t.name)) {
         return { ...t, run: async (input) => (this.externalSources().length ? this.askExternalApproval(t.name, input as Record<string, unknown>) : t.run(input)) };
       }

@@ -298,7 +298,7 @@ const claude: CliAdapter = {
     return {
       // Strict: only the servers above. With --mcp-config, `claude -p` waits for every MCP server the
       // person set up for themselves too before its first model call, up to 30s for one that hangs.
-      // Pull requests go through Myrel's open_pull_request tool (the GitHub App), never the person's gh.
+      // Pull requests and issues go through Myrel's tools (the GitHub App), never the person's gh.
       args: [
         "--mcp-config",
         config,
@@ -306,7 +306,7 @@ const claude: CliAdapter = {
         "--allowedTools",
         allowed.join(","),
         "--disallowedTools",
-        ["Bash(gh pr create:*)", ...(asks ? [] : SSH_COMMANDS)].join(","),
+        ["Bash(gh pr create:*)", "Bash(gh issue create:*)", ...(asks ? [] : SSH_COMMANDS)].join(","),
         "--settings",
         settings,
         ...skillArgs,

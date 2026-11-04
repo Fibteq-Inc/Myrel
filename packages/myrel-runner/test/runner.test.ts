@@ -281,7 +281,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     const claude = await ADAPTERS.claude.agent({ ...mcp(), asks: true, access: "full" });
     const allowed = claude.args[claude.args.indexOf("--allowedTools") + 1];
     expect(allowed).toBe("mcp__myrel,Bash,WebFetch,WebSearch");
-    expect(claude.args[claude.args.indexOf("--disallowedTools") + 1]).toBe("Bash(gh pr create:*)");
+    expect(claude.args[claude.args.indexOf("--disallowedTools") + 1]).toBe("Bash(gh pr create:*),Bash(gh issue create:*)");
     const settings = JSON.parse(await readFile(claude.args[claude.args.indexOf("--settings") + 1]!, "utf8"));
     expect(settings.permissions.ask).toEqual(["Bash(ssh:*)", "Bash(scp:*)", "Bash(sftp:*)", "Bash(rsync:*)"]);
     expect(settings.permissions.deny).toEqual([
@@ -308,7 +308,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
       "--allowedTools",
       "mcp__myrel,mcp__linear,mcp__db",
       "--disallowedTools",
-      "Bash(gh pr create:*),Bash(ssh:*),Bash(scp:*),Bash(sftp:*),Bash(rsync:*)",
+      "Bash(gh pr create:*),Bash(gh issue create:*),Bash(ssh:*),Bash(scp:*),Bash(sftp:*),Bash(rsync:*)",
     ]);
     const config = JSON.parse(await readFile(claude.args[1]!, "utf8"));
     expect(config.mcpServers.linear).toEqual({ type: "http", url: connectors[0]!.url, headers: { Authorization: `Bearer ${"t".repeat(32)}` } });

@@ -46,6 +46,9 @@ export const fakeGithub = {
   workflowsGranted: true,
   /** Issues by "owner/name", in GitHub's REST shape, each with its `comment_list`. */
   issues: {} as Record<string, ({ number: number; comment_list?: unknown[] } & Record<string, unknown>)[]>,
+  /** Labels a repository has, and the repositories with issues turned off (open_issues). */
+  labels: {} as Record<string, string[]>,
+  issuesOff: [] as string[],
   /** Whether installation 42 accepted the app's issues permission. */
   issuesGranted: true,
 };
@@ -199,7 +202,27 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     fakeGithub.pulls[key] = { ...p, state: "closed", merged: true };
     return Response.json({ merged: true, sha: "merge-sha" });
   }
+  const labels = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/labels$/);
+  if (labels && method === "GET") return Response.json((fakeGithub.labels[labels[1]!] ?? []).map((name) => ({ name })));
   const issues = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+)(\/comments)?)?$/);
+  if (issues && !issues[2] && method === "POST") {
+    if (fakeGithub.issuesOff.includes(issues[1]!)) return Response.json({ message: "Issues are disabled for this repo" }, { status: 410 });
+    const all = (fakeGithub.issues[issues[1]!] ??= []);
+    const number = all.length + 100;
+    const made = {
+      ...(body as Record<string, unknown>),
+      number,
+      state: "open",
+      labels: ((body as { labels?: string[] }).labels ?? []).map((name) => ({ name })),
+      user: { login: "myrel-test[bot]", type: "Bot" },
+      author_association: "NONE",
+      created_at: "2026-11-04T10:00:00Z",
+      updated_at: "2026-11-04T10:00:00Z",
+      html_url: `https://github.com/${issues[1]!}/issues/${number}`,
+    };
+    all.push(made);
+    return Response.json(made, { status: 201 });
+  }
   if (issues && method === "GET") {
     const all = fakeGithub.issues[issues[1]!] ?? [];
     const strip = ({ comment_list: _, ...i }: (typeof all)[number]) => ({ ...i, comments: (_ ?? []).length });

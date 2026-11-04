@@ -1,6 +1,7 @@
 import { type ExternalTrust, wrapExternal } from "../agents/external";
 import type { ProjectRepoIssues } from "@myrel/protocol";
-import { GithubError, type GithubEnv, githubFetch } from "./app";
+import { GithubError, type GithubEnv, appSlug, githubFetch } from "./app";
+import { type PullCredit, creditLine } from "./attribution";
 import { projectRepoToken } from "./store";
 
 /**
@@ -8,6 +9,9 @@ import { projectRepoToken } from "./store";
  * read with a token of their own (issues: read), never the turn's token, so every issue's text
  * reaches the agent as data (agents/external.ts). On a public repository anyone can open an issue
  * or comment: text from people without a hand in the repository is untrusted and marks the thread.
+ *
+ * The open_issues tool writes with a token of its own too (issues: write), made for that one call on
+ * the server, so the turn's token stays without issues and gh cannot go around the tool or its card.
  */
 
 type IssuesEnv = GithubEnv & { DB: D1Database };
@@ -41,13 +45,22 @@ export function issueTrust(association?: string): ExternalTrust {
   return association === "OWNER" || association === "MEMBER" || association === "COLLABORATOR" ? "member" : "untrusted";
 }
 
+/**
+ * How far to trust an author, knowing Myrel's own app: GitHub calls an app "NONE", so without this
+ * every issue open_issues opened would mark each thread that lists them and show as an outsider's.
+ */
+async function authorTrust(env: IssuesEnv) {
+  const own = await appSlug(env).then((slug) => `${slug}[bot]`.toLowerCase()).catch(() => null);
+  return (author: User, association?: string): ExternalTrust => (own && author?.login.toLowerCase() === own ? "member" : issueTrust(association));
+}
+
 function cut(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}\n[cut at ${max} of ${text.length} characters]` : text;
 }
 
-async function issuesToken(env: IssuesEnv, projectId: string, repo: string) {
+async function issuesToken(env: IssuesEnv, projectId: string, repo: string, access: "read" | "write" = "read") {
   try {
-    return await projectRepoToken(env, projectId, repo, { issues: "read", metadata: "read" });
+    return await projectRepoToken(env, projectId, repo, { issues: access, metadata: "read" });
   } catch (err) {
     // An installation that was never granted the app's issues permission.
     if (err instanceof GithubError && err.status === 422) {
@@ -71,6 +84,7 @@ async function fetchRepoIssues(env: IssuesEnv, projectId: string, repo: string, 
 
 /** For people: each connected repository's issues as the Issues tab shows them, without their text. */
 export async function projectIssues(env: IssuesEnv, projectId: string, repos: string[], state: ListOpts["state"]): Promise<ProjectRepoIssues[]> {
+  const trust = await authorTrust(env);
   return Promise.all(
     repos.map(async (repo): Promise<ProjectRepoIssues> => {
       try {
@@ -84,7 +98,7 @@ export async function projectIssues(env: IssuesEnv, projectId: string, repos: st
             state: i.state === "closed" ? "closed" : "open",
             url: i.html_url,
             author: i.user?.login ?? "ghost",
-            member: issueTrust(i.author_association) === "member",
+            member: trust(i.user, i.author_association) === "member",
             labels: i.labels.map((l) => (typeof l === "string" ? l : l.name)).filter((l): l is string => !!l),
             comments: i.comments,
             createdAt: i.created_at,
@@ -109,7 +123,8 @@ export async function listRepoIssues(env: IssuesEnv, projectId: string, repo: st
     return `#${i.number} [${i.state}] ${i.title} · by ${i.user?.login ?? "ghost"} (${i.author_association ?? "NONE"}) · ${i.comments} comments · updated ${i.updated_at}${labels.length ? ` · labels: ${labels.join(", ")}` : ""}`;
   });
   // Titles are their authors' words: the list is as trusted as its least trusted author.
-  const trust: ExternalTrust = issues.every((i) => issueTrust(i.author_association) === "member") ? "member" : "untrusted";
+  const authors = await authorTrust(env);
+  const trust: ExternalTrust = issues.every((i) => authors(i.user, i.author_association) === "member") ? "member" : "untrusted";
   const wrapped = wrapExternal({ source: "github-issues", ref: r.fullName, trust }, lines.join("\n"));
   return { text: `${wrapped.text}\nRead one with repo_read_issue.`, external: wrapped.taints ? `github-issues:${r.fullName}` : null };
 }
@@ -124,8 +139,9 @@ export async function readRepoIssue(env: IssuesEnv, projectId: string, repo: str
     : [];
   const ref = `${r.fullName}#${number}`;
   let taints = false;
+  const authors = await authorTrust(env);
   const block = (author: User, association: string | undefined, text: string, max: number) => {
-    const w = wrapExternal({ source: "github-issue", ref, author: author?.login ?? "ghost", trust: issueTrust(association) }, cut(text, max));
+    const w = wrapExternal({ source: "github-issue", ref, author: author?.login ?? "ghost", trust: authors(author, association) }, cut(text, max));
     taints ||= w.taints;
     return w.text;
   };
@@ -143,4 +159,88 @@ export async function readRepoIssue(env: IssuesEnv, projectId: string, repo: str
   const more = from + comments.length < issue.comments ? `\n[comments ${from + 1}-${from + comments.length} of ${issue.comments}; pass page ${page + 1} for more]` : "";
   const text = [...head, ...(shown.length ? [`${issue.comments} comments:`, ...shown] : [issue.comments ? `No comments on page ${page}.` : "No comments."])].join("\n\n") + more;
   return { text, external: taints ? `github-issue:${ref}` : null };
+}
+
+export type NewIssue = { title: string; body?: string; labels?: string[] };
+
+/** Longest description one issue and one call may carry: a person reads all of it on the card. */
+export const MAX_NEW_ISSUE_BODY = 8000;
+const MAX_NEW_ISSUES_TOTAL = 30_000;
+
+const SECRET = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[abeprs]-[A-Za-z0-9-]{10,})|-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const CODE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
+const MENTION = /(?:^|[^\w`/.-])@[a-z0-9][a-z0-9-]*/im;
+
+/**
+ * Refuses what must not reach GitHub, before any card: an issue can be read by everyone who sees the
+ * repository and Myrel cannot delete it, and an @mention sends GitHub's notification to that person.
+ * The message never repeats the secret.
+ */
+export function checkNewIssues(issues: NewIssue[]): void {
+  const total = issues.reduce((sum, i) => sum + i.title.length + (i.body?.length ?? 0), 0);
+  if (total > MAX_NEW_ISSUES_TOTAL) throw new Error(`These issues are too long together (${total} characters, at most ${MAX_NEW_ISSUES_TOTAL}). Shorten them or open them in two calls.`);
+  for (const { title, body } of issues) {
+    const text = `${title}\n${body ?? ""}`;
+    if (SECRET.test(text)) throw new Error(`Nothing was opened: "${title.replace(SECRET, "[secret]")}" contains what looks like a token or private key. Take it out and call again.`);
+    if (MENTION.test(text.replace(CODE, " "))) throw new Error(`Nothing was opened: "${title}" has an @mention, which would notify that person on GitHub. Write the name without @, or in backticks if it is code, and call again.`);
+  }
+}
+
+/**
+ * Opens issues on a connected repository through Myrel's GitHub App, each crediting the person and
+ * assigned to them when they have a GitHub login. `opened` holds what the thread already opened, by
+ * repository and title, so a turn that repeats itself after a restart does not open them twice. Stops
+ * at the first failure and says which were not opened; throws when none was. One line per issue.
+ */
+export async function openRepoIssues(
+  env: IssuesEnv,
+  projectId: string,
+  repo: string,
+  issues: NewIssue[],
+  credit: PullCredit,
+  opened: { get(key: string): string | undefined; add(key: string, url: string): void },
+): Promise<string> {
+  checkNewIssues(issues);
+  const { token, repo: r } = await issuesToken(env, projectId, repo, "write");
+  const keyOf = (i: NewIssue) => `${r.fullName}\n${i.title.trim()}`.toLowerCase();
+  // Only labels the repository has: GitHub would make up new ones. Skipped when listing them fails.
+  const wanted = issues.some((i) => i.labels?.length && !opened.get(keyOf(i)));
+  const known = wanted
+    ? await githubFetch<{ name: string }[]>(token, `/repos/${r.fullName}/labels?per_page=100`).catch((err) => (console.warn("listing labels failed", r.fullName, err), []))
+    : [];
+  const byName = new Map(known.map((l) => [l.name.toLowerCase(), l.name]));
+  const credited = creditLine(credit);
+  const lines: string[] = [];
+  let done = 0;
+  for (const [index, issue] of issues.entries()) {
+    const key = keyOf(issue);
+    const already = opened.get(key);
+    if (already) {
+      lines.push(`${already} · ${issue.title} (this thread already opened it)`);
+      done++;
+      continue;
+    }
+    const labels = (issue.labels ?? []).map((l) => byName.get(l.toLowerCase())).filter((l): l is string => !!l);
+    const dropped = (issue.labels ?? []).filter((l) => !byName.has(l.toLowerCase()));
+    try {
+      const made = await githubFetch<{ number: number; html_url: string }>(token, `/repos/${r.fullName}/issues`, {
+        method: "POST",
+        body: { title: issue.title, body: [credited, issue.body?.trim()].filter(Boolean).join("\n\n"), ...(labels.length && { labels }) },
+      });
+      opened.add(key, made.html_url);
+      done++;
+      lines.push(`${made.html_url} · ${issue.title}${dropped.length ? ` (no such label: ${dropped.join(", ")})` : ""}`);
+      if (credit.login) {
+        await githubFetch(token, `/repos/${r.fullName}/issues/${made.number}/assignees`, { method: "POST", body: { assignees: [credit.login] } }).catch((err) =>
+          console.warn("issue not assigned", made.html_url, err),
+        );
+      }
+    } catch (err) {
+      const why = err instanceof GithubError && err.status === 410 ? `issues are turned off on ${r.fullName}` : err instanceof Error ? err.message : String(err);
+      if (!done) throw new Error(`No issue was opened: ${why}`);
+      lines.push(`Not opened: ${issues.slice(index).map((i) => `"${i.title}"`).join(", ")} (${why})`);
+      break;
+    }
+  }
+  return lines.join("\n");
 }

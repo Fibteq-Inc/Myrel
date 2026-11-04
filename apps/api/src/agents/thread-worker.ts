@@ -10,6 +10,7 @@ import {
   type Thread,
 } from "@myrel/protocol";
 import { z } from "zod";
+import { MAX_NEW_ISSUE_BODY } from "../github/issues";
 import { type Tool, tool } from "../llm";
 import { type KnowledgeSnapshot, renderKnowledge } from "./knowledge";
 import { Plan } from "./plan";
@@ -49,6 +50,8 @@ export type ThreadHost = {
   listRepoIssues(repo: string, opts: { state?: "open" | "closed" | "all"; labels?: string; limit?: number }): Promise<string>;
   /** One issue with a page of its comments, as data. */
   readRepoIssue(repo: string, number: number, page?: number): Promise<string>;
+  /** Opens issues on a connected repository through Myrel's GitHub App; one line per issue. */
+  openIssues(repo: string, issues: { title: string; body?: string; labels?: string[] }[]): Promise<string>;
 };
 
 export type CoordinatorNote = { body: string; createdAt: string; isNew: boolean };
@@ -387,6 +390,25 @@ export function threadTools(host: ThreadHost): Tool[] {
         page: z.number().int().min(1).default(1).describe("Page of comments, 30 per page."),
       }),
       run: ({ repo, number, page }) => host.readRepoIssue(repo, number, page),
+    }),
+    tool({
+      name: "open_issues",
+      description:
+        "Open up to 10 issues on a connected GitHub repository through Myrel's GitHub App, in one call when you have several: it needs no GitHub sign-in or gh on your side, credits the person this thread works for with a link back here, and assigns them. Everyone who can see the repository can read them and Myrel cannot delete them, so no secrets or private details, and no @mentions. Sometimes a person's OK comes first: the tool says so, and Myrel opens them once they allow it. Do not call it again then.",
+      input: z.object({
+        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        issues: z
+          .array(
+            z.object({
+              title: z.string().trim().min(1).max(256),
+              body: z.string().max(MAX_NEW_ISSUE_BODY).optional().describe("What and why, in Markdown. Myrel adds the credit line on top itself."),
+              labels: z.array(z.string().min(1).max(50)).max(10).optional().describe("Only labels the repository already has are applied."),
+            }),
+          )
+          .min(1)
+          .max(10),
+      }),
+      run: ({ repo, issues }) => host.openIssues(repo, issues),
     }),
     tool({
       name: "request_repo_connection",
