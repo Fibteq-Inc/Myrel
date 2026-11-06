@@ -207,6 +207,32 @@ export async function projectRepoToken(
   return { token, repo };
 }
 
+/** A repository a person reaches through one of their GitHub App installations, or why they do not. */
+export type UserRepoResult = { ok: true; repo: GithubApiRepo; installationId: number } | { ok: false; reason: "github_reauth" | "not_installed" };
+
+/**
+ * Finds a repository by name among the installations the person's last GitHub sign-in showed them.
+ * github_reauth: they never signed in to GitHub here, or it was too long ago; not_installed: none of
+ * their installations covers it, or they cannot reach it themselves. Going through the person keeps
+ * one account's installation out of another's reach: Myrel's app could write to every repository it
+ * is installed on, whoever asks.
+ */
+export async function findUserRepo(env: GithubEnv & { DB: D1Database }, userId: string, fullName: string): Promise<UserRepoResult> {
+  const name = fullName.trim().toLowerCase();
+  const installs = await listUserInstallations(env.DB, userId);
+  if (!installs.length || (await githubGrantStale(env.DB, userId))) return { ok: false, reason: "github_reauth" };
+  for (const install of installs) {
+    const repos = await installationRepos(env, install.id).catch((err) => {
+      console.warn("listing installation repos failed", install.id, err);
+      return [] as GithubApiRepo[];
+    });
+    const repo = repos.find((r) => r.full_name.toLowerCase() === name);
+    // The installation may cover repositories this person cannot see on GitHub.
+    if (repo && (await userCanReachRepo(env.DB, userId, install.id, repo.id))) return { ok: true, repo, installationId: install.id };
+  }
+  return { ok: false, reason: "not_installed" };
+}
+
 /** Why a repository could not be connected by name (see connectRepoByName). */
 export type ConnectRepoResult =
   | { ok: true; repo: ProjectRepo; already: boolean }
@@ -234,31 +260,22 @@ export async function connectRepoByName(
   const name = fullName.trim().toLowerCase();
   const existing = (await listProjectRepos(env.DB, projectId)).find((r) => r.fullName.toLowerCase() === name);
   if (existing) return { ok: true, repo: existing, already: true };
-  const installs = await listUserInstallations(env.DB, userId);
-  if (!installs.length || (await githubGrantStale(env.DB, userId))) return { ok: false, reason: "github_reauth" };
-  for (const install of installs) {
-    const repos = await installationRepos(env, install.id).catch((err) => {
-      console.warn("listing installation repos failed", install.id, err);
-      return [] as GithubApiRepo[];
-    });
-    const repo = repos.find((r) => r.full_name.toLowerCase() === name);
-    // The installation may cover repositories this person cannot see on GitHub.
-    if (!repo || !(await userCanReachRepo(env.DB, userId, install.id, repo.id))) continue;
-    await d
-      .insert(projectRepos)
-      .values({
-        projectId,
-        repoId: repo.id,
-        installationId: install.id,
-        fullName: repo.full_name,
-        defaultBranch: repo.default_branch,
-        private: repo.private,
-        addedBy: userId,
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing();
-    const connected = (await listProjectRepos(env.DB, projectId)).find((r) => r.repoId === repo.id)!;
-    return { ok: true, repo: connected, already: false };
-  }
-  return { ok: false, reason: "not_installed" };
+  const found = await findUserRepo(env, userId, name);
+  if (!found.ok) return found;
+  const { repo, installationId } = found;
+  await d
+    .insert(projectRepos)
+    .values({
+      projectId,
+      repoId: repo.id,
+      installationId,
+      fullName: repo.full_name,
+      defaultBranch: repo.default_branch,
+      private: repo.private,
+      addedBy: userId,
+      createdAt: new Date(),
+    })
+    .onConflictDoNothing();
+  const connected = (await listProjectRepos(env.DB, projectId)).find((r) => r.repoId === repo.id)!;
+  return { ok: true, repo: connected, already: false };
 }

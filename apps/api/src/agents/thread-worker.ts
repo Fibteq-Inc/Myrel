@@ -400,9 +400,12 @@ export function threadTools(host: ThreadHost): Tool[] {
     tool({
       name: "open_issues",
       description:
-        "Open up to 10 issues on a connected GitHub repository through Myrel's GitHub App, in one call when you have several: it needs no GitHub sign-in or gh on your side, credits the person this thread works for with a link back here, and assigns them. Everyone who can see the repository can read them and Myrel cannot delete them, so no secrets or private details, and no @mentions. Sometimes a person's OK comes first: the tool says so, and Myrel opens them once they allow it. Do not call it again then.",
+        "Open up to 10 issues on a GitHub repository through Myrel's GitHub App, in one call when you have several: it needs no GitHub sign-in or gh on your side, credits the person this thread works for with a link back here, and assigns them. A repository not connected to the project works too, when Myrel's app is installed on it and the person can push to it: name it, and a person's OK on a card comes first. Everyone who can see the repository can read them and Myrel cannot delete them, so no secrets or private details, and no @mentions. The answer says which happened: links mean they are open; \"Not done yet\" means they wait on a card and Myrel opens them once allowed, so do not call it again then.",
       input: z.object({
-        repo: z.string().min(1).describe("owner/name, one of the connected repositories"),
+        repo: z
+          .string()
+          .regex(/^[\w.-]+\/[\w.-]+$/, "owner/name")
+          .describe("owner/name; a connected repository opens directly, any other asks a person first"),
         issues: z
           .array(
             z.object({

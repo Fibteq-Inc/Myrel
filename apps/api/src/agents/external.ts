@@ -112,6 +112,53 @@ export const ISSUE_WRITE_TOOLS = new Set(["comment_on_issue", "update_issue", "l
 /** Past this many issue writes in one thread, a person allows the rest even when they asked for the work. */
 export const MAX_THREAD_ISSUES = 30;
 
+/** Why a write on GitHub's issues needs a person's card; null when it runs directly. */
+export type IssueCardReason = "not_connected" | "marked" | "nobody" | "limit" | "outsider";
+
+/**
+ * The one rule for card or no card. Directly only when all of this holds: the repository is connected,
+ * the thread read nothing from outside, the turn works for a person, the thread is under its limit,
+ * and it changes nothing an outsider wrote.
+ */
+export function issueCardReason(state: { connected: boolean; marked: boolean; requester: string | null; overLimit: boolean; outsider?: boolean }): IssueCardReason | null {
+  if (!state.connected) return "not_connected";
+  if (state.marked) return "marked";
+  if (!state.requester) return "nobody";
+  if (state.outsider) return "outsider";
+  if (state.overLimit) return "limit";
+  return null;
+}
+
+/** What the agent is told about why a card came up. */
+const CARD_WHY: Record<IssueCardReason, string> = {
+  not_connected: "the repository is not connected to this project, so this change",
+  marked: "this thread read content from outside the project, so this change",
+  nobody: "this turn works for no person, so this change",
+  limit: "this thread made very many issue changes, so this one",
+  outsider: "this changes what someone outside the repository wrote, so it",
+};
+
+/** The tool's answer when a call was put on a card just now. */
+export function cardWaitsResult(reason: IssueCardReason | null): string {
+  return `Not done yet: ${reason ? CARD_WHY[reason] : "this change"} waits for a person's OK on a card in the thread. Myrel makes it exactly as you asked once they allow it; do not call the tool again. Carry on with the rest of the work and say in your reply that the change waits for their approval.`;
+}
+
+/** The tool's answer when a card is really on screen, unanswered, and another call comes. */
+export function cardOccupiedResult(open: Pick<ExternalApproval, "tool" | "input">, tool: string, input: Record<string, unknown>): string {
+  const { what } = describeCall(open.tool, open.input, "en");
+  return open.tool === tool && JSON.stringify(open.input) === JSON.stringify(input)
+    ? `Not done yet: this same change already waits on its card in the thread (${what}). Do not call the tool again; Myrel makes it once a person allows it.`
+    : `Not done yet: a card for another change is already waiting for the person (${what}). Mention this change in your reply; it can be asked for once that card is answered.`;
+}
+
+/**
+ * Whether a card that is on record is still on screen: clients show a card as answered from the first
+ * person's message after it, whatever that says (decisionAnswers), so from then on nobody can tap it.
+ */
+export function cardStillOpen(card: { seq: number } | null, later: { authorKind: string }[]): boolean {
+  return !!card && !later.some((m) => m.authorKind === "user");
+}
+
 /** One call waiting on a person's card, kept on the thread until answered. `requester`: who may answer besides owners and admins. */
 export type ExternalApproval = { tool: string; input: Record<string, unknown>; requester: string | null; messageId: string };
 
@@ -201,11 +248,13 @@ function decision(l: Lang, tool: string): DecisionInput {
 }
 
 /** The card: what the agent wants to change, the whole change, why it asks, and who may answer. */
-export function approvalMessage(tool: string, input: Record<string, unknown>, sources: string[], language: string): string {
+export function approvalMessage(tool: string, input: Record<string, unknown>, sources: string[], language: string, notConnected = false): string {
   const l = lang(language);
   const { what, detail } = describeCall(tool, input, language);
   const from = sources.slice(0, 5).join(", ");
-  const read = !from ? "" : l === "tr" ? `Bu thread dışarıdan gelen içerik okudu (${from}). ` : `This thread read content from outside the project (${from}). `;
+  const repoName = typeof input.repo === "string" ? input.repo : "";
+  const outside = !notConnected ? "" : l === "tr" ? `**${repoName}** bu projeye bağlı değil. ` : `**${repoName}** is not connected to this project. `;
+  const read = `${outside}${!from ? "" : l === "tr" ? `Bu thread dışarıdan gelen içerik okudu (${from}). ` : `This thread read content from outside the project (${from}). `}`;
   const intro =
     tool === "open_issues"
       ? l === "tr"
@@ -222,7 +271,8 @@ export function approvalMessage(tool: string, input: Record<string, unknown>, so
     l === "tr"
       ? "Yalnızca thread'i isteyen kişi ya da projenin sahibi veya bir yöneticisi yanıtlayabilir."
       : "Only the person this thread works for, or the project's owner or an admin, can answer.";
-  return `${intro}${detail ? `\n\n${block(detail)}` : ""}\n\n${who}\n\n${formatDecision(decision(l, tool))}`;
+  const reach = !notConnected ? "" : l === "tr" ? " İzin verenin kendi GitHub hesabı bu repoya yazabilmeli; repo projeye bağlanmaz." : " Whoever allows it must be able to push to this repository with their own GitHub account; it does not get connected to the project.";
+  return `${intro}${detail ? `\n\n${block(detail)}` : ""}\n\n${who}${reach}\n\n${formatDecision(decision(l, tool))}`;
 }
 
 /** Which answer a person's message gives to the card, matched on its labels in either language. */
@@ -243,6 +293,27 @@ export function markedMessage(source: string, language: string): string {
     : `This thread read content from outside the project (${source}). From now on, memory and routine changes and changes to issues are put to you for approval first.`;
 }
 
+/** The line when a card closed without either answer: a person wrote something else, so it shows as answered. */
+export function cardClosedMessage(tool: string, input: Record<string, unknown>, language: string): string {
+  const { what } = describeCall(tool, input, language);
+  return lang(language) === "tr"
+    ? `Bekleyen kart kapandı, değişiklik yapılmadı (${what}). Hâlâ isteniyorsa ajan yeniden sorabilir.`
+    : `The waiting card closed and nothing was changed (${what}). If it is still wanted, the agent can ask again.`;
+}
+
+/** Why a person's OK on a repository outside the project could not be used. */
+export function unconnectedRepoFailure(repo: string, reason: "github_reauth" | "not_installed", connectUrl: string, language: string): string {
+  const tr = lang(language) === "tr";
+  if (reason === "github_reauth") {
+    return tr
+      ? `Senin ${repo} erişimini doğrulamak için GitHub girişin gerekiyor. [GitHub'da izin ver](${connectUrl}), sonra yeniden iste.`
+      : `Your GitHub sign-in is needed to check your access to ${repo}. [Give access on GitHub](${connectUrl}), then ask again.`;
+  }
+  return tr
+    ? `${repo} senin için erişilebilir değil: ad yanlış olabilir, Myrel'in GitHub uygulaması o repoda kurulu olmayabilir ya da GitHub'da oraya yazma iznin olmayabilir.`
+    : `${repo} is out of your reach: the name may be wrong, Myrel's GitHub App may not be installed there, or you may not be able to push to it on GitHub.`;
+}
+
 /** What the person sees after answering. */
 export function approvalResultMessage(
   result: { tool: string; input: Record<string, unknown>; done: true; output: string } | { forbidden: true } | { failed: string; tool: string; input: Record<string, unknown> },
@@ -251,8 +322,8 @@ export function approvalResultMessage(
   const tr = lang(language) === "tr";
   if ("forbidden" in result) {
     return tr
-      ? "Bu değişikliğe yalnızca thread'i isteyen kişi ya da projenin sahibi veya bir yöneticisi izin verebilir."
-      : "Only the person this thread works for, or the project's owner or an admin, can allow this change.";
+      ? "Bu değişikliğe yalnızca thread'i isteyen kişi ya da projenin sahibi veya bir yöneticisi izin verebilir. Kart kapandı, hiçbir şey değişmedi; hâlâ isteniyorsa ajan yeniden sorabilir."
+      : "Only the person this thread works for, or the project's owner or an admin, can allow this change. The card closed and nothing changed; if it is still wanted, the agent can ask again.";
   }
   const { what } = describeCall(result.tool, result.input, language);
   if ("failed" in result) return tr ? `Değişiklik yapılamadı (${what}): ${result.failed}` : `The change failed (${what}): ${result.failed}`;
