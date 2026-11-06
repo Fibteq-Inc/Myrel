@@ -45,6 +45,11 @@ describe("recentThreads", () => {
     expect(titles([news("a", "done"), news("a", "ready"), news("b", "ready")], [project("p")])).toEqual(["a", "b"]);
   });
 
+  it("reads a thread closed by hand as finished, not by the reply before it", () => {
+    const rows = recentThreads([news("a", "done"), news("a", "ready")], [project("p")]);
+    expect(rows.map((r) => r.notification.kind)).toEqual(["done"]);
+  });
+
   it("leaves out a thread whose latest news is not a result", () => {
     expect(titles([news("a", "decision"), news("a", "ready"), news("b", "failed")], [project("p")])).toEqual([]);
   });

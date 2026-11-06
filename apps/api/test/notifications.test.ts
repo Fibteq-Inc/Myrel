@@ -194,4 +194,55 @@ describe("notifications", () => {
     const list = (await (await api("/api/notifications", { token })).json()) as { notifications: { kind: string }[] };
     expect(list.notifications.map((n) => n.kind).sort()).toEqual(["blocked", "decision", "ready"]);
   });
+
+  it("records a thread closed by hand as finished, without telling anyone, so it stops reading as replied", async () => {
+    const { token, project, agent, thread } = await setup();
+    const list = async () =>
+      (await (await api("/api/notifications", { token })).json()) as {
+        notifications: { kind: string; threadId: string; readAt: string | null }[];
+        unread: number;
+      };
+    const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
+    ws.accept();
+    await api("/api/notifications/subscriptions", { method: "POST", token, body: JSON.stringify({ kind: "expo", token: "ExponentPushToken[device]" }) });
+    await agent.notifyThread(thread.id, "ready", "Here it is.");
+    outbound.length = 0;
+    emails.length = 0;
+
+    const resolve = async () => {
+      const before = (await list()).notifications.length;
+      ws.send(JSON.stringify({ type: "thread.resolve", threadId: thread.id, resolved: true }));
+      for (let i = 0; i < 160 && (await list()).notifications.length === before; i++) await new Promise((r) => setTimeout(r, 25));
+    };
+    await resolve();
+    const after = await list();
+    expect(after.notifications[0]).toMatchObject({ kind: "done", threadId: thread.id });
+    expect(after.notifications[0]!.readAt).not.toBeNull();
+    expect(after.unread).toBe(1);
+    expect(outbound.filter((o) => o.url.startsWith("https://exp.host/"))).toEqual([]);
+    expect(emails).toEqual([]);
+
+    // Resolving it again changes nothing, so it adds no second record.
+    ws.send(JSON.stringify({ type: "thread.resolve", threadId: thread.id, resolved: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await list()).notifications).toHaveLength(2);
+    ws.close();
+  });
+
+  it("records a closed thread that had news, not one the coordinator stopped mid-work", async () => {
+    const { token, agent, thread } = await setup();
+    const kinds = async () =>
+      ((await (await api("/api/notifications", { token })).json()) as { notifications: { kind: string; threadId: string }[] }).notifications;
+
+    await agent.updateThread(thread.id, { status: "review_ready" });
+    await agent.notifyThread(thread.id, "ready", "Here it is.");
+    await agent.closeThread(thread.id, { reason: "cancelled", by: "person" });
+    expect((await kinds()).map((n) => n.kind)).toEqual(["done", "ready"]);
+
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "another" });
+    const working = await agent.createThread(root.id, "Still at it");
+    await agent.updateThread(working.id, { status: "working" });
+    await agent.closeThread(working.id, { reason: "misrouted", by: "coordinator" });
+    expect((await kinds()).filter((n) => n.threadId === working.id)).toEqual([]);
+  });
 });
