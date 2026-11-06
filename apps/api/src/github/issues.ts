@@ -1,8 +1,8 @@
 import { type ExternalTrust, revealHidden, wrapExternal } from "../agents/external";
 import type { ProjectIssue, ProjectIssueDetail, ProjectRepoIssues } from "@myrel/protocol";
-import { GithubError, type GithubEnv, appSlug, githubFetch } from "./app";
+import { GithubError, type GithubEnv, appSlug, githubFetch, installationToken } from "./app";
 import { type PullCredit, creditLine } from "./attribution";
-import { projectRepoToken } from "./store";
+import { findUserRepo, listProjectRepos, projectRepoToken } from "./store";
 
 /**
  * The thread agent's repo_list_issues and repo_read_issue tools: issues of a connected repository,
@@ -59,16 +59,55 @@ function cut(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}\n[cut at ${max} of ${text.length} characters]` : text;
 }
 
-async function issuesToken(env: IssuesEnv, projectId: string, repo: string, access: "read" | "write" = "read") {
+/** A token for issues, saying so when the installation was never granted the app's issues permission. */
+async function withIssuesPermission<T>(repo: string, token: () => Promise<T>): Promise<T> {
   try {
-    return await projectRepoToken(env, projectId, repo, { issues: access, metadata: "read" });
+    return await token();
   } catch (err) {
-    // An installation that was never granted the app's issues permission.
     if (err instanceof GithubError && err.status === 422) {
       throw new Error(`Myrel's GitHub App has no access to ${repo}'s issues. Its owner can grant the Issues permission in the app's installation settings on GitHub.`);
     }
     throw err;
   }
+}
+
+async function issuesToken(env: IssuesEnv, projectId: string, repo: string, access: "read" | "write" = "read") {
+  return withIssuesPermission(repo, () => projectRepoToken(env, projectId, repo, { issues: access, metadata: "read" }));
+}
+
+export async function isConnectedRepo(env: IssuesEnv, projectId: string, repo: string): Promise<boolean> {
+  const name = repo.trim().toLowerCase();
+  return (await listProjectRepos(env.DB, projectId)).some((r) => r.fullName.toLowerCase() === name);
+}
+
+/** Why a repository outside the project cannot be written to for a person (see findUserRepo). */
+export class UnconnectedRepoError extends Error {
+  constructor(
+    readonly repo: string,
+    readonly reason: "github_reauth" | "not_installed",
+  ) {
+    super(
+      reason === "github_reauth"
+        ? `Nothing was done: ${repo} is not connected to this project and the person's GitHub sign-in in Myrel is missing or too old to check their access to it. They sign in to GitHub again, then ask again.`
+        : `Nothing was done: ${repo} is not connected to this project, and it cannot be reached for this person: the name may be wrong, Myrel's GitHub App may not be installed on it, or they cannot push to it on GitHub. Check the name, or tell the person what is needed.`,
+    );
+  }
+}
+
+/**
+ * Where new issues go. A connected repository as ever; any other only for `approver`, the person who
+ * allowed it on a card, as far as their own GitHub access reaches. The token is limited to that
+ * repository and its issues, made here on the server, and connects nothing to the project.
+ */
+async function newIssueTarget(env: IssuesEnv, projectId: string, repo: string, approver: string | null) {
+  if (await isConnectedRepo(env, projectId, repo)) return issuesToken(env, projectId, repo, "write");
+  if (!approver) throw new Error(`Nothing was done: ${repo} is not connected to this project, and writing there needs a person's OK on a card.`);
+  const found = await findUserRepo(env, approver, repo);
+  if (!found.ok) throw new UnconnectedRepoError(repo, found.reason);
+  const { token } = await withIssuesPermission(repo, () =>
+    installationToken(env, found.installationId, { repositoryIds: [found.repo.id], permissions: { issues: "write", metadata: "read" } }),
+  );
+  return { token, repo: { fullName: found.repo.full_name } };
 }
 
 type ListOpts = { state?: "open" | "closed" | "all"; labels?: string; limit?: number };
@@ -222,8 +261,9 @@ function checkIssueText(text: string, what: string): void {
 }
 
 /**
- * Opens issues on a connected repository through Myrel's GitHub App, each crediting the person and
- * assigned to them when they have a GitHub login. `opened` holds what the thread already opened, by
+ * Opens issues through Myrel's GitHub App, on a connected repository or, with `approver`, on one the
+ * person who allowed it reaches (newIssueTarget), each crediting the person and assigned to them
+ * when they have a GitHub login. `opened` holds what the thread already opened, by
  * repository and title, so a turn that repeats itself after a restart does not open them twice. Stops
  * at the first failure and says which were not opened; throws when none was. One line per issue.
  */
@@ -234,9 +274,10 @@ export async function openRepoIssues(
   issues: NewIssue[],
   credit: PullCredit,
   opened: { get(key: string): string | undefined; add(key: string, url: string): void },
+  approver: string | null = null,
 ): Promise<string> {
   checkNewIssues(issues);
-  const { token, repo: r } = await issuesToken(env, projectId, repo, "write");
+  const { token, repo: r } = await newIssueTarget(env, projectId, repo, approver);
   const keyOf = (i: NewIssue) => `${r.fullName}\n${i.title.trim()}`.toLowerCase();
   // Only labels the repository has: GitHub would make up new ones. Skipped when listing them fails.
   const wanted = issues.some((i) => i.labels?.length && !opened.get(keyOf(i)));

@@ -264,10 +264,6 @@ describe("open_issues", () => {
     expect(card.body).toContain("connector:linear");
     await until(async () => (await t.projectAgent.getThread(t.thread.id))?.status !== "working", "the turn to end");
 
-    // Someone who may not answer changes nothing, and the card stays.
-    await t.answer("Allow this change", "someone-else");
-    await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("can allow this change")), "the refusal");
-    expect(posted(before)).toEqual([]);
     await t.answer("Allow this change");
     await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("https://github.com/acme/app/issues/100 · Denied one")), "the link");
     expect(posted(before).map((i) => i.title)).toEqual(["Denied one"]);
@@ -291,6 +287,175 @@ describe("open_issues", () => {
     await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body === "Nothing was changed."), "the line");
     expect(posted(before)).toEqual([]);
     t.close();
+  });
+
+  it("closes the card when someone who may not answer taps it, as clients stop showing it then", { timeout: 30_000 }, async () => {
+    fakeGithub.issues["acme/app"] = [];
+    const results: string[] = [];
+    const t = await issueThread(async (turn) => {
+      await (await getAgentByName(env.THREAD_AGENT, turn.threadId)).markExternal("connector:linear");
+      results.push((await turn.call("open_issues", { repo: "acme/app", issues: [{ title: "Tapped" }] })).text);
+    });
+    const before = fakeGithub.requests.length;
+    await t.start();
+    await until(() => results.length === 1, "the call");
+    await until(async () => (await t.projectAgent.getThread(t.thread.id))?.status !== "working", "the turn to end");
+    await t.answer("Allow this change", "someone-else");
+    await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("can allow this change")), "the refusal");
+    // Nothing waits any more, so the right person's tap has nothing to allow either.
+    await t.answer("Allow this change");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(posted(before)).toEqual([]);
+    t.close();
+  });
+
+  describe("a card on record and a card on screen", () => {
+    /** A card for "First" is up; the turn then plays `next` after people wrote. */
+    async function withCard() {
+      fakeGithub.issues["acme/app"] = [];
+      const results: string[] = [];
+      let index = 0;
+      const token = await signUp();
+      await connectGithub(token);
+      const { project, close } = await agentProject(token, async (turn) => {
+        const run = index++;
+        if (run === 0) {
+          await (await getAgentByName(env.THREAD_AGENT, turn.threadId)).markExternal("connector:linear");
+          results.push((await turn.call("open_issues", { repo: "acme/app", issues: [{ title: "First" }] })).text);
+          results.push((await turn.call("open_issues", { repo: "acme/app", issues: [{ title: "First" }] })).text);
+          results.push((await turn.call("memory_write", { name: "note", description: "A note", content: "Text" })).text);
+        } else {
+          results.push((await turn.call("open_issues", { repo: "acme/app", issues: [{ title: "Second" }] })).text);
+        }
+      });
+      await api(`/api/projects/${project.id}/repos`, { method: "POST", token, body: JSON.stringify({ installationId: 42, repoId: 7 }) });
+      const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+      const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+      const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me, body: "Open it." });
+      const thread = await projectAgent.createThread(root.id, "Issues");
+      const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+      await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Open it." });
+      await until(() => results.length === 3, "the calls");
+      await until(async () => (await projectAgent.getThread(thread.id))?.status !== "working", "the turn to end");
+      const messages = async () => (await projectAgent.getMessagesAfter(0, 500)).messages.filter((m: Message) => m.threadId === thread.id);
+      return { me, thread, projectAgent, threadAgent, results, messages, close };
+    }
+
+    it("says which card holds a call up, while it is really on screen", { timeout: 30_000 }, async () => {
+      const t = await withCard();
+      expect(t.results[0]).toContain("waits for a person's OK");
+      expect(t.results[1]).toContain("this same change already waits on its card");
+      expect(t.results[2]).toContain("a card for another change");
+      expect(t.results[2]).toContain("open 1 issue on **acme/app**");
+      t.close();
+    });
+
+    it("closes the card when a person writes something else, and the next call gets its own card", { timeout: 30_000 }, async () => {
+      const t = await withCard();
+      const m = await t.projectAgent.sendMessage({ threadId: t.thread.id, authorKind: "user", authorId: t.me, body: "kart kalmadı issue aç" });
+      await t.threadAgent.wake({ kind: "message", messageId: m.id, body: m.body, authorId: t.me, seq: m.seq });
+      await until(() => t.results.length === 4, "the next turn's call");
+      expect((await t.messages()).some((x) => x.authorKind === "system" && x.body.includes("card closed"))).toBe(true);
+      expect(t.results[3]).toContain("waits for a person's OK");
+      expect(t.results[3]).not.toContain("already");
+      const cards = (await t.messages()).filter((x) => x.authorKind === "agent" && x.body.includes("```decision"));
+      expect(cards.at(-1)!.body).toContain("Second");
+      t.close();
+    });
+
+    it("frees a thread already stuck on a card nobody can tap", { timeout: 30_000 }, async () => {
+      const t = await withCard();
+      // What is on record in threads from before: the person's message did not close the card.
+      const m = await t.projectAgent.sendMessage({ threadId: t.thread.id, authorKind: "user", authorId: t.me, body: "where is the card?" });
+      await t.threadAgent.wake({ kind: "coordinator", note: `Carry on after ${m.id}.` } as Parameters<typeof t.threadAgent.wake>[0]);
+      await until(() => t.results.length === 4, "the next turn's call");
+      expect(t.results[3]).toContain("waits for a person's OK");
+      expect(t.results[3]).not.toContain("a card for another change");
+      t.close();
+    });
+  });
+
+  describe("a repository not connected to the project", () => {
+    const postedOn = (repo: string, from: number) =>
+      fakeGithub.requests.slice(from).filter((r) => r.method === "POST" && r.url.endsWith(`/repos/${repo}/issues`)).map((r) => r.body as { title: string });
+    const docs = { repo: "acme/docs", issues: [{ title: "On docs", body: "Why" }] };
+
+    it("asks first, opens with a token for that repository once allowed, and connects nothing", { timeout: 30_000 }, async () => {
+      fakeGithub.issues["acme/docs"] = [];
+      const results: string[] = [];
+      const t = await issueThread(async (turn) => {
+        results.push((await turn.call("open_issues", docs)).text);
+      });
+      const before = fakeGithub.requests.length;
+      await t.start();
+      await until(() => results.length === 1, "the call");
+      expect(results[0]).toContain("not connected to this project");
+      expect(results[0]).toContain("waits for a person's OK");
+      expect(postedOn("acme/docs", before)).toEqual([]);
+      const card = (await t.messages()).find((m) => m.authorKind === "agent" && m.body.includes("```decision"))!;
+      expect(card.body).toContain("**acme/docs** is not connected to this project");
+      expect(card.body).toContain("On docs");
+      expect(card.body).not.toContain("read content from outside");
+      await until(async () => (await t.projectAgent.getThread(t.thread.id))?.status !== "working", "the turn to end");
+
+      await t.answer("Allow this change");
+      await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("https://github.com/acme/docs/issues/")), "the link");
+      expect(postedOn("acme/docs", before).map((i) => i.title)).toEqual(["On docs"]);
+      const made = fakeGithub.requests.slice(before).filter((r) => r.url.includes("/access_tokens")).map((r) => r.body as { repository_ids: number[]; permissions: Record<string, string> });
+      expect(made).toContainEqual({ repository_ids: [8], permissions: { issues: "write", metadata: "read" } });
+      t.close();
+    });
+
+    it("still opens directly on a connected repository", { timeout: 30_000 }, async () => {
+      fakeGithub.issues["acme/app"] = [];
+      const results: string[] = [];
+      const t = await issueThread(async (turn) => {
+        results.push((await turn.call("open_issues", { repo: "ACME/app", issues: [{ title: "Direct" }] })).text);
+      });
+      await t.start();
+      await until(() => results.length === 1, "the call");
+      expect(results[0]).toContain("https://github.com/acme/app/issues/");
+      expect((await t.messages()).some((m) => m.body.includes("```decision"))).toBe(false);
+      t.close();
+    });
+
+    it("puts up no card for a repository out of the person's reach", { timeout: 30_000 }, async () => {
+      const push = fakeGithub.userPush;
+      fakeGithub.userPush = [7];
+      try {
+        const results: string[] = [];
+        const t = await issueThread(async (turn) => {
+          for (const repo of ["acme/docs", "zeta/site", "acme/missing"]) results.push((await turn.call("open_issues", { ...docs, repo })).text);
+        });
+        const before = fakeGithub.requests.length;
+        await t.start();
+        await until(() => results.length === 3, "the calls");
+        for (const r of results) expect(r).toContain("cannot be reached for this person");
+        expect((await t.messages()).some((m) => m.body.includes("```decision"))).toBe(false);
+        expect(fakeGithub.requests.slice(before).filter((r) => r.method === "POST" && r.url.endsWith("/issues"))).toEqual([]);
+        t.close();
+      } finally {
+        fakeGithub.userPush = push;
+      }
+    });
+
+    it("goes by the access of whoever allows it, and asks for a GitHub sign-in when it is too old", { timeout: 30_000 }, async () => {
+      fakeGithub.issues["acme/docs"] = [];
+      const results: string[] = [];
+      const t = await issueThread(async (turn) => {
+        await runInDurableObject(await getAgentByName(env.THREAD_AGENT, turn.threadId), (agent) => (agent as unknown as { setMeta(k: string, v: string): void }).setMeta("requester", ""));
+        results.push((await turn.call("open_issues", docs)).text);
+      });
+      const before = fakeGithub.requests.length;
+      await t.start();
+      await until(() => results.length === 1, "the call");
+      await until(async () => (await t.projectAgent.getThread(t.thread.id))?.status !== "working", "the turn to end");
+      await env.DB.prepare("UPDATE github_installation_users SET created_at = 0 WHERE user_id = ?").bind(t.me).run();
+      await t.answer("Allow this change");
+      await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("/api/github/connect?returnTo=")), "the sign-in link");
+      expect(postedOn("acme/docs", before)).toEqual([]);
+      t.close();
+    });
   });
 
   it("asks past the thread's limit", { timeout: 30_000 }, async () => {

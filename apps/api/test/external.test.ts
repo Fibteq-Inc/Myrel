@@ -2,7 +2,7 @@ import type { Message } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { approvalAnswer, approvalMessage, revealHidden, suspiciousSignals, wrapExternal } from "../src/agents/external";
+import { approvalAnswer, approvalMessage, cardStillOpen, issueCardReason, revealHidden, suspiciousSignals, wrapExternal } from "../src/agents/external";
 import { callsTool, proxyMcp, wrapJson } from "../src/connectors/gateway";
 import { agentProject, api, signUp, until } from "./fake-agent";
 
@@ -45,6 +45,32 @@ describe("external text", () => {
     expect(file.taints).toBe(false);
     expect(file.text).toContain("<!-- a comment in code -->");
     expect(file.text).toContain('suspicious="instruction-override"');
+  });
+
+  it("has one rule for when an issue write needs a card", () => {
+    const direct = { connected: true, marked: false, requester: "me", overLimit: false };
+    expect(issueCardReason(direct)).toBeNull();
+    expect(issueCardReason({ ...direct, outsider: false })).toBeNull();
+    expect(issueCardReason({ ...direct, connected: false })).toBe("not_connected");
+    expect(issueCardReason({ ...direct, marked: true })).toBe("marked");
+    expect(issueCardReason({ ...direct, requester: null })).toBe("nobody");
+    expect(issueCardReason({ ...direct, overLimit: true })).toBe("limit");
+    expect(issueCardReason({ ...direct, outsider: true })).toBe("outsider");
+    expect(issueCardReason({ connected: false, marked: true, requester: null, overLimit: true, outsider: true })).toBe("not_connected");
+  });
+
+  it("counts a card as on screen only until a person's next message", () => {
+    expect(cardStillOpen({ seq: 5 }, [])).toBe(true);
+    expect(cardStillOpen({ seq: 5 }, [{ authorKind: "agent" }, { authorKind: "system" }])).toBe(true);
+    expect(cardStillOpen({ seq: 5 }, [{ authorKind: "agent" }, { authorKind: "user" }])).toBe(false);
+    expect(cardStillOpen(null, [])).toBe(false);
+  });
+
+  it("names a repository outside the project on the card, in either language", () => {
+    const input = { repo: "acme/docs", issues: [{ title: "One" }] };
+    expect(approvalMessage("open_issues", input, [], "en", true)).toContain("**acme/docs** is not connected to this project.");
+    expect(approvalMessage("open_issues", input, [], "tr", true)).toContain("**acme/docs** bu projeye bağlı değil.");
+    expect(approvalMessage("open_issues", input, [], "en")).not.toContain("not connected");
   });
 
   it("matches the approval card's answers in either language", () => {
