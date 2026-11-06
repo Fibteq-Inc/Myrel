@@ -1,6 +1,7 @@
 export * from "./api";
 export * from "./code-language";
 export * from "./drafts";
+export * from "./issues";
 export * from "./external-links";
 export * from "./onboarding";
 export * from "./platform";

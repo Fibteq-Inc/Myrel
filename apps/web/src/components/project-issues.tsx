@@ -1,4 +1,4 @@
-import { draftKey } from "@myrel/client";
+import { draftKey, ISSUE_LIST_FRESHNESS } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { ProjectIssue, ProjectRepoIssues } from "@myrel/protocol";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -26,11 +26,6 @@ export function ProjectIssues() {
   const { project } = useProjectContext();
   const { search, go } = useProjectView();
   const [state, setState] = useState<State>("open");
-  const issues = useQuery({
-    queryKey: ["projects", project.id, "issues", state],
-    queryFn: () => api.listProjectIssues(project.id, state),
-    staleTime: 60_000,
-  });
 
   /** The request goes to the composer, after anything already typed there, for the person to send. */
   function workOn(issue: Pick<ProjectIssue, "repo" | "number" | "url">) {
@@ -43,7 +38,18 @@ export function ProjectIssues() {
 
   const opened = parseIssueItem(search.item);
   if (opened) return <IssueView {...opened} key={search.item} onBack={() => go("issues")} onWork={workOn} />;
+  return <IssueList state={state} onState={setState} onOpen={(i) => go("issues", { item: `${i.repo}#${i.number}` })} onWork={workOn} />;
+}
 
+/** The list, on its own so that coming back from an opened issue mounts it and asks GitHub again. */
+function IssueList({ state, onState, onOpen, onWork }: { state: State; onState: (s: State) => void; onOpen: (i: ProjectIssue) => void; onWork: (i: ProjectIssue) => void }) {
+  const t = useT();
+  const { project } = useProjectContext();
+  const issues = useQuery({
+    queryKey: ["projects", project.id, "issues", state],
+    queryFn: () => api.listProjectIssues(project.id, state),
+    ...ISSUE_LIST_FRESHNESS,
+  });
   const repos = issues.data ?? [];
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -54,7 +60,7 @@ export function ProjectIssues() {
             label={t("issues.show")}
             value={state}
             options={(["open", "closed", "all"] as const).map((s) => ({ value: s, label: t(`issues.${s}`) }))}
-            onChange={setState}
+            onChange={onState}
           />
         </div>
         {issues.isPending ? (
@@ -63,7 +69,7 @@ export function ProjectIssues() {
               <div key={i} className="h-14 animate-pulse rounded-[10px] border border-line bg-raised" />
             ))}
           </div>
-        ) : issues.error ? (
+        ) : !issues.data ? (
           <p className="text-sm text-bad">{errorMessage(issues.error, t)}</p>
         ) : !repos.length ? (
           <Empty
@@ -72,7 +78,7 @@ export function ProjectIssues() {
             body={t("issues.noReposBody")}
           />
         ) : (
-          repos.map((r) => <RepoIssues key={r.repo} repo={r} state={state} onOpen={(i) => go("issues", { item: `${i.repo}#${i.number}` })} onWork={workOn} />)
+          repos.map((r) => <RepoIssues key={r.repo} repo={r} state={state} onOpen={onOpen} onWork={onWork} />)
         )}
       </div>
     </div>
@@ -95,7 +101,7 @@ function IssueView({ repo, number, onBack, onWork }: { repo: string; number: num
     queryFn: ({ pageParam }) => api.getProjectIssue(project.id, repo, number, pageParam),
     initialPageParam: 1,
     getNextPageParam: (last, _all, page) => (last.moreComments ? page + 1 : undefined),
-    staleTime: 60_000,
+    staleTime: 0,
   });
   const issue = query.data?.pages[0];
   const url = issue?.url ?? `https://github.com/${repo}/issues/${number}`;

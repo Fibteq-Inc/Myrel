@@ -25,7 +25,7 @@ export default function IssueScreen() {
     queryFn: ({ pageParam }) => api.getProjectIssue(projectId, params.repo, number, pageParam),
     initialPageParam: 1,
     getNextPageParam: (last, _all, page) => (last.moreComments ? page + 1 : undefined),
-    staleTime: 60_000,
+    staleTime: 0,
   });
   const issue = query.data?.pages[0];
   const url = issue?.url ?? `https://github.com/${params.repo}/issues/${number}`;
