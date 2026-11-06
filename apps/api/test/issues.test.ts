@@ -399,7 +399,7 @@ describe("open_issues", () => {
       await until(async () => (await t.projectAgent.getThread(t.thread.id))?.status !== "working", "the turn to end");
 
       await t.answer("Allow this change");
-      await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && m.body.includes("https://github.com/acme/docs/issues/")), "the link");
+      await until(async () => (await t.messages()).some((m) => m.authorKind === "system" && /https:\/\/github\.com\/acme\/docs\/issues\/\d+ · On docs/.test(m.body)), "the link");
       expect(postedOn("acme/docs", before).map((i) => i.title)).toEqual(["On docs"]);
       const made = fakeGithub.requests.slice(before).filter((r) => r.url.includes("/access_tokens")).map((r) => r.body as { repository_ids: number[]; permissions: Record<string, string> });
       expect(made).toContainEqual({ repository_ids: [8], permissions: { issues: "write", metadata: "read" } });
