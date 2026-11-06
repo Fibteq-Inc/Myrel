@@ -17,6 +17,8 @@ export type NotifyInput = {
   path: string;
   /** Public origin for links in emails; null leaves links out. */
   origin: string | null;
+  /** Keeps the record only, already read: no badge, push or email. For news the person made themselves. */
+  quiet?: boolean;
 };
 
 export const KIND_LABELS: Record<NotificationKind, string> = {
@@ -55,10 +57,12 @@ export async function deliverNotification(env: Env, input: NotifyInput): Promise
     title: input.title,
     body: input.body,
     url: input.path,
+    readAt: input.quiet ? createdAt : null,
     createdAt,
   }));
   // One statement per row keeps each under D1's bound-parameter limit.
   await db.batch(rows.map((r) => db.insert(notifications).values(r)) as [never, ...never[]]);
+  if (input.quiet) return;
 
   const settings = new Map(
     (await db.select().from(notificationSettings).where(inArray(notificationSettings.userId, ids))).map((s) => [

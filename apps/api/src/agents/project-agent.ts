@@ -450,10 +450,12 @@ export class ProjectAgent extends Agent<Env> {
           await this.closeThread(event.threadId, { reason: event.reason, by: "person" });
           return;
         }
+        const resolving = event.resolved && !this.getThread(event.threadId)!.resolved;
         this.updateThread(event.threadId, {
           resolved: event.resolved,
           status: event.resolved ? "done" : "review_ready",
         });
+        if (resolving) await this.recordResolved(event.threadId);
         return;
       }
       case "thread.cli": {
@@ -901,7 +903,17 @@ export class ProjectAgent extends Agent<Env> {
     })!;
     this.setActivity(thread.id, false);
     if (input.note) this.sendMessage({ threadId: thread.id, authorKind: "system", authorId: SYSTEM_ID, body: input.note });
+    // A thread the coordinator stops mid-work had nothing to report, so it stays out of people's recent news.
+    if (!thread.resolved && (input.by === "person" || thread.status !== "working")) await this.recordResolved(thread.id);
     return closed;
+  }
+
+  /**
+   * A thread closed by hand has no closing turn, so its last notification would keep saying it replied,
+   * and home's recent updates read the latest one. Nobody needs telling, so this adds only a quiet record.
+   */
+  private recordResolved(threadId: string): Promise<void> {
+    return this.notifyThread(threadId, "done", "", { quiet: true });
   }
 
   /** What a thread made that closing it could hide from people: pull requests, artifacts, routines, their own messages. */
@@ -981,7 +993,7 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** A thread's turn ended in a way people should hear about. Callable over RPC. */
-  async notifyThread(threadId: string, kind: NotificationKind, text: string): Promise<void> {
+  async notifyThread(threadId: string, kind: NotificationKind, text: string, options?: { quiet?: boolean }): Promise<void> {
     const thread = this.getThread(threadId);
     if (!thread) return;
     try {
@@ -996,6 +1008,7 @@ export class ProjectAgent extends Agent<Env> {
         body: excerpt(text),
         path: `/projects/${this.name}/threads/${threadId}`,
         origin,
+        quiet: options?.quiet,
       });
     } catch (err) {
       this.ctx.waitUntil(reportError(this.env, "agent", "notification", err));
