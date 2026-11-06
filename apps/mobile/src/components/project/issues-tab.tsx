@@ -1,10 +1,11 @@
+import { ISSUE_LIST_FRESHNESS } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { ProjectIssue } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { type Href, useRouter } from "expo-router";
+import { type Href, useIsFocused, useRouter } from "expo-router";
 import { CircleCheck, CircleDot, ExternalLink, GitBranch, MessageSquare, SquarePen } from "lucide-react-native";
-import { useState } from "react";
-import { Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { AppState, Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
 import { useProjectId } from "../../lib/project";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
@@ -25,11 +26,24 @@ export function IssuesTab({ onWork }: { onWork: (issue: ProjectIssue) => void })
   const { api, server } = useSession();
   const projectId = useProjectId();
   const [state, setState] = useState<State>("open");
+  // The screen stays mounted under an opened issue, so nothing would ask again on the way back:
+  // switching the query off while it is covered makes coming back ask, and stops the minute's asks.
+  const focused = useIsFocused();
   const issues = useQuery({
     queryKey: ["issues", server, projectId, state],
     queryFn: () => api.listProjectIssues(projectId, state),
-    staleTime: 60_000,
+    ...ISSUE_LIST_FRESHNESS,
+    enabled: focused,
   });
+  const { refetch } = issues;
+  // Issues opened while the app was in the background.
+  useEffect(() => {
+    if (!focused) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") void refetch();
+    });
+    return () => sub.remove();
+  }, [focused, refetch]);
 
   if (issues.isPending) {
     return (
@@ -38,7 +52,7 @@ export function IssuesTab({ onWork }: { onWork: (issue: ProjectIssue) => void })
       </View>
     );
   }
-  if (issues.error) return <Empty title={errorMessage(issues.error, t("common.error"))} />;
+  if (!issues.data) return <Empty title={errorMessage(issues.error, t("common.error"))} />;
 
   const sections = issues.data.map((r) => ({
     title: r.repo,
