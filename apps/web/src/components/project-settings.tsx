@@ -2,6 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import {
   type CliId,
   cliLogins,
+  type CheckModel,
   type CliModelDefaults,
   type CloudCli,
   effortsFor,
@@ -27,6 +28,7 @@ import { ProjectFolders } from "./project-folders";
 import { ProjectLookPicker } from "./project-badge";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Switch } from "./ui/controls";
+import { EvaluatorPicker } from "./evaluator-picker";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
   api,
@@ -239,6 +241,11 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   const [cloudCli, setCloudCli] = useState<CloudCli>(settings.cloudCli);
   const [visualCheck, setVisualCheck] = useState(settings.visualCheck);
+  const [checkModel, setCheckModel] = useState<CheckModel | null>(settings.checkModel);
+  // The CLIs of the project's computer, which only its owner's list has.
+  const { data: workspace } = useQuery(workspaceQuery(projectId));
+  const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
   useEffect(() => {
     setName(settings.name);
     setIcon(settings.icon);
@@ -246,12 +253,13 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
     setTaskTarget(settings.taskTarget);
     setCloudCli(settings.cloudCli);
     setVisualCheck(settings.visualCheck);
+    setCheckModel(settings.checkModel);
   }, [settings]);
   const save = useSaveSettings(projectId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli, visualCheck });
+    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli, visualCheck, checkModel });
   }
 
   return (
@@ -298,6 +306,19 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
           </span>
           <Switch checked={visualCheck} disabled={!canManage} onChange={(e) => setVisualCheck(e.target.checked)} />
         </label>
+        {visualCheck && (
+          <div className="space-y-2">
+            <p className="text-[13px] font-medium">{t("evaluator.title")}</p>
+            <p className="text-xs text-subtle">{t("evaluator.projectHint")}</p>
+            <EvaluatorPicker
+              clis={computer?.clis ?? []}
+              value={checkModel}
+              onChange={setCheckModel}
+              disabled={!canManage}
+              autoLabel={t("evaluator.projectAuto")}
+            />
+          </div>
+        )}
       </Section>
 
       {canManage && <SaveBar save={save} disabled={!name.trim()} />}

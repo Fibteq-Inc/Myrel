@@ -10,6 +10,7 @@ import type {
   ApiKey,
   CatalogCategory,
   CatalogPage,
+  CheckModel,
   Connector,
   ConnectSuggestionInput,
   ConnectSuggestionResult,
@@ -304,6 +305,11 @@ export class ApiClient {
   /** Reports one of the app's own errors to the server (see createErrorReporter). */
   async reportClientError(input: ClientErrorInput) {
     await this.request("/api/account/client-errors", { method: "POST", body: input });
+  }
+
+  /** Who judges the visual checks of this person's projects that set none (CheckModel); null: automatic. */
+  async setCheckModel(checkModel: CheckModel | null) {
+    return (await this.request<{ checkModel: CheckModel | null }>("/api/account/check-model", { method: "PUT", body: { checkModel } })).checkModel;
   }
 
   /** Marks a one-time tip seen for this account, on every device. */

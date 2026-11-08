@@ -1,8 +1,8 @@
-import { type Message, parseVisualCheck } from "@myrel/protocol";
+import { type Message, parseVisualCheck, type RunnerCli } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { pickEvaluatorCli } from "../src/checks/loop";
+import { pickEvaluatorCli, resolveEvaluator } from "../src/checks/loop";
 import { judgeCheck, type CheckReport, type CheckVerdict } from "../src/checks/verdict";
 import { builtinBundle, builtinSkill } from "../src/skills/builtin";
 import { BUILTIN_SKILL_FILES } from "../src/skills/builtin.gen";
@@ -92,6 +92,45 @@ describe("evaluator CLI", () => {
     expect(pickEvaluatorCli([{ id: "claude" }, { id: "codex", limited: true }], "claude", true)).toBe("claude");
     expect(pickEvaluatorCli([{ id: "claude" }, { id: "codex" }], "codex", false)).toBe("claude");
     expect(pickEvaluatorCli([{ id: "codex" }], "codex", true)).toBe("codex");
+  });
+});
+
+describe("evaluator setting", () => {
+  const clis: RunnerCli[] = [
+    { id: "claude", version: "2.1.0", models: [{ id: "opus", name: "Opus", efforts: ["low", "high"] }, { id: "sonnet", name: "Sonnet", efforts: [] }] },
+    { id: "codex", version: "0.164.0" },
+  ];
+  it("follows the project's choice, else the person's own, else another CLI", () => {
+    const opus = { cli: "claude", model: "opus", effort: "high", account: null };
+    expect(resolveEvaluator({ project: opus, account: { cli: "codex", model: null, effort: null }, clis, coderCli: "claude", othersAllowed: true })).toMatchObject({
+      cli: "claude",
+      model: { cli: "claude", model: "opus", effort: "high" },
+      source: "project",
+    });
+    expect(resolveEvaluator({ project: null, account: { cli: "codex", model: null, effort: null }, clis, coderCli: "codex", othersAllowed: true })).toMatchObject({
+      cli: "codex",
+      model: null,
+      source: "account",
+    });
+    expect(resolveEvaluator({ project: null, account: null, clis, coderCli: "claude", othersAllowed: true })).toMatchObject({ cli: "codex", source: "auto" });
+  });
+
+  it("falls to the next level when the computer lacks the CLI, and keeps only a listed model and an effort it takes", () => {
+    const r = resolveEvaluator({
+      project: { cli: "cursor", model: null, effort: null },
+      account: { cli: "claude", model: "sonnet", effort: "high" },
+      clis,
+      coderCli: "codex",
+      othersAllowed: true,
+    });
+    expect(r).toMatchObject({ cli: "claude", model: { cli: "claude", model: "sonnet", effort: null }, source: "account" });
+    expect(r.skipped).toContain("cursor");
+    expect(resolveEvaluator({ project: { cli: "claude", model: "gone", effort: null }, account: null, clis, coderCli: "codex", othersAllowed: true }).model).toBeNull();
+    // A runner too old to run other CLIs only takes Claude Code.
+    expect(resolveEvaluator({ project: { cli: "codex", model: null, effort: null }, account: null, clis, coderCli: "claude", othersAllowed: false })).toMatchObject({
+      cli: "claude",
+      source: "auto",
+    });
   });
 });
 
@@ -210,6 +249,59 @@ describe("visual check loop", () => {
       "(visual check card: round 1, failed",
     );
     close();
+  });
+
+  it("starts the evaluator with the person's own setting, and the project's wins over it", { timeout: 60_000 }, async () => {
+    const token = await signUp();
+    const evaluators: Turn[] = [];
+    const requests: string[] = [];
+    let coderThread = "";
+    // The first evaluator hands in only once the test has changed the project's setting.
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const { project } = await agentProject(
+      token,
+      async (turn) => {
+        if (turn.threadId === coderThread) {
+          requests.push((await turn.call("request_visual_check", { branch: "feat/x", what: "The home page." })).text);
+          return;
+        }
+        evaluators.push(turn);
+        if (evaluators.length === 1) await gate;
+        const id = /Check id: (chk_\w+)/.exec(turn.prompt)![1]!;
+        await turn.call("submit_visual_check", { check_id: id, could_not_check: "No browser here." });
+      },
+      { features: ["folders", "cancel", "agent", "agent-clis", "skills"], cli: "claude", clis: ["codex"] },
+    );
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token, body: JSON.stringify({ visualCheck: true }) });
+    const mine = await api("/api/account/check-model", { method: "PUT", token, body: JSON.stringify({ checkModel: { cli: "claude", model: null, effort: null } }) });
+    expect(mine.status).toBe(200);
+    const me = (await (await api("/api/account", { token })).json()) as { user: { id: string; checkModel: unknown } };
+    expect(me.user.checkModel).toEqual({ cli: "claude", model: null, effort: null });
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me.user.id, body: "Ana sayfa" });
+    const thread = await projectAgent.createThread(root.id, "Ana sayfa");
+    coderThread = thread.id;
+    await (await getAgentByName(env.THREAD_AGENT, thread.id)).start({ projectId: project.id, threadId: thread.id, brief: "Build the home page." });
+
+    // The person's own choice: Claude Code, not the other CLI the computer has.
+    await until(() => evaluators.length === 1, "the first evaluator");
+    expect(evaluators[0]!.start.cli).toBe("claude");
+    expect(evaluators[0]!.prompt).toContain("You run as Claude Code with its default model");
+    expect(requests[0]).toContain("Round 1 started");
+
+    // The project's choice wins over it: the next round runs with Codex.
+    const set = await api(`/api/projects/${project.id}/settings`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ checkModel: { cli: "codex", model: null, effort: null } }),
+    });
+    expect(((await set.json()) as { settings: { checkModel: unknown } }).settings.checkModel).toEqual({ cli: "codex", model: null, effort: null });
+    open();
+    await until(() => evaluators.length === 2, "the second round's evaluator");
+    expect(requests[1]).toContain("Round 2 started");
+    expect(evaluators[1]!.start.cli).toBe("codex");
+    expect((await projectAgent.getThread(evaluators[1]!.threadId))?.cli).toMatchObject({ id: "codex", reason: expect.stringContaining("project") });
   });
 
   it("offers no visual check tool while the project's setting is off", { timeout: 30_000 }, async () => {

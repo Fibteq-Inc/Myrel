@@ -137,6 +137,7 @@ describe("project settings", () => {
       cloudCli: "opencode",
       cliModels: {},
       visualCheck: false,
+      checkModel: null,
     });
     const claude = await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "claude" }));
     expect(claude.settings.cloudCli).toBe("claude");
@@ -340,7 +341,7 @@ describe("sign-up setting", () => {
     expect((await api("/api/admin/settings", { token: user.token })).status).toBe(403);
     await makeAdmin(admin);
     expect(await json(api("/api/account", { token: admin.token }))).toEqual({
-      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [] },
+      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [], checkModel: null },
     });
 
     const set = (signUpEnabled: boolean) =>
