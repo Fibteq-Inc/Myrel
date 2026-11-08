@@ -145,7 +145,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, icon, color, model, taskTarget, cloudCli, cliModels } = input.data;
+    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -168,6 +168,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(taskTarget !== undefined && { taskTarget }),
         ...(cloudCli !== undefined && { cloudCli: cloudCli === "opencode" ? null : cloudCli }),
         ...(cliModels !== undefined && { cliModels: mergeCliModels(current.cliModels, cliModels) }),
+        ...(visualCheck !== undefined && { visualCheck }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -827,6 +828,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       taskTarget: projects.taskTarget,
       cloudCli: projects.cloudCli,
       cliModels: projects.cliModels,
+      visualCheck: projects.visualCheck,
     })
     .from(projects)
     .where(eq(projects.id, projectId));

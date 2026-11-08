@@ -22,6 +22,7 @@ import {
   nextCronRun,
   normalizeFilePath,
   isPlanMessage,
+  parseVisualCheck,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -77,7 +78,8 @@ import {
   upkeepDue,
   upkeepNotice,
 } from "./memory-upkeep";
-import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SEEN_EMOJI, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
+import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SEEN_EMOJI, SYSTEM_ID, THREAD_AGENT_ID, VISUAL_CHECK_ID } from "./names";
+import type { VisualCheckRole } from "../checks/loop";
 import { answerLine, relayLine } from "./relay-line";
 import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
@@ -1322,7 +1324,8 @@ export class ProjectAgent extends Agent<Env> {
    * notes and attachment-only messages carry nothing to relay.
    */
   private observable(m: Message): m is Message & { threadId: string } {
-    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body)) return false;
+    // A visual check's card is Myrel's bookkeeping; the round's evaluator thread is what others may care about.
+    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body) || parseVisualCheck(m.body)) return false;
     if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
     return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
   }
@@ -1955,6 +1958,29 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** Opens the upkeep thread under a project-chat line, the way the coordinator opens one for an ask. */
+  /**
+   * Opens a visual check's evaluator thread (see checks/loop.ts) the way memory upkeep opens its
+   * thread: a line in the project chat, the thread under it with its CLI and computer, the brief,
+   * and its first turn, working for the person the checked thread works for. Callable over RPC.
+   */
+  async startVisualCheck(input: {
+    notice: string;
+    title: string;
+    brief: string;
+    cli: ThreadCli | null;
+    runner: ThreadRunner | null;
+    actor: string | null;
+    check: VisualCheckRole;
+  }): Promise<Thread> {
+    const root = this.sendMessage({ threadId: null, authorKind: "system", authorId: VISUAL_CHECK_ID, body: input.notice });
+    const thread = this.createThread(root.id, input.title, null, createId("thread"), input.cli, input.runner);
+    const relay: MessageRelay = { kind: "brief", threadId: thread.id, note: input.brief };
+    this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: relayLine("brief", input.brief), relay });
+    const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
+    await agent.start({ projectId: this.name, threadId: thread.id, brief: input.brief, actor: input.actor, check: input.check });
+    return thread;
+  }
+
   private async startUpkeep(actor: string | null, manual: boolean): Promise<Thread> {
     const threadsSince = Number(this.knowledge.getSetting(UPKEEP_KEYS.threadsSince) ?? 0);
     const notes = this.knowledge.listMemory().filter((m) => m.name !== MEMORY_INDEX).length;

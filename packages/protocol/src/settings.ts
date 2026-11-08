@@ -80,6 +80,12 @@ export const ProjectSettings = z.object({
   cloudCli: CloudCli.default("opencode"),
   /** Older servers never send it. */
   cliModels: CliModelDefaults.default({}),
+  /**
+   * Work that changes what people see gets a visual check before its pull request: a separate
+   * evaluator thread takes screenshots and judges them (see apps/api/skills/visual-check). Off by default.
+   * Older servers never send it.
+   */
+  visualCheck: z.boolean().default(false),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -94,6 +100,7 @@ export const UpdateProjectSettingsInput = z.object({
   cloudCli: CloudCli.optional(),
   /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
   cliModels: CliModelDefaults.optional(),
+  visualCheck: z.boolean().optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 
