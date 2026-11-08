@@ -98,36 +98,39 @@ describe("evaluator CLI", () => {
 describe("evaluator setting", () => {
   const clis: RunnerCli[] = [
     { id: "claude", version: "2.1.0", models: [{ id: "opus", name: "Opus", efforts: ["low", "high"] }, { id: "sonnet", name: "Sonnet", efforts: [] }] },
-    { id: "codex", version: "0.164.0" },
+    { id: "codex", version: "0.164.0", models: [{ id: "gpt-5.5", name: "GPT-5.5", efforts: ["medium", "high"] }] },
+    { id: "opencode", version: "2.0.0", limits: { status: "limited", windows: [], at: "2026-11-08T20:00:00.000Z" } },
   ];
-  it("follows the project's choice, else the person's own, else another CLI", () => {
-    const opus = { cli: "claude", model: "opus", effort: "high", account: null };
-    expect(resolveEvaluator({ project: opus, account: { cli: "codex", model: null, effort: null }, clis, coderCli: "claude", othersAllowed: true })).toMatchObject({
-      cli: "claude",
-      model: { cli: "claude", model: "opus", effort: "high" },
+  const pick = (model: string | null = null, effort: string | null = null) => ({ model, effort });
+  const base = { clis, othersAllowed: true };
+
+  it("picks a listed CLI other than the coder's, with that CLI's model and effort", () => {
+    const list = { claude: pick("opus", "high"), codex: pick("gpt-5.5", "high") };
+    expect(resolveEvaluator({ ...base, project: list, account: {}, coderCli: "claude" })).toMatchObject({
+      cli: "codex",
+      model: { cli: "codex", model: "gpt-5.5", effort: "high" },
       source: "project",
     });
-    expect(resolveEvaluator({ project: null, account: { cli: "codex", model: null, effort: null }, clis, coderCli: "codex", othersAllowed: true })).toMatchObject({
-      cli: "codex",
-      model: null,
-      source: "account",
+    expect(resolveEvaluator({ ...base, project: list, account: {}, coderCli: "codex" })).toMatchObject({
+      cli: "claude",
+      model: { cli: "claude", model: "opus", effort: "high" },
     });
-    expect(resolveEvaluator({ project: null, account: null, clis, coderCli: "claude", othersAllowed: true })).toMatchObject({ cli: "codex", source: "auto" });
   });
 
-  it("falls to the next level when the computer lacks the CLI, and keeps only a listed model and an effort it takes", () => {
-    const r = resolveEvaluator({
-      project: { cli: "cursor", model: null, effort: null },
-      account: { cli: "claude", model: "sonnet", effort: "high" },
-      clis,
-      coderCli: "codex",
-      othersAllowed: true,
-    });
+  it("uses the coder's own CLI when it is the only listed one, and skips one at its limit", () => {
+    expect(resolveEvaluator({ ...base, project: { claude: pick() }, account: {}, coderCli: "claude" })).toMatchObject({ cli: "claude", model: null });
+    expect(resolveEvaluator({ ...base, project: { opencode: pick(), claude: pick() }, account: {}, coderCli: "claude" })).toMatchObject({ cli: "claude" });
+  });
+
+  it("follows the project's list, else the person's own, else any other CLI", () => {
+    expect(resolveEvaluator({ ...base, project: {}, account: { codex: pick() }, coderCli: "codex" })).toMatchObject({ cli: "codex", source: "account" });
+    expect(resolveEvaluator({ ...base, project: {}, account: {}, coderCli: "claude" })).toMatchObject({ cli: "codex", source: "auto" });
+    const r = resolveEvaluator({ ...base, project: { cursor: pick() }, account: { claude: pick("sonnet", "high") }, coderCli: "codex" });
     expect(r).toMatchObject({ cli: "claude", model: { cli: "claude", model: "sonnet", effort: null }, source: "account" });
     expect(r.skipped).toContain("cursor");
-    expect(resolveEvaluator({ project: { cli: "claude", model: "gone", effort: null }, account: null, clis, coderCli: "codex", othersAllowed: true }).model).toBeNull();
+    expect(resolveEvaluator({ ...base, project: { claude: pick("gone") }, account: {}, coderCli: "codex" }).model).toBeNull();
     // A runner too old to run other CLIs only takes Claude Code.
-    expect(resolveEvaluator({ project: { cli: "codex", model: null, effort: null }, account: null, clis, coderCli: "claude", othersAllowed: false })).toMatchObject({
+    expect(resolveEvaluator({ ...base, othersAllowed: false, project: { codex: pick() }, account: {}, coderCli: "claude" })).toMatchObject({
       cli: "claude",
       source: "auto",
     });
@@ -274,29 +277,29 @@ describe("visual check loop", () => {
       { features: ["folders", "cancel", "agent", "agent-clis", "skills"], cli: "claude", clis: ["codex"] },
     );
     await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token, body: JSON.stringify({ visualCheck: true }) });
-    const mine = await api("/api/account/check-model", { method: "PUT", token, body: JSON.stringify({ checkModel: { cli: "claude", model: null, effort: null } }) });
+    const mine = await api("/api/account/check-models", { method: "PUT", token, body: JSON.stringify({ checkModels: { claude: { model: null, effort: null } } }) });
     expect(mine.status).toBe(200);
-    const me = (await (await api("/api/account", { token })).json()) as { user: { id: string; checkModel: unknown } };
-    expect(me.user.checkModel).toEqual({ cli: "claude", model: null, effort: null });
+    const me = (await (await api("/api/account", { token })).json()) as { user: { id: string; checkModels: unknown } };
+    expect(me.user.checkModels).toEqual({ claude: { model: null, effort: null } });
     const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
     const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me.user.id, body: "Ana sayfa" });
     const thread = await projectAgent.createThread(root.id, "Ana sayfa");
     coderThread = thread.id;
     await (await getAgentByName(env.THREAD_AGENT, thread.id)).start({ projectId: project.id, threadId: thread.id, brief: "Build the home page." });
 
-    // The person's own choice: Claude Code, not the other CLI the computer has.
+    // The person lists only Claude Code: it judges, even though the work is Claude Code's too.
     await until(() => evaluators.length === 1, "the first evaluator");
     expect(evaluators[0]!.start.cli).toBe("claude");
     expect(evaluators[0]!.prompt).toContain("You run as Claude Code with its default model");
     expect(requests[0]).toContain("Round 1 started");
 
-    // The project's choice wins over it: the next round runs with Codex.
+    // The project's list wins over it, and of its two Myrel takes the one that did not make the change.
     const set = await api(`/api/projects/${project.id}/settings`, {
       method: "PATCH",
       token,
-      body: JSON.stringify({ checkModel: { cli: "codex", model: null, effort: null } }),
+      body: JSON.stringify({ checkModels: { claude: { model: null, effort: null }, codex: { model: null, effort: null } } }),
     });
-    expect(((await set.json()) as { settings: { checkModel: unknown } }).settings.checkModel).toEqual({ cli: "codex", model: null, effort: null });
+    expect(Object.keys(((await set.json()) as { settings: { checkModels: object } }).settings.checkModels)).toEqual(["claude", "codex"]);
     open();
     await until(() => evaluators.length === 2, "the second round's evaluator");
     expect(requests[1]).toContain("Round 2 started");

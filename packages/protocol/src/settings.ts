@@ -63,24 +63,19 @@ export const CliModelDefault = z.object({
 });
 export type CliModelDefault = z.infer<typeof CliModelDefault>;
 
-/**
- * Who judges a visual check (ProjectSettings.visualCheck): a CLI on the computer the work is on, with
- * its model, effort and login; null parts are the CLI's own. Set per project or for all of a person's
- * projects; the project's wins, and with neither the evaluator gets another CLI than the one that
- * made the change. A CLI the computer lacks falls to the next level. `cli` is a plain string, like
- * ThreadCli.id, so a CLI Myrel drops later does not break the setting.
- */
-export const CheckModel = z.object({
-  cli: z.string().trim().min(1).max(40),
-  model: z.string().trim().min(1).max(200).nullable(),
-  effort: z.string().trim().min(1).max(20).nullable(),
-  account: CliAccountId.nullable().optional(),
-});
-export type CheckModel = z.infer<typeof CheckModel>;
 
 /** Defaults per CLI for the project's threads on a computer, keyed by CliId. */
 export const CliModelDefaults = z.partialRecord(CliId, CliModelDefault);
 export type CliModelDefaults = z.infer<typeof CliModelDefaults>;
+
+/**
+ * The CLIs that may judge visual checks (ProjectSettings.visualCheck), each with the model, effort
+ * and login to judge with (null parts: the CLI's own). For a round Myrel picks one the computer runs,
+ * preferring one other than the CLI that made the change and one not at its usage limit; with none
+ * listed, any other CLI. A project's list wins over the person's own (Me.checkModels).
+ */
+export const CheckModels = CliModelDefaults;
+export type CheckModels = CliModelDefaults;
 
 export const ProjectSettings = z.object({
   name: z.string(),
@@ -101,8 +96,8 @@ export const ProjectSettings = z.object({
    * Older servers never send it.
    */
   visualCheck: z.boolean().default(false),
-  /** Who judges its visual checks; null: the person's own choice, else another CLI. Older servers never send it. */
-  checkModel: CheckModel.nullable().default(null),
+  /** The CLIs that may judge its visual checks; empty: the person's own list, else any other CLI. Older servers never send it. */
+  checkModels: CheckModels.default({}),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -118,7 +113,8 @@ export const UpdateProjectSettingsInput = z.object({
   /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
   cliModels: CliModelDefaults.optional(),
   visualCheck: z.boolean().optional(),
-  checkModel: CheckModel.nullable().optional(),
+  /** Replaces the whole list. */
+  checkModels: CheckModels.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 
@@ -165,13 +161,13 @@ export const Me = z.object({
   onboarded: z.boolean().optional(),
   /** The one-time tips the person has seen or closed; older servers do not send it (the apps then show no tips). */
   tips: z.array(z.string()).optional(),
-  /** Who judges the visual checks of the person's projects that set none (see CheckModel); older servers do not send it. */
-  checkModel: CheckModel.nullable().optional(),
+  /** The CLIs that may judge the visual checks of the person's projects that list none (see CheckModels); older servers do not send it. */
+  checkModels: CheckModels.optional(),
 });
 export type Me = z.infer<typeof Me>;
 
-export const SetCheckModelInput = z.object({ checkModel: CheckModel.nullable() });
-export type SetCheckModelInput = z.infer<typeof SetCheckModelInput>;
+export const SetCheckModelsInput = z.object({ checkModels: CheckModels });
+export type SetCheckModelsInput = z.infer<typeof SetCheckModelsInput>;
 
 /** Server settings admins change at runtime. */
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "74018eae-268a-4e12-b9db-fb7abcfb5bf8",
+  "id": "cb94a743-d514-4c85-a560-36f6d0637128",
   "prevId": "e769a57a-28d0-4155-8545-ede315666b7f",
   "tables": {
     "account": {
@@ -2306,8 +2306,8 @@
           "autoincrement": false,
           "default": false
         },
-        "check_model": {
-          "name": "check_model",
+        "check_models": {
+          "name": "check_models",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3612,8 +3612,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "check_model": {
-          "name": "check_model",
+        "check_models": {
+          "name": "check_models",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

@@ -1,6 +1,6 @@
 import { THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
-import type { BillingSummary, CheckModel } from "@myrel/protocol";
+import type { BillingSummary, CheckModels } from "@myrel/protocol";
 import { useI18n } from "@myrel/i18n/react";
 import { Check, ExternalLink } from "lucide-react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,7 +10,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
-import { EvaluatorRow, mergeClis } from "../../components/evaluator-picker";
+import { EvaluatorList, mergeClis } from "../../components/evaluator-picker";
 import { Notice, Section } from "../../components/settings-section";
 import { Button, errorMessage } from "../../components/ui";
 import * as purchases from "../../lib/purchases";
@@ -288,7 +288,7 @@ function LegalLink({ label, url }: { label: string; url: string }) {
   );
 }
 
-/** Who judges the visual checks of this person's projects that set none (CheckModel), from the CLIs of their computers. */
+/** The CLIs that may judge the visual checks of this person's projects that list none (CheckModels), from the CLIs of their computers. */
 function EvaluatorSection() {
   const { t } = useI18n();
   const { api, server } = useSession();
@@ -297,18 +297,17 @@ function EvaluatorSection() {
   const me = useQuery({ queryKey: meKey, queryFn: () => api.getMe() });
   const runners = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners() });
   const save = useMutation({
-    mutationFn: (next: CheckModel | null) => api.setCheckModel(next),
-    onSuccess: (checkModel) => queryClient.setQueryData(meKey, (old: typeof me.data) => old && { ...old, checkModel }),
+    mutationFn: (next: CheckModels) => api.setCheckModels(next),
+    onSuccess: (checkModels) => queryClient.setQueryData(meKey, (old: typeof me.data) => old && { ...old, checkModels }),
   });
   if (!me.data) return null;
   return (
     <Section title={t("evaluator.title")} hint={t("evaluator.accountHint")}>
-      <EvaluatorRow
+      <EvaluatorList
         clis={mergeClis((runners.data ?? []).map((r) => r.clis))}
-        value={save.isPending ? (save.variables ?? null) : (me.data.checkModel ?? null)}
+        value={save.isPending ? (save.variables ?? {}) : (me.data.checkModels ?? {})}
         onChange={(next) => save.mutate(next)}
         disabled={save.isPending}
-        autoLabel={t("evaluator.accountAuto")}
       />
       {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
     </Section>

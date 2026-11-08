@@ -10,7 +10,7 @@ import type {
   ApiKey,
   CatalogCategory,
   CatalogPage,
-  CheckModel,
+  CheckModels,
   Connector,
   ConnectSuggestionInput,
   ConnectSuggestionResult,
@@ -307,9 +307,9 @@ export class ApiClient {
     await this.request("/api/account/client-errors", { method: "POST", body: input });
   }
 
-  /** Who judges the visual checks of this person's projects that set none (CheckModel); null: automatic. */
-  async setCheckModel(checkModel: CheckModel | null) {
-    return (await this.request<{ checkModel: CheckModel | null }>("/api/account/check-model", { method: "PUT", body: { checkModel } })).checkModel;
+  /** The CLIs that may judge the visual checks of this person's projects that list none (CheckModels); replaces the list. */
+  async setCheckModels(checkModels: CheckModels) {
+    return (await this.request<{ checkModels: CheckModels }>("/api/account/check-models", { method: "PUT", body: { checkModels } })).checkModels;
   }
 
   /** Marks a one-time tip seen for this account, on every device. */

@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import {
   type CliId,
   cliLogins,
-  type CheckModel,
+  type CheckModels,
   type CliModelDefaults,
   type CloudCli,
   effortsFor,
@@ -241,7 +241,7 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   const [cloudCli, setCloudCli] = useState<CloudCli>(settings.cloudCli);
   const [visualCheck, setVisualCheck] = useState(settings.visualCheck);
-  const [checkModel, setCheckModel] = useState<CheckModel | null>(settings.checkModel);
+  const [checkModels, setCheckModels] = useState<CheckModels>(settings.checkModels);
   // The CLIs of the project's computer, which only its owner's list has.
   const { data: workspace } = useQuery(workspaceQuery(projectId));
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
@@ -253,13 +253,13 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
     setTaskTarget(settings.taskTarget);
     setCloudCli(settings.cloudCli);
     setVisualCheck(settings.visualCheck);
-    setCheckModel(settings.checkModel);
+    setCheckModels(settings.checkModels);
   }, [settings]);
   const save = useSaveSettings(projectId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli, visualCheck, checkModel });
+    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli, visualCheck, checkModels });
   }
 
   return (
@@ -310,13 +310,7 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
           <div className="space-y-2">
             <p className="text-[13px] font-medium">{t("evaluator.title")}</p>
             <p className="text-xs text-subtle">{t("evaluator.projectHint")}</p>
-            <EvaluatorPicker
-              clis={computer?.clis ?? []}
-              value={checkModel}
-              onChange={setCheckModel}
-              disabled={!canManage}
-              autoLabel={t("evaluator.projectAuto")}
-            />
+            <EvaluatorPicker clis={computer?.clis ?? []} value={checkModels} onChange={setCheckModels} disabled={!canManage} />
           </div>
         )}
       </Section>

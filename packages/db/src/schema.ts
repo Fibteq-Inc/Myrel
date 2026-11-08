@@ -29,8 +29,8 @@ export const user = sqliteTable("user", {
   onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
   /** The one-time tips (TipId in @myrel/protocol) the person has seen, as a JSON array; null: none yet. */
   tipsSeen: text("tips_seen", { mode: "json" }).$type<string[]>(),
-  /** Who judges the visual checks of this person's projects that set none, JSON CheckModel in @myrel/protocol; null: none. */
-  checkModel: text("check_model"),
+  /** The CLIs that may judge the visual checks of this person's projects that list none, JSON CheckModels in @myrel/protocol; null: none. */
+  checkModels: text("check_models"),
   ...timestamps,
 });
 
@@ -126,8 +126,8 @@ export const projects = sqliteTable("projects", {
   cloudCli: text("cloud_cli"),
   /** Interface work gets a visual check by a separate evaluator thread before its pull request (off by default). */
   visualCheck: integer("visual_check", { mode: "boolean" }).notNull().default(false),
-  /** Who judges its visual checks, JSON CheckModel in @myrel/protocol; null: the person's own choice, else another CLI. */
-  checkModel: text("check_model"),
+  /** The CLIs that may judge its visual checks, JSON CheckModels in @myrel/protocol; null: the person's own list, else any other CLI. */
+  checkModels: text("check_models"),
   /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
   activeCount: integer("active_count").notNull().default(0),
   /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */

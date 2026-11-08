@@ -1,5 +1,6 @@
 import {
-  type CheckModel,
+  type CheckModels,
+  type CliId,
   effortsFor,
   type RunnerCli,
   type ThreadModel,
@@ -81,35 +82,47 @@ export type EvaluatorChoice = {
 };
 
 /**
- * The evaluator for a round on a computer with `clis`: the project's choice, else the person's own
- * (CheckModel), else another CLI than the coder's (pickEvaluatorCli). A choice whose CLI the computer
- * lacks falls to the next level; of a model or effort only what the CLI lists is kept, like
- * resolveTaskModel. Non-Claude CLIs need a runner that runs them (othersAllowed).
+ * The evaluator for a round on a computer with `clis`: one of the CLIs the project lists (CheckModels),
+ * else one the person lists, else any other CLI than the coder's (pickEvaluatorCli). Among the listed
+ * ones the computer runs, it prefers one not at its usage limit, then one other than the coder's, then
+ * EVALUATOR_PREFERENCE; a list none of whose CLIs runs here falls to the next level. Of a model or
+ * effort only what the CLI lists is kept, like resolveTaskModel. Non-Claude CLIs need a runner that
+ * runs them (othersAllowed).
  */
 export function resolveEvaluator(input: {
-  project: CheckModel | null;
-  account: CheckModel | null;
+  project: CheckModels;
+  account: CheckModels;
   clis: RunnerCli[];
   coderCli: string;
   othersAllowed: boolean;
 }): EvaluatorChoice {
   const skipped: string[] = [];
-  for (const [source, pick] of [
+  const installed = (id: string) => input.clis.find((c) => c.id === id);
+  const runs = (id: string) => !!installed(id) && (input.othersAllowed || id === "claude" || id === input.coderCli);
+  const rank = (id: string) => {
+    const i = EVALUATOR_PREFERENCE.indexOf(id);
+    return i < 0 ? EVALUATOR_PREFERENCE.length : i;
+  };
+  const cost = (id: string) => (installed(id)?.limits?.status === "limited" ? 2 : 0) + (id === input.coderCli ? 1 : 0);
+  for (const [source, list] of [
     ["project", input.project],
     ["account", input.account],
   ] as const) {
-    if (!pick) continue;
-    const installed = input.clis.find((c) => c.id === pick.cli);
-    if (!installed || !(input.othersAllowed || pick.cli === "claude" || pick.cli === input.coderCli)) {
-      skipped.push(`the ${source} setting asks for ${pick.cli}, which this computer does not run`);
+    const listed = Object.keys(list) as CliId[];
+    if (!listed.length) continue;
+    const usable = listed.filter(runs).sort((a, b) => cost(a) - cost(b) || rank(a) - rank(b));
+    const cli = usable[0];
+    if (!cli) {
+      skipped.push(`none of the CLIs the ${source} setting lists (${listed.join(", ")}) runs on this computer`);
       continue;
     }
-    const models = installed.models ?? [];
+    const pick = list[cli]!;
+    const models = installed(cli)?.models ?? [];
     const model = pick.model && models.some((m) => m.id === pick.model) ? pick.model : null;
     const effort = pick.effort && effortsFor(models, model).includes(pick.effort) ? pick.effort : null;
     return {
-      cli: pick.cli,
-      model: model || effort ? { cli: pick.cli, model, effort } : null,
+      cli,
+      model: model || effort ? { cli, model, effort } : null,
       account: pick.account ?? null,
       source,
       ...(skipped.length && { skipped: skipped.join("; ") }),

@@ -1,7 +1,7 @@
 import { isThemePreference, THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import type { CheckModel } from "@myrel/protocol";
+import type { CheckModels } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
@@ -131,7 +131,7 @@ function AccountSettings() {
 
       <ThemeSection />
 
-      <EvaluatorSection value={me.checkModel ?? null} />
+      <EvaluatorSection value={me.checkModels ?? {}} />
 
       {platform.updater && <AppUpdateSection updater={platform.updater} />}
 
@@ -141,25 +141,24 @@ function AccountSettings() {
 }
 
 /**
- * Who judges the visual checks of this person's projects that set none (CheckModel), from the CLIs
- * of their computers; each change saves.
+ * The CLIs that may judge the visual checks of this person's projects that list none (CheckModels),
+ * from the CLIs of their computers; each change saves.
  */
-function EvaluatorSection({ value }: { value: CheckModel | null }) {
+function EvaluatorSection({ value }: { value: CheckModels }) {
   const t = useT();
   const queryClient = useQueryClient();
   const { data: runners = [] } = useQuery(runnersQuery);
   const save = useMutation({
-    mutationFn: (next: CheckModel | null) => api.setCheckModel(next),
+    mutationFn: (next: CheckModels) => api.setCheckModels(next),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: meQuery.queryKey }),
   });
   return (
     <Section title={t("evaluator.title")} description={t("evaluator.accountHint")}>
       <EvaluatorPicker
         clis={mergeClis(runners.map((r) => r.clis))}
-        value={save.isPending ? (save.variables ?? null) : value}
+        value={save.isPending ? (save.variables ?? value) : value}
         onChange={(next) => save.mutate(next)}
         disabled={save.isPending}
-        autoLabel={t("evaluator.accountAuto")}
       />
       {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
     </Section>
