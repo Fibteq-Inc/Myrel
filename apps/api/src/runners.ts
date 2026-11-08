@@ -73,11 +73,18 @@ export async function toRunner(env: Env, row: RunnerRow): Promise<Runner> {
     ...(info?.settings && { settings: info.settings }),
     ...(info?.updates && { updates: info.updates }),
     ...(info?.update && { update: info.update }),
+    ...(info?.browser && { browser: info.browser }),
     online,
     lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     ...(stats && { stats }),
   };
+}
+
+/** Whether a visual check's browser can start on a computer, as its runner last said (older runners say nothing). */
+export async function runnerBrowser(env: Env, runnerId: string): Promise<RunnerInfo["browser"]> {
+  const [row] = await createDb(env.DB).select({ info: runners.info }).from(runners).where(eq(runners.id, runnerId));
+  return parseInfo(row?.info ?? null)?.browser;
 }
 
 /** How long the newest myrel-runner version from npm is remembered (a failed lookup: a few minutes). */

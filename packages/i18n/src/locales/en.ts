@@ -968,6 +968,7 @@ export const en = {
   "devices.cancel": "Cancel",
   "devices.remove": "Remove",
   "devices.removeLabel": "Remove {name}",
+  "devices.browserMissing": "Visual checks cannot open a browser on this computer: it lacks Chromium's system libraries. Run this once on the computer (it asks for your password):",
   "devices.sharedFolders": "Shared folders",
   "devices.addFolder": "Add folder",
   "devices.noFolders": "None yet. Add the folders projects may work in.",

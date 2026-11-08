@@ -963,6 +963,7 @@ export const tr: Catalog = {
   "devices.cancel": "Vazgeç",
   "devices.remove": "Kaldır",
   "devices.removeLabel": "{name} cihazını kaldır",
+  "devices.browserMissing": "Görsel kontrol bu bilgisayarda tarayıcı açamıyor: Chromium'un sistem kütüphaneleri eksik. Bilgisayarda bir kez şunu çalıştır (parolanı sorar):",
   "devices.sharedFolders": "Paylaşılan klasörler",
   "devices.addFolder": "Klasör ekle",
   "devices.noFolders": "Henüz yok. Projelerin çalışabileceği klasörleri ekle.",
