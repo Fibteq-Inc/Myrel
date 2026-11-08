@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, useRouter } from "expo-router";
 import { Check } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useSession } from "../../lib/session";
 import { makeStyles, projectColors, radius, useColors, useTheme } from "../../theme";
 import { PROJECT_ICONS, ProjectBadge } from "../project-badge";
@@ -84,6 +84,14 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
         {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
       </Section>
 
+      <Section title={t("projectSettings.checks")} hint={t("projectSettings.checksDescription")}>
+        <VisualCheckToggle
+          on={s.visualCheck}
+          disabled={!canManage || save.isPending}
+          onChange={(visualCheck) => save.mutate({ visualCheck })}
+        />
+      </Section>
+
       <Sheet open={open === "target"} onClose={() => setOpen(null)} title={t("projectSettings.runTasks")} hint={t("projectSettings.tasksDescription")}>
         {TaskTarget.options.map((target) => (
           <Option
@@ -114,6 +122,29 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
         ))}
       </Sheet>
     </>
+  );
+}
+
+/** The visual check's switch (ProjectSettings.visualCheck), with what it does; a change saves. */
+function VisualCheckToggle({ on, disabled, onChange }: { on: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
+  return (
+    <View style={styles.toggle}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.toggleTitle}>{t("projectSettings.visualCheck")}</Text>
+        <Text style={styles.label}>{t("projectSettings.visualCheckHint")}</Text>
+      </View>
+      <Switch
+        value={on}
+        disabled={disabled}
+        onValueChange={onChange}
+        accessibilityLabel={t("projectSettings.visualCheck")}
+        trackColor={{ false: colors.edge, true: colors.accent }}
+        thumbColor={colors.raised}
+      />
+    </View>
   );
 }
 
@@ -258,6 +289,8 @@ export function DeleteProject({ projectId, name }: { projectId: string; name: st
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
     label: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
+    toggle: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
+    toggleTitle: { color: colors.fg, fontSize: 15, fontWeight: "500" },
     grid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
     option: {
       width: 40,

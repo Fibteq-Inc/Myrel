@@ -26,6 +26,7 @@ import { GithubRepos } from "./github-repos";
 import { ProjectFolders } from "./project-folders";
 import { ProjectLookPicker } from "./project-badge";
 import { ConfirmDialog } from "./ui/confirm-dialog";
+import { Switch } from "./ui/controls";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
   api,
@@ -237,18 +238,20 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
   const [color, setColor] = useState<ProjectColor | null>(settings.color);
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   const [cloudCli, setCloudCli] = useState<CloudCli>(settings.cloudCli);
+  const [visualCheck, setVisualCheck] = useState(settings.visualCheck);
   useEffect(() => {
     setName(settings.name);
     setIcon(settings.icon);
     setColor(settings.color);
     setTaskTarget(settings.taskTarget);
     setCloudCli(settings.cloudCli);
+    setVisualCheck(settings.visualCheck);
   }, [settings]);
   const save = useSaveSettings(projectId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli });
+    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli, visualCheck });
   }
 
   return (
@@ -285,6 +288,16 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
             <option value="codex">{t("projectSettings.cloudCli.codex")}</option>
           </Select>
         </Field>
+      </Section>
+
+      <Section title={t("projectSettings.checks")} description={t("projectSettings.checksDescription")}>
+        <label className="flex items-center gap-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium">{t("projectSettings.visualCheck")}</span>
+            <span className="mt-0.5 block text-xs text-subtle">{t("projectSettings.visualCheckHint")}</span>
+          </span>
+          <Switch checked={visualCheck} disabled={!canManage} onChange={(e) => setVisualCheck(e.target.checked)} />
+        </label>
       </Section>
 
       {canManage && <SaveBar save={save} disabled={!name.trim()} />}

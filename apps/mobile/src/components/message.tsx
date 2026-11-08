@@ -5,6 +5,7 @@ import {
   DECISION_LANG,
   type Message,
   parseConnectorSuggestion,
+  parseVisualCheck,
   type Reaction,
 } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
@@ -23,6 +24,7 @@ import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
 import { StopButton } from "./stop-button";
+import { VisualCheckCard } from "./visual-check-card";
 import { CliMark, RelativeTime, Spinner, useRelativeTime } from "./ui";
 
 export type Names = Record<string, string>;
@@ -80,6 +82,7 @@ export function MessageView({
 
   if (message.authorKind === "agent") {
     const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
+    const check = message.threadId && !suggestion ? parseVisualCheck(message.body) : null;
     return (
       <View style={styles.agent}>
         {/* In a thread, the mark of the CLI that wrote it. */}
@@ -87,6 +90,8 @@ export function MessageView({
         <View style={{ flex: 1, minWidth: 0, gap: 8, paddingTop: 2 }}>
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
+          ) : check ? (
+            <VisualCheckCard card={check} projectId={message.projectId} />
           ) : (
             !!message.body && (
               <FoldIfLong body={message.body}>

@@ -1,4 +1,4 @@
-import { type Message, parseConnectorSuggestion, parsePlanUpdate, planChecklist, type Thread } from "@myrel/protocol";
+import { type Message, parseConnectorSuggestion, parsePlanUpdate, parseVisualCheck, planChecklist, type Thread } from "@myrel/protocol";
 
 /** How a message's author reads in a prompt. */
 export function authorLabel(m: Message, names: Record<string, string>): string {
@@ -25,6 +25,12 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
           : "waiting for the person";
     const what = card.signIn ? `sign-in-again card for ${names}, whose sign-in ended` : `connector card offering ${names}`;
     return `${head}\n${indent(`(${what}: ${state})`)}`;
+  }
+  // A visual check's card: its findings reach the thread as a note, so the state is enough here.
+  const check = parseVisualCheck(m.body);
+  if (check) {
+    const by = check.evaluator ? `, judged by ${check.evaluator.cli} / ${check.evaluator.model}` : "";
+    return `${head}\n${indent(`(visual check card: round ${check.round}, ${check.status}${by}${check.summary ? `, result in ${check.summary}` : ""})`)}`;
   }
   // The note itself is in the prompt already (the brief, or the coordinator's notes).
   if (m.relay) return `${head}\n${indent(`${m.body}\n(marker for a coordinator note people can open)`)}`;

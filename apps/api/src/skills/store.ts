@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import { MAX_TURN_SKILLS, parseSkillMd, type Skill, SKILL_LIMITS, SkillName, SkillPath, type SkillScope } from "@myrel/protocol";
 import { and, asc, eq } from "drizzle-orm";
+import { type BuiltinSkillName, builtinBundle, builtinSkill } from "./builtin";
 
 const { projectSkills, skills } = schema;
 
@@ -119,10 +120,14 @@ export function tameSkillMd(text: string): string {
 }
 
 /**
- * The skills a thread's agent gets this turn: the project's, then those of the person the thread
- * works for that they turned on in this project. A person's skill with the same name as a project's is left out (the project's wins).
+ * The skills a thread's agent gets this turn: the built-in ones the project turned on, the
+ * project's, then those of the person the thread works for that they turned on in this project.
+ * A person's skill with the same name as a project's is left out (the project's wins).
  */
-export async function turnSkills(env: Env, where: { projectId: string; userId: string | null }): Promise<TurnSkill[]> {
+export async function turnSkills(
+  env: Env,
+  where: { projectId: string; userId: string | null; builtins?: BuiltinSkillName[] },
+): Promise<TurnSkill[]> {
   const db = createDb(env.DB);
   const project = await db
     .select()
@@ -140,8 +145,9 @@ export async function turnSkills(env: Env, where: { projectId: string; userId: s
           .orderBy(asc(skills.name))
       ).map((r) => r.skill)
     : [];
-  const seen = new Set<string>();
-  const out: TurnSkill[] = [];
+  // Myrel's own skills the project turned on come first and win a name clash.
+  const out: TurnSkill[] = (where.builtins ?? []).map((name) => ({ ...builtinSkill(name), project: true }));
+  const seen = new Set<string>(out.map((s) => s.name));
   for (const row of [...project, ...own]) {
     if (seen.has(row.name) || out.length >= MAX_TURN_SKILLS) continue;
     seen.add(row.name);
@@ -168,7 +174,7 @@ export function streamSkillBundle(env: Env, given: GivenSkill[]): ReadableStream
     async pull(controller) {
       for (let s = next.next(); !s.done; s = next.next()) {
         const { id, name, tame } = s.value;
-        const files = await readBundle(env, id);
+        const files = builtinBundle(id) ?? (await readBundle(env, id));
         if (!files.length) continue;
         const out = tame
           ? files.map((f) =>

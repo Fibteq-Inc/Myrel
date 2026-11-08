@@ -5,6 +5,7 @@
 //   node capture.mjs --config .myrel/checks.json --out /tmp/myrel-checks/pricing/1
 //   node capture.mjs --url http://localhost:5173 --path / --path /settings
 //   node capture.mjs --serve dist --path /index.html --target game
+//   node capture.mjs --path / --path /pricing        (no --url/--start/--serve: the app is detected)
 //
 // See ../SKILL.md for the config file and ../rubric.md for what the evaluator does with the report.
 
@@ -17,6 +18,7 @@ import { createServer as netServer } from "node:net";
 import { tmpdir } from "node:os";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { AXE_VERSION, PLAYWRIGHT_VERSION, launchBrowser, loadDeps } from "./deps.mjs";
+import { detectApp } from "./detect.mjs";
 import { layoutChecks } from "./page-checks.mjs";
 import { groupFindings } from "./shared.mjs";
 import { contactSheet, frameDiff, imageStats, pixelPage, probeImage } from "./pixels.mjs";
@@ -81,8 +83,13 @@ async function loadConfig(args) {
   config.ignoreConsole = (config.ignoreConsole ?? []).map((r) => new RegExp(r, "i"));
   config.ignoreAxe ??= [];
   config.minTarget ??= 24;
+  // Nothing said where the app is: work it out from the repository (see detect.mjs).
   if (!config.url && !config.start && !config.serve && config.screens.every((s) => !s.url)) {
-    throw new Error("Say where the app is: --url, --start, --serve, or url/start/serve in the config.");
+    const found = detectApp(resolve(config.cwd ?? "."));
+    if (!found) throw new Error("Could not tell how to start the app: pass --url, --start or --serve, or write .myrel/checks.json.");
+    if (found.warning) throw new Error(`${found.detected}: ${found.warning}`);
+    Object.assign(config, found);
+    log(`Detected ${found.detected}`);
   }
   return { config, file };
 }
@@ -463,6 +470,7 @@ async function main() {
       createdAt: new Date().toISOString(),
       tool: { name: "visual-check", playwright: PLAYWRIGHT_VERSION, axe: AXE_VERSION, chromium: browser.version() },
       config: file ?? null,
+      ...(config.detected && { detected: config.detected }),
       target: config.target,
       baseUrl: base,
       git: { commit: git(["rev-parse", "HEAD"]), branch: git(["rev-parse", "--abbrev-ref", "HEAD"]), dirty: !!git(["status", "--porcelain"]) },

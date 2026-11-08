@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import { DECISION_LANG, type Message, parseConnectorSuggestion, type Reaction } from "@myrel/protocol";
+import { DECISION_LANG, type Message, parseConnectorSuggestion, parseVisualCheck, type Reaction } from "@myrel/protocol";
 import { AlarmClock, CircleAlert, LoaderCircle, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { CliMark, useRelativeTime } from "../../lib/ui";
@@ -11,6 +11,7 @@ import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
 import { StopButton } from "./stop-button";
+import { VisualCheckCard } from "./visual-check-card";
 
 export type Names = Record<string, string>;
 
@@ -70,12 +71,15 @@ export function MessageView({
 
   if (message.authorKind === "agent") {
     const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
+    const check = message.threadId && !suggestion ? parseVisualCheck(message.body) : null;
     return (
       <div className="group flex gap-3.5">
         <CliMark cli={message.threadId ? (message.stats?.task?.harness ?? message.stats?.harness) : null} tile />
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5">
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
+          ) : check ? (
+            <VisualCheckCard card={check} projectId={message.projectId} />
           ) : (
             <FoldIfLong body={message.body}>
               <MessageMarkdown body={message.body} decision={decision} />

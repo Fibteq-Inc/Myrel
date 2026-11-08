@@ -12,6 +12,9 @@ import {
   type ConnectorSuggestion,
   createId,
   formatConnectorSuggestion,
+  formatVisualCheck,
+  VISUAL_CHECK_ROUNDS,
+  type VisualCheckCard,
   formatPlan,
   formatPlanUpdate,
   type PlanUpdate,
@@ -46,6 +49,22 @@ import { z } from "zod";
 import { type ConnectorRow, readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { findOffers, knownConnectors, searchOffers, signInOffer } from "../connectors/suggest";
 import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
+import { BUILTIN_ID_PREFIX, type BuiltinSkillName } from "../skills/builtin";
+import { visualCheckOn } from "../checks/visual";
+import {
+  checkFolder,
+  checkNotice,
+  checkTitle,
+  evaluatorBrief,
+  judgedCard,
+  pickEvaluatorCli,
+  resultNote,
+  VISUAL_CHECK_TIMEOUT_SEC,
+  type VisualCheckRole,
+  type VisualCheckState,
+  visualCheckTools,
+} from "../checks/loop";
+import { CheckReport, CheckVerdict, judgeCheck } from "../checks/verdict";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
@@ -171,6 +190,8 @@ export type ThreadStart = {
    * author, or the person behind the coordinator turn that opened it on its own message.
    */
   actor?: string | null;
+  /** Set for a visual check's evaluator thread: what it checks for which thread (see checks/loop.ts). */
+  check?: VisualCheckRole;
 };
 
 /** A connector card the agent posted, and the message that shows it. */
@@ -379,6 +400,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("thread_id", input.threadId);
     this.setMeta("brief", input.brief);
     if (input.actor) this.setMeta("start_actor", input.actor);
+    if (input.check) this.setMeta("visual_check_role", JSON.stringify(input.check));
     await this.markDirty();
   }
 
@@ -1064,6 +1086,13 @@ export class ThreadAgent extends Agent<Env> {
       await project.setMessageStats(last.id, this.runStats(row, last.from).stats);
     }
     const resolved = turn?.resolved ?? false;
+    // An evaluator that finishes without handing in its check would leave the thread that asked waiting.
+    const role = this.visualCheckRole();
+    if (resolved && role && !role.submitted) {
+      await this.handInVisualCheck(role, this.notCheckedCard(role, "The evaluator thread finished without handing in a result.")).catch((err) =>
+        console.error("visual check hand-in", err),
+      );
+    }
     // Read right before the update: a choice card the coordinator passed on meanwhile is the person's now.
     const asked = (turn?.asked ?? false) || (!!turn?.questioned && !!this.getMeta("pending_question"));
     const failed = row.status === "failed" && !replied;
@@ -1151,13 +1180,18 @@ export class ThreadAgent extends Agent<Env> {
   private async turnSkills(place: Exclude<TaskPlace, { kind: "error" | "wait" }>, requester: string | null): Promise<TurnSkill[]> {
     const { projectId } = this.ids();
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "skills"))) return [];
-    const skills = await turnSkills(this.env, { projectId, userId: requester }).catch((err) => {
+    const builtins: BuiltinSkillName[] = (await visualCheckOn(this.env, projectId).catch(() => false)) ? ["visual-check"] : [];
+    const skills = await turnSkills(this.env, { projectId, userId: requester, builtins }).catch((err) => {
       console.error("skills", err);
       return [];
     });
     // On someone's computer a project skill comes tamed (see tameSkillMd): its author may not be them.
+    // Myrel's own built-in skills are not anyone's.
     const tame = place.kind === "local";
-    this.setMeta("agent_skills", JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name, tame: tame && s.project }))));
+    this.setMeta(
+      "agent_skills",
+      JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name, tame: tame && s.project && !s.id.startsWith(BUILTIN_ID_PREFIX) }))),
+    );
     return skills;
   }
 
@@ -1431,6 +1465,194 @@ export class ThreadAgent extends Agent<Env> {
 
   private repoRequest(): RepoRequest | null {
     return JSON.parse(this.getMeta("repo_request") ?? "null") as RepoRequest | null;
+  }
+
+  // ---- Visual check (see checks/loop.ts) ----------------------------------
+
+  /** The round this thread asked for last, if any. */
+  private visualCheck(): VisualCheckState | null {
+    return JSON.parse(this.getMeta("visual_check") ?? "null") as VisualCheckState | null;
+  }
+
+  /** What this thread checks, when it is a visual check's evaluator. */
+  private visualCheckRole(): VisualCheckRole | null {
+    return JSON.parse(this.getMeta("visual_check_role") ?? "null") as VisualCheckRole | null;
+  }
+
+  private notCheckedCard(role: VisualCheckRole, note: string): VisualCheckCard {
+    return {
+      id: role.checkId,
+      round: role.round,
+      status: "not_checked",
+      evaluatorThreadId: this.ids().threadId,
+      folder: role.folder,
+      branch: role.branch,
+      blocking: [],
+      sheets: [],
+      note,
+    };
+  }
+
+  /**
+   * request_visual_check: starts the next round. The evaluator runs on the computer this thread runs
+   * on (its branch and the browser are there), with another CLI when the computer has one.
+   */
+  private async requestVisualCheck(input: { branch: string; repo?: string; what: string }): Promise<string> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const current = this.visualCheck();
+    if (current?.status === "running") return `Round ${current.round} of the visual check is still running; its result will wake you. End your turn.`;
+    if (current && current.round >= VISUAL_CHECK_ROUNDS && !(await this.personWroteSince(current.resultSeq ?? 0))) {
+      return `${VISUAL_CHECK_ROUNDS} rounds are done. Ask the person with ask_decision whether to accept the work as it is, run one more round, or change the brief; another round can start once they have answered.`;
+    }
+    const row = this.runningTask();
+    const spec = row ? (JSON.parse(row.spec) as StoredSpec) : null;
+    if (row?.backend !== "local" || !spec?.runnerId) {
+      return "Not started: visual checks run on a computer with a browser, and this thread works in the cloud, where there is none yet. Carry on without it and tell the person the look was not checked.";
+    }
+    const thread = await project.getThread(threadId);
+    if (!thread) throw new Error("This thread is gone.");
+    const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId });
+    const othersAllowed = await runnerHasFeature(this.env, spec.runnerId, "agent-clis");
+    const cli = pickEvaluatorCli(
+      (workspace?.clis ?? []).map((c) => ({ id: c.id, limited: c.limits?.status === "limited" })),
+      spec.harness,
+      othersAllowed,
+    );
+    const id = current?.id ?? createId("check");
+    const round = (current?.round ?? 0) + 1;
+    const folder = checkFolder(id, round);
+    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], sheets: [] };
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatVisualCheck(card) });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    const tr = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language === "tr";
+    const reason =
+      cli === spec.harness
+        ? tr
+          ? "Görsel kontrol: bu bilgisayarda başka bir CLI yok"
+          : "Visual check: no other CLI on this computer"
+        : tr
+          ? "Görsel kontrol: işi yapandan farklı bir CLI"
+          : "Visual check: another CLI than the one that made the change";
+    const state: VisualCheckState = { id, round, status: "running", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch };
+    this.setMeta("visual_check", JSON.stringify(state));
+    try {
+      const evaluator = await project.startVisualCheck({
+        notice: checkNotice(thread.title, round),
+        title: checkTitle(thread.title, round),
+        brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder }),
+        cli: { id: cli, options: [cli], by: "coordinator", reason },
+        runner: { id: spec.runnerId, by: "auto", reason: null },
+        actor: this.getMeta("requester") || null,
+        check: { checkId: id, round, coderThreadId: threadId, folder, branch: input.branch },
+      });
+      this.setMeta("visual_check", JSON.stringify({ ...state, evaluatorThreadId: evaluator.id }));
+      await project.editMessage(m.id, formatVisualCheck({ ...card, evaluatorThreadId: evaluator.id }));
+    } catch (err) {
+      const note = `The evaluator thread could not start: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600);
+      this.setMeta("visual_check", JSON.stringify({ ...state, status: "not_checked" }));
+      await project.editMessage(m.id, formatVisualCheck({ ...card, status: "not_checked", note }));
+      return `Not started. ${note}`;
+    }
+    await this.schedule(VISUAL_CHECK_TIMEOUT_SEC, "visualCheckTimeout", { id, round });
+    return `Round ${round} started: an evaluator thread with ${CLI_NAMES[cli as keyof typeof CLI_NAMES] ?? cli} checks branch ${input.branch}, and its card is in this thread. Its result wakes you. Do not open the pull request yet; end your turn.`;
+  }
+
+  /** A person wrote in this thread after the given message. */
+  private async personWroteSince(seq: number): Promise<boolean> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const ctx = await project.getThreadContext(threadId);
+    return !!ctx?.messages.some((m) => m.authorKind === "user" && m.seq > seq);
+  }
+
+  /** submit_visual_check: judges the evaluator's verdict with the rules, then hands the round back. */
+  private async submitVisualCheck(role: VisualCheckRole, input: { checkId: string; couldNotCheck?: string }): Promise<string> {
+    if (input.checkId !== role.checkId) return `That is not this thread's check: its id is ${role.checkId}.`;
+    if (role.submitted) return "This round is already handed in. Tell people the verdict and resolve this thread.";
+    if (input.couldNotCheck) {
+      const delivered = await this.handInVisualCheck(role, this.notCheckedCard(role, input.couldNotCheck));
+      return delivered
+        ? "Handed in as not checked. Tell people why in one or two sentences (with any command they need to run) and resolve this thread."
+        : "The thread that asked no longer waits for this round. Tell people and resolve this thread.";
+    }
+    const project = await getAgentByName(this.env.PROJECT_AGENT, this.ids().projectId);
+    const files = await project.listFiles(`${role.folder}/`);
+    const names = new Set(files.map((f) => f.path.slice(role.folder.length + 1)));
+    const readJson = async (name: string): Promise<unknown | string> => {
+      if (!names.has(name)) return `${name} is not in ${role.folder}/: upload it there (file_upload_url) and call submit_visual_check again.`;
+      const { text } = await project.readFileText(`${role.folder}/${name}`);
+      try {
+        return JSON.parse(text ?? "");
+      } catch {
+        return `${name} in ${role.folder}/ is not valid JSON.`;
+      }
+    };
+    const rawReport = await readJson("report.json");
+    if (typeof rawReport === "string") return rawReport;
+    const rawVerdict = await readJson("verdict.json");
+    if (typeof rawVerdict === "string") return rawVerdict;
+    const report = CheckReport.safeParse(rawReport);
+    if (!report.success) return `report.json is not the one capture.mjs writes: ${report.error.issues[0]?.message ?? "invalid"}. Upload the file capture.mjs wrote.`;
+    const verdict = CheckVerdict.safeParse(rawVerdict);
+    if (!verdict.success) {
+      const issue = verdict.error.issues[0];
+      return `verdict.json does not match the format in rubric.md: ${issue?.path.join(".") || "(top)"}: ${issue?.message ?? "invalid"}. Fix it, upload it again and resubmit.`;
+    }
+    const judged = await judgeCheck(report.data, verdict.data, async (path) => names.has(path));
+    if (!judged.ok) return `Not handed in yet. Fix these, upload again and resubmit:\n${judged.problems.map((p) => `- ${p}`).join("\n")}`;
+    const sheets = [...names].filter((n) => n.endsWith(".sheet.png")).map((n) => `${role.folder}/${n}`);
+    const card = judgedCard(this.notCheckedCard(role, ""), judged.check, { folder: role.folder, sheets });
+    delete card.note;
+    if (judged.check.notes.length) card.note = judged.check.notes.join(" ").slice(0, 600);
+    const delivered = await this.handInVisualCheck(role, card);
+    if (!delivered) return "The thread that asked no longer waits for this round (it timed out or moved on). Tell people the verdict and resolve this thread.";
+    return `Handed in: ${card.status}${judged.check.notes.length ? ` (${judged.check.notes.join(" ")})` : ""}. Myrel showed it in the thread that asked and woke it. Tell people the verdict in one or two sentences and resolve this thread.`;
+  }
+
+  /** Gives a round's result to the thread that asked, once. */
+  private async handInVisualCheck(role: VisualCheckRole, card: VisualCheckCard): Promise<boolean> {
+    this.setMeta("visual_check_role", JSON.stringify({ ...role, submitted: true }));
+    const coder = await getAgentByName(this.env.THREAD_AGENT, role.coderThreadId);
+    return coder.visualCheckResult({ checkId: role.checkId, card });
+  }
+
+  /**
+   * A round's result, from its evaluator (or the timeout): the card shows it, and the thread wakes
+   * with what to do. False when this thread no longer waits for that round. Callable over RPC.
+   */
+  async visualCheckResult(input: { checkId: string; card: VisualCheckCard }): Promise<boolean> {
+    const state = this.visualCheck();
+    if (!state || state.id !== input.checkId || state.round !== input.card.round || state.status !== "running") return false;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const card: VisualCheckCard = { ...input.card, evaluatorThreadId: input.card.evaluatorThreadId ?? state.evaluatorThreadId };
+    await project.editMessage(state.messageId, formatVisualCheck(card));
+    const ctx = await project.getThreadContext(threadId);
+    const lastSeq = ctx?.messages.at(-1)?.seq ?? 0;
+    this.setMeta("visual_check", JSON.stringify({ ...state, status: card.status, resultSeq: lastSeq } satisfies VisualCheckState));
+    await this.wake({ kind: "coordinator", note: resultNote(card) });
+    return true;
+  }
+
+  /** A round that never came back is reported as not checked, so the thread is not held up for good. */
+  async visualCheckTimeout(payload: { id: string; round: number }): Promise<void> {
+    const state = this.visualCheck();
+    if (!state || state.id !== payload.id || state.round !== payload.round || state.status !== "running") return;
+    await this.visualCheckResult({
+      checkId: state.id,
+      card: {
+        id: state.id,
+        round: state.round,
+        status: "not_checked",
+        evaluatorThreadId: state.evaluatorThreadId,
+        folder: state.folder,
+        branch: state.branch,
+        blocking: [],
+        sheets: [],
+        note: `The evaluator did not hand in a result within ${VISUAL_CHECK_TIMEOUT_SEC / 60} minutes.`,
+      },
+    });
   }
 
   /**
@@ -1810,6 +2032,9 @@ export class ThreadAgent extends Agent<Env> {
     // which makes it this agent's (opened with gh, say); an older one may not be this thread's.
     const track = (url: string, credit?: PullCredit) => trackPullRequest(this.env, projectId, threadId, url, credit);
     const local = this.runningTask()?.backend === "local";
+    // An evaluator thread hands in its check; any other thread of a project with the check on asks for one.
+    const role = this.visualCheckRole();
+    const checksOn = !role && (await visualCheckOn(this.env, projectId).catch(() => false));
     const reply = async (text: string, needs?: ReplyNeeds, files?: string[]): Promise<Message> => {
       // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
       const attachments = files?.length ? await project.attachmentsFor(files) : [];
@@ -1897,6 +2122,9 @@ export class ThreadAgent extends Agent<Env> {
         // and their answer wakes it, instead of reading as finished.
         resolve: async () => {
           const t = turn();
+          if (this.visualCheck()?.status === "running") {
+            return "Not resolved: a visual check of this work is running, and its result will wake you. End your turn without resolving.";
+          }
           if (t.needs || t.published || t.questioned) {
             return "Not resolved: this turn asked the person something or presented work for their feedback, so the thread waits on their answer. End your turn without resolving; it shows as waiting for them.";
           }
@@ -1947,6 +2175,10 @@ export class ThreadAgent extends Agent<Env> {
           return `The card is in the thread. End your turn now: once ${repo} is connected you are woken with it connected, and carry on from there.`;
         },
         openPullRequest: async (input) => {
+          const check = this.visualCheck();
+          if (check?.status === "running") {
+            return `Not opened: round ${check.round} of the visual check is still running on ${check.branch}. Its result will wake you; open the pull request then. End your turn.`;
+          }
           const { pr, created } = await openPullRequest(this.env, projectId, threadId, input, await this.pullCredit());
           return `${created ? "Opened" : "An open pull request already exists for that branch:"} ${pr.url} (${pr.repo}#${pr.number}). Myrel follows it: CI failures, reviews and the merge will wake you.`;
         },
@@ -1960,6 +2192,10 @@ export class ThreadAgent extends Agent<Env> {
           this.setMeta("branch_request", JSON.stringify(request));
           return `${done} A card asks the person whether to delete its branch ${branch.branch}; Myrel deletes it if they say so, without you. Do not ask again.`;
         },
+      }),
+      ...visualCheckTools({
+        request: role ? undefined : checksOn ? (input) => this.requestVisualCheck(input) : undefined,
+        submit: role ? (input) => this.submitVisualCheck(role, input) : undefined,
       }),
       ...suggestionTools({
         search: (q) => searchOffers(this.env, q),
