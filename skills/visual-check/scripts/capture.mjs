@@ -334,6 +334,7 @@ async function shoot(ctx) {
     shot.interactive = layout.interactive;
     if (layout.overflowX) add("blocking", "overflow-x", `The page scrolls sideways: ${layout.overflowX.scrollWidth}px of content in a ${layout.overflowX.viewport}px viewport.`, { offenders: layout.offscreen });
     else if (layout.offscreen.length) add("warning", "cut-off", `${layout.offscreen.length} element(s) run past the screen edge and are cut off.`, { offenders: layout.offscreen });
+    if (layout.cutControls.length) add("blocking", "cut-off-control", `${layout.cutControls.length} control(s) are cut by the screen edge and cannot be scrolled to.`, { items: layout.cutControls });
     if (layout.covered.length) add("blocking", "covered-control", `${layout.covered.length} control(s) have something else drawn on top of them; a tap lands on the wrong element.`, { items: layout.covered });
     if (layout.overlaps.length) add("warning", "overlapping-controls", `${layout.overlaps.length} pair(s) of controls overlap.`, { items: layout.overlaps });
     if (layout.textOverlaps.length) add("warning", "overlapping-text", `${layout.textOverlaps.length} pair(s) of text runs are drawn over each other.`, { items: layout.textOverlaps });
