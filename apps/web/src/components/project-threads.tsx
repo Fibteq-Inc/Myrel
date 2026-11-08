@@ -1,3 +1,4 @@
+import { threadChildren } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { Thread } from "@myrel/protocol";
 import { Link } from "@tanstack/react-router";
@@ -5,6 +6,7 @@ import { ChevronDown, ChevronRight, Search, SquarePen } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useProjectContext } from "../lib/project-context";
 import { cn, Kbd, useRelativeTime } from "../lib/ui";
+import { ChildThreads } from "./chat/thread-card";
 import { threadActivity, ThreadStatusIcon } from "./chat/thread-status";
 import { useProjectView } from "./project-view";
 
@@ -16,9 +18,12 @@ export function ProjectThreads() {
   const [query, setQuery] = useState("");
   const [showResolved, setShowResolved] = useState(false);
 
+  // A visual check's evaluator is listed under the thread it checks, not on its own.
+  const checks = useMemo(() => threadChildren(state), [state]);
   const { open, resolved } = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
     const all = Object.values(state.threads)
+      .filter((th) => !th.parentId || !state.threads[th.parentId])
       .filter((th) => !q || th.title.toLocaleLowerCase().includes(q))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return { open: all.filter((th) => !th.resolved), resolved: all.filter((th) => th.resolved) };
@@ -65,6 +70,7 @@ export function ProjectThreads() {
             {open.map((th) => (
               <li key={th.id}>
                 <ThreadRow projectId={project.id} thread={th} />
+                {checks.has(th.id) && <ChildThreads projectId={project.id} threads={checks.get(th.id)!} />}
               </li>
             ))}
           </ul>
@@ -87,6 +93,7 @@ export function ProjectThreads() {
                 {resolved.map((th) => (
                   <li key={th.id}>
                     <ThreadRow projectId={project.id} thread={th} />
+                    {checks.has(th.id) && <ChildThreads projectId={project.id} threads={checks.get(th.id)!} />}
                   </li>
                 ))}
               </ul>

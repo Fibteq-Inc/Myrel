@@ -1,11 +1,13 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import type { VisualCheckCard as Card, VisualCheckStatus } from "@myrel/protocol";
+import type { VisualCheckAction, VisualCheckCard as Card, VisualCheckStatus } from "@myrel/protocol";
+import { useMutation } from "@tanstack/react-query";
 import { type Href, useRouter } from "expo-router";
 import { CircleAlert, CircleCheck, CircleDashed, CircleX, FileImage, ScanEye } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useSession } from "../lib/session";
 import { makeStyles, mono, radius, useColors } from "../theme";
-import { Spinner } from "./ui";
+import { Button, errorMessage, Spinner } from "./ui";
 
 const SCORES = ["functionality", "craft", "design", "originality"] as const;
 
@@ -17,11 +19,16 @@ function fileName(path: string): string {
  * One round of a visual check (ProjectSettings.visualCheck) in the thread that asked for it, as on
  * the web: who judged it, what must change with the screenshot that shows it, and the contact sheets.
  */
-export function VisualCheckCard({ card, projectId }: { card: Card; projectId: string }) {
+export function VisualCheckCard({ card, projectId, threadId }: { card: Card; projectId: string; threadId: string }) {
   const t = useT();
   const colors = useColors();
   const styles = useStyles();
   const router = useRouter();
+  const { api } = useSession();
+  const act = useMutation({ mutationFn: (action: VisualCheckAction) => api.visualCheckAction(projectId, threadId, card.id, action) });
+  const settled = card.status !== "running";
+  const canAccept = settled && card.status !== "passed" && !card.acceptedBy;
+  const canApprove = settled && card.status !== "not_checked" && !card.baselineBy;
   const tone: Record<VisualCheckStatus, string> = {
     running: colors.accent,
     passed: colors.ok,
@@ -56,7 +63,7 @@ export function VisualCheckCard({ card, projectId }: { card: Card; projectId: st
         </Text>
       )}
       {card.scores && <Text style={styles.meta}>{SCORES.map((k) => `${t(`visualCheck.score.${k}` as MessageKey)} ${card.scores![k]}`).join(" · ")}</Text>}
-      {card.status === "running" && card.evaluatorThreadId && (
+      {card.evaluatorThreadId && (
         <Pressable accessibilityRole="link" onPress={() => router.push(`/projects/${projectId}/threads/${card.evaluatorThreadId}` as Href)}>
           <Text style={styles.link}>{t("visualCheck.openEvaluator")}</Text>
         </Pressable>
@@ -66,20 +73,25 @@ export function VisualCheckCard({ card, projectId }: { card: Card; projectId: st
       {card.blocking.length > 0 && (
         <View style={{ gap: 8 }}>
           <Text style={styles.section}>{t("visualCheck.mustFix")}</Text>
-          {card.blocking.map((b) => (
-            <View key={`${b.screen}-${b.evidence}-${b.problem.slice(0, 40)}`} style={styles.finding}>
-              <Text style={styles.screen}>{b.screen}</Text>
+          {card.blocking.map((b, i) => (
+            <View key={`${b.screen}-${b.evidence}-${i}`} style={styles.finding}>
+              <View style={styles.findingHead}>
+                <View style={styles.num}>
+                  <Text style={styles.numText}>{b.n ?? i + 1}</Text>
+                </View>
+                <Text style={styles.screen}>{b.screen}</Text>
+              </View>
               <Text style={styles.problem}>{b.problem}</Text>
-              <Pressable accessibilityRole="button" onPress={() => open(b.evidence)} style={styles.fileLink}>
+              <Pressable accessibilityRole="button" onPress={() => open(b.image ?? b.evidence)} style={styles.fileLink}>
                 <FileImage size={12} color={colors.link} />
-                <Text style={styles.link}>{fileName(b.evidence)}</Text>
+                <Text style={styles.link}>{b.image ? t("visualCheck.showOnScreenshot") : fileName(b.evidence)}</Text>
               </Pressable>
             </View>
           ))}
         </View>
       )}
 
-      {(card.sheets.length > 0 || !!card.summary) && (
+      {(card.sheets.length > 0 || card.diffs.length > 0 || !!card.summary) && (
         <View style={styles.chips}>
           {!!card.summary && (
             <Pressable accessibilityRole="button" onPress={() => open(card.summary!)} style={({ pressed }) => [styles.chip, pressed && { backgroundColor: colors.hover }]}>
@@ -92,8 +104,37 @@ export function VisualCheckCard({ card, projectId }: { card: Card; projectId: st
               <Text style={styles.chipText}>{fileName(s).replace(/\.sheet\.png$/, "")}</Text>
             </Pressable>
           ))}
+          {card.diffs.map((d) => (
+            <Pressable key={d} accessibilityRole="button" onPress={() => open(d)} style={({ pressed }) => [styles.chip, styles.diffChip, pressed && { backgroundColor: colors.hover }]}>
+              <FileImage size={12} color={colors.warn} />
+              <Text style={styles.chipText}>{t("visualCheck.changed", { screen: fileName(d).replace(/\.diff\.png$/, "") })}</Text>
+            </Pressable>
+          ))}
         </View>
       )}
+
+      {(!!card.acceptedBy || !!card.baselineBy) && (
+        <Text style={styles.meta}>
+          {[card.acceptedBy && t("visualCheck.acceptedBy", { name: card.acceptedBy }), card.baselineBy && t("visualCheck.baselineBy", { name: card.baselineBy })]
+            .filter(Boolean)
+            .join(" · ")}
+        </Text>
+      )}
+      {(canAccept || canApprove) && (
+        <View style={styles.actions}>
+          {canAccept && (
+            <Button variant="ghost" onPress={() => act.mutate("accept")} pending={act.isPending && act.variables === "accept"}>
+              {t("visualCheck.accept")}
+            </Button>
+          )}
+          {canApprove && (
+            <Button variant="ghost" onPress={() => act.mutate("baseline")} pending={act.isPending && act.variables === "baseline"}>
+              {t("visualCheck.approveBaseline")}
+            </Button>
+          )}
+        </View>
+      )}
+      {act.error && <Text style={[styles.meta, { color: colors.bad }]}>{errorMessage(act.error, t("common.error"))}</Text>}
     </View>
   );
 }
@@ -108,7 +149,12 @@ const useStyles = makeStyles((colors) =>
     meta: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
     note: { color: colors.body, fontSize: 13, lineHeight: 18 },
     section: { color: colors.fg, fontSize: 13, fontWeight: "600", marginTop: 6 },
-    finding: { gap: 2, borderLeftWidth: 2, borderLeftColor: colors.bad, paddingLeft: 10 },
+    finding: { gap: 2 },
+    findingHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+    num: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.bad, alignItems: "center", justifyContent: "center" },
+    numText: { color: colors.onAccent, fontSize: 11, fontWeight: "700" },
+    diffChip: { borderColor: colors.warnLine, backgroundColor: colors.warnSoft },
+    actions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
     screen: { color: colors.subtle, fontSize: 12, fontFamily: mono },
     problem: { color: colors.body, fontSize: 14, lineHeight: 20 },
     fileLink: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 },

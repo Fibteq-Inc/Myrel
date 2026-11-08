@@ -306,6 +306,24 @@ export function threadReplyCount(s: ProjectState, threadId: string): number {
   return threadSummary(s, threadId).replies;
 }
 
+/**
+ * Threads Myrel opened to check another thread's work (Thread.parentId), by that thread, oldest
+ * first: they show under it rather than as threads of their own.
+ */
+export function threadChildren(s: ProjectState): Map<string, Thread[]> {
+  const out = new Map<string, Thread[]>();
+  for (const t of Object.values(s.threads).sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    if (!t.parentId) continue;
+    out.set(t.parentId, [...(out.get(t.parentId) ?? []), t]);
+  }
+  return out;
+}
+
+/** The visual check status an evaluator thread's label carries (`check:<status>`), once it handed in. */
+export function checkLabelStatus(t: Thread): string | null {
+  return t.label?.startsWith("check:") ? t.label.slice("check:".length) : null;
+}
+
 export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
 }

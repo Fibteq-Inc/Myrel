@@ -79,7 +79,7 @@ export function MessageView({
           {suggestion ? (
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
           ) : check ? (
-            <VisualCheckCard card={check} projectId={message.projectId} />
+            <VisualCheckCard card={check} projectId={message.projectId} threadId={message.threadId!} />
           ) : (
             <FoldIfLong body={message.body}>
               <MessageMarkdown body={message.body} decision={decision} />

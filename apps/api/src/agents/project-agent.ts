@@ -132,6 +132,8 @@ type ThreadRow = {
   /** JSON ThreadRunner, or null. */
   runner: string | null;
   seen_seq: number | null;
+  /** The thread it checks (Thread.parentId), or null. */
+  parent_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -315,6 +317,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!threadColumns.some((c) => c.name === "runner")) this.sql`ALTER TABLE threads ADD COLUMN runner TEXT`;
     // Added with telling threads waiting on a person from ones that only delivered something.
     if (!threadColumns.some((c) => c.name === "needs")) this.sql`ALTER TABLE threads ADD COLUMN needs TEXT`;
+    // Added with visual checks: an evaluator thread shows under the thread it checks.
+    if (!threadColumns.some((c) => c.name === "parent_id")) this.sql`ALTER TABLE threads ADD COLUMN parent_id TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -824,10 +828,11 @@ export class ProjectAgent extends Agent<Env> {
     id = createId("thread"),
     cli: ThreadCli | null = null,
     runner: ThreadRunner | null = null,
+    parentId: string | null = null,
   ): Thread {
     const now = new Date().toISOString();
-    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, runner, created_at, updated_at)
-      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${runner ? JSON.stringify(runner) : null}, ${now}, ${now})`;
+    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, runner, parent_id, created_at, updated_at)
+      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${runner ? JSON.stringify(runner) : null}, ${parentId}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
     this.syncActivity();
@@ -1056,13 +1061,14 @@ export class ProjectAgent extends Agent<Env> {
     for (const threadId of this.active.keys()) working.add(threadId ?? "coordinator");
     let waiting = 0;
     const live: LiveThread[] = [];
-    for (const row of this.sql<Pick<ThreadRow, "id" | "title" | "status" | "needs" | "status_text" | "updated_at">>`
-      SELECT id, title, status, needs, status_text, updated_at FROM threads WHERE resolved = 0 ORDER BY created_at`) {
+    for (const row of this.sql<Pick<ThreadRow, "id" | "title" | "status" | "needs" | "status_text" | "updated_at" | "parent_id">>`
+      SELECT id, title, status, needs, status_text, updated_at, parent_id FROM threads WHERE resolved = 0 ORDER BY created_at`) {
       if (row.status === "working") working.add(row.id);
       const waits = threadWaitsOnPerson({ ...row, resolved: false });
       if (waits) waiting++;
       const state = waits ? (row.status === "failed" ? "failed" : "waiting") : this.active.has(row.id) ? "working" : row.status === "working" ? "queued" : null;
-      if (state) live.push(toLiveThread(row, state));
+      // A visual check's evaluator shows under the thread it checks, not as work of its own on the home page.
+      if (state && !row.parent_id) live.push(toLiveThread(row, state));
     }
     const activeCount = working.size;
     const counts = { activeCount, waitingCount: waiting };
@@ -1975,7 +1981,7 @@ export class ProjectAgent extends Agent<Env> {
     check: VisualCheckRole;
   }): Promise<Thread> {
     const root = this.sendMessage({ threadId: null, authorKind: "system", authorId: VISUAL_CHECK_ID, body: input.notice });
-    const created = this.createThread(root.id, input.title, null, createId("thread"), input.cli, input.runner);
+    const created = this.createThread(root.id, input.title, null, createId("thread"), input.cli, input.runner, input.check.coderThreadId);
     const thread = input.model ? (this.updateThread(created.id, { model: input.model }) ?? created) : created;
     const relay: MessageRelay = { kind: "brief", threadId: thread.id, note: input.brief };
     this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: relayLine("brief", input.brief), relay });
@@ -2120,6 +2126,7 @@ export class ProjectAgent extends Agent<Env> {
       runner: r.runner ? (JSON.parse(r.runner) as ThreadRunner) : null,
       model: r.model ? (JSON.parse(r.model) as ThreadModel) : null,
       seenSeq: r.seen_seq ?? null,
+      parentId: r.parent_id ?? null,
       summary: this.threadSummary(r.id),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
