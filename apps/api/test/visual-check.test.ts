@@ -7,6 +7,7 @@ import { judgeCheck, type CheckReport, type CheckVerdict } from "../src/checks/v
 import { builtinBundle, builtinSkill } from "../src/skills/builtin";
 import { BUILTIN_SKILL_FILES } from "../src/skills/builtin.gen";
 import { renderMessage } from "../src/agents/render";
+import { signFileLink } from "../src/agents/knowledge";
 import { agentProject, api, closeRunners, mcp, signUp, type Turn, until } from "./fake-agent";
 
 /** The names of the tools a turn's agent is offered. */
@@ -149,6 +150,32 @@ describe("built-in skill", () => {
   });
 });
 
+describe("folder links", () => {
+  it("take a whole results folder in one go and list a folder's files, and nothing outside it", async () => {
+    const token = await signUp();
+    const created = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Links" }) });
+    const { project } = (await created.json()) as { project: { id: string } };
+    const base = "http://myrel.test";
+    // The tests' BETTER_AUTH_SECRET is a binding of vitest.config.ts, not in the generated Env.
+    const secret = env as unknown as { BETTER_AUTH_SECRET: string };
+    const put = await signFileLink(secret, base, { projectId: project.id, path: "checks/chk_1/1", mode: "put-folder", by: "thread-agent" });
+    const send = (name: string) => api(`${put.slice(base.length)}&name=${encodeURIComponent(name)}`, { method: "PUT", body: "png", headers: { "content-type": "image/png" } });
+    expect((await send("home-390-light.png")).status).toBe(200);
+    expect((await send("annotated/home-390-light.png")).status).toBe(200);
+    expect((await send("../escape.png")).status).toBe(403);
+    expect((await send("a/b/c.png")).status).toBe(403);
+    // A plain file link does not take names.
+    const single = await signFileLink(secret, base, { projectId: project.id, path: "checks/chk_1/1", mode: "put", by: "thread-agent" });
+    expect((await api(`${single.slice(base.length)}&name=x.png`, { method: "PUT", body: "png" })).status).toBe(403);
+
+    const list = await signFileLink(secret, base, { projectId: project.id, path: "checks/chk_1/1", mode: "get-folder", by: "thread-agent" });
+    const res = await api(`${list.slice(base.length)}&list=1`);
+    const { files } = (await res.json()) as { files: { name: string; url: string }[] };
+    expect(files.map((f) => f.name).sort()).toEqual(["annotated/home-390-light.png", "home-390-light.png"]);
+    expect((await api(files[0]!.url.slice(base.length))).status).toBe(200);
+  });
+});
+
 describe("visual check loop", () => {
   it("runs a round: the coder asks, an evaluator with another CLI hands in, and the coder's card and next turn get the result", { timeout: 60_000 }, async () => {
     const token = await signUp();
@@ -185,7 +212,15 @@ describe("visual check loop", () => {
             verdict({
               verdict: "fail",
               scores: { functionality: 5, craft: 6, design: 6, originality: 5 },
-              blocking: [{ screen: "pricing@390-dark", evidence: "pricing-390-dark.png", problem: "The Pro card overlaps the bottom bar.", expected: "The card ends above it." }],
+              blocking: [
+                {
+                  screen: "pricing@390-dark",
+                  evidence: "pricing-390-dark.png",
+                  problem: "The Pro card overlaps the bottom bar.",
+                  expected: "The card ends above it.",
+                  image: "annotated/pricing-390-dark.png",
+                },
+              ],
             }),
           ),
           by,
@@ -193,6 +228,8 @@ describe("visual check loop", () => {
         out.noEvidence = (await turn.call("submit_visual_check", { check_id: id })).text;
         await projectAgent.writeFileText(`${folder}/pricing-390-dark.png`, "png", by);
         await projectAgent.writeFileText(`${folder}/pricing.sheet.png`, "png", by);
+        await projectAgent.writeFileText(`${folder}/annotated/pricing-390-dark.png`, "png", by);
+        await projectAgent.writeFileText(`${folder}/pricing-390-dark.diff.png`, "png", by);
         await projectAgent.writeFileText(`${folder}/summary.md`, "# Visual check: FAIL", by);
         out.submit = (await turn.call("submit_visual_check", { check_id: id })).text;
         out.resubmit = (await turn.call("submit_visual_check", { check_id: id })).text;
@@ -216,7 +253,8 @@ describe("visual check loop", () => {
     expect(out.request).toContain("Round 1 started");
     expect(out.request).toContain("Codex");
     expect(out.again).toContain("still running");
-    expect(out.prWhileRunning).toContain("Not opened");
+    // The pull request does not wait for the check (İsmail, 2026-11-08); resolving does.
+    expect(out.prWhileRunning).not.toContain("Not opened");
     expect(out.resolve).toContain("Not resolved");
     // The coder's skills include Myrel's own visual-check.
     expect(coder[0]!.prompt).toContain("- visual-check:");
@@ -227,6 +265,7 @@ describe("visual check loop", () => {
     expect(evaluator[0]!.prompt).toContain("feat/pricing");
     expect(evaluator[0]!.prompt).toContain("- visual-check:");
     expect(out.evaluatorTools).toContain("submit_visual_check");
+    expect(out.evaluatorTools).toContain("visual_check_links");
     expect(out.evaluatorTools).not.toContain("request_visual_check");
     expect(out.missing).toContain("report.json is not in");
     expect(out.noEvidence).toContain("pricing-390-dark.png");
@@ -244,6 +283,12 @@ describe("visual check loop", () => {
     expect(card).toMatchObject({ round: 1, status: "failed", evaluator: { cli: "codex", model: "gpt-5.5" }, vision: "passed" });
     expect(card!.blocking[0]).toMatchObject({ screen: "pricing@390-dark", evidence: `${card!.folder}/pricing-390-dark.png` });
     expect(card!.sheets).toEqual([`${card!.folder}/pricing.sheet.png`]);
+    // The finding is numbered and shown framed on its screenshot; what changed against the approved look is listed.
+    expect(card!.blocking[0]).toMatchObject({ n: 1, image: `${card!.folder}/annotated/pricing-390-dark.png` });
+    expect(card!.diffs).toEqual([`${card!.folder}/pricing-390-dark.diff.png`]);
+    // The evaluator shows under the thread it checks, with the verdict on its row.
+    const evaluatorThread = await projectAgent.getThread(evaluator[0]!.threadId);
+    expect(evaluatorThread).toMatchObject({ parentId: thread.id, label: "check:failed" });
     await until(() => coder.length === 2, "the coder's turn with the result");
     expect(coder[1]!.prompt).toContain("Visual check round 1 (codex / gpt-5.5): failed.");
     expect(coder[1]!.prompt).toContain("The Pro card overlaps the bottom bar.");
@@ -251,6 +296,18 @@ describe("visual check loop", () => {
     expect(renderMessage((await projectAgent.getMessagesAfter(0, 500)).messages.find((m: Message) => parseVisualCheck(m.body))!, {})).toContain(
       "(visual check card: round 1, failed",
     );
+
+    // From the card: the person approves its screenshots as the reference look, then accepts the round as it is.
+    const action = (what: string) => api(`/api/projects/${project.id}/threads/${thread.id}/visual-checks/${card!.id}/${what}`, { method: "POST", token, body: "{}" });
+    expect((await action("baseline")).status).toBe(204);
+    const baseline = (await projectAgent.listFiles("checks/baseline/")).map((f: { path: string }) => f.path);
+    expect(baseline).toEqual(["checks/baseline/pricing-390-dark.png"]);
+    expect((await action("accept")).status).toBe(204);
+    await until(async () => (await cards())[0]?.acceptedBy, "the card to say who accepted");
+    expect((await cards())[0]).toMatchObject({ acceptedBy: "İsmail", baselineBy: "İsmail" });
+    await until(() => coder.length === 3, "the coder's turn after the person accepted");
+    expect(coder[2]!.prompt).toContain("accepted visual check round 1 as it is");
+    expect((await action("nonsense")).status).toBe(404);
     close();
   });
 

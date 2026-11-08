@@ -12,7 +12,7 @@ import {
 import { useT } from "@myrel/i18n/react";
 import { decisionPicks, lastPromptSize, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, projectSettingsQuery } from "../../lib/api";
@@ -232,6 +232,21 @@ export function ThreadPanel({
             <div className="ml-1.5 flex min-w-0 flex-1 flex-col leading-tight">
               <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
               <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                {/* A visual check's evaluator says which thread's work it checks, and leads back to it. */}
+                {thread.parentId && state.threads[thread.parentId] && (
+                  <>
+                    <Link
+                      to="/projects/$projectId/threads/$threadId"
+                      params={{ projectId: project.id, threadId: thread.parentId }}
+                      className="truncate text-link hover:underline"
+                    >
+                      {t("visualCheck.checksThread", { title: state.threads[thread.parentId]!.title })}
+                    </Link>
+                    <span aria-hidden="true" className="text-edge-strong">
+                      ·
+                    </span>
+                  </>
+                )}
                 <span className={cn("truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
                 {usage && usage.tokens > 0 && (
                   <>

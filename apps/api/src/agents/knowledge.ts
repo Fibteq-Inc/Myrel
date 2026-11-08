@@ -602,7 +602,9 @@ export function knowledgeTools(host: KnowledgeHost): Tool[] {
 
 export const FILE_LINK_MINUTES = 60;
 
-type LinkClaims = { projectId: string; path: string; mode: "get" | "put"; by: string; exp: number };
+/** put-folder: any file under the folder `path`, named by the request's `name`; for a visual check's uploads. */
+/** get-folder: the list of files under the folder `path`, each with its own get link. */
+type LinkClaims = { projectId: string; path: string; mode: "get" | "put" | "put-folder" | "get-folder"; by: string; exp: number };
 
 async function linkKey(env: { BETTER_AUTH_SECRET: string }): Promise<CryptoKey> {
   const material = new TextEncoder().encode(`myrel-file-links:${env.BETTER_AUTH_SECRET}`);
@@ -617,8 +619,9 @@ export async function signFileLink(
   origin: string,
   claims: Omit<LinkClaims, "exp">,
   now = Date.now(),
+  minutes = FILE_LINK_MINUTES,
 ): Promise<string> {
-  const full = { ...claims, exp: Math.floor(now / 1000) + FILE_LINK_MINUTES * 60 };
+  const full = { ...claims, exp: Math.floor(now / 1000) + minutes * 60 };
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await linkKey(env), new TextEncoder().encode(claimsText(full))));
   const query = new URLSearchParams({ path: full.path, by: full.by, exp: String(full.exp), sig: base64url(sig) });
   return `${origin}/api/file-links/${encodeURIComponent(full.projectId)}?${query}`;

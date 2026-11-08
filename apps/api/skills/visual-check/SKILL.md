@@ -22,18 +22,19 @@ Two roles use this skill:
    node <skill>/scripts/capture.mjs --path / --path /pricing --out <out> --name <work>
    node <skill>/scripts/capture.mjs --config <config> --out <out> --name <work>
    ```
-   Other forms: `--url http://localhost:5173` for an app already running, `--start "pnpm dev --port {port}"`, `--serve dist` for a built folder. It takes about 1–2 s per screenshot. If Chromium cannot start because the computer lacks system libraries, stop and report the `sudo` command it prints: installing system packages is the person's step.
+   Other forms: `--url http://localhost:5173` for an app already running, `--start "pnpm dev --port {port}"`, `--serve dist` for a built folder. It takes about 1–2 s per screenshot.
+   - **Against the approved look:** in Myrel, call `visual_check_links` first. When the project has approved screenshots, it gives a command for `scripts/baseline.mjs` that downloads them; capture with `--baseline <that folder>`. Each screen that differs gets a `changed` warning and a `<file>.diff.png` showing what changed in red; screens with no baseline are new. If Chromium cannot start because the computer lacks system libraries, stop and report the `sudo` command it prints: installing system packages is the person's step.
 5. **Read the deterministic results** (stdout, then `report.json`). Open the screenshot of each blocking finding and confirm it. A false positive goes in `dismissed` with a reason; a real one stays. If real blockers remain, the verdict is `fail` and you skip the scores: judging the look of a broken page wastes the person's usage. Still note anything obvious you saw.
    - **New or old?** If findings might predate the change, capture the base too (`git checkout --detach origin/main`, `--out <out>-base`, same config) and compare. Only what the change introduced or made worse is blocking; older problems go in `advice`.
 6. **Vision probe.** Open `<out>/probe.png` with your image-reading tool and put the code you read in `evaluator.probeAnswer`. If you cannot see images, leave it empty and use the verdict `deterministic_only`. Never guess: `verdict.mjs` checks the answer, and a wrong one drops your scores and any pass.
-7. **Look.** Open each `<screen>.sheet.png` first (all widths and themes side by side), then the full-size screenshots of every screen the change touches and of anything suspicious. For games, also open the frames in `<screen>-<width>-<theme>.frames/`. Score with [rubric.md](rubric.md).
+7. **Look.** Open each `<screen>.sheet.png` first (all widths and themes side by side), then the full-size screenshots of every screen the change touches and of anything suspicious. With a baseline, judge the changed and new screens (open their `.diff.png` too); an unchanged screen was approved already. For games, also open the frames in `<screen>-<width>-<theme>.frames/`. Score with [rubric.md](rubric.md). For every finding of yours that sits in one place, note its `box` in that screenshot's pixels.
 8. **Write `<out>/verdict.json`** (format in rubric.md) and run:
    ```sh
    node <skill>/scripts/verdict.mjs <out>
    ```
-   It enforces the rules (probe, open blockers, evidence files, score bar), prints what to fix if anything, and writes `summary.md`.
+   It enforces the rules (probe, open blockers, evidence files, score bar), prints what to fix if anything, writes `summary.md`, numbers the findings and draws each on its screenshot (`annotated/<file>`: a numbered red frame, from the element's own box for deterministic findings and from your `box` for yours). Open one annotated screenshot to check the frames sit where they should.
 9. **Deliver.**
-   - In Myrel: your brief names the check and its folder in the project files. Upload `report.json`, `verdict.json`, `summary.md`, every contact sheet and every screenshot named as evidence into that folder, keeping their file names (one `file_upload_url` per file). Then call `submit_visual_check` with the check id. Myrel applies the rules again, shows the result as a card in the coder's thread and hands the findings to the coder. If it sends problems back, fix `verdict.json`, upload it again and resubmit. Then tell people the verdict in a sentence and resolve your thread.
+   - In Myrel: upload the whole output folder with the command `visual_check_links` gave (`node <skill>/scripts/upload.mjs <out> "<link>"`: reports, screenshots, sheets, marked screenshots and diffs, in one go). Then call `submit_visual_check` with the check id. Myrel applies the rules again, shows the result as a card in the coder's thread (the marked screenshot with the numbered list, and buttons for the person to accept the round or approve its screenshots as the reference look) and hands the findings to the coder. If it sends problems back, fix `verdict.json`, run verdict.mjs and upload again, then resubmit. Then tell people the verdict in a sentence and resolve your thread.
    - Elsewhere: print `summary.md`.
    - Myrel allows two rounds per piece of work; after the second failing round it asks the person instead of starting a third.
 
@@ -90,9 +91,10 @@ Stable screenshots need stable data: use the app's fake or seed data, never a re
 | `missing-element`, `action-failed`, `game-not-ready` | blocking | A `waitFor`, scripted step or game hook failed. |
 | `overlapping-controls`, `overlapping-text`, `clipped-text` | warning | Controls or text drawn over each other; text cut by its box without an ellipsis. |
 | `small-target` | warning | Tap targets under 24 px at touch widths (inline links in running text are exempt). |
+| `changed` | warning | With `--baseline`: the screen differs from the approved screenshot; `<file>.diff.png` shows where. Not wrong in itself: judge whether the change is the intended one. |
 | `axe:<rule>` | blocking when critical, warning otherwise | WCAG 2.2 A/AA rules from axe-core, e.g. `axe:color-contrast`. |
 
-Each finding names its screenshot (`file`), so it can be shown as evidence.
+Each finding names its screenshot (`file`) and, when it is about elements, their `boxes` in that screenshot, so it can be shown and framed as evidence.
 
 ## Games
 

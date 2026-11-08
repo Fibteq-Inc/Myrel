@@ -12,7 +12,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { groupFindings } from "./shared.mjs";
 
@@ -92,6 +92,41 @@ if (problems.length) {
   process.exit(1);
 }
 
+// 5. Mark the findings on their screenshots: a numbered red frame around each, the same number as in
+// the list, so people see in the thread what is wrong. The boxes come from the deterministic checks
+// (the elements' own boxes) or from the evaluator (`box` on a finding it wrote).
+verdict.blocking.forEach((b, i) => {
+  b.n = i + 1;
+  const boxes = b.box
+    ? [{ x: b.box.x, y: b.box.y, w: b.box.w ?? b.box.width, h: b.box.h ?? b.box.height }]
+    : (report.findings.find((f) => f.id === b.id && f.screen === b.screen)?.boxes ??
+      report.findings.find((f) => f.id === b.id && f.screen.split("@")[0] === (b.screen ?? "").split("@")[0])?.boxes ??
+      []);
+  if (boxes.length) b.boxes = boxes.filter((x) => [x.x, x.y, x.w, x.h].every(Number.isFinite));
+});
+const marked = verdict.blocking.filter((b) => b.boxes?.length && existsSync(join(dir, b.evidence)));
+if (marked.length) {
+  try {
+    const { annotateImage, pixelPage } = await import("./pixels.mjs");
+    const { launchBrowser, loadDeps } = await import("./deps.mjs");
+    const browser = await launchBrowser(await loadDeps(() => {}), () => {});
+    try {
+      const page = await pixelPage(browser);
+      await mkdir(join(dir, "annotated"), { recursive: true });
+      for (const file of new Set(marked.map((b) => b.evidence))) {
+        const marks = marked.filter((b) => b.evidence === file).map((b) => ({ n: b.n, boxes: b.boxes }));
+        const out = `annotated/${file.split("/").pop()}`;
+        await writeFile(join(dir, out), await annotateImage(page, await readFile(join(dir, file)), marks));
+        for (const b of marked) if (b.evidence === file) b.image = out;
+      }
+    } finally {
+      await browser.close();
+    }
+  } catch (err) {
+    notes.push(`Findings could not be marked on the screenshots: ${String(err?.message ?? err).split("\n")[0]}`);
+  }
+}
+
 verdict.checked = { at: new Date().toISOString(), report: report.createdAt, commit: report.git?.commit, notes };
 await writeFile(join(dir, "verdict.json"), `${JSON.stringify(verdict, null, 2)}\n`);
 
@@ -110,7 +145,7 @@ if (verdict.verdict === "deterministic_only") lines.push("- The look was not jud
 if (verdict.blocking.length) {
   lines.push("", "## Must fix", "");
   for (const b of verdict.blocking) {
-    lines.push(`- **${b.screen}**${b.where ? ` [${b.where}]` : ""}: ${b.problem}${b.expected ? ` Expected: ${b.expected}` : ""} (evidence: \`${b.evidence}\`)`);
+    lines.push(`${b.n}. **${b.screen}**${b.where ? ` [${b.where}]` : ""}: ${b.problem}${b.expected ? ` Expected: ${b.expected}` : ""} (evidence: \`${b.image ?? b.evidence}\`)`);
   }
 }
 if (verdict.acceptance?.length) {

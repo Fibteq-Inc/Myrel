@@ -269,6 +269,12 @@ export const Thread = z.object({
   /** The model and effort picked for this thread; null: the project's defaults (and from older servers). */
   model: ThreadModel.nullable().default(null),
   /**
+   * The thread this one works for, when Myrel opened it to check another thread's work (a visual
+   * check's evaluator): clients show it under that thread instead of as a thread of its own in the
+   * project chat. Null for every other thread (and from older servers).
+   */
+  parentId: ThreadId.nullable().default(null),
+  /**
    * The last message the thread's agent has taken in. A person's message after it, while the thread
    * is working, waits for the agent: clients show it as queued. Null: not known (older servers).
    */

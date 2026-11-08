@@ -11,6 +11,7 @@ import type {
   CatalogCategory,
   CatalogPage,
   CheckModels,
+  VisualCheckAction,
   Connector,
   ConnectSuggestionInput,
   ConnectSuggestionResult,
@@ -440,6 +441,17 @@ export class ApiClient {
    */
   connectSuggestion(projectId: string, threadId: string, suggestionId: string, input: ConnectSuggestionInput) {
     return this.request<ConnectSuggestionResult>(`${this.suggestionPath(projectId, threadId, suggestionId)}/connect`, { method: "POST", body: input });
+  }
+
+  /**
+   * A person's answer to a visual check's card: "accept" the round as it is, or make its screenshots
+   * the approved "baseline" later checks compare against.
+   */
+  async visualCheckAction(projectId: string, threadId: string, checkId: string, action: VisualCheckAction) {
+    await this.request(`${projectPath(projectId)}/threads/${encodeURIComponent(threadId)}/visual-checks/${encodeURIComponent(checkId)}/${action}`, {
+      method: "POST",
+      body: {},
+    });
   }
 
   /** Not now: the card closes and the agent does not offer these connectors again in this thread. */

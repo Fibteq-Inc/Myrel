@@ -36,13 +36,30 @@ export const VisualCheckCard = z.object({
   vision: z.enum(["passed", "failed", "skipped"]).optional(),
   scores: z.object({ functionality: Score, craft: Score, design: Score, originality: Score }).optional(),
   deterministic: z.object({ shots: z.number(), blocking: z.number(), warnings: z.number() }).optional(),
-  /** What must change, each with its screenshot (a project file path). */
+  /**
+   * What must change, each with its screenshot (a project file path) and, when the finding could be
+   * located, `image`: that screenshot with the finding framed in red and numbered `n`.
+   */
   blocking: z
-    .array(z.object({ screen: z.string().max(200), problem: z.string().max(2000), evidence: z.string().max(400) }))
+    .array(
+      z.object({
+        n: z.number().int().min(1).optional(),
+        screen: z.string().max(200),
+        problem: z.string().max(2000),
+        evidence: z.string().max(400),
+        image: z.string().max(400).optional(),
+      }),
+    )
     .max(20)
     .default([]),
   /** Contact sheets (project file paths): every width and theme of a screen side by side. */
   sheets: z.array(z.string().max(400)).max(12).default([]),
+  /** Screens that differ from the approved screenshots, as pictures of what changed (project file paths). */
+  diffs: z.array(z.string().max(400)).max(12).default([]),
+  /** A person accepted the round as it is, despite its findings. */
+  acceptedBy: z.string().max(120).optional(),
+  /** A person made this round's screenshots the approved ones that later checks compare against. */
+  baselineBy: z.string().max(120).optional(),
   /** The full result for people (a project file path). */
   summary: z.string().max(400).optional(),
   /** Why it could not run, for not_checked; otherwise a short note. */
@@ -52,6 +69,13 @@ export type VisualCheckCard = z.infer<typeof VisualCheckCard>;
 export type VisualCheckCardInput = z.input<typeof VisualCheckCard>;
 
 export const VISUAL_CHECK_LANG = "visual-check";
+
+/** The project files folder holding the approved screenshots later checks compare against. */
+export const VISUAL_CHECK_BASELINE = "checks/baseline";
+
+/** What a person can do from a round's card: accept it as it is, or make its screenshots the approved ones. */
+export const VisualCheckAction = z.enum(["accept", "baseline"]);
+export type VisualCheckAction = z.infer<typeof VisualCheckAction>;
 
 /** The message body for a visual check card. */
 export function formatVisualCheck(card: VisualCheckCardInput): string {

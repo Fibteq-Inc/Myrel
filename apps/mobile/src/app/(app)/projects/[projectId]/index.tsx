@@ -1,4 +1,4 @@
-import { conversationState, draftKey, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { conversationState, draftKey, projectChat, threadByCard, threadChildren, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
@@ -119,8 +119,10 @@ function ChatTab({ owner }: { owner: boolean }) {
   const { user } = useSession();
   const { projectId, state, status, ready, send, emit, loadConversation } = useProject();
   const names = useNames(projectId);
-  const messages = useMemo(() => projectChat(state), [state]);
   const threads = useMemo(() => threadByCard(state), [state]);
+  const checks = useMemo(() => threadChildren(state), [state]);
+  // A visual check's evaluator shows under the thread it checks, not as a line of its own here.
+  const messages = useMemo(() => projectChat(state).filter((m) => !threads.get(m.id)?.parentId), [state, threads]);
   // The CLIs the next ask's thread may run with; each ask picks its own.
   const pickable = usePickableClis(projectId);
   const [clis, setClis] = useState<CliId[]>([]);
@@ -167,7 +169,7 @@ function ChatTab({ owner }: { owner: boolean }) {
         return (
           <>
             {offered}
-            <ThreadCard projectId={projectId} thread={thread} replies={threadReplyCount(state, thread.id)} />
+            <ThreadCard projectId={projectId} thread={thread} replies={threadReplyCount(state, thread.id)} checks={checks.get(thread.id)} />
           </>
         );
       }}

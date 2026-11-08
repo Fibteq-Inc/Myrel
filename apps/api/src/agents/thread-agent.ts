@@ -13,7 +13,10 @@ import {
   createId,
   formatConnectorSuggestion,
   formatVisualCheck,
+  parseVisualCheck,
+  VISUAL_CHECK_BASELINE,
   VISUAL_CHECK_ROUNDS,
+  type VisualCheckAction,
   type VisualCheckCard,
   formatPlan,
   formatPlanUpdate,
@@ -138,7 +141,7 @@ import {
 } from "./folder-access";
 import { answeredSshMessage, sshAnswer, sshMessage, sshToolOutput } from "./ssh-access";
 import { matchSshHost, projectSshHostRows, recordSshAudit, type SshHostRow, sshTarget } from "../ssh/store";
-import { type Author, knowledgeTools, signFileLink } from "./knowledge";
+import { type Author, fileKey, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
 import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, type ResumeWhere, resumeNote, resumingMessage } from "./auto-resume";
@@ -1489,6 +1492,7 @@ export class ThreadAgent extends Agent<Env> {
       branch: role.branch,
       blocking: [],
       sheets: [],
+      diffs: [],
       note,
     };
   }
@@ -1526,7 +1530,7 @@ export class ThreadAgent extends Agent<Env> {
     const id = current?.id ?? createId("check");
     const round = (current?.round ?? 0) + 1;
     const folder = checkFolder(id, round);
-    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], sheets: [] };
+    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], sheets: [], diffs: [] };
     const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatVisualCheck(card) });
     if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
     const tr = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language === "tr";
@@ -1620,7 +1624,8 @@ export class ThreadAgent extends Agent<Env> {
     const judged = await judgeCheck(report.data, verdict.data, async (path) => names.has(path));
     if (!judged.ok) return `Not handed in yet. Fix these, upload again and resubmit:\n${judged.problems.map((p) => `- ${p}`).join("\n")}`;
     const sheets = [...names].filter((n) => n.endsWith(".sheet.png")).map((n) => `${role.folder}/${n}`);
-    const card = judgedCard(this.notCheckedCard(role, ""), judged.check, { folder: role.folder, sheets });
+    const diffs = [...names].filter((n) => n.endsWith(".diff.png")).map((n) => `${role.folder}/${n}`);
+    const card = judgedCard(this.notCheckedCard(role, ""), judged.check, { folder: role.folder, sheets, diffs, has: (n) => names.has(n) });
     delete card.note;
     if (judged.check.notes.length) card.note = judged.check.notes.join(" ").slice(0, 600);
     const delivered = await this.handInVisualCheck(role, card);
@@ -1631,8 +1636,72 @@ export class ThreadAgent extends Agent<Env> {
   /** Gives a round's result to the thread that asked, once. */
   private async handInVisualCheck(role: VisualCheckRole, card: VisualCheckCard): Promise<boolean> {
     this.setMeta("visual_check_role", JSON.stringify({ ...role, submitted: true }));
+    // Its row under the checked thread shows the verdict.
+    const { projectId, threadId } = this.ids();
+    await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).updateThread(threadId, { label: `check:${card.status}` });
     const coder = await getAgentByName(this.env.THREAD_AGENT, role.coderThreadId);
     return coder.visualCheckResult({ checkId: role.checkId, card });
+  }
+
+  /** visual_check_links: an upload link for the round's folder and a link to the approved screenshots. */
+  private async visualCheckLinks(role: VisualCheckRole, checkId: string): Promise<string> {
+    if (checkId !== role.checkId) return `That is not this thread's check: its id is ${role.checkId}.`;
+    const { projectId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const origin = await project.publicOrigin();
+    if (!origin) return "Myrel does not know its own address yet, so it cannot make links. Upload the files one by one with file_upload_url.";
+    const minutes = VISUAL_CHECK_TIMEOUT_SEC / 60 + 30;
+    const upload = await signFileLink(this.env, origin, { projectId, path: role.folder, mode: "put-folder", by: THREAD_AGENT_ID }, Date.now(), minutes);
+    const baseline = `${await signFileLink(this.env, origin, { projectId, path: VISUAL_CHECK_BASELINE, mode: "get-folder", by: THREAD_AGENT_ID }, Date.now(), minutes)}&list=1`;
+    const approved = (await project.listFiles(`${VISUAL_CHECK_BASELINE}/`)).filter((f) => f.path.startsWith(`${VISUAL_CHECK_BASELINE}/`)).length;
+    return [
+      approved
+        ? `Approved screenshots (${approved}): node <skill>/scripts/baseline.mjs "${baseline}" <out>-baseline, then capture with --baseline <out>-baseline. Unchanged screens need no new look; judge the changed and new ones.`
+        : "No screenshots are approved yet: every screen counts as new, so capture without --baseline.",
+      `Upload the results once verdict.mjs has run: node <skill>/scripts/upload.mjs <out> "${upload}"`,
+      "Keep these links out of your replies.",
+    ].join("\n");
+  }
+
+  /**
+   * A person's answer to a round's card: accept it as it is (the thread carries on without fixing its
+   * findings), or make its screenshots the approved ones later checks compare against. Returns why it
+   * cannot be done, or null. Callable over RPC.
+   */
+  async visualCheckAction(input: { checkId: string; action: VisualCheckAction; by: { id: string; name: string } }): Promise<string | null> {
+    const state = this.visualCheck();
+    if (!state || state.id !== input.checkId) return "This check is no longer this thread's latest.";
+    if (state.status === "running") return "The round is still running.";
+    const { projectId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const message = await project.getMessage(state.messageId);
+    const card = message ? parseVisualCheck(message.body) : null;
+    if (!card) return "The card is gone.";
+    if (input.action === "accept") {
+      if (state.status === "passed") return "The round passed; there is nothing to accept.";
+      if (card.acceptedBy) return null;
+      await project.editMessage(state.messageId, formatVisualCheck({ ...card, acceptedBy: input.by.name }));
+      await this.wake({
+        kind: "coordinator",
+        note: `${input.by.name} accepted visual check round ${state.round} as it is: its findings need no fixing. Carry on with the work (open or keep the pull request) and do not ask for another round for them.`,
+      });
+      return null;
+    }
+    if (!this.env.FILES) return "Files are not set up on this server.";
+    // The round's own screenshots, not its contact sheets, marked copies or diffs.
+    const shots = (await project.listFiles(`${state.folder}/`)).filter(
+      (f) => /^[^/]+\.png$/.test(f.path.slice(state.folder.length + 1)) && !/\.(sheet|diff)\.png$/.test(f.path),
+    );
+    if (!shots.length) return "This round has no screenshots to approve.";
+    for (const f of shots) {
+      const object = await this.env.FILES.get(fileKey(projectId, f.path));
+      if (!object) continue;
+      const path = `${VISUAL_CHECK_BASELINE}/${f.path.slice(state.folder.length + 1)}`;
+      await this.env.FILES.put(fileKey(projectId, path), await object.arrayBuffer(), { httpMetadata: { contentType: "image/png" } });
+      await project.recordFile({ path, size: object.size, contentType: "image/png" }, { kind: "user", id: input.by.id });
+    }
+    await project.editMessage(state.messageId, formatVisualCheck({ ...card, baselineBy: input.by.name }));
+    return null;
   }
 
   /**
@@ -1668,6 +1737,7 @@ export class ThreadAgent extends Agent<Env> {
         branch: state.branch,
         blocking: [],
         sheets: [],
+        diffs: [],
         note: `The evaluator did not hand in a result within ${VISUAL_CHECK_TIMEOUT_SEC / 60} minutes.`,
       },
     });
@@ -2193,10 +2263,6 @@ export class ThreadAgent extends Agent<Env> {
           return `The card is in the thread. End your turn now: once ${repo} is connected you are woken with it connected, and carry on from there.`;
         },
         openPullRequest: async (input) => {
-          const check = this.visualCheck();
-          if (check?.status === "running") {
-            return `Not opened: round ${check.round} of the visual check is still running on ${check.branch}. Its result will wake you; open the pull request then. End your turn.`;
-          }
           const { pr, created } = await openPullRequest(this.env, projectId, threadId, input, await this.pullCredit());
           return `${created ? "Opened" : "An open pull request already exists for that branch:"} ${pr.url} (${pr.repo}#${pr.number}). Myrel follows it: CI failures, reviews and the merge will wake you.`;
         },
@@ -2214,6 +2280,7 @@ export class ThreadAgent extends Agent<Env> {
       ...visualCheckTools({
         request: role ? undefined : checksOn ? (input) => this.requestVisualCheck(input) : undefined,
         submit: role ? (input) => this.submitVisualCheck(role, input) : undefined,
+        links: role ? (id) => this.visualCheckLinks(role, id) : undefined,
       }),
       ...suggestionTools({
         search: (q) => searchOffers(this.env, q),
