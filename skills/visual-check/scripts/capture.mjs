@@ -9,7 +9,7 @@
 // See ../SKILL.md for the config file and ../rubric.md for what the evaluator does with the report.
 
 import { spawn, execFileSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createReadStream, existsSync, openSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -449,7 +449,7 @@ async function main() {
     // The vision probe: only a model that reads the picture can give back the code.
     const alphabet = "ACDEFHJKMNPRTUVWXY3479";
     // VISUAL_CHECK_PROBE_CODE exists for selftest.mjs only.
-    const code = process.env.VISUAL_CHECK_PROBE_CODE ?? [...randomBytes(5)].map((b) => alphabet[b % alphabet.length]).join("");
+    const code = process.env.VISUAL_CHECK_PROBE_CODE ?? Array.from({ length: 5 }, () => alphabet[randomInt(alphabet.length)]).join("");
     const salt = randomBytes(8).toString("hex");
     await writeFile(join(outDir, "probe.png"), await probeImage(pixels, code));
 
