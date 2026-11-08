@@ -83,6 +83,7 @@ Stable screenshots need stable data: use the app's fake or seed data, never a re
 | `frozen` | blocking | Frames that should move are identical (games, `expectMotion`). |
 | `overflow-x` | blocking | The page scrolls sideways; `details.offenders` names the outermost elements sticking out. |
 | `cut-off` | warning | Elements run past the screen edge but the page hides it. |
+| `cut-off-control` | blocking | A button or link runs past the screen edge inside a box that hides its overflow, so its end cannot be reached. |
 | `covered-control` | blocking | Something is drawn on top of a button or link, so a tap lands elsewhere (open dialogs and menus are not counted). |
 | `broken-image` | blocking | An image did not load. |
 | `missing-element`, `action-failed`, `game-not-ready` | blocking | A `waitFor`, scripted step or game hook failed. |
