@@ -10,7 +10,7 @@ export function layoutChecks(opts) {
   const doc = document.documentElement;
   const vw = doc.clientWidth;
   const vh = window.innerHeight;
-  const out = { viewport: { width: vw, height: vh }, overflowX: null, offscreen: [], covered: [], overlaps: [], clipped: [], textOverlaps: [], smallTargets: [], interactive: 0 };
+  const out = { viewport: { width: vw, height: vh }, overflowX: null, offscreen: [], covered: [], overlaps: [], clipped: [], textOverlaps: [], smallTargets: [], cutControls: [], interactive: 0 };
 
   const isIgnored = (el) => ignore.some((sel) => { try { return el.closest(sel); } catch { return false; } });
   const path = (el) => {
@@ -107,6 +107,24 @@ export function layoutChecks(opts) {
   const interactive = [...document.querySelectorAll('a[href],button,input:not([type="hidden"]),select,textarea,summary,[role="button"],[role="link"],[role="tab"],[role="menuitem"],[role="checkbox"],[role="switch"],[role="radio"],[tabindex]:not([tabindex="-1"])')]
     .filter((el) => !isIgnored(el) && shown(el) && !hiddenByAncestor(el));
   out.interactive = interactive.length;
+
+  // Controls cut by the screen edge inside a box that hides its overflow: the page does not scroll
+  // sideways, so the part past the edge cannot be reached (a header row too wide for a phone).
+  for (const el of interactive) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom <= 0 || r.top >= vh) continue;
+    const straddles = (r.left < vw - 1 && r.right > vw + 1) || (r.left < -1 && r.right > 1);
+    if (!straddles) continue;
+    let hiddenBy = null;
+    for (let a = el.parentElement; a && a !== doc; a = a.parentElement) {
+      const ox = getComputedStyle(a).overflowX;
+      if (ox === "auto" || ox === "scroll") { hiddenBy = null; break; } // Scrolls: reachable.
+      if (ox === "hidden" || ox === "clip") { hiddenBy = a; break; }
+    }
+    if (!hiddenBy) continue;
+    const seen = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+    push(out.cutControls, { target: path(el), text: label(el), visiblePx: Math.round(seen), width: Math.round(r.width), clippedBy: path(hiddenBy) });
+  }
   const inView = [];
   for (const el of interactive) {
     const full = el.getBoundingClientRect();

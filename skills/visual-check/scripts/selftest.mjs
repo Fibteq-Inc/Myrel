@@ -42,10 +42,11 @@ const on = (screen, sev) => new Set(report.findings.filter((f) => f.screen.start
 check(report.shots.length === 20, "20 screenshots (5 screens × 2 widths × 2 themes)");
 check(on("clean").size === 0, `clean page has no findings (${[...on("clean")].join(", ") || "none"})`);
 const broken = on("broken", "blocking");
-for (const id of ["overflow-x", "covered-control", "broken-image", "exception", "axe:button-name"]) check(broken.has(id), `broken page: ${id} is blocking`);
+for (const id of ["overflow-x", "covered-control", "cut-off-control", "broken-image", "exception", "axe:button-name"]) check(broken.has(id), `broken page: ${id} is blocking`);
 const brokenWarn = on("broken", "warning");
 for (const id of ["axe:color-contrast", "clipped-text", "overlapping-text", "small-target", "console-error"]) check(brokenWarn.has(id), `broken page: ${id} is a warning`);
 check(!report.findings.some((f) => f.id === "overflow-x" && f.screen === "broken@1280-light"), "no sideways scroll at 1280px");
+check(!report.findings.some((f) => f.id === "cut-off-control" && f.screen.startsWith("broken@1280")), "no cut-off control at 1280px");
 check(on("blank", "blocking").has("blank"), "blank page is blank");
 check(on("blank", "blocking").has("http-error"), "blank page: missing script is blocking");
 check(on("game", "blocking").size === 0, `running game has no blocking findings (${[...on("game", "blocking")].join(", ") || "none"})`);
