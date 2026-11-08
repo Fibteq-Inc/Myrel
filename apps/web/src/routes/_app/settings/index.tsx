@@ -1,13 +1,15 @@
 import { isThemePreference, THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import type { CheckModels } from "@myrel/protocol";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { AppUpdateSection } from "../../../components/app-update";
+import { EvaluatorPicker, mergeClis } from "../../../components/evaluator-picker";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
-import { api, meQuery, platform, sessionQuery } from "../../../lib/api";
+import { api, meQuery, platform, runnersQuery, sessionQuery } from "../../../lib/api";
 import { drafts } from "../../../lib/drafts";
 import { currentPushSubscription } from "../../../lib/push";
 import { setThemePreference, useThemePreference } from "../../../lib/theme";
@@ -129,10 +131,37 @@ function AccountSettings() {
 
       <ThemeSection />
 
+      <EvaluatorSection value={me.checkModels ?? {}} />
+
       {platform.updater && <AppUpdateSection updater={platform.updater} />}
 
       <DeleteAccount email={me.email} />
     </>
+  );
+}
+
+/**
+ * The CLIs that may judge the visual checks of this person's projects that list none (CheckModels),
+ * from the CLIs of their computers; each change saves.
+ */
+function EvaluatorSection({ value }: { value: CheckModels }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const { data: runners = [] } = useQuery(runnersQuery);
+  const save = useMutation({
+    mutationFn: (next: CheckModels) => api.setCheckModels(next),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: meQuery.queryKey }),
+  });
+  return (
+    <Section title={t("evaluator.title")} description={t("evaluator.accountHint")}>
+      <EvaluatorPicker
+        clis={mergeClis(runners.map((r) => r.clis))}
+        value={save.isPending ? (save.variables ?? value) : value}
+        onChange={(next) => save.mutate(next)}
+        disabled={save.isPending}
+      />
+      {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
+    </Section>
   );
 }
 

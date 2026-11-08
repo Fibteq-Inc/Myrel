@@ -1,6 +1,6 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CloudCli, ProjectColor, ProjectIcon, TaskTarget, type UpdateProjectSettingsInput } from "@myrel/protocol";
+import { type CheckModels, CloudCli, ProjectColor, ProjectIcon, TaskTarget, type UpdateProjectSettingsInput } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, useRouter } from "expo-router";
 import { Check } from "lucide-react-native";
@@ -10,6 +10,8 @@ import { useSession } from "../../lib/session";
 import { makeStyles, projectColors, radius, useColors, useTheme } from "../../theme";
 import { PROJECT_ICONS, ProjectBadge } from "../project-badge";
 import { Option, Sheet } from "../cli-picker";
+import { EvaluatorList } from "../evaluator-picker";
+import { runnersQueryKey, workspaceQueryKey } from "../../lib/queries";
 import { Notice, Section, ValueRow } from "../settings-section";
 import { Button, errorMessage, Input } from "../ui";
 
@@ -90,6 +92,9 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
           disabled={!canManage || save.isPending}
           onChange={(visualCheck) => save.mutate({ visualCheck })}
         />
+        {s.visualCheck && (
+          <ProjectEvaluator projectId={projectId} value={s.checkModels} canManage={canManage} onChange={(checkModels) => save.mutate({ checkModels })} />
+        )}
       </Section>
 
       <Sheet open={open === "target"} onClose={() => setOpen(null)} title={t("projectSettings.runTasks")} hint={t("projectSettings.tasksDescription")}>
@@ -121,6 +126,33 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
           />
         ))}
       </Sheet>
+    </>
+  );
+}
+
+/** The CLIs that may judge the project's visual checks, from its folder's computer (which only its owner's list has). */
+function ProjectEvaluator({
+  projectId,
+  value,
+  canManage,
+  onChange,
+}: {
+  projectId: string;
+  value: CheckModels;
+  canManage: boolean;
+  onChange: (next: CheckModels) => void;
+}) {
+  const t = useT();
+  const styles = useStyles();
+  const { api, server } = useSession();
+  const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
+  return (
+    <>
+      <Text style={styles.toggleTitle}>{t("evaluator.title")}</Text>
+      <Text style={styles.label}>{t("evaluator.projectHint")}</Text>
+      <EvaluatorList clis={computer?.clis ?? []} value={value} onChange={onChange} disabled={!canManage} />
     </>
   );
 }

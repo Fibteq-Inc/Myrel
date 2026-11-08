@@ -1,18 +1,20 @@
 import { THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
-import type { BillingSummary } from "@myrel/protocol";
+import type { BillingSummary, CheckModels } from "@myrel/protocol";
 import { useI18n } from "@myrel/i18n/react";
 import { Check, ExternalLink } from "lucide-react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
-import { Section } from "../../components/settings-section";
+import { EvaluatorList, mergeClis } from "../../components/evaluator-picker";
+import { Notice, Section } from "../../components/settings-section";
 import { Button, errorMessage } from "../../components/ui";
 import * as purchases from "../../lib/purchases";
+import { runnersQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { useThemePreference } from "../../lib/theme";
 import { makeStyles, useColors } from "../../theme";
@@ -88,6 +90,8 @@ export default function SettingsScreen() {
           </Pressable>
         ))}
       </Section>
+
+      <EvaluatorSection />
 
       <Section title={t("settings.server")}>
         <Text style={styles.value}>{info?.name ?? ""}</Text>
@@ -281,6 +285,32 @@ function LegalLink({ label, url }: { label: string; url: string }) {
       <Text style={styles.value}>{label}</Text>
       <ExternalLink size={16} color={colors.subtle} />
     </Pressable>
+  );
+}
+
+/** The CLIs that may judge the visual checks of this person's projects that list none (CheckModels), from the CLIs of their computers. */
+function EvaluatorSection() {
+  const { t } = useI18n();
+  const { api, server } = useSession();
+  const queryClient = useQueryClient();
+  const meKey = ["me", server];
+  const me = useQuery({ queryKey: meKey, queryFn: () => api.getMe() });
+  const runners = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners() });
+  const save = useMutation({
+    mutationFn: (next: CheckModels) => api.setCheckModels(next),
+    onSuccess: (checkModels) => queryClient.setQueryData(meKey, (old: typeof me.data) => old && { ...old, checkModels }),
+  });
+  if (!me.data) return null;
+  return (
+    <Section title={t("evaluator.title")} hint={t("evaluator.accountHint")}>
+      <EvaluatorList
+        clis={mergeClis((runners.data ?? []).map((r) => r.clis))}
+        value={save.isPending ? (save.variables ?? {}) : (me.data.checkModels ?? {})}
+        onChange={(next) => save.mutate(next)}
+        disabled={save.isPending}
+      />
+      {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
+    </Section>
   );
 }
 

@@ -63,9 +63,19 @@ export const CliModelDefault = z.object({
 });
 export type CliModelDefault = z.infer<typeof CliModelDefault>;
 
+
 /** Defaults per CLI for the project's threads on a computer, keyed by CliId. */
 export const CliModelDefaults = z.partialRecord(CliId, CliModelDefault);
 export type CliModelDefaults = z.infer<typeof CliModelDefaults>;
+
+/**
+ * The CLIs that may judge visual checks (ProjectSettings.visualCheck), each with the model, effort
+ * and login to judge with (null parts: the CLI's own). For a round Myrel picks one the computer runs,
+ * preferring one other than the CLI that made the change and one not at its usage limit; with none
+ * listed, any other CLI. A project's list wins over the person's own (Me.checkModels).
+ */
+export const CheckModels = CliModelDefaults;
+export type CheckModels = CliModelDefaults;
 
 export const ProjectSettings = z.object({
   name: z.string(),
@@ -86,6 +96,8 @@ export const ProjectSettings = z.object({
    * Older servers never send it.
    */
   visualCheck: z.boolean().default(false),
+  /** The CLIs that may judge its visual checks; empty: the person's own list, else any other CLI. Older servers never send it. */
+  checkModels: CheckModels.default({}),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -101,6 +113,8 @@ export const UpdateProjectSettingsInput = z.object({
   /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
   cliModels: CliModelDefaults.optional(),
   visualCheck: z.boolean().optional(),
+  /** Replaces the whole list. */
+  checkModels: CheckModels.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 
@@ -147,8 +161,13 @@ export const Me = z.object({
   onboarded: z.boolean().optional(),
   /** The one-time tips the person has seen or closed; older servers do not send it (the apps then show no tips). */
   tips: z.array(z.string()).optional(),
+  /** The CLIs that may judge the visual checks of the person's projects that list none (see CheckModels); older servers do not send it. */
+  checkModels: CheckModels.optional(),
 });
 export type Me = z.infer<typeof Me>;
+
+export const SetCheckModelsInput = z.object({ checkModels: CheckModels });
+export type SetCheckModelsInput = z.infer<typeof SetCheckModelsInput>;
 
 /** Server settings admins change at runtime. */
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });

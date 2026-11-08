@@ -1969,11 +1969,14 @@ export class ProjectAgent extends Agent<Env> {
     brief: string;
     cli: ThreadCli | null;
     runner: ThreadRunner | null;
+    /** The model and effort the evaluator runs with (from the evaluator setting); null: the CLI's own. */
+    model: ThreadModel | null;
     actor: string | null;
     check: VisualCheckRole;
   }): Promise<Thread> {
     const root = this.sendMessage({ threadId: null, authorKind: "system", authorId: VISUAL_CHECK_ID, body: input.notice });
-    const thread = this.createThread(root.id, input.title, null, createId("thread"), input.cli, input.runner);
+    const created = this.createThread(root.id, input.title, null, createId("thread"), input.cli, input.runner);
+    const thread = input.model ? (this.updateThread(created.id, { model: input.model }) ?? created) : created;
     const relay: MessageRelay = { kind: "brief", threadId: thread.id, note: input.brief };
     this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: relayLine("brief", input.brief), relay });
     const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);

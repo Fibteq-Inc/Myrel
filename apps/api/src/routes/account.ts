@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo, TipId, ClientErrorInput } from "@myrel/protocol";
+import { createId, CreateApiKeyInput, type Invite, type Me, ProviderId, type ProviderInfo, SetCheckModelsInput, TipId, ClientErrorInput } from "@myrel/protocol";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAuth, firstPasswordKey } from "../auth";
@@ -10,6 +10,7 @@ import { PROVIDERS, serverProviderId } from "../llm";
 import { type AppEnv, requireUser } from "../middleware";
 import { UNVERIFIED_MESSAGE } from "../verification";
 import { recordError } from "../errors";
+import { parseCheckModels } from "../checks/visual";
 
 const { apiKeys, projectInvites, projectMembers, projects, user } = schema;
 
@@ -19,12 +20,31 @@ export const accountRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const { id, name, email, role } = c.get("user");
     const [row] = await createDb(c.env.DB)
-      .select({ onboardedAt: user.onboardedAt, tipsSeen: user.tipsSeen })
+      .select({ onboardedAt: user.onboardedAt, tipsSeen: user.tipsSeen, checkModels: user.checkModels })
       .from(user)
       .where(eq(user.id, id));
     return c.json({
-      user: { id, name, email, role, onboarded: !!row?.onboardedAt, tips: row?.tipsSeen ?? [] } satisfies Me,
+      user: {
+        id,
+        name,
+        email,
+        role,
+        onboarded: !!row?.onboardedAt,
+        tips: row?.tipsSeen ?? [],
+        checkModels: parseCheckModels(row?.checkModels),
+      } satisfies Me,
     });
+  })
+  // The CLIs that may judge the visual checks of this person's projects that list none (see CheckModels).
+  .put("/check-models", async (c) => {
+    const input = SetCheckModelsInput.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_input", issues: input.error.issues }, 400);
+    const { checkModels } = input.data;
+    await createDb(c.env.DB)
+      .update(user)
+      .set({ checkModels: Object.keys(checkModels).length ? JSON.stringify(checkModels) : null })
+      .where(eq(user.id, c.get("user").id));
+    return c.json({ checkModels });
   })
   // The "Get started" list is done or hidden, for this account on every device.
   .post("/onboarded", async (c) => {

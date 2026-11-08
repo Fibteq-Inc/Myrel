@@ -1,8 +1,8 @@
-import { type Message, parseVisualCheck } from "@myrel/protocol";
+import { type Message, parseVisualCheck, type RunnerCli } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { pickEvaluatorCli } from "../src/checks/loop";
+import { pickEvaluatorCli, resolveEvaluator } from "../src/checks/loop";
 import { judgeCheck, type CheckReport, type CheckVerdict } from "../src/checks/verdict";
 import { builtinBundle, builtinSkill } from "../src/skills/builtin";
 import { BUILTIN_SKILL_FILES } from "../src/skills/builtin.gen";
@@ -92,6 +92,48 @@ describe("evaluator CLI", () => {
     expect(pickEvaluatorCli([{ id: "claude" }, { id: "codex", limited: true }], "claude", true)).toBe("claude");
     expect(pickEvaluatorCli([{ id: "claude" }, { id: "codex" }], "codex", false)).toBe("claude");
     expect(pickEvaluatorCli([{ id: "codex" }], "codex", true)).toBe("codex");
+  });
+});
+
+describe("evaluator setting", () => {
+  const clis: RunnerCli[] = [
+    { id: "claude", version: "2.1.0", models: [{ id: "opus", name: "Opus", efforts: ["low", "high"] }, { id: "sonnet", name: "Sonnet", efforts: [] }] },
+    { id: "codex", version: "0.164.0", models: [{ id: "gpt-5.5", name: "GPT-5.5", efforts: ["medium", "high"] }] },
+    { id: "opencode", version: "2.0.0", limits: { status: "limited", windows: [], at: "2026-11-08T20:00:00.000Z" } },
+  ];
+  const pick = (model: string | null = null, effort: string | null = null) => ({ model, effort });
+  const base = { clis, othersAllowed: true };
+
+  it("picks a listed CLI other than the coder's, with that CLI's model and effort", () => {
+    const list = { claude: pick("opus", "high"), codex: pick("gpt-5.5", "high") };
+    expect(resolveEvaluator({ ...base, project: list, account: {}, coderCli: "claude" })).toMatchObject({
+      cli: "codex",
+      model: { cli: "codex", model: "gpt-5.5", effort: "high" },
+      source: "project",
+    });
+    expect(resolveEvaluator({ ...base, project: list, account: {}, coderCli: "codex" })).toMatchObject({
+      cli: "claude",
+      model: { cli: "claude", model: "opus", effort: "high" },
+    });
+  });
+
+  it("uses the coder's own CLI when it is the only listed one, and skips one at its limit", () => {
+    expect(resolveEvaluator({ ...base, project: { claude: pick() }, account: {}, coderCli: "claude" })).toMatchObject({ cli: "claude", model: null });
+    expect(resolveEvaluator({ ...base, project: { opencode: pick(), claude: pick() }, account: {}, coderCli: "claude" })).toMatchObject({ cli: "claude" });
+  });
+
+  it("follows the project's list, else the person's own, else any other CLI", () => {
+    expect(resolveEvaluator({ ...base, project: {}, account: { codex: pick() }, coderCli: "codex" })).toMatchObject({ cli: "codex", source: "account" });
+    expect(resolveEvaluator({ ...base, project: {}, account: {}, coderCli: "claude" })).toMatchObject({ cli: "codex", source: "auto" });
+    const r = resolveEvaluator({ ...base, project: { cursor: pick() }, account: { claude: pick("sonnet", "high") }, coderCli: "codex" });
+    expect(r).toMatchObject({ cli: "claude", model: { cli: "claude", model: "sonnet", effort: null }, source: "account" });
+    expect(r.skipped).toContain("cursor");
+    expect(resolveEvaluator({ ...base, project: { claude: pick("gone") }, account: {}, coderCli: "codex" }).model).toBeNull();
+    // A runner too old to run other CLIs only takes Claude Code.
+    expect(resolveEvaluator({ ...base, othersAllowed: false, project: { codex: pick() }, account: {}, coderCli: "claude" })).toMatchObject({
+      cli: "claude",
+      source: "auto",
+    });
   });
 });
 
@@ -210,6 +252,59 @@ describe("visual check loop", () => {
       "(visual check card: round 1, failed",
     );
     close();
+  });
+
+  it("starts the evaluator with the person's own setting, and the project's wins over it", { timeout: 60_000 }, async () => {
+    const token = await signUp();
+    const evaluators: Turn[] = [];
+    const requests: string[] = [];
+    let coderThread = "";
+    // The first evaluator hands in only once the test has changed the project's setting.
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const { project } = await agentProject(
+      token,
+      async (turn) => {
+        if (turn.threadId === coderThread) {
+          requests.push((await turn.call("request_visual_check", { branch: "feat/x", what: "The home page." })).text);
+          return;
+        }
+        evaluators.push(turn);
+        if (evaluators.length === 1) await gate;
+        const id = /Check id: (chk_\w+)/.exec(turn.prompt)![1]!;
+        await turn.call("submit_visual_check", { check_id: id, could_not_check: "No browser here." });
+      },
+      { features: ["folders", "cancel", "agent", "agent-clis", "skills"], cli: "claude", clis: ["codex"] },
+    );
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token, body: JSON.stringify({ visualCheck: true }) });
+    const mine = await api("/api/account/check-models", { method: "PUT", token, body: JSON.stringify({ checkModels: { claude: { model: null, effort: null } } }) });
+    expect(mine.status).toBe(200);
+    const me = (await (await api("/api/account", { token })).json()) as { user: { id: string; checkModels: unknown } };
+    expect(me.user.checkModels).toEqual({ claude: { model: null, effort: null } });
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me.user.id, body: "Ana sayfa" });
+    const thread = await projectAgent.createThread(root.id, "Ana sayfa");
+    coderThread = thread.id;
+    await (await getAgentByName(env.THREAD_AGENT, thread.id)).start({ projectId: project.id, threadId: thread.id, brief: "Build the home page." });
+
+    // The person lists only Claude Code: it judges, even though the work is Claude Code's too.
+    await until(() => evaluators.length === 1, "the first evaluator");
+    expect(evaluators[0]!.start.cli).toBe("claude");
+    expect(evaluators[0]!.prompt).toContain("You run as Claude Code with its default model");
+    expect(requests[0]).toContain("Round 1 started");
+
+    // The project's list wins over it, and of its two Myrel takes the one that did not make the change.
+    const set = await api(`/api/projects/${project.id}/settings`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ checkModels: { claude: { model: null, effort: null }, codex: { model: null, effort: null } } }),
+    });
+    expect(Object.keys(((await set.json()) as { settings: { checkModels: object } }).settings.checkModels)).toEqual(["claude", "codex"]);
+    open();
+    await until(() => evaluators.length === 2, "the second round's evaluator");
+    expect(requests[1]).toContain("Round 2 started");
+    expect(evaluators[1]!.start.cli).toBe("codex");
+    expect((await projectAgent.getThread(evaluators[1]!.threadId))?.cli).toMatchObject({ id: "codex", reason: expect.stringContaining("project") });
   });
 
   it("offers no visual check tool while the project's setting is off", { timeout: 30_000 }, async () => {

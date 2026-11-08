@@ -50,14 +50,14 @@ import { type ConnectorRow, readSecrets, refreshStaleTools, remoteTarget, type T
 import { findOffers, knownConnectors, searchOffers, signInOffer } from "../connectors/suggest";
 import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
 import { BUILTIN_ID_PREFIX, type BuiltinSkillName } from "../skills/builtin";
-import { visualCheckOn } from "../checks/visual";
+import { checkModels, visualCheckOn } from "../checks/visual";
 import {
   checkFolder,
   checkNotice,
   checkTitle,
   evaluatorBrief,
   judgedCard,
-  pickEvaluatorCli,
+  resolveEvaluator,
   resultNote,
   VISUAL_CHECK_TIMEOUT_SEC,
   type VisualCheckRole,
@@ -1514,11 +1514,15 @@ export class ThreadAgent extends Agent<Env> {
     if (!thread) throw new Error("This thread is gone.");
     const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId });
     const othersAllowed = await runnerHasFeature(this.env, spec.runnerId, "agent-clis");
-    const cli = pickEvaluatorCli(
-      (workspace?.clis ?? []).map((c) => ({ id: c.id, limited: c.limits?.status === "limited" })),
-      spec.harness,
+    const requester = this.getMeta("requester") || null;
+    // The project's choice, else the person's own, else another CLI than this one (see resolveEvaluator).
+    const choice = resolveEvaluator({
+      ...(await checkModels(this.env, projectId, requester)),
+      clis: workspace?.clis ?? [],
+      coderCli: spec.harness,
       othersAllowed,
-    );
+    });
+    const cli = choice.cli;
     const id = current?.id ?? createId("check");
     const round = (current?.round ?? 0) + 1;
     const folder = checkFolder(id, round);
@@ -1527,23 +1531,36 @@ export class ThreadAgent extends Agent<Env> {
     if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
     const tr = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language === "tr";
     const reason =
-      cli === spec.harness
+      choice.source === "project"
         ? tr
-          ? "Görsel kontrol: bu bilgisayarda başka bir CLI yok"
-          : "Visual check: no other CLI on this computer"
-        : tr
-          ? "Görsel kontrol: işi yapandan farklı bir CLI"
-          : "Visual check: another CLI than the one that made the change";
+          ? "Görsel kontrol: projenin değerlendirici ayarı"
+          : "Visual check: the project's evaluator setting"
+        : choice.source === "account"
+          ? tr
+            ? "Görsel kontrol: kişinin değerlendirici ayarı"
+            : "Visual check: the person's evaluator setting"
+          : cli === spec.harness
+            ? tr
+              ? "Görsel kontrol: bu bilgisayarda başka bir CLI yok"
+              : "Visual check: no other CLI on this computer"
+            : tr
+              ? "Görsel kontrol: işi yapandan farklı bir CLI"
+              : "Visual check: another CLI than the one that made the change";
+    const cliLabel = CLI_NAMES[cli as keyof typeof CLI_NAMES] ?? cli;
+    const runsAs = choice.model
+      ? `${cliLabel} (${[choice.model.model && `model ${choice.model.model}`, choice.model.effort && `effort ${choice.model.effort}`].filter(Boolean).join(", ")})`
+      : `${cliLabel} with its default model`;
     const state: VisualCheckState = { id, round, status: "running", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch };
     this.setMeta("visual_check", JSON.stringify(state));
     try {
       const evaluator = await project.startVisualCheck({
         notice: checkNotice(thread.title, round),
         title: checkTitle(thread.title, round),
-        brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder }),
-        cli: { id: cli, options: [cli], by: "coordinator", reason },
+        brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder, runsAs }),
+        cli: { id: cli, options: [cli], by: "coordinator", reason, ...(choice.account && { account: choice.account }) },
         runner: { id: spec.runnerId, by: "auto", reason: null },
-        actor: this.getMeta("requester") || null,
+        model: choice.model,
+        actor: requester,
         check: { checkId: id, round, coderThreadId: threadId, folder, branch: input.branch },
       });
       this.setMeta("visual_check", JSON.stringify({ ...state, evaluatorThreadId: evaluator.id }));
@@ -1555,7 +1572,8 @@ export class ThreadAgent extends Agent<Env> {
       return `Not started. ${note}`;
     }
     await this.schedule(VISUAL_CHECK_TIMEOUT_SEC, "visualCheckTimeout", { id, round });
-    return `Round ${round} started: an evaluator thread with ${CLI_NAMES[cli as keyof typeof CLI_NAMES] ?? cli} checks branch ${input.branch}, and its card is in this thread. Its result wakes you. Do not open the pull request yet; end your turn.`;
+    const skipped = choice.skipped ? ` (Not as set: ${choice.skipped}.)` : "";
+    return `Round ${round} started: an evaluator thread with ${runsAs} checks branch ${input.branch}, and its card is in this thread.${skipped} Its result wakes you. Do not open the pull request yet; end your turn.`;
   }
 
   /** A person wrote in this thread after the given message. */
