@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starfall</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1020; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Starfall: move the basket to catch falling stars"></canvas>
+<script>
+// A tiny game used to test the visual-check skill: catch falling stars with a basket.
+// window.__myrelTest is the test hook the skill drives: seed(n) restarts it with fixed randomness
+// and stops the real-time loop, step(ms) advances the simulation, state() reports it.
+// ?bug=frozen draws once and never again, which the frame check must catch.
+const canvas = document.getElementById("game");
+const g = canvas.getContext("2d");
+const bug = new URLSearchParams(location.search).get("bug");
+let W = 0, H = 0, rng = Math.random, manual = false;
+const game = { phase: "play", score: 0, lives: 3, stars: [], basket: 0.5, spawn: 0, t: 0 };
+
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = canvas.clientWidth; H = canvas.clientHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function reset() { Object.assign(game, { phase: "play", score: 0, lives: 3, stars: [], basket: 0.5, spawn: 0, t: 0 }); }
+function update(dt) {
+  if (game.phase !== "play") return;
+  game.t += dt;
+  game.spawn -= dt;
+  if (game.spawn <= 0) { game.stars.push({ x: 0.08 + rng() * 0.84, y: -0.05, v: 0.18 + rng() * 0.12, r: 6 + rng() * 6 }); game.spawn = 0.6; }
+  // The basket drifts toward the lowest star so the game plays itself under test.
+  const target = game.stars.reduce((a, s) => (s.y > (a?.y ?? -1) ? s : a), null);
+  if (target) game.basket += Math.sign(target.x - game.basket) * Math.min(Math.abs(target.x - game.basket), dt * 0.5);
+  for (const s of game.stars) s.y += s.v * dt;
+  const bw = Math.max(70, W * 0.16) / W;
+  game.stars = game.stars.filter((s) => {
+    if (s.y > 0.9 && s.y < 0.95 && Math.abs(s.x - game.basket) < bw / 2) { game.score += 10; return false; }
+    if (s.y > 1.05) { game.lives -= 1; return false; }
+    return true;
+  });
+  if (game.lives <= 0) game.phase = "over";
+}
+function star(x, y, r) {
+  g.beginPath();
+  for (let i = 0; i < 10; i++) { const a = (i * Math.PI) / 5 - Math.PI / 2, d = i % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); }
+  g.closePath(); g.fill();
+}
+function draw() {
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#0d1020"); sky.addColorStop(1, "#27204a");
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#ffd76a";
+  for (const s of game.stars) star(s.x * W, s.y * H, s.r);
+  const bw = Math.max(70, W * 0.16);
+  g.fillStyle = "#6ee7c8";
+  g.fillRect(game.basket * W - bw / 2, H * 0.92, bw, 14);
+  g.fillStyle = "#f2f4ff";
+  g.font = "600 20px system-ui, sans-serif";
+  g.textBaseline = "top";
+  g.fillText(`Score ${game.score}`, 16, 16);
+  g.textAlign = "right";
+  g.fillText("♥".repeat(Math.max(0, game.lives)), W - 16, 16);
+  g.textAlign = "left";
+  if (game.phase === "over") {
+    g.fillStyle = "rgba(0,0,0,0.6)"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#ffffff"; g.font = "700 36px system-ui, sans-serif"; g.textAlign = "center";
+    g.fillText("Game over", W / 2, H / 2 - 20); g.textAlign = "left";
+  }
+}
+let last = performance.now();
+function loop(now) {
+  if (!manual) { update(Math.min(0.05, (now - last) / 1000)); draw(); }
+  last = now;
+  if (bug !== "frozen") requestAnimationFrame(loop);
+}
+window.addEventListener("resize", () => { resize(); draw(); });
+window.addEventListener("pointermove", (e) => { game.basket = e.clientX / W; });
+resize(); draw();
+requestAnimationFrame(loop);
+
+window.__myrelTest = {
+  ready: () => W > 0,
+  seed(n) { rng = mulberry32(n); manual = true; reset(); draw(); },
+  step(ms) { if (bug === "frozen") return; for (let t = 0; t < ms; t += 16) update(0.016); draw(); },
+  state: () => ({ phase: game.phase, score: game.score, lives: game.lives, stars: game.stars.length }),
+};
+</script>
+</body>
+</html>
