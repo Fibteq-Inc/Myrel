@@ -15,6 +15,7 @@ import {
   formatVisualCheck,
   parseVisualCheck,
   VISUAL_CHECK_BASELINE,
+  VISUAL_CHECK_DEPS_COMMAND,
   VISUAL_CHECK_ROUNDS,
   type VisualCheckAction,
   type VisualCheckCard,
@@ -101,7 +102,7 @@ import {
 import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
-import { getWorkspace, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
+import { getWorkspace, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
@@ -1516,6 +1517,11 @@ export class ThreadAgent extends Agent<Env> {
     }
     const thread = await project.getThread(threadId);
     if (!thread) throw new Error("This thread is gone.");
+    // A computer whose runner said its browser cannot start is told now, not after an evaluator's turn.
+    const browser = await runnerBrowser(this.env, spec.runnerId).catch(() => undefined);
+    if (browser?.status === "missing-libs") {
+      return `Not started: this computer lacks the system libraries the check's browser needs (${(browser.missing ?? []).slice(0, 5).join(", ")}). The computer's owner runs once: ${VISUAL_CHECK_DEPS_COMMAND} . Tell the person that in one line, carry on without the check, and ask for it again once they have run it (the runner picks the change up when it restarts).`;
+    }
     const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId });
     const othersAllowed = await runnerHasFeature(this.env, spec.runnerId, "agent-clis");
     const requester = this.getMeta("requester") || null;

@@ -1,6 +1,6 @@
 import type { Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliLimitWindow, cliLogins, type Runner, type RunnerCli, type RunnerPairingCode, type RunnerStats } from "@myrel/protocol";
+import { CLI_NAMES, type CliLimitWindow, cliLogins, type Runner, type RunnerCli, type RunnerPairingCode, type RunnerStats, VISUAL_CHECK_DEPS_COMMAND } from "@myrel/protocol";
 import { Check, Copy, Laptop, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useFormat } from "../lib/format";
@@ -243,6 +243,21 @@ function LimitBar({ window: w, label }: { window: CliLimitWindow; label: string 
 }
 
 /** A shell command with a copy button. */
+/**
+ * A computer whose runner said a visual check's browser cannot start there (Linux without
+ * Chromium's system libraries): the one command its owner runs, with sudo, once.
+ */
+export function BrowserNotice({ runner }: { runner: Runner }) {
+  const t = useT();
+  if (runner.browser?.status !== "missing-libs") return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-warn-line bg-warn-soft px-3 py-2.5 text-[13px] text-body">
+      <p>{t("devices.browserMissing")}</p>
+      <Command>{VISUAL_CHECK_DEPS_COMMAND}</Command>
+    </div>
+  );
+}
+
 export function Command({ children }: { children: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);

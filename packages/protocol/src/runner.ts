@@ -270,6 +270,20 @@ export const RunnerUpdateState = z.object({
 export type RunnerUpdateState = z.infer<typeof RunnerUpdateState>;
 
 /** What the runner last told the server about the computer. */
+/**
+ * Whether a visual check's headless browser can start on the computer (feature-free: older runners
+ * never say). missing-libs: Linux lacks Chromium's system libraries, which one command run with sudo
+ * installs (VISUAL_CHECK_DEPS_COMMAND).
+ */
+export const RunnerBrowser = z.object({
+  status: z.enum(["ok", "missing-libs", "unknown"]),
+  missing: z.array(z.string().max(80)).max(30).optional(),
+});
+export type RunnerBrowser = z.infer<typeof RunnerBrowser>;
+
+/** What installs Chromium's system libraries for visual checks on Linux, once, with sudo. */
+export const VISUAL_CHECK_DEPS_COMMAND = "sudo npx playwright@1.64.1 install-deps chromium";
+
 export const RunnerInfo = z.object({
   version: z.string().max(50),
   hostname: z.string().max(255),
@@ -296,6 +310,7 @@ export const RunnerInfo = z.object({
   updates: RunnerUpdates.optional().catch(undefined),
   /** An update in progress, or one that did not work out lately. */
   update: RunnerUpdateState.optional().catch(undefined),
+  browser: RunnerBrowser.optional().catch(undefined),
 });
 export type RunnerInfo = z.infer<typeof RunnerInfo>;
 
