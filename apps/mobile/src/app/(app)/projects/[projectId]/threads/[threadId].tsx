@@ -10,7 +10,7 @@ import {
 } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
 import { lastPromptSize, waitsForAgent } from "@myrel/protocol";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { type Href, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ChartColumn,
   CircleCheck,
@@ -53,6 +53,7 @@ export default function ThreadScreen() {
   const styles = useStyles();
   const t = useT();
   const { threadId } = useLocalSearchParams<{ threadId: string }>();
+  const router = useRouter();
   const { user, api } = useSession();
   const { projectId, state, status, ready, send, emit, loadTasks, loadConversation } = useProject();
   const names = useNames(projectId);
@@ -133,9 +134,18 @@ export default function ThreadScreen() {
     </View>
   ) : null;
   // Which CLI Myrel picked, or that it opened the thread in the cloud, and why, stays in view above the conversation.
+  // A visual check's evaluator says which thread's work it checks, and leads back to it.
+  const parent = thread?.parentId ? state.threads[thread.parentId] : undefined;
   const header =
-    progress || thread?.cli?.by === "coordinator" || thread?.runner?.by === "coordinator" ? (
+    progress || parent || thread?.cli?.by === "coordinator" || thread?.runner?.by === "coordinator" ? (
       <>
+        {parent && (
+          <Pressable accessibilityRole="link" onPress={() => router.push(`/projects/${projectId}/threads/${parent.id}` as Href)}>
+            <Text style={{ color: colors.link, fontSize: 13, paddingHorizontal: 16, paddingVertical: 6 }}>
+              {t("visualCheck.checksThread", { title: parent.title })}
+            </Text>
+          </Pressable>
+        )}
         {progress}
         {thread && <ThreadRunnerNote thread={thread} />}
         {thread && <ThreadCliNote thread={thread} />}

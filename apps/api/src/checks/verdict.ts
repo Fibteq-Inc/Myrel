@@ -41,6 +41,8 @@ export const CheckVerdict = z.object({
         evidence: z.string().max(300),
         problem: z.string().min(1).max(2000),
         expected: z.string().max(1000).optional(),
+        /** The screenshot with the findings marked (verdict.mjs writes it). */
+        image: z.string().max(300).optional(),
       }),
     )
     .max(50)

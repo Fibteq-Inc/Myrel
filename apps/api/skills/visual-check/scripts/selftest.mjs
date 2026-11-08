@@ -99,5 +99,36 @@ await verdict({ verdict: "deterministic_only", evaluator: { cli: "selftest", mod
 r = runVerdict();
 check(r.code === 0 && /look not judged/.test(r.out), "deterministic_only says the look was not judged");
 
+// Findings are framed on their screenshots: the deterministic one from its element's box, the
+// evaluator's from the box it gave.
+await verdict({
+  verdict: "fail",
+  evaluator: { ...base.evaluator, probeAnswer: "K7FQX" },
+  scores: base.scores,
+  dismissed: dismissAll.filter((d) => !(d.id === "covered-control" && d.screen === "broken")),
+  blocking: [{ screen: "clean@390-light", evidence: "clean-390-light.png", problem: "The Pro card is cramped.", box: { x: 16, y: 300, w: 358, h: 120 } }],
+});
+r = runVerdict();
+v = JSON.parse(await readFile(join(out, "verdict.json"), "utf8"));
+check(r.code === 0 && v.blocking[0].image === "annotated/clean-390-light.png" && v.blocking[0].n === 1, "the evaluator's finding is framed on its screenshot");
+const covered = v.blocking.find((b) => b.id === "covered-control");
+check(covered?.image === `annotated/${covered?.evidence}` && covered?.boxes?.length > 0, "a deterministic finding is framed from its element's box");
+check(/^1\. \*\*clean@390-light/m.test(await readFile(join(out, "summary.md"), "utf8")), "summary numbers the findings like the frames");
+
+// Against approved screenshots: the same page is unchanged, another page under its name is changed.
+const again = join(out, "again");
+await writeFile(join(out, "again.json"), JSON.stringify({
+  serve: fixtures,
+  viewports: [390],
+  themes: ["light"],
+  baseline: out,
+  screens: [{ name: "clean", path: "/clean.html" }, { name: "game", path: "/broken.html", axe: false }],
+}));
+execFileSync(process.execPath, [join(here, "capture.mjs"), "--config", join(out, "again.json"), "--out", again], { stdio: ["ignore", "ignore", "inherit"] });
+const second = JSON.parse(await readFile(join(again, "report.json"), "utf8"));
+check(!second.findings.some((f) => f.id === "changed" && f.screen === "clean@390-light"), "an unchanged screen matches its approved screenshot");
+check(second.findings.some((f) => f.id === "changed" && f.screen === "game@390-light"), "a changed screen is reported against its approved screenshot");
+check(second.summary.baseline?.changed === 1 && second.summary.baseline?.unchanged === 1, "the report counts changed and unchanged screens");
+
 console.log(failed ? `\n${failed} check(s) failed. Output in ${out}` : `\nAll checks passed. Output in ${out}`);
 process.exit(failed ? 1 : 0);

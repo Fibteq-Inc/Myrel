@@ -1,4 +1,4 @@
-import { conversationState, draftKey, projectChat, threadByCard, threadReplyCount } from "@myrel/client";
+import { conversationState, draftKey, projectChat, threadByCard, threadChildren, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { type CliId, decisionPicks, type Message } from "@myrel/protocol";
 import { MessagesSquare } from "lucide-react";
@@ -32,6 +32,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
   });
   const choose = useCallback((label: string) => send(label), [send]);
   const roots = threadByCard(state);
+  const checks = threadChildren(state);
   const answers = decisionAnswers(chat);
   // A tap on a card is shown on the card itself, not again as a bubble.
   const picks = decisionPicks(chat);
@@ -75,6 +76,8 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
           <EarlierMessages hidden={history.hidden} more={history.more} loading={history.loading} onShow={history.showEarlier} />
           {history.visible.map((m) => {
             const thread = roots.get(m.id);
+            // A visual check's evaluator shows under the thread it checks, not as a line of its own here.
+            if (thread?.parentId) return null;
             // A pick that opened a thread keeps its bubble, which carries the thread's card.
             if (picks.has(m.id) && !thread) return null;
             return (
@@ -92,7 +95,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 ) : null}
                 {m.clis?.length ? <OfferedClis clis={m.clis} /> : null}
                 {thread && (
-                  <ThreadCard projectId={project.id} thread={thread} replies={threadReplyCount(state, thread.id)} />
+                  <ThreadCard projectId={project.id} thread={thread} replies={threadReplyCount(state, thread.id)} checks={checks.get(thread.id)} />
                 )}
               </MessageView>
             );

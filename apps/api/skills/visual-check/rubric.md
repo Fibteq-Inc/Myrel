@@ -46,7 +46,8 @@ In addition: the HUD is readable at phone width and does not cover the play area
       "screen": "pricing@390-dark",
       "evidence": "pricing-390-dark.png",
       "problem": "The Choose Pro button sits under the bottom navigation bar.",
-      "expected": "The button is fully visible above the bar without scrolling."
+      "expected": "The button is fully visible above the bar without scrolling.",
+      "box": { "x": 24, "y": 760, "w": 160, "h": 60 }
     }
   ],
   "dismissed": [
@@ -58,5 +59,5 @@ In addition: the HUD is readable at phone width and does not cover the play area
 
 - `verdict`: `pass`, `fail`, or `deterministic_only` when no model that reads images took part (the result then says the look was not judged).
 - `evaluator`: the CLI, model and effort that judged, and the probe code you read. Say what you really are; the person compares models by this.
-- `blocking[].screen`: `<screen>@<width>-<theme>` as in `report.json`; `evidence`: a file in the output folder. A deterministic finding you agree with may be listed as is (`id` from the report) or left out: `verdict.mjs` adds every open one itself.
+- `blocking[].screen`: `<screen>@<width>-<theme>` as in `report.json`; `evidence`: a file in the output folder; `box` (optional, but give it whenever the problem is in one place): where it is in that screenshot, in its pixels, so verdict.mjs frames it for people. A deterministic finding you agree with may be listed as is (`id` from the report) or left out: `verdict.mjs` adds every open one itself.
 - `dismissed`: deterministic findings you checked and found false, by `id` and `screen` (a bare screen name covers all its widths and themes), each with a reason.

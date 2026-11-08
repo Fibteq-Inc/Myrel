@@ -6,7 +6,12 @@
  * @param {{ touch: boolean, ignore: string[], limit: number, minTarget: number }} opts
  */
 export function layoutChecks(opts) {
-  const { touch, ignore, limit, minTarget } = opts;
+  const { touch, ignore, limit, minTarget, pageCoords } = opts;
+  // Where an element is in the screenshot, so a finding can be marked on it: the viewport's
+  // coordinates, or the page's for a full-page screenshot.
+  const sx = pageCoords ? window.scrollX : 0;
+  const sy = pageCoords ? window.scrollY : 0;
+  const box = (r) => ({ x: Math.round(r.left + sx), y: Math.round(r.top + sy), w: Math.round(r.width), h: Math.round(r.height) });
   const doc = document.documentElement;
   const vw = doc.clientWidth;
   const vh = window.innerHeight;
@@ -100,7 +105,7 @@ export function layoutChecks(opts) {
   for (const el of sticking) {
     if (sticking.some((o) => o !== el && o.contains(el))) continue;
     const r = el.getBoundingClientRect();
-    push(out.offscreen, { target: path(el), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) });
+    push(out.offscreen, { target: path(el), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), box: box(r) });
   }
 
   // 2. Controls another element sits on top of, so a tap lands on the wrong thing.
@@ -123,7 +128,7 @@ export function layoutChecks(opts) {
     }
     if (!hiddenBy) continue;
     const seen = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
-    push(out.cutControls, { target: path(el), text: label(el), visiblePx: Math.round(seen), width: Math.round(r.width), clippedBy: path(hiddenBy) });
+    push(out.cutControls, { target: path(el), text: label(el), visiblePx: Math.round(seen), width: Math.round(r.width), clippedBy: path(hiddenBy), box: box(r) });
   }
   const inView = [];
   for (const el of interactive) {
@@ -141,7 +146,7 @@ export function layoutChecks(opts) {
     const top = layer(hit);
     if (top && !top.contains(el)) continue; // An open dialog or menu covers the page on purpose.
     if (scrollsUnder(el, hit)) continue;
-    push(out.covered, { target: path(el), text: label(el), coveredBy: path(hit) });
+    push(out.covered, { target: path(el), text: label(el), coveredBy: path(hit), box: box(r) });
   }
 
   // 3. Two controls overlapping each other.
@@ -152,7 +157,7 @@ export function layoutChecks(opts) {
       if (a.el.contains(b.el) || b.el.contains(a.el) || scrollsUnder(a.el, b.el) || scrollsUnder(b.el, a.el)) continue;
       const shared = intersect(a.r, b.r);
       if (shared && shared / Math.min(area(a.r), area(b.r)) > 0.3) {
-        push(out.overlaps, { a: path(a.el), aText: label(a.el), b: path(b.el), bText: label(b.el) });
+        push(out.overlaps, { a: path(a.el), aText: label(a.el), b: path(b.el), bText: label(b.el), box: box(a.r) });
       }
     }
   }
@@ -179,7 +184,7 @@ export function layoutChecks(opts) {
     const cutX = cuts(s.overflowX) && s.textOverflow !== "ellipsis" && el.scrollWidth > el.clientWidth + 1;
     const clamp = s.webkitLineClamp && s.webkitLineClamp !== "none";
     const cutY = cuts(s.overflowY) && !clamp && el.scrollHeight > el.clientHeight + 2;
-    if (cutX || cutY) push(out.clipped, { target: path(el), text: label(el), axis: cutX ? "x" : "y" });
+    if (cutX || cutY) push(out.clipped, { target: path(el), text: label(el), axis: cutX ? "x" : "y", box: box(el.getBoundingClientRect()) });
   }
 
   // 5. Text drawn over other text.
@@ -189,7 +194,7 @@ export function layoutChecks(opts) {
       if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el) || scrollsUnder(a.el, b.el) || scrollsUnder(b.el, a.el)) continue;
       const shared = intersect(a.r, b.r);
       if (shared && shared / Math.min(area(a.r), area(b.r)) > 0.25) {
-        push(out.textOverlaps, { a: path(a.el), aText: a.text, b: path(b.el), bText: b.text });
+        push(out.textOverlaps, { a: path(a.el), aText: a.text, b: path(b.el), bText: b.text, box: box(a.r) });
       }
     }
   }
@@ -199,7 +204,7 @@ export function layoutChecks(opts) {
     // The whole box, not the visible part: a button half scrolled out of view is not small.
     for (const { el, full: r } of inView) {
       if (getComputedStyle(el).display === "inline") continue;
-      if (r.width < minTarget || r.height < minTarget) push(out.smallTargets, { target: path(el), text: label(el), width: Math.round(r.width), height: Math.round(r.height) });
+      if (r.width < minTarget || r.height < minTarget) push(out.smallTargets, { target: path(el), text: label(el), width: Math.round(r.width), height: Math.round(r.height), box: box(r) });
     }
   }
 
@@ -212,7 +217,7 @@ export function layoutChecks(opts) {
   }).length;
 
   // Images and fonts that did not load.
-  out.brokenImages = [...document.images].filter((img) => img.complete && img.naturalWidth === 0 && img.currentSrc && shown(img)).slice(0, limit).map((img) => ({ target: path(img), src: img.currentSrc.slice(0, 200) }));
+  out.brokenImages = [...document.images].filter((img) => img.complete && img.naturalWidth === 0 && img.currentSrc && shown(img)).slice(0, limit).map((img) => ({ target: path(img), src: img.currentSrc.slice(0, 200), box: box(img.getBoundingClientRect()) }));
   out.failedFonts = document.fonts ? [...document.fonts].filter((f) => f.status === "error").slice(0, limit).map((f) => f.family) : [];
   return out;
 }

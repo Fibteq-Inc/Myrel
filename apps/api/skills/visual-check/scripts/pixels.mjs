@@ -144,3 +144,92 @@ export async function probeImage(page, code) {
   }, code);
   return Buffer.from(b64, "base64");
 }
+
+/**
+ * A picture of what changed against the approved screenshot: the approved one dimmed, the pixels
+ * that differ in red. Same size only (a size change is a change everywhere).
+ */
+export async function diffImage(page, approved, current) {
+  const b64 = await page.evaluate(
+    async ([a64, b64]) => {
+      const load = async (s) => createImageBitmap(await (await fetch(`data:image/png;base64,${s}`)).blob());
+      const [ia, ib] = await Promise.all([load(a64), load(b64)]);
+      const read = (bmp) => {
+        const c = new OffscreenCanvas(bmp.width, bmp.height);
+        const g = c.getContext("2d", { willReadFrequently: true });
+        g.drawImage(bmp, 0, 0);
+        return g.getImageData(0, 0, bmp.width, bmp.height);
+      };
+      const a = read(ia), b = read(ib);
+      const out = new ImageData(ib.width, ib.height);
+      for (let p = 0; p < ib.width * ib.height; p++) {
+        const i = p * 4;
+        const changed = Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]) > 48;
+        const y = (0.2126 * b.data[i] + 0.7152 * b.data[i + 1] + 0.0722 * b.data[i + 2]) * 0.35 + 150;
+        out.data[i] = changed ? 255 : y;
+        out.data[i + 1] = changed ? 40 : y;
+        out.data[i + 2] = changed ? 40 : y;
+        out.data[i + 3] = 255;
+      }
+      const c = new OffscreenCanvas(ib.width, ib.height);
+      c.getContext("2d").putImageData(out, 0, 0);
+      const bytes = new Uint8Array(await (await c.convertToBlob({ type: "image/png" })).arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    },
+    [approved.toString("base64"), current.toString("base64")],
+  );
+  return Buffer.from(b64, "base64");
+}
+
+/** The pixel size of a PNG, read from its header. */
+export function pngSize(png) {
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}
+
+/**
+ * A screenshot with findings marked on it: a red frame around each box and its number in a circle,
+ * so people see in the thread exactly what is wrong. `marks`: [{ n, boxes: [{ x, y, w, h }] }].
+ */
+export async function annotateImage(page, png, marks) {
+  const b64 = await page.evaluate(
+    async ({ src, marks }) => {
+      const bmp = await createImageBitmap(await (await fetch(`data:image/png;base64,${src}`)).blob());
+      const c = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = c.getContext("2d");
+      g.drawImage(bmp, 0, 0);
+      const scale = Math.max(1, bmp.width / 800);
+      g.lineWidth = 3 * scale;
+      g.font = `bold ${13 * scale}px sans-serif`;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      for (const { n, boxes } of marks) {
+        for (const [k, b] of boxes.entries()) {
+          const x = Math.max(1, Math.min(b.x, bmp.width - 2));
+          const y = Math.max(1, Math.min(b.y, bmp.height - 2));
+          const w = Math.max(6, Math.min(b.w, bmp.width - x - 1));
+          const h = Math.max(6, Math.min(b.h, bmp.height - y - 1));
+          g.strokeStyle = "#ff3b30";
+          g.strokeRect(x, y, w, h);
+          if (k > 0) continue;
+          const r = 11 * scale;
+          const cx = Math.min(Math.max(x, r + 2), bmp.width - r - 2);
+          const cy = Math.min(Math.max(y, r + 2), bmp.height - r - 2);
+          g.fillStyle = "#ff3b30";
+          g.beginPath();
+          g.arc(cx, cy, r, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = "#ffffff";
+          g.fillText(String(n), cx, cy + scale);
+        }
+      }
+      const bytes = new Uint8Array(await (await c.convertToBlob({ type: "image/png" })).arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    },
+    { src: png.toString("base64"), marks },
+  );
+  return Buffer.from(b64, "base64");
+}

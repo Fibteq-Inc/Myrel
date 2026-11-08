@@ -1,4 +1,4 @@
-import { threadReplyCount } from "@myrel/client";
+import { threadChildren, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { Thread } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { Pressable, SectionList, StyleSheet, Text, View } from "react-native";
 import { useProject } from "../../lib/project";
 import { makeStyles, radius, useColors } from "../../theme";
+import { ChildThreads } from "../thread-card";
 import { threadActivity, ThreadStatusIcon } from "../thread-status";
 import { useRelativeTime } from "../ui";
 import { Empty } from "./empty";
@@ -19,8 +20,12 @@ export function ThreadsTab() {
   const router = useRouter();
   const relativeTime = useRelativeTime();
   const { projectId, state } = useProject();
+  // A visual check's evaluator is listed under the thread it checks, not on its own.
+  const checks = useMemo(() => threadChildren(state), [state]);
   const sections = useMemo(() => {
-    const all = Object.values(state.threads).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const all = Object.values(state.threads)
+      .filter((th) => !th.parentId || !state.threads[th.parentId])
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return [
       { key: "open", title: t("threads.open"), data: all.filter((th) => !th.resolved) },
       { key: "resolved", title: t("sidebar.resolved"), data: all.filter((th) => th.resolved) },
@@ -40,28 +45,32 @@ export function ThreadsTab() {
       renderSectionHeader={({ section }) => <Text style={styles.section}>{section.title}</Text>}
       renderItem={({ item }) => {
         const activity = threadActivity(item, t, colors);
+        const rounds = checks.get(item.id);
         return (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push(`/projects/${projectId}/threads/${item.id}` as Href)}
-            style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.hover }]}
-          >
-            <View style={{ marginTop: 2 }}>
-              <ThreadStatusIcon thread={item} />
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Text style={styles.title} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Text style={[styles.activity, { color: activity.color }]} numberOfLines={1}>
-                {activity.label}
-              </Text>
-            </View>
-            <View style={{ alignItems: "flex-end", gap: 3 }}>
-              <Text style={styles.meta}>{relativeTime(item.updatedAt)}</Text>
-              <Text style={styles.meta}>{t("threadCard.replies", { count: threadReplyCount(state, item.id) })}</Text>
-            </View>
-          </Pressable>
+          <View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push(`/projects/${projectId}/threads/${item.id}` as Href)}
+              style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.hover }]}
+            >
+              <View style={{ marginTop: 2 }}>
+                <ThreadStatusIcon thread={item} />
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.activity, { color: activity.color }]} numberOfLines={1}>
+                  {activity.label}
+                </Text>
+              </View>
+              <View style={{ alignItems: "flex-end", gap: 3 }}>
+                <Text style={styles.meta}>{relativeTime(item.updatedAt)}</Text>
+                <Text style={styles.meta}>{t("threadCard.replies", { count: threadReplyCount(state, item.id) })}</Text>
+              </View>
+            </Pressable>
+            {rounds && <ChildThreads projectId={projectId} threads={rounds} />}
+          </View>
         );
       }}
     />

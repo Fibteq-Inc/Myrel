@@ -21,11 +21,11 @@ import { AXE_VERSION, PLAYWRIGHT_VERSION, launchBrowser, loadDeps } from "./deps
 import { detectApp } from "./detect.mjs";
 import { layoutChecks } from "./page-checks.mjs";
 import { groupFindings } from "./shared.mjs";
-import { contactSheet, frameDiff, imageStats, pixelPage, probeImage } from "./pixels.mjs";
+import { contactSheet, diffImage, frameDiff, imageStats, pixelPage, pngSize, probeImage } from "./pixels.mjs";
 
 const HELP = `Usage: node capture.mjs [--config file] [--url base | --start "cmd {port}" | --serve dir]
        [--path /p ...] [--viewports 390,768,1440] [--themes light,dark] [--target web|game]
-       [--out dir] [--name label] [--cwd dir] [--timeout seconds]`;
+       [--baseline dir] [--out dir] [--name label] [--cwd dir] [--timeout seconds]`;
 
 const log = (m) => console.error(`[visual-check] ${m}`);
 
@@ -71,6 +71,7 @@ async function loadConfig(args) {
   if (args.timeout) config.timeout = Number(args.timeout);
   if (args.viewports) config.viewports = args.viewports.split(",").map((v) => (/x/.test(v) ? v : Number(v)));
   if (args.themes) config.themes = args.themes.split(",");
+  if (args.baseline) config.baseline = args.baseline;
   if (args.path.length) config.screens = args.path.map((p) => ({ name: screenName(p), path: p }));
   config.target ??= "web";
   const game = config.target === "game";
@@ -218,7 +219,12 @@ async function shoot(ctx) {
   const id = `${screen.name}@${vp.width}-${theme}`;
   const file = `${screen.name}-${vp.width}-${theme}.png`;
   const findings = [];
-  const add = (severity, kind, message, details) => findings.push({ id: kind, severity, screen: id, file, message, ...(details && { details }) });
+  // Where the finding is in the screenshot (from its elements' boxes), so it can be marked there.
+  const boxesOf = (details) => (details?.items ?? details?.offenders ?? []).map((i) => i.box).filter(Boolean).slice(0, 8);
+  const add = (severity, kind, message, details) => {
+    const boxes = boxesOf(details);
+    findings.push({ id: kind, severity, screen: id, file, message, ...(boxes.length && { boxes }), ...(details && { details }) });
+  };
   const game = config.target === "game";
   const phone = vp.width < 600;
   const context = await browser.newContext({
@@ -307,6 +313,24 @@ async function shoot(ctx) {
   }
   await writeFile(join(outDir, file), png);
 
+  // Against the approved screenshot (the baseline a person approved): unchanged screens need no new look.
+  if (config.baseline) {
+    const approvedPath = join(resolve(config.baseline), file);
+    if (existsSync(approvedPath)) {
+      const approved = await readFile(approvedPath);
+      const [a, b] = [pngSize(approved), pngSize(png)];
+      const diff = a.width === b.width && a.height === b.height ? await frameDiff(pixels, approved, png) : 1;
+      shot.baseline = { diff };
+      if (diff > (config.baselineThreshold ?? 0.002)) {
+        if (diff < 1) {
+          shot.baseline.image = file.replace(/\.png$/, ".diff.png");
+          await writeFile(join(outDir, shot.baseline.image), await diffImage(pixels, approved, png));
+        }
+        add("warning", "changed", `Differs from the approved screenshot: ${diff === 1 ? "its size changed" : `${(diff * 100).toFixed(1)}% of its pixels`}.`);
+      }
+    } else shot.baseline = { new: true };
+  }
+
   // Frames: for games and animations, to tell a running screen from a frozen one.
   const frames = screen.frames ?? (game ? 3 : 0);
   if (frames > 1) {
@@ -335,7 +359,9 @@ async function shoot(ctx) {
   if (hasHook) shot.gameState = await page.evaluate(() => window.__myrelTest.state?.()).catch((err) => ({ error: err.message }));
 
   // Layout from the browser's own boxes.
-  const layout = await page.evaluate(layoutChecks, { touch: vp.width <= 1024, ignore: [...config.ignore, ...(screen.ignore ?? [])], limit: config.limit, minTarget: config.minTarget }).catch((err) => ({ error: err.message }));
+  const layout = await page
+    .evaluate(layoutChecks, { touch: vp.width <= 1024, ignore: [...config.ignore, ...(screen.ignore ?? [])], limit: config.limit, minTarget: config.minTarget, pageCoords: !!screen.fullPage })
+    .catch((err) => ({ error: err.message }));
   if (layout.error) add("warning", "layout-unchecked", `Layout checks could not run: ${layout.error}`);
   else {
     shot.interactive = layout.interactive;
@@ -475,7 +501,19 @@ async function main() {
       baseUrl: base,
       git: { commit: git(["rev-parse", "HEAD"]), branch: git(["rev-parse", "--abbrev-ref", "HEAD"]), dirty: !!git(["status", "--porcelain"]) },
       probe: { image: "probe.png", salt, sha256: createHash("sha256").update(salt + code).digest("hex") },
-      summary: { shots: shots.length, blocking: blocking.length, warnings: warnings.length, byId },
+      summary: {
+        shots: shots.length,
+        blocking: blocking.length,
+        warnings: warnings.length,
+        byId,
+        ...(config.baseline && {
+          baseline: {
+            unchanged: shots.filter((s) => s.baseline && !s.baseline.new && !findings.some((f) => f.id === "changed" && f.screen === s.id)).length,
+            changed: findings.filter((f) => f.id === "changed").length,
+            new: shots.filter((s) => s.baseline?.new).length,
+          },
+        }),
+      },
       sheets,
       shots,
       findings: [...blocking, ...warnings],
