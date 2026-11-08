@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clean page</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fbfaf7; --fg: #1d1f24; --muted: #555b66; --accent: #2a55c9; --card: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15171b; --fg: #eceef2; --muted: #a9afba; --accent: #8fb0ff; --card: #1e2127; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header, main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav { display: flex; gap: 8px; }
+  nav a { color: var(--accent); padding: 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .card { background: var(--card); border-radius: 12px; padding: 20px; }
+  .card p { color: var(--muted); margin: 0 0 16px; }
+  button { font: inherit; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 0; background: var(--accent); color: var(--bg); }
+</style>
+</head>
+<body>
+<header><h1>Plans</h1><nav aria-label="Main"><a href="#a">Docs</a><a href="#b">Pricing</a></nav></header>
+<main>
+  <div class="grid">
+    <section class="card"><h2>Free</h2><p>One project, your own computer.</p><button type="button">Start free</button></section>
+    <section class="card"><h2>Pro</h2><p>Unlimited projects and cloud runs.</p><button type="button">Choose Pro</button></section>
+    <section class="card"><h2>Team</h2><p>Shared projects and seats.</p><button type="button">Talk to us</button></section>
+  </div>
+</main>
+</body>
+</html>
