@@ -5,6 +5,7 @@ import {
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
+  CLOUD_RUNNER,
   resolveAccount,
   CloudCli,
   type CliUsage,
@@ -34,6 +35,7 @@ import {
   type TerminalLine,
   type ThreadModel,
   destructiveCommand,
+  type ThreadRunner,
 } from "@myrel/protocol";
 import {
   emptyProgress,
@@ -59,6 +61,7 @@ import {
   checkFolder,
   checkNotice,
   checkTitle,
+  type EvaluatorChoice,
   type EvaluatorRequest,
   evaluatorBrief,
   judgedCard,
@@ -875,7 +878,7 @@ export class ThreadAgent extends Agent<Env> {
         if (!allowed.ok) throw new Error(allowed.reason);
         const origin = await project.publicOrigin();
         if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
-        const model = await projectTaskModel(this.env, projectId);
+        const model = await projectTaskModel(this.env, projectId, { check: !!this.visualCheckRole() });
         if (!model.ok) throw new Error(model.reason);
         // The model is reached through Myrel (see modelCaller), so no key, the server's or a member's
         // own, ever enters the sandbox, and an OpenAI-compatible call's cost is counted.
@@ -1518,8 +1521,10 @@ export class ThreadAgent extends Agent<Env> {
     }
     const row = this.runningTask();
     const spec = row ? (JSON.parse(row.spec) as StoredSpec) : null;
-    if (row?.backend !== "local" || !spec?.runnerId) {
-      return "Not started: visual checks run on a computer with a browser, and this thread works in the cloud, where there is none yet. Carry on without it and tell the person the look was not checked.";
+    // The evaluator works where this thread does: on its computer, or in the cloud.
+    const cloud = row?.backend === "sandbox";
+    if (!row || !spec || (!cloud && !spec.runnerId)) {
+      return "Not started: ask for a visual check while you work (in a turn), on the computer or in the cloud where the change is.";
     }
     const thread = await project.getThread(threadId);
     if (!thread) throw new Error("This thread is gone.");
@@ -1535,7 +1540,7 @@ export class ThreadAgent extends Agent<Env> {
     };
     // A computer whose runner said its browser cannot start is told now, not after an evaluator's
     // turn, and on a card, so people see the command wherever they read the thread.
-    const browser = await runnerBrowser(this.env, spec.runnerId).catch(() => undefined);
+    const browser = cloud ? undefined : await runnerBrowser(this.env, spec.runnerId!).catch(() => undefined);
     if (browser?.status === "missing-libs") {
       const missing = (browser.missing ?? []).slice(0, 5).join(", ");
       const note = tr
@@ -1545,25 +1550,42 @@ export class ThreadAgent extends Agent<Env> {
       this.setMeta("visual_check", JSON.stringify({ id, round, status: "not_checked", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch, unstarted: true } satisfies VisualCheckState));
       return `Not started: this computer lacks the system libraries the check's browser needs (${missing}); a card in this thread shows the person the command to run (${VISUAL_CHECK_DEPS_COMMAND}). Tell them in one line, carry on without the check, and ask for it again once they have run it.`;
     }
-    const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId });
-    const othersAllowed = await runnerHasFeature(this.env, spec.runnerId, "agent-clis");
     const requester = this.getMeta("requester") || null;
-    // The one asked for this check, else the project's choice, else the person's own, else another
-    // CLI than this one (see resolveEvaluator).
-    const choice = resolveEvaluator({
-      ...(input.evaluator && { once: input.evaluator }),
-      ...(await checkModels(this.env, projectId, requester)),
-      clis: workspace?.clis ?? [],
-      coderCli: spec.harness,
-      othersAllowed,
-    });
+    let choice: EvaluatorChoice;
+    let runner: ThreadRunner;
+    if (cloud) {
+      // In the cloud every CLI reaches the same model through Myrel (CHECK_MODEL when the server
+      // sets one): the CLI asked for, else this thread's, else the project's cloud CLI.
+      const asked = CloudCli.safeParse(input.evaluator?.cli);
+      const own = CloudCli.safeParse(thread.cli?.id);
+      const cli = asked.success ? asked.data : own.success ? own.data : await projectCloudCli(this.env, projectId);
+      choice = { cli, model: null, account: null, source: asked.success ? "request" : "cloud" };
+      runner = { id: CLOUD_RUNNER, by: "auto", reason: null };
+    } else {
+      const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId! });
+      const othersAllowed = await runnerHasFeature(this.env, spec.runnerId!, "agent-clis");
+      // The one asked for this check, else the project's choice, else the person's own, else another
+      // CLI than this one (see resolveEvaluator).
+      choice = resolveEvaluator({
+        ...(input.evaluator && { once: input.evaluator }),
+        ...(await checkModels(this.env, projectId, requester)),
+        clis: workspace?.clis ?? [],
+        coderCli: spec.harness,
+        othersAllowed,
+      });
+      runner = { id: spec.runnerId!, by: "auto", reason: null };
+    }
     const cli = choice.cli;
     // The branch's pull request, so the evaluator knows its CI result.
     const open = (await listPullRequests(this.env.DB, projectId, threadId).catch(() => [])).find((p) => p.branch === input.branch && p.state !== "closed");
     const pr = open ? { url: open.url, checks: open.checks } : null;
     const m = await post(card);
     const reason =
-      choice.source === "request"
+      choice.source === "cloud"
+        ? tr
+          ? "Görsel kontrol: iş gibi bulutta"
+          : "Visual check: in the cloud, like the work"
+        : choice.source === "request"
         ? tr
           ? "Görsel kontrol: bu kontrol için istenen"
           : "Visual check: asked for this check"
@@ -1583,9 +1605,11 @@ export class ThreadAgent extends Agent<Env> {
                 ? "Görsel kontrol: işi yapandan farklı bir CLI"
                 : "Visual check: another CLI than the one that made the change";
     const cliLabel = CLI_NAMES[cli as keyof typeof CLI_NAMES] ?? cli;
-    const runsAs = choice.model
-      ? `${cliLabel} (${[choice.model.model && `model ${choice.model.model}`, choice.model.effort && `effort ${choice.model.effort}`].filter(Boolean).join(", ")})`
-      : `${cliLabel} with its default model`;
+    const runsAs = cloud
+      ? `${cliLabel} in the cloud`
+      : choice.model
+        ? `${cliLabel} (${[choice.model.model && `model ${choice.model.model}`, choice.model.effort && `effort ${choice.model.effort}`].filter(Boolean).join(", ")})`
+        : `${cliLabel} with its default model`;
     const state: VisualCheckState = { id, round, status: "running", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch };
     this.setMeta("visual_check", JSON.stringify(state));
     try {
@@ -1594,7 +1618,7 @@ export class ThreadAgent extends Agent<Env> {
         title: checkTitle(thread.title, round),
         brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder, runsAs, pr }),
         cli: { id: cli, options: [cli], by: "coordinator", reason, ...(choice.account && { account: choice.account }) },
-        runner: { id: spec.runnerId, by: "auto", reason: null },
+        runner,
         model: choice.model,
         actor: requester,
         check: { checkId: id, round, coderThreadId: threadId, folder, branch: input.branch },

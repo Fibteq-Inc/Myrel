@@ -1,6 +1,8 @@
 // Writes src/skills/builtin.gen.ts from the folders in skills/: Myrel's built-in skills, bundled
 // into the Worker so they reach turns without being stored anywhere. Run it after changing a
-// built-in skill; `--check` (part of typecheck) fails when the generated file is out of date.
+// built-in skill; `--check` (part of typecheck) fails when the generated file is out of date. Either
+// way it fails when the sandbox image pins other Playwright or axe-core versions than the visual
+// check's deps.mjs, so a check in the cloud uses the same browser as one on a computer.
 //
 //   pnpm --filter @myrel/api builtin-skills
 
@@ -38,6 +40,17 @@ const body = [
   `export const BUILTIN_SKILL_FILES: Record<string, { path: string; content: string }[]> = ${JSON.stringify(Object.fromEntries(skills.map((s) => [s.name, s.files])), null, 2)};`,
   "",
 ].join("\n");
+
+const deps = skills.find((x) => x.name === "visual-check")?.files.find((f) => f.path === "scripts/deps.mjs")?.content ?? "";
+const pin = (name) => [...deps.matchAll(/export const (\w+)_VERSION = "([^"]+)"/g)].find((m) => m[1] === name)?.[2];
+const dockerfile = await readFile(fileURLToPath(new URL("../sandbox/Dockerfile", import.meta.url)), "utf8");
+const [pw, axe] = [pin("PLAYWRIGHT"), pin("AXE")];
+const wanted = [`pw-${pw}-axe-${axe}`, `"playwright@${pw}"`, `"axe-core@${axe}"`];
+const stale = wanted.filter((w) => !dockerfile.includes(w));
+if (!pw || !axe || stale.length) {
+  console.error(`sandbox/Dockerfile does not pin the visual check's versions (skills/visual-check/scripts/deps.mjs): missing ${stale.join(", ") || "the versions in deps.mjs"}.`);
+  process.exit(1);
+}
 
 if (process.argv.includes("--check")) {
   const current = await readFile(out, "utf8").catch(() => "");

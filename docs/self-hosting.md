@@ -208,6 +208,8 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `SANDBOX_INSTANCE_TYPE` | `standard-1` | Container size for the cloud thread agent: `lite`, `basic`, `standard-1` … `standard-4`. |
 | `RUNNER_MODEL` | empty | Model for the cloud thread agent (OpenCode); empty uses the agents' model. |
 | `RUNNER_IMAGES` | empty | `"true"` or `"false"` when that model does or does not read images (screenshots); empty guesses from its name. |
+| `CHECK_MODEL` | empty | Model for a visual check's evaluator in the cloud; pick one that reads screenshots. Empty uses `RUNNER_MODEL`; a model that cannot read images only runs the automatic checks and flows, and the card says the look was not judged. |
+| `CHECK_IMAGES` | empty | Like `RUNNER_IMAGES`, for `CHECK_MODEL`. |
 | `DEFAULT_TIMEZONE` | `UTC` | IANA time zone agents use for routines when nobody names one, e.g. `Europe/Istanbul`. |
 | `CONNECTOR_REGISTRY_URL` | (empty) | Where the connector catalog is copied from every hour (a Worker cron trigger). Empty means the official MCP Registry, `https://registry.modelcontextprotocol.io`; any server with the same `/v0/servers` API works. |
 | `EMAIL_FROM` | Fibteq's address | Sender for notification, verification and password-reset emails, an address on your onboarded domain, e.g. `Myrel <myrel@example.com>`. Empty turns email off. |

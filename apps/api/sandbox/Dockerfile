@@ -42,5 +42,19 @@ RUN corepack enable && corepack prepare "pnpm@10.28.0" --activate && chmod -R a+
 # one (see cloudHarness in src/sandbox/backend.ts). Each reaches its model only through Myrel's proxy.
 RUN npm install -g "@opencode/cli@2.2.5" "@anthropic-ai/claude-code@2.1.309" "@openai/codex@0.164.0" && npm cache clean --force
 
+# The visual check (Myrel's built-in visual-check skill, see skills/visual-check): Playwright's
+# headless Chromium (the shell build, all a check needs; about 650 MB with its system libraries) and
+# the skill's pinned Playwright and axe-core where its deps.mjs looks for them, so a check in the
+# cloud starts at once. The versions match deps.mjs (scripts/builtin-skills.mjs, part of
+# typecheck, checks that).
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright MYREL_CHECKS_CACHE=/opt/myrel-visual-check
+RUN mkdir -p /opt/myrel-visual-check/pw-1.64.1-axe-4.14.0 \
+  && cd /opt/myrel-visual-check/pw-1.64.1-axe-4.14.0 \
+  && echo '{"private":true,"name":"myrel-visual-check-deps"}' > package.json \
+  && npm install --no-audit --no-fund --loglevel=error --save-exact "playwright@1.64.1" "axe-core@4.14.0" \
+  && node node_modules/playwright/cli.js install --with-deps --only-shell chromium \
+  && npm cache clean --force && rm -rf /var/lib/apt/lists/* \
+  && chmod -R a+rX /opt/ms-playwright /opt/myrel-visual-check
+
 # Work arrives through exec; this only keeps the container up.
 CMD ["sleep", "infinity"]

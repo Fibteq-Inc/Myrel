@@ -61,4 +61,6 @@ The check runs Chromium on your computer. Myrel downloads it the first time. On 
 sudo npx playwright@1.64.1 install-deps chromium
 ```
 
-A round that could not start for this does not count toward the two. Tasks that run in the cloud cannot be checked yet.
+A round that could not start for this does not count toward the two.
+
+Work done in the cloud is checked in the cloud: the sandbox has the browser. Whether the evaluator there also judges the look depends on the server's model for checks; when that model cannot read images, the automatic checks and flows still run and the card says **Look not judged**.
