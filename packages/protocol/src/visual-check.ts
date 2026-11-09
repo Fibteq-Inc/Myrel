@@ -52,6 +52,11 @@ export const VisualCheckCard = z.object({
     )
     .max(20)
     .default([]),
+  /** What the work had to do, each checked on screen or by walking a flow (the logic part of the check). */
+  acceptance: z
+    .array(z.object({ criterion: z.string().max(500), met: z.boolean() }))
+    .max(30)
+    .default([]),
   /** Contact sheets (project file paths): every width and theme of a screen side by side. */
   sheets: z.array(z.string().max(400)).max(12).default([]),
   /** Screens that differ from the approved screenshots, as pictures of what changed (project file paths). */

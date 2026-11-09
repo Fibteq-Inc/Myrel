@@ -1577,6 +1577,7 @@ export class ThreadAgent extends Agent<Env> {
       folder: role.folder,
       branch: role.branch,
       blocking: [],
+      acceptance: [],
       sheets: [],
       diffs: [],
       note,
@@ -1607,7 +1608,7 @@ export class ThreadAgent extends Agent<Env> {
     const id = current?.id ?? createId("check");
     const round = done + 1;
     const folder = checkFolder(id, round);
-    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], sheets: [], diffs: [] };
+    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], acceptance: [], sheets: [], diffs: [] };
     const post = async (body: VisualCheckCard) => {
       const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatVisualCheck(body) });
       if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
@@ -1638,6 +1639,9 @@ export class ThreadAgent extends Agent<Env> {
       othersAllowed,
     });
     const cli = choice.cli;
+    // The branch's pull request, so the evaluator knows its CI result.
+    const open = (await listPullRequests(this.env.DB, projectId, threadId).catch(() => [])).find((p) => p.branch === input.branch && p.state !== "closed");
+    const pr = open ? { url: open.url, checks: open.checks } : null;
     const m = await post(card);
     const reason =
       choice.source === "request"
@@ -1669,7 +1673,7 @@ export class ThreadAgent extends Agent<Env> {
       const evaluator = await project.startVisualCheck({
         notice: checkNotice(thread.title, round),
         title: checkTitle(thread.title, round),
-        brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder, runsAs }),
+        brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder, runsAs, pr }),
         cli: { id: cli, options: [cli], by: "coordinator", reason, ...(choice.account && { account: choice.account }) },
         runner: { id: spec.runnerId, by: "auto", reason: null },
         model: choice.model,
@@ -1866,6 +1870,7 @@ export class ThreadAgent extends Agent<Env> {
         folder: state.folder,
         branch: state.branch,
         blocking: [],
+        acceptance: [],
         sheets: [],
         diffs: [],
         note: `The evaluator did not hand in a result within ${VISUAL_CHECK_TIMEOUT_SEC / 60} minutes.`,

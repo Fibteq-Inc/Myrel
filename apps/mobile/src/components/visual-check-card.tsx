@@ -4,7 +4,7 @@ import type { VisualCheckAction, VisualCheckCard as Card, VisualCheckStatus } fr
 import { useMutation } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import { type Href, useRouter } from "expo-router";
-import { CircleAlert, CircleCheck, CircleDashed, CircleX, Copy, FileImage, ScanEye } from "lucide-react-native";
+import { Check, CircleAlert, CircleCheck, CircleDashed, CircleX, Copy, FileImage, ScanEye, X } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSession } from "../lib/session";
 import { makeStyles, mono, radius, useColors } from "../theme";
@@ -107,6 +107,18 @@ export function VisualCheckCard({ card, projectId, threadId }: { card: Card; pro
         </View>
       )}
 
+      {card.acceptance.length > 0 && (
+        <View style={{ gap: 4 }}>
+          <Text style={styles.section}>{t("visualCheck.acceptance")}</Text>
+          {card.acceptance.map((a, i) => (
+            <View key={`${a.criterion}-${i}`} style={styles.criterion} accessibilityLabel={`${a.criterion}: ${t(a.met ? "visualCheck.met" : "visualCheck.notMet")}`}>
+              {a.met ? <Check size={14} color={colors.ok} /> : <X size={14} color={colors.bad} />}
+              <Text style={styles.criterionText}>{a.criterion}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       {(card.sheets.length > 0 || card.diffs.length > 0 || !!card.summary) && (
         <View style={styles.chips}>
           {!!card.summary && (
@@ -175,6 +187,8 @@ const useStyles = makeStyles((colors) =>
     actions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
     screen: { color: colors.subtle, fontSize: 12, fontFamily: mono },
     problem: { color: colors.body, fontSize: 14, lineHeight: 20 },
+    criterion: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+    criterionText: { flex: 1, color: colors.body, fontSize: 14, lineHeight: 20 },
     fileLink: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 },
     link: { color: colors.link, fontSize: 13 },
     chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
