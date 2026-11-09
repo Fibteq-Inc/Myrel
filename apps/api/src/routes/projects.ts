@@ -41,7 +41,7 @@ import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
 import { emailEnabled } from "../notifications/channels";
 import { sendInviteEmail } from "../notifications/invite";
-import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
+import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, projectWorktrees, setWorkspaceFolder } from "../runners";
 import { parseCliModels } from "../task-model";
 import { parseCheckModels } from "../checks/visual";
 
@@ -146,7 +146,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels } = input.data;
+    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels, worktrees } = input.data;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -171,6 +171,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(cliModels !== undefined && { cliModels: mergeCliModels(current.cliModels, cliModels) }),
         ...(visualCheck !== undefined && { visualCheck }),
         ...(checkModels !== undefined && { checkModels: Object.keys(checkModels).length ? JSON.stringify(checkModels) : null }),
+        ...(worktrees !== undefined && { worktrees }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -561,7 +562,9 @@ export const projectRoutes = new Hono<AppEnv>()
       return c.json({ error: "forbidden", message: "Only the person whose computer this is can open its files." }, 403);
     }
     const agent = await getAgentByName(c.env.RUNNER_AGENT, workspace.runnerId);
-    const result = await agent.readFile({ path, folders: [workspace.path, ...workspace.folders], ...(threadId && { threadId }) });
+    // Threads that work in the folder itself leave older worktrees behind, whose copy of a file is not the one meant.
+    const worktrees = await projectWorktrees(c.env, id);
+    const result = await agent.readFile({ path, folders: [workspace.path, ...workspace.folders], ...(threadId && { threadId }), ...(!worktrees && { worktrees }) });
     if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
     const { file } = result;
     const bytes = Uint8Array.from(atob(file.data), (ch) => ch.charCodeAt(0));
@@ -832,6 +835,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       cliModels: projects.cliModels,
       visualCheck: projects.visualCheck,
       checkModels: projects.checkModels,
+      worktrees: projects.worktrees,
     })
     .from(projects)
     .where(eq(projects.id, projectId));

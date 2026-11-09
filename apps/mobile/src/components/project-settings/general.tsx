@@ -130,6 +130,46 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
   );
 }
 
+/**
+ * Whether the project's threads work in their own worktree on a computer (the default) or in the
+ * project's folder itself, one at a time (ProjectSettings.worktrees), as on the web's Folders tab. A change saves.
+ */
+export function WorktreeSettings({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
+  const { api, server } = useSession();
+  const { settings, save } = useProjectSettings(projectId);
+  // The project's computer, when it is the viewer's own: an older runner there cannot work in the folder itself.
+  const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
+  if (!settings.data) return null;
+  const on = save.isPending && save.variables.worktrees !== undefined ? save.variables.worktrees : settings.data.worktrees;
+  return (
+    <Section title={t("projectFolders.copies")}>
+      <View style={styles.toggle}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.toggleTitle}>{t("projectFolders.worktrees")}</Text>
+          <Text style={styles.label}>{t(on ? "projectFolders.worktreesOn" : "projectFolders.worktreesOff")}</Text>
+        </View>
+        <Switch
+          value={on}
+          disabled={!canManage || save.isPending}
+          onValueChange={(worktrees) => save.mutate({ worktrees })}
+          accessibilityLabel={t("projectFolders.worktrees")}
+          trackColor={{ false: colors.edge, true: colors.accent }}
+          thumbColor={colors.raised}
+        />
+      </View>
+      {!on && computer && !computer.features.includes("shared-folder") && (
+        <Notice>{t("projectFolders.worktreesUpdate", { computer: computer.name, command: "npx myrel-runner@latest update" })}</Notice>
+      )}
+      {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
+    </Section>
+  );
+}
+
 /** The CLIs that may judge the project's visual checks, from its folder's computer (which only its owner's list has). */
 function ProjectEvaluator({
   projectId,

@@ -218,6 +218,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "steer-claude",
         "ssh",
         "cli-accounts",
+        "shared-folder",
         ...(updates === "service" ? (["update"] as const) : []),
         ...(statsOn() ? (["stats"] as const) : []),
       ],

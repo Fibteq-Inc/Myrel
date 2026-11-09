@@ -57,7 +57,9 @@ uses it too.
 In a git repository, each thread works in its own git worktree on its own
 branch (myrel/thr-…), so threads working at the same time never touch each
 other's files. Worktrees live in ~/.myrel-runner/worktrees; ones whose branch
-is merged and that were not used for a day are removed automatically.
+is merged and that were not used for a day are removed automatically. Off
+here, threads share the folder in every project; a project can also have its
+threads work in its folder itself (its Folders tab in Myrel), one at a time.
 --json prints one JSON status object per line instead of messages.
 
 Environment: MYREL_SERVER and MYREL_RUNNER_TOKEN override the saved pairing;

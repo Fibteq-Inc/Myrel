@@ -31,9 +31,19 @@ export function sandboxBackend(env: Env, threadId: string, principal = ""): Runn
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel; github?: TaskGithub | null; account?: string },
+  where: {
+    projectId: string;
+    threadId: string;
+    workspace: ProjectWorkspace;
+    agent?: AgentStart;
+    model?: TaskModel;
+    github?: TaskGithub | null;
+    account?: string;
+    /** The CLI works in the folder itself, one turn of the project at a time (see RunnerAgent.claimFolder). */
+    shared?: boolean;
+  },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent, model, github, account } = where;
+  const { projectId, threadId, workspace, agent, model, github, account, shared } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -52,6 +62,7 @@ export function localBackend(
         model,
         ...(github && { github }),
         ...(account && { account }),
+        ...(shared && { shared }),
       });
       if (!started.ok) throw new Error(started.reason);
     },

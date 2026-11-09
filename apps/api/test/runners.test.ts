@@ -871,6 +871,83 @@ describe("local workspace", () => {
     chat.close();
   });
 
+  it("runs one turn at a time in the folder of a project whose threads work in it, the others queued", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "shared-folder"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const settings = async () => ((await (await api(`/api/projects/${project.id}/settings`, { token: user })).json()) as { settings: ProjectSettings }).settings;
+    // Each thread in its own worktree unless the project says otherwise.
+    expect((await settings()).worktrees).toBe(true);
+    const patch = await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ worktrees: false }) });
+    expect(patch.status).toBe(200);
+    expect((await settings()).worktrees).toBe(false);
+
+    const chat = await openChat(project.id, user);
+    const labels: (string | undefined)[] = [];
+    chat.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data as string) as { type: string; label?: string };
+      if (event.type === "agent.activity") labels.push(event.label);
+    });
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const starts = () => runnerSide.frames.filter((f): f is Start => f.type === "task.start");
+    const a = await startThread(project.id, user);
+    const first = await until(() => starts()[0], "the first thread's task.start");
+    expect(first).toMatchObject({ threadId: a.thread.id, worktree: false });
+    expect(first.prompt).toContain("This project's threads work in this folder itself");
+
+    // A second thread waits while the first one's turn works in the folder.
+    const b = await startThread(project.id, user);
+    await until(() => labels.some((l) => l === 'Queued: "Testler" is working in this folder'), "the queued line");
+    await b.threadAgent.folderRetry();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(starts()).toHaveLength(1);
+
+    // The first turn ends: the second starts at once, in the folder too.
+    runnerSide.send({ type: "task.done", taskId: first.taskId, ok: true, result: "Done." });
+    const second = await until(() => starts()[1], "the second thread's task.start");
+    expect(second).toMatchObject({ threadId: b.thread.id, worktree: false });
+    runnerSide.send({ type: "task.done", taskId: second.taskId, ok: true, result: "Done." });
+    await until(async () => (await b.threadAgent.getTasks())[0]?.status === "done", "second turn done");
+
+    // Back on: threads work in their own worktrees again, side by side.
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ worktrees: true }) });
+    for (const t of [a, b]) {
+      const next = await t.projectAgent.sendMessage({ threadId: t.thread.id, authorKind: "user", authorId: t.author, body: "again" });
+      await t.threadAgent.wake({ kind: "message", messageId: next.id });
+    }
+    await until(() => starts()[3], "both turns");
+    expect(starts().slice(2).map((f) => f.worktree)).toEqual([undefined, undefined]);
+    expect(starts()[2]!.prompt).not.toContain("This project's threads work in this folder itself");
+    chat.close();
+    runnerSide.ws.close();
+  });
+
+  it("asks to update a runner that cannot work in the project's folder itself", async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ worktrees: false }) });
+    const { projectAgent, thread } = await startThread(project.id, user);
+    const bodies = async () => ((await projectAgent.getThreadContext(thread.id))?.messages ?? []).map((m) => m.body);
+    await until(async () => (await bodies()).some((b) => b.includes("cannot do yet") && b.includes("npx myrel-runner@latest update")), "the update notice");
+    expect(runnerSide.frames.some((f) => f.type === "task.start")).toBe(false);
+    runnerSide.ws.close();
+  });
+
   it("stops a thread's turn from its chat with one line, and nothing continues it on its own", { timeout: 30_000 }, async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

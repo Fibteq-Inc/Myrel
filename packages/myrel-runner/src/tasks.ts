@@ -1,19 +1,19 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
 import { type AppServerAsk, AppServerTurn, type AppServerTurnOptions, approveAccess } from "./app-server";
 import { ClaudeStreamTurn } from "./claude-stream";
 import { accountEnv } from "./accounts";
 import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
-import { childEnv, type RunnerConfig, type SessionStore } from "./config";
+import { childEnv, type RunnerConfig, type SessionStore, type StoredSession } from "./config";
 import { GitCredentials } from "./github";
 import { sandboxed, sandboxNote } from "./sandbox";
 import { downloadSkills, type RunSkills } from "./skills";
 import { installShim } from "./ssh-shim";
-import { threadWorktree, type Worktree } from "./worktrees";
+import { listWorktrees, threadWorktree, type Worktree } from "./worktrees";
 
 type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
@@ -81,9 +81,10 @@ export class TaskRunner {
     const login = accountEnv(config, task.cli, task.account);
     if ("error" in login) return fail(login.error);
 
-    // Read-only tasks change nothing, so they can share the folder.
+    // Read-only tasks change nothing, so they can share the folder. A project whose threads work in its
+    // folder itself (its setting, task.worktree false) shares it too; Myrel then runs one of its turns at a time.
     let isolated: Awaited<ReturnType<typeof threadWorktree>> = null;
-    if (config.worktrees !== false && config.access !== "read") {
+    if (config.worktrees !== false && task.worktree !== false && config.access !== "read") {
       try {
         isolated = await threadWorktree(folder, task.threadId);
       } catch (err) {
@@ -110,8 +111,9 @@ export class TaskRunner {
     }
     // Claude Code asks the person through Myrel before stepping outside those folders.
     const asks = !!task.agent && task.cli === "claude";
-    // A CLI session belongs to the folder it ran in, so a new worktree starts a new one.
-    const session = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli, task.account) : undefined;
+    // A CLI session belongs to the folder it ran in, so a new worktree (or the folder itself, after one) starts a new one.
+    const stored = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli, task.account) : undefined;
+    const session = stored && (await ranIn(stored, cwd, isolated ? null : { folder, threadId: task.threadId })) ? stored : undefined;
     // A session that saw the thread's last turn already holds the thread: it only needs what is new.
     const short = session && task.agent?.resume && session.task === task.agent.resume.after ? task.agent.resume.prompt : undefined;
     log(`▶ ${adapter.id}${task.account ? `@${task.account}` : ""} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
@@ -293,7 +295,7 @@ export class TaskRunner {
       // restarting for an update) is then continued in the same session instead of a new one.
       if (state.sessionId && state.sessionId !== savedSession && RESUMES.has(task.cli)) {
         savedSession = state.sessionId;
-        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }, task.account).catch(() => {});
+        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
       }
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
@@ -391,7 +393,7 @@ export class TaskRunner {
         }
         // The session now holds this turn too, so the next one can continue it with only what is new.
         if (state.sessionId && RESUMES.has(task.cli)) {
-          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }, task.account).catch(() => {});
+          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
         }
         const result =
           state.result ??
@@ -439,6 +441,18 @@ export async function sharedFolder(config: RunnerConfig, requested: string): Pro
     if ((await realpath(f.path).catch(() => null)) === real) return real;
   }
   return null;
+}
+
+/**
+ * Whether a stored session ran in `cwd`, so the turn can continue it. One saved before runners kept its
+ * folder: in a worktree it ran there (as before); in the folder itself (`inFolder`), it ran in the thread's
+ * worktree of the folder when there is one, since a worktree was the only reason the folders differed.
+ */
+async function ranIn(session: StoredSession, cwd: string, inFolder: { folder: string; threadId: string } | null): Promise<boolean> {
+  if (session.cwd) return session.cwd === cwd;
+  if (!inFolder) return true;
+  const { folder, threadId } = inFolder;
+  return !(await listWorktrees().catch(() => [])).some((w) => w.threadId === threadId && (folder === w.repo || folder.startsWith(w.repo + sep)));
 }
 
 const errorLine = (err: unknown) =>

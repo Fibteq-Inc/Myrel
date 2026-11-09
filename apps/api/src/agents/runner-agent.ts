@@ -45,12 +45,21 @@ export type TaskStart = {
   github?: TaskGithub;
   /** The CLI's other login to run with, only one the runner listed (so only runners with feature "cli-accounts"). */
   account?: string;
+  /**
+   * The CLI works in `folder` itself, not in a worktree of it (the project's setting, ProjectSettings.worktrees;
+   * only runners with feature "shared-folder"): one such turn of the project at a time, see claimFolder.
+   */
+  shared?: boolean;
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
+/** A thread's turn may work in the project's shared folder now, or waits for `busy`, the thread working there. */
+export type FolderClaim = { ok: true } | { ok: false; busy: string };
 export type RunnerResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
 
 /** How long the web app waits for the computer to answer a folder request. */
 const REQUEST_TIMEOUT_MS = 15_000;
+/** How long a thread's claim on a project's shared folder holds before its task starts (see claimFolder). */
+const CLAIM_MS = 2 * 60_000;
 
 type Answer = Extract<RunnerToServer, { requestId: string }>;
 type Question = Extract<ServerToRunner, { requestId: string }>;
@@ -61,6 +70,8 @@ type TaskRow = {
   project_id: string;
   thread_id: string;
   status: "running" | "done" | "failed";
+  /** 1: it works in the project's folder itself (TaskStart.shared). */
+  shared: number;
 };
 
 /**
@@ -83,6 +94,23 @@ export class RunnerAgent extends Agent<Env> {
       thread_id TEXT NOT NULL,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL
+    )`;
+    // Added with projects whose threads work in their folder itself (TaskStart.shared).
+    if (!this.sql<{ name: string }>`PRAGMA table_info(tasks)`.some((c) => c.name === "shared")) {
+      this.sql`ALTER TABLE tasks ADD COLUMN shared INTEGER NOT NULL DEFAULT 0`;
+    }
+    // A thread about to start a turn in a project's shared folder, and threads waiting for it (see claimFolder).
+    this.sql`CREATE TABLE IF NOT EXISTS folder_claims (
+      project_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, thread_id)
+    )`;
+    this.sql`CREATE TABLE IF NOT EXISTS folder_waits (
+      project_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, thread_id)
     )`;
     // When the computer connected lately, to tell a runner that keeps going down from one restart.
     this.sql`CREATE TABLE IF NOT EXISTS connects (at INTEGER NOT NULL)`;
@@ -261,6 +289,7 @@ export class RunnerAgent extends Agent<Env> {
       threadId: input.threadId,
       folder: input.folder,
       ...(input.folders?.length && { folders: input.folders }),
+      ...(input.shared && { worktree: false }),
       cli: input.cli,
       prompt: input.prompt,
       ...(input.agent && { agent: input.agent }),
@@ -275,10 +304,71 @@ export class RunnerAgent extends Agent<Env> {
       console.error("task.start does not fit the runner protocol", taskId, issue?.path.join("."), issue?.message);
       return { ok: false, reason: `Myrel could not send this task to the computer (${issue?.path.join(".") || "frame"}: ${issue?.message ?? "invalid"}).` };
     }
-    this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at)
-      VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()})`;
+    if (input.shared) {
+      // claimFolder said it may; a turn of another thread that started meanwhile still comes first.
+      if (this.sharedRunning(input.projectId, input.threadId)) {
+        return { ok: false, reason: "Another thread of this project is working in its folder on this computer right now. Write here again once it is done." };
+      }
+      this.sql`DELETE FROM folder_claims WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}`;
+    }
+    this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at, shared)
+      VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()}, ${input.shared ? 1 : 0})`;
     send(connection, frame);
     return { ok: true };
+  }
+
+  /**
+   * Whether a thread's turn may work in its project's folder on this computer now, for a project whose
+   * threads work in the folder itself (ProjectSettings.worktrees off): one turn of the project at a time,
+   * so two CLIs never change the same files or run git at once. The first to ask holds the folder for
+   * CLAIM_MS until its task starts (startTask with `shared`); while another thread's turn works there,
+   * the answer names that thread and this one is noted as waiting, to be woken when it ends (releaseFolder).
+   * A turn its thread already gave up (its watchdog, say) without the computer's word does not count.
+   * Callable over RPC by thread agents.
+   */
+  async claimFolder(projectId: string, threadId: string): Promise<FolderClaim> {
+    for (const task of this.sql<TaskRow>`SELECT * FROM tasks
+      WHERE project_id = ${projectId} AND status = 'running' AND shared = 1 AND thread_id != ${threadId}`) {
+      const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
+      if (await thread.runsTask(task.id).catch(() => true)) return this.waitForFolder(projectId, threadId, task.thread_id);
+      this.sql`UPDATE tasks SET status = 'failed' WHERE id = ${task.id} AND status = 'running'`;
+    }
+    // From here on nothing waits, so no other claim can come in between the look and the claim.
+    const now = Date.now();
+    this.sql`DELETE FROM folder_claims WHERE at < ${now - CLAIM_MS}`;
+    const [held] = this.sql<{ thread_id: string }>`SELECT thread_id FROM folder_claims
+      WHERE project_id = ${projectId} AND thread_id != ${threadId} ORDER BY at LIMIT 1`;
+    const busy = held?.thread_id ?? this.sharedRunning(projectId, threadId);
+    if (busy) return this.waitForFolder(projectId, threadId, busy);
+    this.sql`INSERT OR REPLACE INTO folder_claims (project_id, thread_id, at) VALUES (${projectId}, ${threadId}, ${now})`;
+    this.sql`DELETE FROM folder_waits WHERE project_id = ${projectId} AND thread_id = ${threadId}`;
+    return { ok: true };
+  }
+
+  /**
+   * A thread's turn in its project's shared folder ended, or never started: the folder is free for the
+   * thread that has waited longest, which is woken (the first one that still wants its turn). Callable
+   * over RPC by thread agents.
+   */
+  async releaseFolder(projectId: string, threadId: string): Promise<void> {
+    this.sql`DELETE FROM folder_claims WHERE project_id = ${projectId} AND thread_id = ${threadId}`;
+    for (const next of this.sql<{ thread_id: string }>`SELECT thread_id FROM folder_waits WHERE project_id = ${projectId} ORDER BY at`) {
+      this.sql`DELETE FROM folder_waits WHERE project_id = ${projectId} AND thread_id = ${next.thread_id}`;
+      const thread = await getAgentByName(this.env.THREAD_AGENT, next.thread_id);
+      if (await thread.folderFree().catch(() => false)) return;
+    }
+  }
+
+  /** The thread whose turn works in the project's shared folder here now, other than `threadId`, if any. */
+  private sharedRunning(projectId: string, threadId: string): string | null {
+    const [row] = this.sql<{ thread_id: string }>`SELECT thread_id FROM tasks
+      WHERE project_id = ${projectId} AND status = 'running' AND shared = 1 AND thread_id != ${threadId} LIMIT 1`;
+    return row?.thread_id ?? null;
+  }
+
+  private waitForFolder(projectId: string, threadId: string, busy: string): FolderClaim {
+    this.sql`INSERT OR IGNORE INTO folder_waits (project_id, thread_id, at) VALUES (${projectId}, ${threadId}, ${Date.now()})`;
+    return { ok: false, busy };
   }
 
   /** Hands a running task a new GitHub token before its last one expires. Callable over RPC by thread agents. */
@@ -333,7 +423,7 @@ export class RunnerAgent extends Agent<Env> {
    * One file in a project's folders (`folders`, each shared on the computer) or in the thread's
    * worktree of them, e.g. one an agent's message links to. Callable over RPC.
    */
-  async readFile(input: { path: string; folders: string[]; threadId?: string }): Promise<RunnerResult<{ file: RunnerFile }>> {
+  async readFile(input: { path: string; folders: string[]; threadId?: string; worktrees?: boolean }): Promise<RunnerResult<{ file: RunnerFile }>> {
     const answer = await this.ask({ type: "file.read", ...input }, "files");
     if (answer.ok === false) return answer;
     if (answer.type !== "file") return { ok: false, reason: "Unexpected answer from the computer." };

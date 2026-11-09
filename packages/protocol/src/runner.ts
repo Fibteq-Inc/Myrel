@@ -180,6 +180,9 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * an `ssh` on PATH that goes through Myrel's ssh_run tool instead.
  * "stats": measures how busy the computer is and sends it with each "ping" (RunnerStats).
  * "cli-accounts": lists a CLI's other logins (RunnerCli.accounts) and runs the one in task.start's `account`.
+ * "shared-folder": runs a task in the shared folder itself when task.start's `worktree` is false (a project
+ * whose threads work in its folder, ProjectSettings.worktrees), and leaves the thread's worktrees out of
+ * "file.read" when its `worktrees` is false.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -201,6 +204,7 @@ export const RunnerFeature = z.enum([
   "ssh",
   "stats",
   "cli-accounts",
+  "shared-folder",
 ]);
 
 /**
@@ -507,6 +511,11 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     /** The project's other folders the CLI may also work in; each must be shared too (feature "project-folders"). */
     folders: z.array(z.string().min(1).max(1024)).max(50).optional(),
     /**
+     * false: the CLI works in `folder` itself, never in a worktree of it (feature "shared-folder"), as the
+     * project's setting says (ProjectSettings.worktrees). Absent: the runner's own setting decides.
+     */
+    worktree: z.boolean().optional(),
+    /**
      * Present when the CLI runs as the thread's agent instead of doing one task for it: the
      * runner connects the CLI to the thread's MCP endpoint (server origin + mcpPath) with this
      * token, so it talks to people through Myrel's tools. Needs feature "agent".
@@ -551,7 +560,8 @@ export const ServerToRunner = z.discriminatedUnion("type", [
   /**
    * Read one file, e.g. one an agent's message links to (feature "files"). Answered with "file".
    * `path` is absolute or relative to `folders`, the project's folders; the runner reads it only
-   * inside those (each shared) or the thread's worktree of them.
+   * inside those (each shared) or the thread's worktree of them. `worktrees` false (feature
+   * "shared-folder"): the project's threads work in its folders, so a worktree left from before is not looked in.
    */
   z.object({
     type: z.literal("file.read"),
@@ -559,6 +569,7 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     path: z.string().min(1).max(4096),
     folders: z.array(z.string().min(1).max(1024)).min(1).max(51),
     threadId: ThreadId.optional(),
+    worktrees: z.boolean().optional(),
   }),
   /** Change some of the runner's settings (feature "settings"). Answered with "settings". */
   z.object({ type: z.literal("settings.set"), requestId: RunnerRequestId, settings: RunnerSettingsInput }),

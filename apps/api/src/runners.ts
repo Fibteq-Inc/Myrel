@@ -3,7 +3,7 @@ import { type CliId, MAX_WORKSPACE_FOLDERS, type ProjectWorkspace, type Runner, 
 import { getAgentByName } from "agents";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 
-const { runners, projectWorkspaces } = schema;
+const { runners, projectWorkspaces, projects } = schema;
 
 /** Header the API Worker sets after checking a runner's token. The RunnerAgent trusts it. */
 export const RUNNER_ID_HEADER = "x-myrel-runner-id";
@@ -236,6 +236,15 @@ export async function setWorkspaceFolder(env: Env, projectId: string, path: stri
 export async function runnerHasFeature(env: Env, runnerId: string, feature: RunnerFeature): Promise<boolean> {
   const [row] = await createDb(env.DB).select({ info: runners.info }).from(runners).where(eq(runners.id, runnerId));
   return parseInfo(row?.info ?? null)?.features.includes(feature) ?? false;
+}
+
+/**
+ * Whether the project's threads work in their own worktree on a computer (ProjectSettings.worktrees, the
+ * default), rather than in the project's folder itself.
+ */
+export async function projectWorktrees(env: Env, projectId: string): Promise<boolean> {
+  const [row] = await createDb(env.DB).select({ worktrees: projects.worktrees }).from(projects).where(eq(projects.id, projectId));
+  return row?.worktrees ?? true;
 }
 
 /** Tells every project working on this runner that its workspace changed, so open clients refresh. */

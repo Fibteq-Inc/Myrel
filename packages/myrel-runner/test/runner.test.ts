@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
@@ -393,7 +393,7 @@ sleep 30`);
     const done = runner.start({ type: "task.start", taskId, threadId, folder, cli: "claude", prompt: "x" });
     // The session is saved once the CLI names it, before the run ends.
     for (let i = 0; i < 200 && !(await new SessionStore().get(threadId, "claude")); i++) await new Promise((r) => setTimeout(r, 10));
-    expect(await new SessionStore().get(threadId, "claude")).toEqual({ id: "sess-7", task: taskId });
+    expect(await new SessionStore().get(threadId, "claude")).toEqual({ id: "sess-7", task: taskId, cwd: await realpath(folder) });
     expect(runner.stopAll()).toEqual([taskId]);
     await done;
     expect(frames.some((f) => f.type === "task.done")).toBe(false);
@@ -426,7 +426,11 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s in %s
     expect(frames.at(-1)).toMatchObject({ type: "task.done", ok: true });
     expect((frames.at(-1) as { result: string }).result).toMatch(/^fix the bug in .*proj$/);
     // The thread's next task resumes the same CLI session.
-    expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "claude")).toEqual({ id: "sess-42", task: "task_01JTEST0000000000000000000" });
+    expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "claude")).toEqual({
+      id: "sess-42",
+      task: "task_01JTEST0000000000000000000",
+      cwd: await realpath(folder),
+    });
   });
 
   /** Starts an agent turn that may continue the session of turn `after`. */

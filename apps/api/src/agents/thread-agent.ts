@@ -106,7 +106,7 @@ import {
 import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
-import { getWorkspace, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
+import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
@@ -243,7 +243,8 @@ type PendingNews = {
   /** The coordinator's notes taken, by id: unseen ones up to the first that waits for a turn of its own. */
   noteIds: number[];
 };
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean; promptSize?: PromptSize };
+/** shared: the CLI worked in the project's folder itself, which it held on its computer (RunnerAgent.claimFolder). */
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean; promptSize?: PromptSize; shared?: boolean };
 
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
 type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
@@ -326,6 +327,11 @@ const WATCHDOG_GRACE_SEC = 300;
 const SANDBOX_CHECK_SEC = 60;
 /** How often a turn waiting for the person's computer to reconnect looks again (see waitForComputer). */
 const RECONNECT_RETRY_SEC = 5;
+/**
+ * How often a turn waiting for another thread's turn in the project's shared folder looks again, should
+ * the wake when that turn ends not come (RunnerAgent.releaseFolder).
+ */
+const FOLDER_RETRY_SEC = 60;
 /** Why a cloud turn ended when its sandbox lost it. */
 const SANDBOX_LOST = "The sandbox stopped while working, most likely because a new version of Myrel was deployed. Send your message again to continue.";
 
@@ -618,6 +624,21 @@ export class ThreadAgent extends Agent<Env> {
         `myrel-runner on "${place.workspace.runnerName}" is too old to work this thread. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
       );
     }
+    // A project whose threads work in its folder itself (its setting): one turn at a time on the computer,
+    // the others wait for it. A thread checking another's work (a visual check's evaluator) keeps a worktree.
+    const shared = place.kind === "local" && !ctx.thread.parentId && !(await projectWorktrees(this.env, projectId));
+    if (place.kind === "local" && shared) {
+      if (!(await runnerHasFeature(this.env, place.workspace.runnerId, "shared-folder"))) {
+        return this.cannotWork(
+          `This project's threads work in its folder itself, which myrel-runner on "${place.workspace.runnerName}" cannot do yet. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
+        );
+      }
+      const claim = await (await getAgentByName(this.env.RUNNER_AGENT, place.workspace.runnerId)).claimFolder(projectId, threadId);
+      if (!claim.ok) {
+        const lastBody = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.body ?? "";
+        return this.waitForFolder(claim.busy, (this.getMeta("language") ?? "").startsWith("tr") || /[çğıöşüÇĞİÖŞÜ]/.test(lastBody));
+      }
+    }
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes WHERE id <= ${noteCut} ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
@@ -683,6 +704,7 @@ export class ThreadAgent extends Agent<Env> {
       threadCli: ctx.thread.cli?.id ?? null,
       threadAccount: ctx.thread.cli?.account ?? null,
       threadRunner: ctx.thread.runner?.id ?? null,
+      shared,
     });
   }
 
@@ -721,6 +743,54 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
+   * Another thread's turn works in the project's shared folder on the computer: this turn waits for it,
+   * with a line saying so, and starts when that turn ends (folderFree), or at the next look.
+   */
+  private async waitForFolder(busyThreadId: string, tr: boolean) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const title = (await project.getThread(busyThreadId))?.title;
+    const label = tr
+      ? title ? `Sırada: "${title}" bu klasörde çalışıyor` : "Sırada: başka bir thread bu klasörde çalışıyor"
+      : title ? `Queued: "${title}" is working in this folder` : "Queued: another thread is working in this folder";
+    await project.setActivity(threadId, true, label.slice(0, 200));
+    this.setMeta("dirty", "1");
+    if (this.getMeta("folder_wait") === "1") return;
+    this.setMeta("folder_wait", "1");
+    await this.schedule(FOLDER_RETRY_SEC, "folderRetry");
+  }
+
+  /** Schedule callback: another look at the shared folder this thread's turn waits for. */
+  async folderRetry(): Promise<void> {
+    if (this.getMeta("folder_wait") !== "1") return;
+    this.deleteMeta("folder_wait");
+    await this.queue("threadTurn", null);
+  }
+
+  /**
+   * The shared folder this thread's turn waited for is free (RunnerAgent.releaseFolder): true when the
+   * turn still wants it and starts now; false when it no longer waits (stopped, closed, already working).
+   * Callable over RPC by the RunnerAgent.
+   */
+  async folderFree(): Promise<boolean> {
+    if (this.getMeta("folder_wait") !== "1" || this.getMeta("dirty") !== "1" || this.getMeta("closed") === "1" || this.runningTask()) return false;
+    this.deleteMeta("folder_wait");
+    await this.queue("threadTurn", null);
+    return true;
+  }
+
+  /** Whether `taskId` is this thread's running task, for a RunnerAgent that thinks it still runs. Callable over RPC. */
+  runsTask(taskId: string): boolean {
+    return this.runningTask()?.id === taskId;
+  }
+
+  /** This turn no longer holds the project's shared folder on `runnerId`: the next waiting thread may start. */
+  private async releaseFolder(runnerId: string): Promise<void> {
+    const { projectId, threadId } = this.ids();
+    await (await getAgentByName(this.env.RUNNER_AGENT, runnerId)).releaseFolder(projectId, threadId).catch((err) => console.warn("releasing the shared folder failed", err));
+  }
+
+  /**
    * Hands this turn to the thread's agent, connected to this thread's MCP endpoint with a token that
    * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
    */
@@ -747,6 +817,8 @@ export class ThreadAgent extends Agent<Env> {
     threadCli: string | null;
     /** The login picked for the thread's CLI, if any (see resolveAccount). */
     threadAccount?: string | null;
+    /** The CLI works in the project's folder itself, which this turn holds on the computer (see waitForFolder). */
+    shared?: boolean;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -764,6 +836,7 @@ export class ThreadAgent extends Agent<Env> {
             computer: place.workspace.runnerName,
             asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
             github: !!github,
+            ...(input.shared && { shared: true }),
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     const taskId = createId("task");
@@ -854,12 +927,17 @@ export class ThreadAgent extends Agent<Env> {
         const model = resolveTaskModel(workspace.cli, input.threadModel, defaults, installed);
         // The thread's login for the CLI, else the project's; one the computer lost runs the CLI's own.
         const login = resolveAccount({ thread: input.threadAccount, project: defaults[workspace.cli]?.account }, installed);
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account });
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account, shared: input.shared });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
         const run = { ...spec, title: CLI_NAMES[workspace.cli] };
-        await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName }), backend.id, () => backend.start(run, {}), language);
+        await this.launch(
+          stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName, ...(input.shared && { shared: true }) }),
+          backend.id,
+          () => backend.start(run, {}),
+          language,
+        );
         await this.taskEvents(taskId, LOCAL_PHASES);
         if (login.missing) {
           const text = `${CLI_NAMES[workspace.cli]} has no account "${login.missing}" on ${workspace.runnerName} anymore, so this turn runs with its own login there. Pick another account for this thread from its message box if you like.`;
@@ -935,6 +1013,7 @@ export class ThreadAgent extends Agent<Env> {
       // Once recorded, launch() finished the run as failed and finishAgentTurn reported it.
       if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
         await this.revokeGithub(taskId);
+        if (place.kind === "local" && input.shared) await this.releaseFolder(place.workspace.runnerId);
         this.deleteMeta("agent_token");
         this.deleteMeta("agent_turn");
         this.deleteMeta("agent_connectors");
@@ -980,6 +1059,8 @@ export class ThreadAgent extends Agent<Env> {
     if (!row) return;
     this.sql`UPDATE tasks SET reported = 1 WHERE id = ${taskId}`;
     await this.revokeGithub(taskId);
+    const ran = JSON.parse(row.spec) as StoredSpec;
+    if (ran.shared && ran.runnerId) await this.releaseFolder(ran.runnerId);
     const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
     this.deleteMeta("agent_token");
     this.deleteMeta("agent_turn");
@@ -2836,6 +2917,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("resume_pending");
     this.deleteMeta("auto_resume");
     this.deleteMeta("reconnect_wait");
+    this.deleteMeta("folder_wait");
     const row = this.runningTask();
     if (!row) {
       const { projectId, threadId } = this.ids();

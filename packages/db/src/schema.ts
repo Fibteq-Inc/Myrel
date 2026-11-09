@@ -128,6 +128,11 @@ export const projects = sqliteTable("projects", {
   visualCheck: integer("visual_check", { mode: "boolean" }).notNull().default(false),
   /** The CLIs that may judge its visual checks, JSON CheckModels in @myrel/protocol; null: the person's own list, else any other CLI. */
   checkModels: text("check_models"),
+  /**
+   * In a git repository, each thread works on the person's computer in its own worktree and branch (on by
+   * default). Off: threads work in the project's folder itself, one turn at a time per computer.
+   */
+  worktrees: integer("worktrees", { mode: "boolean" }).notNull().default(true),
   /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
   activeCount: integer("active_count").notNull().default(0),
   /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */
