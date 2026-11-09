@@ -1,6 +1,7 @@
 import type { Extensions, LimitCheck } from "../../../apps/api/src/extensions";
 import { DEFAULT_PRICES, parsePrices, priceFor } from "../../../apps/api/src/llm/pricing";
 import { userVerified } from "../../../apps/api/src/verification";
+import { endBilling } from "./account";
 import {
   activeSandboxes,
   freeBudgetMicros,
@@ -142,6 +143,9 @@ export const billingExtensions: Extensions = {
     }
     return OK;
   },
+
+  // A deleted account is never charged again: its web subscription is cancelled first.
+  beforeDeleteAccount: endBilling,
 };
 
 /**

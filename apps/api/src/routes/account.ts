@@ -85,7 +85,9 @@ export const accountRoutes = new Hono<AppEnv>()
     return c.redirect(`/reset-password?first=1&token=${encodeURIComponent(row.value)}`);
   })
   .delete("/", async (c) => {
-    await deleteAccount(c.env, c.get("user").id);
+    const done = await deleteAccount(c.env, c.get("user").id);
+    // Kept, for example because a subscription could not be cancelled yet: the person tries again.
+    if (!done.ok) return c.json({ error: "not_deleted", message: done.reason }, 503);
     return c.body(null, 204);
   })
 
