@@ -13,6 +13,7 @@ import type { PurchasesPackage } from "react-native-purchases";
 import { EvaluatorList, mergeClis } from "../../components/evaluator-picker";
 import { Notice, Section } from "../../components/settings-section";
 import { Button, errorMessage } from "../../components/ui";
+import { appPage } from "../../lib/app-page";
 import * as purchases from "../../lib/purchases";
 import { runnersQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
@@ -281,7 +282,7 @@ function LegalLink({ label, url }: { label: string; url: string }) {
   const colors = useColors();
   const styles = useStyles();
   return (
-    <Pressable onPress={() => void WebBrowser.openBrowserAsync(url)} accessibilityRole="link" style={styles.option}>
+    <Pressable onPress={() => void WebBrowser.openBrowserAsync(appPage(url))} accessibilityRole="link" style={styles.option}>
       <Text style={styles.value}>{label}</Text>
       <ExternalLink size={16} color={colors.subtle} />
     </Pressable>

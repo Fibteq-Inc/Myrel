@@ -6,6 +6,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MyrelMark, Button, errorMessage, Input } from "../components/ui";
+import { appPage } from "../lib/app-page";
 import { useSession } from "../lib/session";
 import { makeStyles, useColors } from "../theme";
 
@@ -189,11 +190,11 @@ function SignInForm() {
               </Pressable>
               <Text style={[styles.hint, { flex: 1 }]}>
                 {t("login.accept.before")}
-                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.terms)}>
+                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(appPage(legal.terms))}>
                   {t("legal.terms")}
                 </Text>
                 {t("login.accept.and")}
-                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.privacy)}>
+                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(appPage(legal.privacy))}>
                   {t("legal.privacy")}
                 </Text>
                 {t("login.accept.after")}

@@ -19,6 +19,8 @@ export default defineConfig({
       logo: { src: "./src/assets/logo.svg" },
       favicon: "/favicon.svg",
       customCss: ["./src/styles/theme.css"],
+      // A page the mobile app opened keeps plans and purchases out of the web app it links to.
+      head: [{ tag: "script", attrs: { src: "/app-links.js" } }],
       description: "How to use Fibteq Myrel: projects, threads, your computer and GitHub.",
       social: [{ icon: "github", label: "GitHub", href: repo }],
       editLink: { baseUrl: `${repo}/edit/main/apps/docs/` },

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as WebBrowser from "expo-web-browser";
 import { Laptop } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { appPage } from "../lib/app-page";
 import { runnersQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors } from "../theme";
@@ -76,7 +77,7 @@ export function ComputerTip({ threads }: { threads: Thread[] }) {
           accessibilityRole="link"
           onPress={() => {
             see("computer");
-            void WebBrowser.openBrowserAsync(`${DOCS_URL}/computer/connect/`);
+            void WebBrowser.openBrowserAsync(appPage(`${DOCS_URL}/computer/connect/`));
           }}
           style={({ pressed }) => [styles.button, pressed && { backgroundColor: colors.hover }]}
         >

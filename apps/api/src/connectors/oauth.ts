@@ -21,7 +21,7 @@ export type OAuthState = {
   scope?: string;
   redirectUri: string;
   /** A sign-in in progress, and who started it (sign-ins from before that was kept have none). */
-  pending?: { state: string; verifier: string; by?: string; back?: SignInReturn };
+  pending?: { state: string; verifier: string; by?: string; back?: SignInReturn; app?: true };
   accessToken?: string;
   refreshToken?: string;
   /** Epoch ms; absent when the server did not say. */
@@ -30,6 +30,12 @@ export type OAuthState = {
 
 /** A sign-in started from a suggestion card in a thread: the person goes back there, and the card learns the result. */
 export type SignInReturn = { projectId: string; threadId: string; suggestionId: string; offerId: string };
+
+/**
+ * Where a sign-in goes once done: `back` to a suggestion card's thread, and `app` when the desktop
+ * or mobile app started it, so the page it ends on is marked ?app (no plans or purchases there).
+ */
+export type SignInOptions = { back?: SignInReturn; app?: boolean };
 
 /** Where the authorization server sends the person back to. */
 export const CALLBACK_PATH = "/api/connectors/oauth/callback";
@@ -63,7 +69,7 @@ export async function startAuthorization(
   origin: string,
   by: string,
   fetcher: typeof fetch = fetch,
-  back?: SignInReturn,
+  { back, app }: SignInOptions = {},
 ): Promise<string> {
   if (!row.url) throw new Error("This connector has no address.");
   const redirectUri = `${origin}${CALLBACK_PATH}`;
@@ -72,7 +78,7 @@ export async function startAuthorization(
     state = await register(row.url, redirectUri, fetcher);
   }
   const verifier = randomToken();
-  const pending = { state: `${row.id}.${randomToken()}`, verifier, by, ...(back && { back }) };
+  const pending = { state: `${row.id}.${randomToken()}`, verifier, by, ...(back && { back }), ...(app && { app: true as const }) };
   await saveOAuth(env, row.id, { ...state, pending });
   const url = new URL(state.authorizationEndpoint);
   url.searchParams.set("response_type", "code");
@@ -107,16 +113,19 @@ export async function finishAuthorization(
   env: Env,
   params: { code?: string; state?: string; error?: string },
   fetcher: typeof fetch = fetch,
-): Promise<{ ok: true; id: string; by?: string; back?: SignInReturn } | { ok: false; id: string | null; error: string; back?: SignInReturn }> {
+): Promise<
+  | { ok: true; id: string; by?: string; back?: SignInReturn; app?: true }
+  | { ok: false; id: string | null; error: string; back?: SignInReturn; app?: true }
+> {
   const id = params.state?.split(".")[0] ?? "";
   const [row] = id ? await createDb(env.DB).select().from(connectors).where(eq(connectors.id, id)) : [];
   if (!row) return { ok: false, id: null, error: "unknown_sign_in" };
   const state = await readOAuth(env, row);
   if (!state?.pending || state.pending.state !== params.state) return { ok: false, id, error: "unknown_sign_in" };
-  const { back, by } = state.pending;
+  const { back, by, app } = state.pending;
   if (params.error || !params.code) {
     await saveOAuth(env, id, { ...state, pending: undefined }, { status: "needs_auth", lastError: params.error ?? "Sign-in was cancelled." });
-    return { ok: false, id, error: params.error ?? "cancelled", back };
+    return { ok: false, id, error: params.error ?? "cancelled", back, app };
   }
   try {
     const tokens = await tokenRequest(state, {
@@ -126,11 +135,11 @@ export async function finishAuthorization(
       code_verifier: state.pending.verifier,
     }, fetcher);
     await saveOAuth(env, id, { ...withTokens(state, tokens), pending: undefined }, { status: "ok", lastError: null });
-    return { ok: true, id, by, back };
+    return { ok: true, id, by, back, app };
   } catch (err) {
     const message = errorText(err);
     await saveOAuth(env, id, { ...state, pending: undefined }, { status: "needs_auth", lastError: message });
-    return { ok: false, id, error: message, back };
+    return { ok: false, id, error: message, back, app };
   }
 }
 
