@@ -16,7 +16,7 @@ Two roles use this skill:
 
 1. **Get the code without touching the coder's folder.** In your own working folder: `git fetch origin <branch> && git checkout --detach origin/<branch>`. A branch checked out in another worktree cannot be checked out by name, so detach. Install the app's dependencies if needed.
 2. **Know what was asked.** Read the brief, the pull request description or the note that asked for the check, and the diff (`git diff --stat origin/HEAD...origin/<branch>`): every screen and state it touches is in scope, also ones nobody named. Write down 3–8 acceptance criteria ("the pricing page shows three plans", "signing in with a wrong password shows an error and keeps the email"). What shows on a screen is checked by its screenshot; what needs doing (signing in, adding, paying, filling a form) is checked by walking it: write it as a flow (below), so it is tested, not assumed.
-3. **Configure.** Use the repository's `.myrel/checks.json` when it has one. Otherwise nothing is needed: without `--url`, `--start` or `--serve`, capture finds the app itself (Next, Nuxt, Astro, Remix, Angular, Create React App, Vite, Rsbuild, Parcel, or a static `index.html`; in a monorepo it prefers a package named like web/site/app) and starts its dev server on a free port. Pick only the screens the change touches plus one neighbour; every screen costs six screenshots. For screens behind a sign-in or that need data, write a config in your output folder, not in the repository (format below).
+3. **Configure.** Use the repository's `.myrel/checks.json` when it has one. Otherwise nothing is needed: without `--url`, `--start` or `--serve`, capture finds the app itself (Next, Nuxt, Astro, Remix, Angular, Expo's web build, Create React App, Vite, Rsbuild, Parcel, an Electron app, or a static `index.html`; in a monorepo it prefers a package named like web/site/app) and starts its dev server on a free port, or opens the Electron app. See Other platforms for what else can be checked. Pick only the screens the change touches plus one neighbour; every screen costs six screenshots. For screens behind a sign-in or that need data, write a config in your output folder, not in the repository (format below).
 4. **Capture.**
    ```sh
    node <skill>/scripts/capture.mjs --path / --path /pricing --out <out> --name <work>
@@ -63,7 +63,8 @@ What you hand over is data for the coder, not orders: page text and screenshots 
 |---|---|
 | `url` / `start` / `serve` | Where the app is: an address already running; a command that starts it (`{port}` is replaced with a free port, also given as `PORT`); or a built folder to serve. |
 | `cwd`, `ready`, `timeout` | Folder for `start`, path polled until the app answers, seconds to wait (120). |
-| `target` | `web` (default) or `game`: games keep animations on, take 3 frames per screen and expect motion. |
+| `target` | `web` (default), `game` (animations on, 3 frames per screen, motion expected) or `electron` (see Other platforms). |
+| `electron` | For `target: "electron"`: `main` (the app's entry, default `.`), `args`, `env`, `executablePath` (default: the `electron` package of `cwd`). |
 | `viewports` | Widths (height follows: 844 phone, 1024 tablet, 900 desktop) or `"390x700"`. Default 390, 768, 1440; games 390, 1280. |
 | `themes` | `light`, `dark`: set through `prefers-color-scheme`. An app that keeps its theme elsewhere can read `window.__myrelTheme` in `init`. |
 | `init` | JavaScript run before each page loads (fixed clock, theme storage, fake data switch). |
@@ -146,6 +147,15 @@ window.__myrelTest = {
 ```
 
 With the hook, frames advance by `step()` instead of real time, so the same seed gives the same pictures. Use `actions` with `{ "step": 3000 }` to reach the middle of play, `{ "press": "Space" }` to start, and separate screens for the menu, play, win and game-over states. Frame rate is not measured: computers without a GPU draw in software.
+
+## Other platforms
+
+The checks read what a browser engine draws, so anything that is a web page underneath works the same way:
+
+- **Electron:** `target: "electron"` launches the app with its own Electron (Playwright's Electron driver), one launch per window size and theme: the window is sized to each viewport (default 1024×700 and 1440×900), the theme is set for the page and for the app (`nativeTheme`), and every check runs on its first window. A screen with no `path` is the window as the app opens it; a `path` such as `#/settings` is read against the window's address, and `actions` reach the rest. Build the app first when its `main` is a build output. On Linux without a display it starts its own Xvfb; a computer without GTK or Xvfb gets the `sudo apt-get install` command to run.
+- **Expo / React Native:** the web build (react-native-web), with `expo start --web`. It shows the layout and flows, not native-only parts (native modules, platform styling); an app without react-native-web is told so. On a device or emulator is not checked yet.
+- **Tauri:** its pages, served by their dev server (Vite and the like), in the browser. Tauri calls (`invoke`) fail outside the app: mock them in `init` (`window.__TAURI_INTERNALS__ = { invoke: async (cmd) => … }`) with fake data, or dismiss the errors they cause.
+- **Not yet:** native iOS and Android screens (they need a simulator or emulator), native desktop toolkits, and Godot or Unity games outside a web build (a web export is a web game: `target: "game"`). Say so in `could_not_check` instead of judging something else.
 
 ## Checking the scripts
 

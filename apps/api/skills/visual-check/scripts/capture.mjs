@@ -12,6 +12,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createReadStream, existsSync, openSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createServer as netServer } from "node:net";
@@ -24,7 +25,7 @@ import { groupFindings } from "./shared.mjs";
 import { contactSheet, diffImage, frameDiff, imageStats, pixelPage, pngSize, probeImage } from "./pixels.mjs";
 
 const HELP = `Usage: node capture.mjs [--config file] [--url base | --start "cmd {port}" | --serve dir]
-       [--path /p ...] [--viewports 390,768,1440] [--themes light,dark] [--target web|game]
+       [--path /p ...] [--viewports 390,768,1440] [--themes light,dark] [--target web|game|electron]
        [--baseline dir] [--out dir] [--name label] [--cwd dir] [--timeout seconds]`;
 
 const log = (m) => console.error(`[visual-check] ${m}`);
@@ -73,25 +74,31 @@ async function loadConfig(args) {
   if (args.themes) config.themes = args.themes.split(",");
   if (args.baseline) config.baseline = args.baseline;
   if (args.path.length) config.screens = args.path.map((p) => ({ name: screenName(p), path: p }));
+  // Nothing said where the app is: work it out from the repository (see detect.mjs).
+  if (!config.url && !config.start && !config.serve && config.target !== "electron" && !config.electron && (config.screens ?? []).every((s) => !s.url)) {
+    const found = detectApp(resolve(config.cwd ?? "."));
+    if (!found) throw new Error("Could not tell how to start the app: pass --url, --start or --serve, or write .myrel/checks.json.");
+    if (found.warning) throw new Error(`${found.detected}: ${found.warning}`);
+    Object.assign(config, found, config.target && { target: config.target });
+    log(`Detected ${found.detected}`);
+    if (found.note) log(found.note);
+  }
+  if (config.electron) config.target ??= "electron";
   config.target ??= "web";
   const game = config.target === "game";
-  config.viewports = (config.viewports ?? (game ? [390, 1280] : [390, 768, 1440])).map(viewport);
+  const desktop = config.target === "electron";
+  // A desktop app has windows, not phones: two window sizes.
+  config.viewports = (config.viewports ?? (game ? [390, 1280] : desktop ? ["1024x700", "1440x900"] : [390, 768, 1440])).map(viewport);
   config.themes ??= game ? ["dark"] : ["light", "dark"];
-  config.screens ??= [{ name: "home", path: "/" }];
+  // An Electron app opens on its own first screen; a screen's path is read against that window's address.
+  config.screens ??= [desktop ? { name: "home" } : { name: "home", path: "/" }];
+  if (desktop) config.electron = { main: ".", ...config.electron };
   config.timeout ??= 120;
   config.limit ??= 8;
   config.ignore ??= [];
   config.ignoreConsole = (config.ignoreConsole ?? []).map((r) => new RegExp(r, "i"));
   config.ignoreAxe ??= [];
   config.minTarget ??= 24;
-  // Nothing said where the app is: work it out from the repository (see detect.mjs).
-  if (!config.url && !config.start && !config.serve && config.screens.every((s) => !s.url)) {
-    const found = detectApp(resolve(config.cwd ?? "."));
-    if (!found) throw new Error("Could not tell how to start the app: pass --url, --start or --serve, or write .myrel/checks.json.");
-    if (found.warning) throw new Error(`${found.detected}: ${found.warning}`);
-    Object.assign(config, found);
-    log(`Detected ${found.detected}`);
-  }
   return { config, file };
 }
 
@@ -138,7 +145,7 @@ async function startApp(config, outDir) {
   const child = spawn(cmd, {
     shell: true,
     cwd: config.cwd ? resolve(config.cwd) : process.cwd(),
-    env: { ...process.env, PORT: String(port), BROWSER: "none", FORCE_COLOR: "0" },
+    env: { ...process.env, PORT: String(port), BROWSER: "none", FORCE_COLOR: "0", ...config.startEnv },
     stdio: ["ignore", fd, fd],
     detached: process.platform !== "win32",
   });
@@ -272,8 +279,123 @@ async function settle(page) {
   await page.waitForTimeout(250);
 }
 
+/**
+ * The page to capture at one size and theme: a fresh browser context, or for an Electron app the
+ * first window of a fresh launch, sized and themed to match.
+ */
+async function openPage({ browser, deps, display, config, screen, vp, theme }) {
+  const scheme = theme === "dark" ? "dark" : "light";
+  const reducedMotion = config.target === "game" || screen.motion ? "no-preference" : "reduce";
+  const init = config.init && `window.__myrelTheme=${JSON.stringify(theme)};\n${config.init}`;
+  if (config.target === "electron") {
+    const e = config.electron;
+    const cwd = resolve(config.cwd ?? ".");
+    let executablePath = e.executablePath;
+    if (!executablePath) {
+      try {
+        // The electron package exports the path of its binary.
+        executablePath = createRequire(join(cwd, "package.json"))("electron");
+      } catch {
+        throw new Error(`Electron is not installed in ${cwd}: install the app's dependencies, or set electron.executablePath.`);
+      }
+    }
+    // Checked first: Playwright's launch of a binary that cannot load its libraries ends the whole process.
+    const lacking = electronLibs(executablePath);
+    if (lacking) throw new Error(`Electron cannot start.${lacking}`);
+    const app = await deps.electron
+      .launch({
+        executablePath,
+        cwd,
+        // A root user (a container) cannot use Chromium's sandbox.
+        args: [...(process.getuid?.() === 0 ? ["--no-sandbox"] : []), e.main ?? ".", ...(e.args ?? [])],
+        env: { ...process.env, ...display.env, ...(e.env ?? {}) },
+        colorScheme: scheme,
+        locale: config.locale ?? "en-US",
+        timezoneId: config.timezone ?? "UTC",
+        timeout: 30_000,
+      })
+      .catch((err) => {
+        throw new Error(`Electron did not start: ${String(err?.message ?? err).split("\n")[0]}${electronLibs(executablePath)}`);
+      });
+    try {
+      const page = await app.firstWindow({ timeout: 30_000 });
+      // The app's own idea of the theme (nativeTheme) and the page's (prefers-color-scheme), and the window's size.
+      await app.evaluate(({ BrowserWindow, nativeTheme }, o) => {
+        nativeTheme.themeSource = o.scheme;
+        BrowserWindow.getAllWindows()[0]?.setContentSize(o.width, o.height);
+      }, { scheme, width: vp.width, height: vp.height });
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion });
+      if (init) {
+        await page.addInitScript({ content: init });
+        await page.reload({ waitUntil: "load" });
+      }
+      await page.waitForFunction((w) => window.innerWidth === w, vp.width, { timeout: 5000 }).catch(() => {});
+      return { page, electron: true, close: () => app.close().catch(() => {}) };
+    } catch (err) {
+      await app.close().catch(() => {});
+      throw err;
+    }
+  }
+  const context = await browser.newContext({
+    viewport: { width: vp.width, height: vp.height },
+    deviceScaleFactor: 1,
+    isMobile: vp.width < 600,
+    hasTouch: vp.width <= 1024,
+    colorScheme: scheme,
+    reducedMotion,
+    locale: config.locale ?? "en-US",
+    timezoneId: config.timezone ?? "UTC",
+    ...(config.storageState && { storageState: config.storageState }),
+  });
+  if (init) await context.addInitScript({ content: init });
+  return { page: await context.newPage(), close: () => context.close() };
+}
+
+/** On Linux, the system libraries Electron's binary cannot find, and the command that installs them. */
+function electronLibs(binary) {
+  if (process.platform !== "linux") return "";
+  try {
+    const missing = execFileSync("ldd", [binary], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      .split("\n")
+      .filter((l) => l.includes("not found"))
+      .map((l) => l.trim().split(/\s/)[0]);
+    if (!missing.length) return "";
+    return `\nThis computer lacks the system libraries Electron needs (${missing.join(", ")}). Someone with sudo runs once:\n  sudo apt-get install -y libgtk-3-0 libnss3 libasound2 libgbm1 xvfb`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * An X display for Electron on a Linux computer without one (a server, a container): a private
+ * Xvfb, stopped when the check ends. Elsewhere, or with DISPLAY set, the computer's own.
+ */
+async function ensureDisplay() {
+  if (process.platform !== "linux" || process.env.DISPLAY || process.env.WAYLAND_DISPLAY) return { env: {}, stop() {} };
+  for (let n = 90; n < 120; n++) {
+    if (existsSync(`/tmp/.X${n}-lock`)) continue;
+    const child = spawn("Xvfb", [`:${n}`, "-screen", "0", "1920x1200x24", "-nolisten", "tcp"], { stdio: "ignore" });
+    const result = await new Promise((ok) => {
+      child.once("error", (err) => ok(err.code === "ENOENT" ? "missing" : "failed"));
+      child.once("exit", () => ok("failed"));
+      setTimeout(() => ok("running"), 700);
+    });
+    if (result === "missing") {
+      throw new Error("An Electron app needs a display, and this computer has none and no Xvfb. Someone with sudo runs once:\n  sudo apt-get install -y xvfb");
+    }
+    // Another X server holds this number: try the next.
+    if (result === "failed") continue;
+    log(`Started a virtual display :${n} for Electron`);
+    // Gone with this process however it ends.
+    const stop = () => child.exitCode === null && child.kill();
+    process.once("exit", stop);
+    return { env: { DISPLAY: `:${n}` }, stop };
+  }
+  throw new Error("No free X display number for Xvfb (:90 to :119).");
+}
+
 async function shoot(ctx) {
-  const { browser, pixels, axeSource, config, base, screen, vp, theme, outDir } = ctx;
+  const { pixels, axeSource, config, base, screen, vp, theme, outDir } = ctx;
   const id = `${screen.name}@${vp.width}-${theme}`;
   const file = `${screen.name}-${vp.width}-${theme}.png`;
   const findings = [];
@@ -284,20 +406,8 @@ async function shoot(ctx) {
     findings.push({ id: kind, severity, screen: id, file, message, ...(boxes.length && { boxes }), ...(details && { details }) });
   };
   const game = config.target === "game";
-  const phone = vp.width < 600;
-  const context = await browser.newContext({
-    viewport: { width: vp.width, height: vp.height },
-    deviceScaleFactor: 1,
-    isMobile: phone,
-    hasTouch: vp.width <= 1024,
-    colorScheme: theme === "dark" ? "dark" : "light",
-    reducedMotion: game || screen.motion ? "no-preference" : "reduce",
-    locale: config.locale ?? "en-US",
-    timezoneId: config.timezone ?? "UTC",
-    ...(config.storageState && { storageState: config.storageState }),
-  });
-  if (config.init) await context.addInitScript({ content: `window.__myrelTheme=${JSON.stringify(theme)};\n${config.init}` });
-  const page = await context.newPage();
+  const opened = await openPage(ctx);
+  const { page } = opened;
   const consoleErrors = [];
   const pageErrors = [];
   const badResponses = [];
@@ -322,11 +432,15 @@ async function shoot(ctx) {
   });
 
   const shot = { id, screen: screen.name, viewport: vp, theme, file };
-  const url = screen.url ?? new URL(screen.path ?? "/", base).href;
-  shot.url = url;
+  // An Electron window is already open on the app's own page: a path is read against its address.
+  const url = opened.electron
+    ? (screen.url ?? (screen.path ? new URL(screen.path, page.url()).href : null))
+    : (screen.url ?? new URL(screen.path ?? "/", base).href);
+  shot.url = url ?? page.url();
   const started = Date.now();
   try {
-    await page.goto(url, { waitUntil: "load", timeout: 30_000 });
+    if (url) await page.goto(url, { waitUntil: "load", timeout: 30_000 });
+    else await page.waitForLoadState("load", { timeout: 30_000 });
   } catch (err) {
     add("blocking", "load-failed", `The page did not load: ${err.message.split("\n")[0]}`);
   }
@@ -494,7 +608,7 @@ async function shoot(ctx) {
     add(["document", "script", "stylesheet"].includes(r.type) ? "blocking" : "warning", "request-failed", `${r.type} request failed (${r.error}): ${r.url}`);
   }
 
-  await context.close();
+  await opened.close();
   return { shot, png, findings };
 }
 
@@ -523,9 +637,11 @@ async function main() {
   const deps = await loadDeps(log);
   let app = null;
   let browser = null;
+  let display = { env: {}, stop() {} };
   const cleanup = async () => {
     app?.stop();
     await browser?.close().catch(() => {});
+    display.stop();
   };
   process.on("SIGINT", () => cleanup().finally(() => process.exit(130)));
   process.on("SIGTERM", () => cleanup().finally(() => process.exit(143)));
@@ -536,6 +652,7 @@ async function main() {
     if (config.url && !app) await waitForHttp(config.url, 15);
     browser = await launchBrowser(deps, log);
     const pixels = await pixelPage(browser);
+    if (config.target === "electron") display = await ensureDisplay();
 
     const shots = [];
     const findings = [];
@@ -550,7 +667,7 @@ async function main() {
         const row = [];
         for (const vp of viewports) {
           log(`${screen.name} @ ${vp.width}x${vp.height} ${theme}`);
-          const r = await shoot({ browser, pixels, axeSource: deps.axeSource, config, base, screen, vp, theme, outDir });
+          const r = await shoot({ browser, deps, display, pixels, axeSource: deps.axeSource, config, base, screen, vp, theme, outDir });
           shots.push(r.shot);
           findings.push(...r.findings);
           row.push({ label: `${vp.width}px ${theme}`, png: r.png });

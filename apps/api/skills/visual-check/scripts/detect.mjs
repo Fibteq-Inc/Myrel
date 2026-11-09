@@ -12,11 +12,23 @@ const FRAMEWORKS = [
   { dep: "astro", name: "Astro", start: "npx --no-install astro dev --port {port}" },
   { dep: "@remix-run/dev", name: "Remix", start: "npx --no-install remix vite:dev --port {port} --strictPort" },
   { dep: "@angular/cli", name: "Angular", start: "npx --no-install ng serve --port {port}" },
+  // Expo's web build (react-native-web); CI keeps its dev server from asking questions.
+  {
+    dep: "expo",
+    name: "Expo (web)",
+    start: "npx --no-install expo start --web --port {port}",
+    env: { CI: "1" },
+    needs: ["react-native-web", "react-dom"],
+    missing: "This Expo app has no web build to check (react-native-web and react-dom are not its dependencies). Add them with `npx expo install react-native-web react-dom @expo/metro-runtime`, or check it on a device or emulator, which this check does not do yet.",
+  },
   { dep: "react-scripts", name: "Create React App", start: "npx --no-install react-scripts start" },
   { dep: "vite", name: "Vite", start: "npx --no-install vite --port {port} --strictPort" },
   { dep: "@rsbuild/core", name: "Rsbuild", start: "npx --no-install rsbuild dev --port {port}" },
   { dep: "parcel", name: "Parcel", start: "npx --no-install parcel index.html --port {port}" },
 ];
+
+/** An Electron app: launched with its own Electron through Playwright, not served to a browser. */
+const ELECTRON = { dep: "electron", name: "Electron" };
 
 /** Folders a monorepo usually keeps its apps in, searched in this order. */
 const PLACES = ["", "apps", "packages", "web", "frontend", "client", "site", "app", "src"];
@@ -54,21 +66,38 @@ export function detectApp(root) {
     const pkg = readJson(join(dir, "package.json"));
     if (!pkg) continue;
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    const fw = FRAMEWORKS.find((f) => deps[f.dep]);
+    // An Electron app is opened as the desktop app it is, even when a bundler builds its pages.
+    const fw = deps.electron ? ELECTRON : FRAMEWORKS.find((f) => deps[f.dep]);
     if (!fw) continue;
-    const label = `${relative(root, dir) || "."} (${fw.name})`;
+    const tauri = !!(deps["@tauri-apps/api"] || deps["@tauri-apps/cli"]);
+    const label = `${relative(root, dir) || "."} (${fw.name}${tauri ? ", a Tauri app's pages in the browser" : ""})`;
     const score = (/(^|[/-])(web|site|app|frontend|client|www)([/-]|$)/i.test(`${relative(root, dir)} ${pkg.name ?? ""}`) ? 2 : 0) + (dir === root ? 1 : 0);
-    found.push({ dir, fw, label, score, installed: existsSync(join(dir, "node_modules")) || existsSync(join(root, "node_modules")) });
+    const installed = existsSync(join(dir, "node_modules")) || existsSync(join(root, "node_modules"));
+    const lacking = (fw.needs ?? []).filter((d) => !deps[d]);
+    const main = fw === ELECTRON ? join(dir, pkg.main ?? "index.js") : null;
+    const warning = !installed
+      ? "Dependencies are not installed: run the project's install command first."
+      : lacking.length
+        ? fw.missing
+        : main && !existsSync(main)
+          ? `Its main file ${relative(root, main)} does not exist yet: build the app first (its build script), or set electron.main in .myrel/checks.json.`
+          : undefined;
+    found.push({ dir, fw, label, score, warning, tauri });
   }
   found.sort((a, b) => b.score - a.score);
   const best = found[0];
   if (best) {
+    const detected = `${best.label}${found.length > 1 ? `; also found ${found.slice(1).map((f) => f.label).join(", ")}` : ""}`;
+    const warning = best.warning && { warning: best.warning };
+    if (best.fw === ELECTRON) return { target: "electron", electron: { main: "." }, cwd: best.dir, detected, ...warning };
     return {
       start: best.fw.start,
+      ...(best.fw.env && { startEnv: best.fw.env }),
       cwd: best.dir,
       ready: "/",
-      detected: `${best.label}${found.length > 1 ? `; also found ${found.slice(1).map((f) => f.label).join(", ")}` : ""}`,
-      ...(!best.installed && { warning: "Dependencies are not installed: run the project's install command first." }),
+      detected,
+      ...(best.tauri && { note: "Tauri calls (invoke) fail in a plain browser: mock them in init (window.__TAURI_INTERNALS__) or expect errors from them." }),
+      ...warning,
     };
   }
   for (const place of STATIC) {
