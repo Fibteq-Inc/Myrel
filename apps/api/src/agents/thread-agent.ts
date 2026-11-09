@@ -70,6 +70,7 @@ import {
   type VisualCheckState,
   visualCheckTools,
 } from "../checks/loop";
+import { type ChangeRisk, changeRisk, uncheckedNote } from "../checks/risk";
 import { CheckReport, CheckVerdict, judgeCheck } from "../checks/verdict";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
@@ -99,6 +100,7 @@ import {
   deletePullBranch,
   listPullRequests,
   openPullRequest,
+  pullFiles,
   trackPullRequest,
 } from "../github/pulls";
 import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
@@ -1606,6 +1608,27 @@ export class ThreadAgent extends Agent<Env> {
     return `Round ${round} started: an evaluator thread with ${runsAs} checks branch ${input.branch}, and its card is in this thread.${skipped} Its result wakes you. The pull request does not have to wait for it: open it now if you would anyway, then end your turn.`;
   }
 
+  /**
+   * What resolve says when this thread's open or merged pull requests change what people see and
+   * no visual check ran on the work (see checks/risk.ts); null when they do not, or when the agent
+   * was already told about these pull requests and resolves anyway.
+   */
+  private async uncheckedChange(): Promise<string | null> {
+    const { projectId, threadId } = this.ids();
+    const prs = (await listPullRequests(this.env.DB, projectId, threadId)).filter((p) => p.state !== "closed").slice(0, 5);
+    if (!prs.length) return null;
+    const key = prs.map((p) => `${p.repo}#${p.number}`).sort().join(" ");
+    if (this.getMeta("check_reminded") === key) return null;
+    const read: { pr: string; risk: ChangeRisk }[] = [];
+    for (const pr of prs) {
+      const files = await pullFiles(this.env, projectId, threadId, pr.repo, pr.number);
+      if (files) read.push({ pr: `${pr.repo}#${pr.number}`, risk: changeRisk(files.files.map((f) => f.path)) });
+    }
+    const note = uncheckedNote(read);
+    if (note) this.setMeta("check_reminded", key);
+    return note;
+  }
+
   /** A person wrote in this thread after the given message. */
   private async personWroteSince(seq: number): Promise<boolean> {
     const { projectId, threadId } = this.ids();
@@ -2238,6 +2261,14 @@ export class ThreadAgent extends Agent<Env> {
           const t = turn();
           if (this.visualCheck()?.status === "running") {
             return "Not resolved: a visual check of this work is running, and its result will wake you. End your turn without resolving.";
+          }
+          // Work whose pull requests change what people see, with no check run on it: asked once.
+          if (checksOn && !this.visualCheck()) {
+            const unchecked = await this.uncheckedChange().catch((err) => {
+              console.warn("visual check reminder", err);
+              return null;
+            });
+            if (unchecked) return unchecked;
           }
           if (t.needs || t.published || t.questioned) {
             return "Not resolved: this turn asked the person something or presented work for their feedback, so the thread waits on their answer. End your turn without resolving; it shows as waiting for them.";

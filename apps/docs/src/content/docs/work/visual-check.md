@@ -20,6 +20,8 @@ Each check is an extra agent run on your computer, so it uses your CLI's usage l
 
 The pull request does not wait for the check. The thread cannot be resolved while a round is running. There are two rounds per piece of work; for a third the agent asks you first.
 
+An agent that tries to resolve a thread whose pull request changes what people see, without having asked for a check, is reminded once; when nobody sees the change it says why and resolves. For sign-in, sign-up, payment or checkout screens the reminder also asks the agent to list that flow's steps, so the evaluator walks it. When Myrel keeps working toward a goal on its own (overnight, say), a thread whose check needs fixes and that nobody accepted counts as work left, not done.
+
 ## Screens that explain themselves
 
 Agents tend to write how-to text onto the screen ("Click the + button in the top right to add a task", "Bu sayfada tüm projelerinizi görebilirsiniz") instead of designing a screen that shows the way. The check looks for such text and for help boxes that never go away, and the evaluator counts them against the work: when a screen leans on the text, it must change, and the finding says what design replaces it (an obvious main button, an empty state with one action, labels on icons, a hint at the moment it is needed). Help and docs pages, legal text and error messages that say how to recover are fine.

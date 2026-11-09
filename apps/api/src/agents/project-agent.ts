@@ -23,6 +23,7 @@ import {
   normalizeFilePath,
   isPlanMessage,
   parseVisualCheck,
+  VISUAL_CHECK_LANG,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -1384,7 +1385,11 @@ export class ProjectAgent extends Agent<Env> {
         .filter((m) => m.threadId !== thread.id && named(m))
         .slice(-MENTION_LIMIT)
         .map((m) => ({ threadId: m.threadId!, note: m.relay!.note, createdAt: m.createdAt }));
-      return { thread, last: last ?? null, mentions };
+      // Its last visual check round's card, so the coordinator knows whether the look was verified.
+      const [card] = this.sql<{ body: string }>`
+        SELECT body FROM messages WHERE thread_id = ${thread.id} AND body LIKE ${`\`\`\`${VISUAL_CHECK_LANG}%`}
+        ORDER BY seq DESC LIMIT 1`;
+      return { thread, last: last ?? null, mentions, check: card ? parseVisualCheck(card.body) : null };
     });
   }
 
