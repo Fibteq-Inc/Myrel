@@ -20,6 +20,7 @@ import type {
   CreateSkillInput,
   CreateInviteInput,
   CreateProjectInput,
+  CreateReportInput,
   Instructions,
   GiftOffer,
   GithubRepo,
@@ -277,6 +278,20 @@ export class ApiClient {
   /** Removes a member; pass your own id to leave the project. */
   async removeMember(projectId: string, userId: string) {
     await this.request(`${projectPath(projectId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  }
+
+  /** Reports a message or an artifact of the project to the server's admins. */
+  async report(projectId: string, input: CreateReportInput) {
+    await this.request(`${projectPath(projectId)}/reports`, { method: "POST", body: input });
+  }
+
+  /** Blocks a member for yourself: their messages are hidden from you in every project you share. */
+  async blockMember(projectId: string, userId: string) {
+    await this.request(`${projectPath(projectId)}/blocks/${encodeURIComponent(userId)}`, { method: "PUT", body: {} });
+  }
+
+  async unblockMember(projectId: string, userId: string) {
+    await this.request(`${projectPath(projectId)}/blocks/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
   async listProjectInvites(projectId: string) {

@@ -41,8 +41,9 @@ class MyrelRenderer extends Renderer {
     private readonly onLink: (href: string) => void,
     private readonly projectFiles: ReadonlySet<string>,
     private readonly linkStyle: TextStyle | undefined,
+    selectable: boolean,
   ) {
-    super({ selectable: true });
+    super({ selectable });
   }
 
   override code(text: string, language?: string, containerStyle?: ViewStyle, textStyle?: TextStyle): ReactNode {
@@ -221,10 +222,13 @@ export function MessageMarkdown({
   body,
   decision,
   onLink,
+  selectable = true,
 }: {
   body: string;
   decision?: DecisionHandlers;
   onLink: (href: string) => void;
+  /** Off in chat messages: a long press there opens the message's actions (with Select text) instead. */
+  selectable?: boolean;
 }) {
   const theme = useTheme();
   const markedStyles = useMarkedStyles();
@@ -234,8 +238,8 @@ export function MessageMarkdown({
   const onChoose = decision?.onChoose;
   // Rebuilding the renderer re-parses the message, so only do it when what it draws changes.
   const renderer = useMemo(
-    () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink, projectFiles, markedStyles.link),
-    [hasDecision, answer, onChoose, onLink, projectFiles, markedStyles.link],
+    () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink, projectFiles, markedStyles.link, selectable),
+    [hasDecision, answer, onChoose, onLink, projectFiles, markedStyles.link, selectable],
   );
   const elements = useMarkdown(body, { colorScheme: theme, renderer, tokenizer, styles: markedStyles });
   return <View>{elements}</View>;

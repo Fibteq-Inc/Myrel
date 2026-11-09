@@ -468,6 +468,8 @@ export const Member = z.object({
   role: ProjectRole,
   /** Shown to project owners and admins only. */
   email: z.string().optional(),
+  /** The person asking blocked this member: the apps hide their messages. Missing from older servers. */
+  blocked: z.boolean().optional(),
 });
 export type Member = z.infer<typeof Member>;
 

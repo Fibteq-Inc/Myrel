@@ -39,6 +39,7 @@ import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRep
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
+import { blockedIds } from "../moderation";
 import { emailEnabled } from "../notifications/channels";
 import { sendInviteEmail } from "../notifications/invite";
 import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, projectWorktrees, setWorkspaceFolder } from "../runners";
@@ -185,13 +186,20 @@ export const projectRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     const project = await findMembership(c.env, id, c.get("user").id);
     if (!project) return c.json({ error: "not_found" }, 404);
-    const rows = await createDb(c.env.DB)
-      .select({ id: user.id, name: user.name, email: user.email, role: projectMembers.role })
-      .from(projectMembers)
-      .innerJoin(user, eq(user.id, projectMembers.userId))
-      .where(eq(projectMembers.projectId, id))
-      .orderBy(projectMembers.createdAt);
-    const members: Member[] = rows.map(({ email, ...m }) => (canManage(project.role) ? { ...m, email } : m));
+    const [rows, blocked] = await Promise.all([
+      createDb(c.env.DB)
+        .select({ id: user.id, name: user.name, email: user.email, role: projectMembers.role })
+        .from(projectMembers)
+        .innerJoin(user, eq(user.id, projectMembers.userId))
+        .where(eq(projectMembers.projectId, id))
+        .orderBy(projectMembers.createdAt),
+      blockedIds(c.env, c.get("user").id),
+    ]);
+    const members: Member[] = rows.map(({ email, ...m }) => ({
+      ...m,
+      ...(canManage(project.role) && { email }),
+      ...(blocked.has(m.id) && { blocked: true }),
+    }));
     return c.json({ members });
   })
   .patch("/:id/members/:userId", async (c) => {

@@ -23,6 +23,7 @@ import { usageRoutes } from "./routes/usage";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
+import { blockRoutes, reportRoutes } from "./routes/moderation";
 import { accountConnectorRoutes, connectorCatalogRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
 import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
@@ -163,6 +164,8 @@ const app = new Hono<AppEnv>()
   .route("/projects/:id/connectors", projectConnectorRoutes)
   .route("/projects/:id/skills", projectSkillRoutes)
   .route("/projects/:id/ssh", sshRoutes)
+  .route("/projects/:id/reports", reportRoutes)
+  .route("/projects/:id/blocks", blockRoutes)
   .route("/projects/:id/personal", personalInProjectRoutes)
   .route("/projects/:id/threads/:threadId/connector-suggestions", connectorSuggestionRoutes)
   .route("/projects/:id/threads/:threadId/visual-checks", visualCheckRoutes)

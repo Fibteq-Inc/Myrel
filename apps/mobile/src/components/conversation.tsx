@@ -1,21 +1,26 @@
 import { useT } from "@myrel/i18n/react";
-import { type Artifact, decisionPicks, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
+import { type Artifact, decisionPicks, hiddenByBlock, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
+import * as Haptics from "expo-haptics";
 import { ArrowDown } from "lucide-react-native";
 import { type ComponentRef, memo, type ReactNode, type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decisionAnswers } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
+import { useBlocked } from "../lib/use-names";
 import { makeStyles, useColors } from "../theme";
 import { ChatSkeleton } from "./chat-skeleton";
 import { PlanCard, PlanUpdateNote } from "./checklist";
 import { Composer, type ComposerHandle } from "./composer";
 import { MessageView, type Names, Thinking } from "./message";
+import { MessageSheet } from "./moderation";
 
 /**
  * A chat column: messages newest at the bottom, a thinking line while the
  * agent works, and the composer. Decision cards in agent messages are
- * answered with one tap, which sends the option as the person's reply.
+ * answered with one tap, which sends the option as the person's reply. A long
+ * press on a message opens its sheet (copy, select, report, block); messages of
+ * members the person blocked show as a hidden line.
  */
 export function Conversation({
   messages,
@@ -108,6 +113,12 @@ export function Conversation({
   const edit = useLatest((messageId: string, body: string) => onEdit?.(messageId, body));
   const interrupt = useLatest(() => onInterrupt?.run() ?? Promise.resolve());
   const openPlan = useLatest(() => onOpenPlan?.());
+  const blocked = useBlocked(projectId);
+  const [acting, setActing] = useState<Message | null>(null);
+  const openActions = useCallback((message: Message) => {
+    void Haptics.selectionAsync().catch(() => {});
+    setActing(message);
+  }, []);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const loadEarlier = () => {
     if (loading || !hasEarlier || loadingEarlier || !onLoadEarlier) return;
@@ -200,6 +211,8 @@ export function Conversation({
                   onEdit={onEdit && edit}
                   onInterrupt={item.id === onInterrupt?.messageId ? interrupt : undefined}
                   onChoose={send}
+                  hidden={hiddenByBlock(item, blocked)}
+                  onActions={openActions}
                 >
                   {footer}
                 </Row>
@@ -221,6 +234,7 @@ export function Conversation({
           <Composer placeholder={placeholder} onSend={onSend} tools={tools} handle={composer} threadId={threadId} />
         </View>
       </KeyboardAvoidingView>
+      {acting && <MessageSheet key={acting.id} message={acting} me={me} names={names} onClose={() => setActing(null)} />}
     </View>
   );
 }
@@ -245,6 +259,8 @@ const Row = memo(function Row({
   onEdit,
   onInterrupt,
   onChoose,
+  hidden,
+  onActions,
   children,
 }: {
   message: Message;
@@ -253,6 +269,9 @@ const Row = memo(function Row({
   reactions?: Reaction[];
   artifacts: Record<string, Artifact>;
   answer?: string;
+  /** Its author is someone the person blocked. */
+  hidden: boolean;
+  onActions: (message: Message) => void;
   /** Set on the plan card the agent is moving along: the thread's fresh checklist. */
   planText?: string;
   planLive?: boolean;
@@ -281,6 +300,8 @@ const Row = memo(function Row({
       onEdit={onEdit && ((body) => onEdit(message.id, body))}
       onInterrupt={onInterrupt}
       decision={agent ? { answer, onChoose } : undefined}
+      hidden={hidden}
+      onLongPress={() => onActions(message)}
     >
       {children}
     </MessageView>

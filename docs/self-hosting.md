@@ -216,6 +216,7 @@ and never committed. Locally, both go in `apps/api/.dev.vars` (copy
 | `GITHUB_APP_ID` | Fibteq's GitHub App | Your GitHub App's id: replace the value in `wrangler.jsonc`, or remove it there and set it as a secret. Its URL name is read from GitHub (`GITHUB_APP_SLUG` is only a fallback for when GitHub cannot be reached). GitHub stays off until all GitHub secrets are set too. |
 | `VAPID_PUBLIC_KEY` | Fibteq's key | Web Push public key; must pair with your `VAPID_PRIVATE_KEY`, so replace it with your own. |
 | `VAPID_SUBJECT` | Fibteq's contact | Contact for push services, e.g. `mailto:you@example.com`. Falls back to `BETTER_AUTH_URL`. |
+| `REPORTS_EMAIL` | Fibteq's contact | Comma-separated addresses that get each content report, besides the server's admins (see [Reporting and blocking](#reporting-and-blocking)). Empty sends them to the admins only. |
 | `TERMS_URL`, `PRIVACY_URL` | empty | Links to your terms and privacy policy. When both are set, signing up requires accepting them. |
 | `LEGAL_VERSION` | `"1"` | Recorded with each acceptance, e.g. the documents' effective date. Change it when the documents change. |
 
@@ -444,6 +445,22 @@ person turns email and browser push on or off under the bell.
   Changing the pair later invalidates every browser subscription.
 - **Mobile push** for the Expo app needs nothing on the server: the app
   registers its Expo push token through `POST /api/notifications/subscriptions`.
+
+### Reporting and blocking
+
+Everyone in a project can report a message (a person's or an agent's) or an
+artifact: on the web from the message's "…" menu or the artifact's flag button,
+in the mobile app by long-pressing the message. Each report is kept in the
+`content_reports` table with a copy of what was reported, and emailed to the
+server's admins and to `REPORTS_EMAIL` (email must be set up, see
+[Notifications](#notifications)). A person reporting the same thing twice files
+one report; one person files at most 20 an hour.
+
+A member can block another member from the project's Members settings or the
+message menu. The apps then hide the blocked person's messages from them in
+every project they share (`user_blocks`), and the project's other owners and
+admins get an email so they can remove the member. App stores ask that reports
+are acted on within 24 hours; the hosted service's terms promise that.
 
 ### Web UI on another origin
 
