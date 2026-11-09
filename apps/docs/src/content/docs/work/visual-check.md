@@ -22,6 +22,10 @@ The pull request does not wait for the check. The thread cannot be resolved whil
 
 An agent that tries to resolve a thread whose pull request changes what people see, without having asked for a check, is reminded once; when nobody sees the change it says why and resolves. For sign-in, sign-up, payment or checkout screens the reminder also asks the agent to list that flow's steps, so the evaluator walks it. When Myrel keeps working toward a goal on its own (overnight, say), a thread whose check needs fixes and that nobody accepted counts as work left, not done.
 
+## What the work must do
+
+The agent writes down what the work must do before it starts (its acceptance criteria) and hands them to the check. The evaluator checks each one: what shows on a screen by its screenshot, and what needs doing (signing in, adding something, paying, a form) by walking it in the browser step by step. The card lists every criterion as met or not met, and a check with one not met does not pass. The evaluator also reads the change itself, so screens the agent did not name are not missed.
+
 ## Screens that explain themselves
 
 Agents tend to write how-to text onto the screen ("Click the + button in the top right to add a task", "Bu sayfada tüm projelerinizi görebilirsiniz") instead of designing a screen that shows the way. The check looks for such text and for help boxes that never go away, and the evaluator counts them against the work: when a screen leans on the text, it must change, and the finding says what design replaces it (an obvious main button, an empty state with one action, labels on icons, a hint at the moment it is needed). Help and docs pages, legal text and error messages that say how to recover are fine.

@@ -3,7 +3,7 @@ import { useT } from "@myrel/i18n/react";
 import type { VisualCheckAction, VisualCheckCard as Card, VisualCheckStatus } from "@myrel/protocol";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { CircleAlert, CircleCheck, CircleDashed, CircleX, Image, LoaderCircle, ScanEye } from "lucide-react";
+import { Check, CircleAlert, CircleCheck, CircleDashed, CircleX, Image, LoaderCircle, ScanEye, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { cn, errorMessage } from "../../lib/ui";
@@ -161,6 +161,27 @@ export function VisualCheckCard({ card, projectId, threadId }: { card: Card; pro
               </li>
             ))}
           </ol>
+        </div>
+      )}
+
+      {card.acceptance.length > 0 && (
+        <div className="mt-3">
+          <h4 className="text-xs font-semibold text-fg">{t("visualCheck.acceptance")}</h4>
+          <ul className="mt-1.5 space-y-1">
+            {card.acceptance.map((a, i) => (
+              <li key={`${a.criterion}-${i}`} className="flex gap-2 text-body">
+                {a.met ? (
+                  <Check size={14} className="mt-0.5 flex-none text-ok" aria-hidden="true" />
+                ) : (
+                  <X size={14} className="mt-0.5 flex-none text-bad" aria-hidden="true" />
+                )}
+                <span className="min-w-0">
+                  {a.criterion}
+                  <span className="sr-only"> ({t(a.met ? "visualCheck.met" : "visualCheck.notMet")})</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

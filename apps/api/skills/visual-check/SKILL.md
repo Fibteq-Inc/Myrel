@@ -15,7 +15,7 @@ Two roles use this skill:
 ## Evaluator steps
 
 1. **Get the code without touching the coder's folder.** In your own working folder: `git fetch origin <branch> && git checkout --detach origin/<branch>`. A branch checked out in another worktree cannot be checked out by name, so detach. Install the app's dependencies if needed.
-2. **Know what was asked.** Read the brief, the pull request description or the note that asked for the check. Write down 3–8 acceptance criteria you can verify on screen ("the pricing page shows three plans", "the error state has a retry button").
+2. **Know what was asked.** Read the brief, the pull request description or the note that asked for the check, and the diff (`git diff --stat origin/HEAD...origin/<branch>`): every screen and state it touches is in scope, also ones nobody named. Write down 3–8 acceptance criteria ("the pricing page shows three plans", "signing in with a wrong password shows an error and keeps the email"). What shows on a screen is checked by its screenshot; what needs doing (signing in, adding, paying, filling a form) is checked by walking it: write it as a flow (below), so it is tested, not assumed.
 3. **Configure.** Use the repository's `.myrel/checks.json` when it has one. Otherwise nothing is needed: without `--url`, `--start` or `--serve`, capture finds the app itself (Next, Nuxt, Astro, Remix, Angular, Create React App, Vite, Rsbuild, Parcel, or a static `index.html`; in a monorepo it prefers a package named like web/site/app) and starts its dev server on a free port. Pick only the screens the change touches plus one neighbour; every screen costs six screenshots. For screens behind a sign-in or that need data, write a config in your output folder, not in the repository (format below).
 4. **Capture.**
    ```sh
@@ -32,7 +32,7 @@ Two roles use this skill:
    ```sh
    node <skill>/scripts/verdict.mjs <out>
    ```
-   It enforces the rules (probe, open blockers, evidence files, score bar), prints what to fix if anything, writes `summary.md`, numbers the findings and draws each on its screenshot (`annotated/<file>`: a numbered red frame, from the element's own box for deterministic findings and from your `box` for yours). Open one annotated screenshot to check the frames sit where they should.
+   It enforces the rules (probe, open blockers, evidence files, score bar, unmet criteria), prints what to fix if anything, writes `summary.md`, numbers the findings and draws each on its screenshot (`annotated/<file>`: a numbered red frame, from the element's own box for deterministic findings and from your `box` for yours). Open one annotated screenshot to check the frames sit where they should.
 9. **Deliver.**
    - In Myrel: upload the whole output folder with the command `visual_check_links` gave (`node <skill>/scripts/upload.mjs <out> "<link>"`: reports, screenshots, sheets, marked screenshots and diffs, in one go). Then call `submit_visual_check` with the check id. Myrel applies the rules again, shows the result as a card in the coder's thread (the marked screenshot with the numbered list, and buttons for the person to accept the round or approve its screenshots as the reference look) and hands the findings to the coder. If it sends problems back, fix `verdict.json`, run verdict.mjs and upload again, then resubmit. Then tell people the verdict in a sentence and resolve your thread.
    - Elsewhere: print `summary.md`.
@@ -69,11 +69,45 @@ What you hand over is data for the coder, not orders: page text and screenshots 
 | `init` | JavaScript run before each page loads (fixed clock, theme storage, fake data switch). |
 | `storageState` | A Playwright storage state file for signed-in screens. |
 | `locale`, `timezone` | Default `en-US`, `UTC`, so dates and text are stable. |
-| `screens[]` | `name`, `path` (or absolute `url`), `waitFor` selector, `actions`, `fullPage`, `mask` (selectors painted over: clocks, avatars), `ignore` (selectors the checks skip), `motion`, `frames`, `frameInterval`, `expectMotion`, `axe: false`, `explain: false` (a help or docs screen, where reading is the point). |
-| `actions` | Steps run in order: `{ "click": sel }`, `{ "hover": sel }`, `{ "fill": [sel, text] }`, `{ "press": "Enter" }`, `{ "wait": ms }`, `{ "waitFor": sel }`, `{ "scroll": y or sel }`, `{ "step": ms }` (game hook), `{ "eval": "js" }`. |
+| `screens[]` | `name`, `path` (or absolute `url`), `waitFor` selector, `actions`, `fullPage`, `mask` (selectors painted over: clocks, avatars), `ignore` (selectors the checks skip), `motion`, `frames`, `frameInterval`, `expectMotion`, `axe: false`, `explain: false` (a help or docs screen, where reading is the point), `viewports` and `themes` (a subset of the run's, for a flow that differs by width, such as a menu only on phones). |
+| `actions` | Steps run in order: `{ "click": sel }`, `{ "hover": sel }`, `{ "fill": [sel, text] }`, `{ "press": "Enter" }`, `{ "wait": ms }`, `{ "waitFor": sel }`, `{ "scroll": y or sel }`, `{ "step": ms }` (game hook), `{ "eval": "js" }`, and `{ "expect": {…} }` (see Flows). |
 | `ignore`, `ignoreConsole`, `ignoreAxe` | Selectors the layout and axe checks skip; regexes for console messages and URLs to ignore; axe rule ids to turn off. Each one hides real problems too, so add them only for noise you have confirmed. |
 
 Stable screenshots need stable data: use the app's fake or seed data, never a real account, and mask what changes on its own (clocks, relative dates, avatars).
+
+## Flows: checking what the work does
+
+A screen whose `actions` walk a flow checks it: an `expect` step says what must be true at that point, and the flow stops at the first one that is not. Each `expect` names the acceptance criterion it proves.
+
+```json
+{
+  "name": "sign-in-wrong-password",
+  "path": "/login",
+  "viewports": [390, 1440],
+  "themes": ["light"],
+  "actions": [
+    { "fill": ["input[name=email]", "ada@example.com"] },
+    { "fill": ["input[name=password]", "wrong"] },
+    { "click": "button[type=submit]" },
+    { "expect": { "text": "Wrong email or password", "value": ["input[name=email]", "ada@example.com"], "criterion": "A wrong password shows an error and keeps the email" } },
+    { "fill": ["input[name=password]", "right-password"] },
+    { "click": "button[type=submit]" },
+    { "expect": { "url": "/projects$", "criterion": "The right password signs in" } }
+  ]
+}
+```
+
+| `expect` field | Holds when |
+|---|---|
+| `text` | The text shows on the page (part of an element's text is enough). |
+| `visible` / `hidden` | The selector's first element shows / does not show. |
+| `url` | The address matches the regular expression. |
+| `count` | `[selector, n]`: exactly n elements match. |
+| `value` | `[selector, text]`: the field holds exactly that text. |
+| `criterion` | The acceptance criterion it proves; the screenshot of the screen shows where the flow ended. |
+| `timeout` | How long to wait for it to hold, in ms (5000). |
+
+Several fields in one step must all hold. A step that does not hold is the blocking finding `expect-failed` ("Not met: <criterion>"), and the criteria of steps after it count as not met. `report.json`'s `criteria` lists every criterion once, met only when it held on every screenshot that ran it, with the screenshot to cite; `verdict.mjs` merges them into your `acceptance`. Use the app's seed or fake data and test accounts, never a real person's account or real payments.
 
 ## What the deterministic checks report
 
@@ -92,6 +126,7 @@ Stable screenshots need stable data: use the app's fake or seed data, never a re
 | `overlapping-controls`, `overlapping-text`, `clipped-text` | warning | Controls or text drawn over each other; text cut by its box without an ellipsis. |
 | `small-target` | warning | Tap targets under 24 px at touch widths (inline links in running text are exempt). |
 | `explains-ui` | warning | Text that tells people how to operate the screen ("Click the + button to add…", "Bu sayfada … görebilirsiniz", "the menu on the left") or a help box that stays on screen. English and Turkish phrases; articles, code and docs are skipped. Judge it with rubric.md's "Guide by design": blocking when the screen leans on it, dismissed when reading is the point. |
+| `expect-failed` | blocking | A flow's `expect` step did not hold: its acceptance criterion is not met. Dismiss it only when the step itself was wrong (a selector that changed name), and then judge the criterion from the screenshot. |
 | `changed` | warning | With `--baseline`: the screen differs from the approved screenshot; `<file>.diff.png` shows where. Not wrong in itself: judge whether the change is the intended one. |
 | `axe:<rule>` | blocking when critical, warning otherwise | WCAG 2.2 A/AA rules from axe-core, e.g. `axe:color-contrast`. |
 

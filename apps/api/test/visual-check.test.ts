@@ -84,6 +84,40 @@ describe("visual check rules", () => {
     const low = await judgeCheck(await report(), verdict({ scores: { functionality: 8, craft: 4, design: 7, originality: 6 } }), has());
     expect(low.ok).toBe(false);
   });
+
+  it("fails on an acceptance criterion not met, from the evaluator or a flow's expect step", async () => {
+    // The evaluator's own: with its screenshot it becomes a finding, without one it is sent back.
+    const said = await judgeCheck(await report(), verdict({ acceptance: [{ criterion: "Three plans show", met: false, evidence: "pricing-1440-light.png" }] }), has("pricing-1440-light.png"));
+    expect(said.ok && said.check.verdict).toBe("fail");
+    expect(said.ok && said.check.blocking).toEqual([{ id: "acceptance", screen: "pricing-1440-light.png", evidence: "pricing-1440-light.png", problem: "Not met: Three plans show" }]);
+    const bare = await judgeCheck(await report(), verdict({ acceptance: [{ criterion: "Three plans show", met: false }] }), has());
+    expect(!bare.ok && bare.problems[0]).toContain("give it the screenshot");
+
+    // A flow's: its expect step failed and nobody dismissed it, so "met" does not stand.
+    const step = { id: "expect-failed", severity: "blocking" as const, screen: "sign-in@1440-light", file: "sign-in-1440-light.png", message: "Not met: A wrong password shows an error (expected …)" };
+    const flows = {
+      ...(await report([step])),
+      criteria: [
+        { criterion: "A wrong password shows an error", screen: "sign-in", met: false, evidence: "sign-in-1440-light.png", failedOn: ["sign-in@1440-light"] },
+        { criterion: "The right password signs in", screen: "sign-in", met: true, evidence: "sign-in-1440-light.png", failedOn: [] },
+      ],
+    };
+    const r = await judgeCheck(flows, verdict({ acceptance: [{ criterion: "A wrong password shows an error", met: true }] }), has("sign-in-1440-light.png"));
+    expect(r.ok && r.check.verdict).toBe("fail");
+    expect(r.ok && r.check.acceptance).toEqual([
+      { criterion: "A wrong password shows an error", met: false, evidence: "sign-in-1440-light.png" },
+      { criterion: "The right password signs in", met: true, evidence: "sign-in-1440-light.png" },
+    ]);
+    // The failed step is its finding already; no second one for the same criterion.
+    expect(r.ok && r.check.blocking.map((b) => b.id)).toEqual(["expect-failed"]);
+    // Dismissed as a wrong step: the evaluator's word on the criterion stands.
+    const dismissed = await judgeCheck(
+      flows,
+      verdict({ dismissed: [{ id: "expect-failed", screen: "sign-in", reason: "The selector changed name; the error shows" }], acceptance: [{ criterion: "A wrong password shows an error", met: true }] }),
+      has(),
+    );
+    expect(dismissed.ok && dismissed.check.verdict).toBe("pass");
+  });
 });
 
 describe("evaluator CLI", () => {
@@ -241,6 +275,7 @@ describe("visual check loop", () => {
                   image: "annotated/pricing-390-dark.png",
                 },
               ],
+              acceptance: [{ criterion: "Three plans side by side", met: true, evidence: "pricing.sheet.png" }],
             }),
           ),
           by,
@@ -305,6 +340,7 @@ describe("visual check loop", () => {
     expect(card!.sheets).toEqual([`${card!.folder}/pricing.sheet.png`]);
     // The finding is numbered and shown framed on its screenshot; what changed against the approved look is listed.
     expect(card!.blocking[0]).toMatchObject({ n: 1, image: `${card!.folder}/annotated/pricing-390-dark.png` });
+    expect(card!.acceptance).toEqual([{ criterion: "Three plans side by side", met: true }]);
     expect(card!.diffs).toEqual([`${card!.folder}/pricing-390-dark.diff.png`]);
     // The evaluator shows under the thread it checks, with the verdict on its row.
     const evaluatorThread = await projectAgent.getThread(evaluator[0]!.threadId);

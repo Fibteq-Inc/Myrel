@@ -7,7 +7,8 @@
 // - a model that did not read the vision probe back cannot pass anything (it may not see images);
 // - a deterministic blocking finding is either passed on or dismissed with a reason, never dropped;
 // - every blocking finding points at a screenshot that exists;
-// - functionality and craft below the bar cannot pass.
+// - functionality and craft below the bar cannot pass;
+// - an acceptance criterion that is not met (by the evaluator's word or by a flow's expect step) cannot pass.
 // Exit code 1 means verdict.json has to be fixed; the problems are printed.
 
 import { createHash } from "node:crypto";
@@ -61,6 +62,39 @@ for (const g of groupFindings(open)) {
 if (open.length && verdict.verdict !== "fail") {
   notes.push(`Verdict set to fail: ${open.length} deterministic blocking finding(s) were neither fixed nor dismissed.`);
   verdict.verdict = "fail";
+}
+
+// 2b. Acceptance criteria. What the flows' expect steps found is merged in (an evaluator who
+// dismissed the failed step as wrong judges the criterion itself); one not met cannot pass, and
+// stands as a blocking finding with its screenshot.
+verdict.acceptance ??= [];
+for (const c of report.criteria ?? []) {
+  const stepFailed = !c.met && open.some((f) => f.id === "expect-failed" && f.screen.split("@")[0] === c.screen);
+  const mine = verdict.acceptance.find((a) => a.criterion === c.criterion);
+  if (!mine) {
+    if (c.met || stepFailed) verdict.acceptance.push({ criterion: c.criterion, met: c.met, evidence: c.evidence, source: "steps" });
+  } else if (mine.met && stepFailed) {
+    mine.met = false;
+    mine.evidence ??= c.evidence;
+    notes.push(`"${c.criterion}" set to not met: its expect step failed on ${c.failedOn.join(", ")} and was not dismissed.`);
+  }
+}
+for (const a of verdict.acceptance) {
+  if (!a.criterion?.trim() || typeof a.met !== "boolean") problems.push(`Each acceptance entry needs "criterion" and "met" (true or false): ${JSON.stringify(a).slice(0, 120)}.`);
+}
+const unmet = verdict.acceptance.filter((a) => a.met === false);
+if (unmet.length && verdict.verdict !== "fail") {
+  notes.push(`Verdict set to fail: ${unmet.length} acceptance criteria not met.`);
+  verdict.verdict = "fail";
+}
+for (const a of unmet) {
+  if (verdict.blocking.some((b) => b.criterion === a.criterion || (b.problem ?? "").includes(a.criterion))) continue;
+  if (!a.evidence) {
+    problems.push(`Acceptance criterion "${a.criterion}" is not met: give it the screenshot that shows it ("evidence").`);
+    continue;
+  }
+  const shot = report.shots.find((x) => x.file === a.evidence);
+  verdict.blocking.push({ id: "acceptance", screen: shot?.id ?? a.evidence.replace(/\.png$/, ""), evidence: a.evidence, problem: `Not met: ${a.criterion}`, criterion: a.criterion, source: "acceptance" });
 }
 
 // 3. Evidence.
