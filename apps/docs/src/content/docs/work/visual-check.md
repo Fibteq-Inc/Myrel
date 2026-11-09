@@ -53,6 +53,15 @@ By default Myrel picks another CLI than the one that made the change, and one th
 
 For one check only, say so in the thread ("check it with Codex"). A CLI, model or effort the computer does not have is skipped, and the agent is told.
 
+## What it can check
+
+- Websites and web apps (Next, Nuxt, Astro, Remix, Angular, Vite and others, or plain HTML), found in the repository without any setup.
+- Web games, with their animation checked frame by frame.
+- Electron apps, opened as the desktop app at two window sizes.
+- Expo and React Native apps through their web build, and Tauri apps through their pages in the browser.
+
+Native iOS and Android screens and games outside a web build are not checked yet; the card says so.
+
 ## Needs a browser
 
 The check runs Chromium on your computer. Myrel downloads it the first time. On Linux it may also need system libraries; then **Devices** and the check's card show the command to run once (it asks for your password):

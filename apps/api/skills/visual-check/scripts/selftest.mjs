@@ -3,12 +3,14 @@
 // verdict rules. Run it after changing the scripts, or to see whether this computer's browser works:
 //
 //   node selftest.mjs
+//   node selftest.mjs --electron   (also an Electron app; installs Electron into a temporary folder)
 
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { detectApp } from "./detect.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixtures = fileURLToPath(new URL("../fixtures/", import.meta.url));
@@ -180,6 +182,51 @@ const second = JSON.parse(await readFile(join(again, "report.json"), "utf8"));
 check(!second.findings.some((f) => f.id === "changed" && f.screen === "clean@390-light"), "an unchanged screen matches its approved screenshot");
 check(second.findings.some((f) => f.id === "changed" && f.screen === "game@390-light"), "a changed screen is reported against its approved screenshot");
 check(second.summary.baseline?.changed === 1 && second.summary.baseline?.unchanged === 1, "the report counts changed and unchanged screens");
+
+// Working out the app from the repository: Expo's web build, Electron, a Tauri app's pages.
+const repo = async (name, pkg, files = {}) => {
+  const dir = join(out, "repos", name);
+  await mkdir(join(dir, "node_modules"), { recursive: true });
+  await writeFile(join(dir, "package.json"), JSON.stringify(pkg));
+  for (const [f, text] of Object.entries(files)) await writeFile(join(dir, f), text);
+  return detectApp(dir);
+};
+const expoBare = await repo("expo-bare", { dependencies: { expo: "58", "react-native": "0.83" } });
+check(/no web build/.test(expoBare?.warning ?? ""), "an Expo app without react-native-web is told it has no web build");
+const expoWeb = await repo("expo-web", { dependencies: { expo: "58", "react-native-web": "0.21", "react-dom": "19" } });
+check(/expo start --web/.test(expoWeb?.start ?? "") && expoWeb?.startEnv?.CI === "1" && !expoWeb.warning, "an Expo app with a web build starts with expo start --web");
+const unbuilt = await repo("electron-unbuilt", { main: "dist/main.js", devDependencies: { electron: "45", vite: "7" } });
+check(unbuilt?.target === "electron" && /build the app first/.test(unbuilt.warning ?? ""), "an Electron app whose main file is not built yet is told to build");
+const built = await repo("electron-built", { main: "main.js", devDependencies: { electron: "45" } }, { "main.js": "" });
+check(built?.target === "electron" && !built.warning, "an Electron app is opened as a desktop app");
+const tauri = await repo("tauri", { dependencies: { "@tauri-apps/api": "2" }, devDependencies: { vite: "7" } });
+check(/vite/.test(tauri?.start ?? "") && /__TAURI_INTERNALS__/.test(tauri?.note ?? ""), "a Tauri app's pages run in the browser, with a note on mocking Tauri calls");
+
+// An Electron app, opened through Playwright, sized and themed like a page.
+if (process.argv.includes("--electron")) {
+  const ELECTRON_VERSION = "45.2.3";
+  const app = join(out, "electron-app");
+  await mkdir(app, { recursive: true });
+  await writeFile(join(app, "package.json"), JSON.stringify({ private: true }));
+  execFileSync("npm", ["install", "--no-audit", "--no-fund", "--loglevel=error", `electron@${ELECTRON_VERSION}`], { cwd: app, stdio: ["ignore", "inherit", "inherit"] });
+  const desk = join(out, "desktop");
+  await writeFile(join(out, "desktop.json"), JSON.stringify({ target: "electron", cwd: app, electron: { main: join(fixtures, "electron", "main.js") }, screens: [{ name: "plans" }] }));
+  let ran = true;
+  try {
+    execFileSync(process.execPath, [join(here, "capture.mjs"), "--config", join(out, "desktop.json"), "--out", desk], { stdio: ["ignore", "inherit", "inherit"] });
+  } catch {
+    ran = false;
+  }
+  check(ran, "an Electron app is captured (on Linux it needs GTK and Xvfb; the message above says what to install)");
+  if (ran) {
+    const d = JSON.parse(await readFile(join(desk, "report.json"), "utf8"));
+    check(d.shots.length === 4 && d.shots.every((x) => x.url.startsWith("file:")), "4 screenshots of the app's own window (2 window sizes × 2 themes)");
+    check(d.summary.blocking === 0, `the Electron app has no blocking findings (${d.findings.map((f) => f.id).join(", ") || "none"})`);
+    const dark = d.shots.find((x) => x.id === "plans@1024-dark");
+    const light = d.shots.find((x) => x.id === "plans@1024-light");
+    check(dark && light && dark.stats.dominantColor !== light.stats.dominantColor, "the dark theme reaches the app");
+  }
+}
 
 console.log(failed ? `\n${failed} check(s) failed. Output in ${out}` : `\nAll checks passed. Output in ${out}`);
 process.exit(failed ? 1 : 0);
