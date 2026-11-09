@@ -26,7 +26,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.36.0";
+export const RUNNER_VERSION = "0.37.0";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -218,6 +218,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "steer-claude",
         "ssh",
         "cli-accounts",
+        "shared-folder",
         ...(updates === "service" ? (["update"] as const) : []),
         ...(statsOn() ? (["stats"] as const) : []),
       ],

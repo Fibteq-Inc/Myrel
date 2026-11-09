@@ -31,7 +31,7 @@ Choose **Settings** on your computer's card.
 | **Automatic** (recommended) | Claude Code runs the steps it judges safe (tests, builds, commits) and asks about the rest; other CLIs work as with Edit files |
 | **Full access** | Runs any command without asking. Only for projects you trust; Myrel asks you to confirm |
 
-**Each thread in its own copy**: in a git repository, each thread works in its own worktree and branch.
+**Each thread in its own copy**: in a git repository, each thread works in its own worktree and branch. Off here, it is off for every project on this computer; to work in the folder itself in one project only, see [Working in the folder itself](/computer/folders/#working-in-the-folder-itself).
 
 **Update by itself**: installs a new myrel-runner when no task is running.
 

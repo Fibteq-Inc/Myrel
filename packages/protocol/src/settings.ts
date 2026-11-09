@@ -98,6 +98,14 @@ export const ProjectSettings = z.object({
   visualCheck: z.boolean().default(false),
   /** The CLIs that may judge its visual checks; empty: the person's own list, else any other CLI. Older servers never send it. */
   checkModels: CheckModels.default({}),
+  /**
+   * In a git repository, each thread works on the person's computer in its own worktree and branch, so
+   * threads never change each other's files. Off: threads work in the project's folder itself (a game whose
+   * editor watches it, say), one turn at a time on each computer while the others wait. On by default; a
+   * computer whose own setting is off (RunnerSettings.worktrees) shares the folder either way, without the
+   * queue. Cloud turns always work in their own sandbox. Older servers never send it.
+   */
+  worktrees: z.boolean().default(true),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -115,6 +123,7 @@ export const UpdateProjectSettingsInput = z.object({
   visualCheck: z.boolean().optional(),
   /** Replaces the whole list. */
   checkModels: CheckModels.optional(),
+  worktrees: z.boolean().optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 

@@ -103,8 +103,11 @@ export function unshareFolder(config: RunnerConfig, folder: string): boolean {
 }
 
 /** Per-thread CLI session ids, so later tasks in a thread continue the same conversation. */
-/** A thread's CLI session, and the task whose turn it last ran. */
-export type StoredSession = { id: string; task?: string };
+/**
+ * A thread's CLI session, the task whose turn it last ran, and the folder it ran in (`cwd`; none in
+ * sessions saved before runners kept it): a session is continued only in the folder it ran in.
+ */
+export type StoredSession = { id: string; task?: string; cwd?: string };
 
 export class SessionStore {
   constructor(private readonly path = join(runnerHome(), "sessions.json")) {}

@@ -102,7 +102,12 @@ export function ProjectSettings({
         </>
       )}
       {tab === "model" && <ModelForm projectId={projectId} canManage={canManage} />}
-      {tab === "folders" && <ProjectFolders project={project} canManage={canManage} />}
+      {tab === "folders" && (
+        <>
+          <ProjectFolders project={project} canManage={canManage} />
+          <WorktreeSetting projectId={projectId} canManage={canManage} />
+        </>
+      )}
       {tab === "github" && <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />}
       {tab === "connectors" && (
         <>
@@ -230,6 +235,36 @@ function useSaveSettings(projectId: string) {
       ]);
     },
   });
+}
+
+/**
+ * Whether the project's threads work in their own worktree on a computer (the default) or in the
+ * project's folder itself, one at a time (ProjectSettings.worktrees). A change saves.
+ */
+function WorktreeSetting({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
+  const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
+  const save = useSaveSettings(projectId);
+  // The project's computer, when it is the viewer's own: an older runner there cannot work in the folder itself.
+  const { data: workspace } = useQuery(workspaceQuery(projectId));
+  const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
+  const on = save.isPending && save.variables.worktrees !== undefined ? save.variables.worktrees : settings.worktrees;
+  return (
+    <Section title={t("projectFolders.copies")}>
+      <label className="flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium">{t("projectFolders.worktrees")}</span>
+          <span className="mt-0.5 block text-xs text-subtle">{t(on ? "projectFolders.worktreesOn" : "projectFolders.worktreesOff")}</span>
+        </span>
+        <Switch checked={on} disabled={!canManage || save.isPending} onChange={(e) => save.mutate({ worktrees: e.target.checked })} />
+      </label>
+      {!on && computer && !computer.features.includes("shared-folder") && (
+        <Notice>{t("projectFolders.worktreesUpdate", { computer: computer.name, command: "npx myrel-runner@latest update" })}</Notice>
+      )}
+      {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
+    </Section>
+  );
 }
 
 function GeneralForm({ projectId, canManage }: { projectId: string; canManage: boolean }) {
