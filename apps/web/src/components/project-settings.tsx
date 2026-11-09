@@ -17,13 +17,14 @@ import {
 } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, SquareTerminal, Users, X } from "lucide-react";
+import { Ban, BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, SquareTerminal, Users, X } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
 import { PersonalInProject } from "./personal-in-project";
 import { Skills } from "./skills";
 import { SshHosts } from "./ssh-hosts";
 import { GithubRepos } from "./github-repos";
+import { useBlockMember } from "./moderation";
 import { ProjectFolders } from "./project-folders";
 import { ProjectLookPicker } from "./project-badge";
 import { ConfirmDialog } from "./ui/confirm-dialog";
@@ -590,6 +591,8 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
     },
   });
 
+  const blocking = useBlockMember(projectId);
+
   const canManage = myRole === "owner" || myRole === "admin";
   const roleOptions: ProjectRole[] = myRole === "owner" ? ["owner", "admin", "member"] : ["admin", "member"];
 
@@ -611,6 +614,7 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium">{m.name}</span>
                   {isMe && <Badge>{t("members.you")}</Badge>}
+                  {m.blocked && <Badge>{t("block.blocked")}</Badge>}
                 </div>
                 {m.email && <div className="truncate text-xs text-subtle">{m.email}</div>}
               </div>
@@ -631,6 +635,28 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
               ) : (
                 <span className="text-[13px] text-subtle">{t(roleKey(m.role))}</span>
               )}
+              {!isMe &&
+                (m.blocked ? (
+                  <GhostButton
+                    type="button"
+                    className="h-8 px-2.5 text-[13px]"
+                    aria-label={t("block.unblockLabel", { name: m.name })}
+                    disabled={blocking.pending}
+                    onClick={() => blocking.unblock(m.id)}
+                  >
+                    {t("block.unblock")}
+                  </GhostButton>
+                ) : (
+                  <IconButton
+                    type="button"
+                    aria-label={t("block.action", { name: m.name })}
+                    title={t("block.action", { name: m.name })}
+                    disabled={blocking.pending}
+                    onClick={() => void blocking.block(m.id, m.name)}
+                  >
+                    <Ban size={15} />
+                  </IconButton>
+                ))}
               {(editable || isMe) && (
                 <IconButton
                   type="button"
@@ -653,7 +679,9 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
           );
         })}
       </List>
-      {(setRole.error || remove.error) && <Notice>{errorMessage(setRole.error ?? remove.error, t)}</Notice>}
+      {(setRole.error || remove.error || blocking.error) && (
+        <Notice>{errorMessage(setRole.error ?? remove.error ?? blocking.error, t)}</Notice>
+      )}
     </Section>
   );
 }

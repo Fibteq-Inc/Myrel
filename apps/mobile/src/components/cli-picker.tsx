@@ -5,7 +5,7 @@ import { cliMark, sessionUse, threadLogin as loginOf } from "@myrel/client";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { memoryLow, usageSummary } from "../lib/format";
 import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
@@ -546,15 +546,18 @@ export function Sheet({ open, onClose, title, hint, children }: { open: boolean;
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} accessibilityLabel={t("common.close")} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-        <Text style={styles.sheetTitle}>{title}</Text>
-        <View style={{ gap: 2 }}>{children}</View>
-        {hint && <Text style={styles.hint}>{hint}</Text>}
-        <Pressable accessibilityRole="button" onPress={onClose} style={({ pressed }) => [styles.done, pressed && { opacity: 0.8 }]}>
-          <Text style={styles.doneText}>{t("common.close")}</Text>
-        </Pressable>
-      </View>
+      {/* Lifts the sheet over the keyboard when an option holds a text field (a report's note). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <Pressable style={styles.backdrop} accessibilityLabel={t("common.close")} onPress={onClose} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <View style={{ gap: 2, flexShrink: 1 }}>{children}</View>
+          {hint && <Text style={styles.hint}>{hint}</Text>}
+          <Pressable accessibilityRole="button" onPress={onClose} style={({ pressed }) => [styles.done, pressed && { opacity: 0.8 }]}>
+            <Text style={styles.doneText}>{t("common.close")}</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -621,6 +624,8 @@ const useStyles = makeStyles((colors) =>
     chipText: { color: colors.muted, fontSize: 13, flexShrink: 1 },
     backdrop: { flex: 1, backgroundColor: colors.scrim },
     sheet: {
+      // Gives way (to a scrolling option list) rather than running off the top of a short screen.
+      flexShrink: 1,
       gap: 12,
       borderTopLeftRadius: radius.lg,
       borderTopRightRadius: radius.lg,

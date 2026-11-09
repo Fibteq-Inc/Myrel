@@ -1,10 +1,11 @@
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { ExternalLink } from "lucide-react-native";
+import { ExternalLink, Flag } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
+import { ReportSheet } from "../../components/moderation";
 import { errorMessage, Spinner } from "../../components/ui";
 import { useSession } from "../../lib/session";
 import { useColors } from "../../theme";
@@ -15,7 +16,8 @@ type Params = { url?: string; projectId?: string; artifactId?: string; version?:
  * Artifacts (and pages sent here as myrel://artifact?url=…) open in a WebView.
  * An artifact is framed through a signed, short-lived link on its own origin,
  * so the page never shares the app's session; the button hands the page to
- * the OS (the browser, or the app that owns the address).
+ * the OS (the browser, or the app that owns the address). An artifact can be reported from the
+ * flag in the header.
  */
 export default function ArtifactScreen() {
   const colors = useColors();
@@ -35,6 +37,7 @@ export default function ArtifactScreen() {
   const [title, setTitle] = useState("");
   const [shownUrl, setShownUrl] = useState("");
   const [loading, setLoading] = useState(true);
+  const [reporting, setReporting] = useState(false);
 
   let body;
   if (isArtifact && view.isPending) body = <Centered><Spinner size={22} color={colors.subtle} /></Centered>;
@@ -75,19 +78,35 @@ export default function ArtifactScreen() {
           // Any page can be opened here (a link in a message, or myrel://artifact?url=…), and any page
           // can name itself "Myrel": outside an artifact the header shows the address it is really on.
           title: isArtifact ? title || t("artifacts.artifact") : valid ? hostOf(shownUrl || url) : "",
-          headerRight: () =>
-            valid ? (
-              <Pressable
-                accessibilityLabel={t("mobile.openInBrowser")}
-                hitSlop={10}
-                onPress={() => void Linking.openURL(url).catch(() => {})}
-              >
-                <ExternalLink size={20} color={colors.fg} />
-              </Pressable>
-            ) : null,
+          headerRight: () => (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 20 }}>
+              {isArtifact && (
+                <Pressable accessibilityRole="button" accessibilityLabel={t("report.artifact")} hitSlop={10} onPress={() => setReporting(true)}>
+                  <Flag size={19} color={colors.fg} />
+                </Pressable>
+              )}
+              {valid && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("mobile.openInBrowser")}
+                  hitSlop={10}
+                  onPress={() => void Linking.openURL(url).catch(() => {})}
+                >
+                  <ExternalLink size={20} color={colors.fg} />
+                </Pressable>
+              )}
+            </View>
+          ),
         }}
       />
       {body}
+      {reporting && isArtifact && (
+        <ReportSheet
+          projectId={params.projectId!}
+          target={{ kind: "artifact", artifactId: params.artifactId!, ...(version && { version }) }}
+          onClose={() => setReporting(false)}
+        />
+      )}
     </View>
   );
 }

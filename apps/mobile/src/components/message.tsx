@@ -9,7 +9,7 @@ import {
   type Reaction,
 } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
-import { CircleAlert, FileImage, Paperclip, Pencil } from "lucide-react-native";
+import { Ban, CircleAlert, FileImage, Paperclip, Pencil } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { fileKind } from "../lib/files";
@@ -38,7 +38,8 @@ const MARKDOWN_LINE = 24;
  * the assistant's as open text beside its mark, system notes as a banner.
  * `children` renders under the message (e.g. its thread card). `onEdit` lets the
  * person change their own message's text. `onInterrupt`: the message waits for the
- * thread's working agent, which this stops so it goes now.
+ * thread's working agent, which this stops so it goes now. `onLongPress` opens the message's
+ * actions (copy, select text, report, block); `hidden`: its author is blocked, so no text shows.
  */
 export function MessageView({
   message,
@@ -47,10 +48,12 @@ export function MessageView({
   reactions,
   decision,
   artifacts,
+  hidden,
   onLink,
   onOpenArtifact,
   onEdit,
   onInterrupt,
+  onLongPress,
   children,
 }: {
   message: Message;
@@ -59,15 +62,29 @@ export function MessageView({
   reactions?: Reaction[];
   decision?: DecisionHandlers;
   artifacts: Record<string, Artifact>;
+  hidden?: boolean;
   onLink: (href: string) => void;
   onOpenArtifact: (artifactId: string, version?: number) => void;
   onEdit?: (body: string) => void;
   onInterrupt?: () => Promise<unknown>;
+  onLongPress?: () => void;
   children?: ReactNode;
 }) {
   const t = useT();
   const colors = useColors();
   const styles = useStyles();
+
+  if (hidden) {
+    return (
+      <View style={styles.user}>
+        <View style={styles.hidden}>
+          <Ban size={12} color={colors.subtle} />
+          <Text style={styles.time}>{t("block.hidden")}</Text>
+        </View>
+        {children && <View style={{ width: "100%" }}>{children}</View>}
+      </View>
+    );
+  }
 
   if (message.authorKind === "system") {
     return (
@@ -94,9 +111,17 @@ export function MessageView({
             <VisualCheckCard card={check} projectId={message.projectId} threadId={message.threadId!} />
           ) : (
             !!message.body && (
-              <FoldIfLong body={message.body}>
-                <MessageMarkdown body={message.body} decision={decision} onLink={onLink} />
-              </FoldIfLong>
+              <Pressable
+                onLongPress={onLongPress}
+                disabled={!onLongPress}
+                accessibilityHint={onLongPress ? t("message.more") : undefined}
+                accessibilityActions={onLongPress ? [{ name: "longpress", label: t("message.more") }] : undefined}
+                onAccessibilityAction={onLongPress}
+              >
+                <FoldIfLong body={message.body}>
+                  <MessageMarkdown body={message.body} decision={decision} onLink={onLink} selectable={!onLongPress} />
+                </FoldIfLong>
+              </Pressable>
             )
           )}
           {message.relay && <RelayNote relay={message.relay} onLink={onLink} />}
@@ -122,6 +147,7 @@ export function MessageView({
       reactions={reactions}
       onEdit={message.authorId === me ? onEdit : undefined}
       onInterrupt={onInterrupt}
+      onLongPress={onLongPress}
     >
       {children}
     </PersonMessage>
@@ -130,7 +156,8 @@ export function MessageView({
 
 /**
  * A person's bubble. A tap on their own shows its actions (Edit), which turns it into a text box in
- * place; long presses stay free for selecting text. An edited one says so, with the time a tap away.
+ * place; a long press opens the message's sheet (copy, select text, and report or block on someone
+ * else's). An edited one says so, with the time a tap away.
  */
 function PersonMessage({
   message,
@@ -138,6 +165,7 @@ function PersonMessage({
   reactions,
   onEdit,
   onInterrupt,
+  onLongPress,
   children,
 }: {
   message: Message;
@@ -145,6 +173,7 @@ function PersonMessage({
   reactions?: Reaction[];
   onEdit?: (body: string) => void;
   onInterrupt?: () => Promise<unknown>;
+  onLongPress?: () => void;
   children?: ReactNode;
 }) {
   const t = useT();
@@ -196,13 +225,16 @@ function PersonMessage({
       ) : (
         !!message.body && (
           <Pressable
-            disabled={!actions}
-            onPress={() => setOpen((o) => !o)}
-            accessibilityHint={mine ? t("message.edit") : undefined}
+            disabled={!actions && !onLongPress}
+            onPress={actions ? () => setOpen((o) => !o) : undefined}
+            onLongPress={onLongPress}
+            accessibilityHint={mine ? t("message.edit") : onLongPress ? t("message.more") : undefined}
+            accessibilityActions={onLongPress ? [{ name: "longpress", label: t("message.more") }] : undefined}
+            onAccessibilityAction={onLongPress}
             style={styles.bubble}
           >
             <Collapsible height={BUBBLE_LINE * 10} long={surelyLong(message.body, 10)}>
-              <Text selectable style={styles.bubbleText}>
+              <Text selectable={!onLongPress} style={styles.bubbleText}>
                 {message.body}
               </Text>
             </Collapsible>
@@ -335,6 +367,17 @@ const useStyles = makeStyles((colors) =>
     meta: { flexDirection: "row", alignItems: "center", gap: 8 },
     time: { color: colors.subtle, fontSize: 12 },
     user: { alignItems: "flex-end", gap: 6 },
+    hidden: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: colors.edge,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
     author: { color: colors.subtle, fontSize: 12 },
     bubble: {
       maxWidth: "85%",

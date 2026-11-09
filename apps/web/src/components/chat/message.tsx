@@ -1,9 +1,11 @@
 import { useT } from "@myrel/i18n/react";
-import { DECISION_LANG, type Message, parseConnectorSuggestion, parseVisualCheck, type Reaction } from "@myrel/protocol";
-import { AlarmClock, CircleAlert, LoaderCircle, Pencil } from "lucide-react";
+import { DECISION_LANG, hiddenByBlock, type Message, parseConnectorSuggestion, parseVisualCheck, type Reaction } from "@myrel/protocol";
+import { AlarmClock, Ban, CircleAlert, LoaderCircle, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { useProjectContext } from "../../lib/project-context";
 import { CliMark, useRelativeTime } from "../../lib/ui";
 import { AttachmentList } from "../files";
+import { MessageMenu } from "../moderation";
 import { Collapsible } from "./collapsible";
 import { ConnectorSuggestionCard } from "./connector-suggestion-card";
 import { CopyButton, type DecisionHandlers, MessageMarkdown } from "./markdown";
@@ -21,7 +23,8 @@ export type Names = Record<string, string>;
  * system notes as a banner.
  * `children` renders under the message (e.g. its thread card). `onEdit` lets the
  * person change their own message's text. `onInterrupt`: the message waits for the
- * thread's working agent, which this stops so it goes now.
+ * thread's working agent, which this stops so it goes now. Every message someone else wrote has a "…"
+ * menu to report it (and block its author); a blocked member's message shows only as a hidden line.
  */
 export function MessageView({
   message,
@@ -44,6 +47,8 @@ export function MessageView({
 }) {
   const t = useT();
   const relativeTime = useRelativeTime();
+  const { blocked } = useProjectContext();
+  if (hiddenByBlock(message, blocked)) return <HiddenMessage>{children}</HiddenMessage>;
   if (message.authorKind === "system" && message.authorId === "routine") {
     const [title, ...rest] = message.body.replace(/^⏰\s*/, "").split("\n");
     return (
@@ -93,6 +98,7 @@ export function MessageView({
             <Reactions reactions={reactions} />
             <span className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
               {!suggestion && <CopyButton text={message.body} label={t("message.copy")} />}
+              <MessageMenu message={message} me={me} />
               <time dateTime={message.createdAt} className="px-1 text-xs text-subtle">
                 {relativeTime(message.createdAt)}
               </time>
@@ -106,6 +112,7 @@ export function MessageView({
   return (
     <PersonMessage
       message={message}
+      me={me}
       names={names}
       reactions={reactions}
       onEdit={message.authorId === me ? onEdit : undefined}
@@ -119,6 +126,7 @@ export function MessageView({
 /** A person's bubble. Their own can be edited in place; an edited one says so, with the time on hover. */
 function PersonMessage({
   message,
+  me,
   names,
   reactions,
   onEdit,
@@ -126,6 +134,7 @@ function PersonMessage({
   children,
 }: {
   message: Message;
+  me: string;
   names: Names;
   reactions?: Reaction[];
   onEdit?: (body: string) => void;
@@ -146,7 +155,15 @@ function PersonMessage({
 
   return (
     <div className="group flex flex-col items-end gap-1.5">
-      {!mine && <span className="text-xs text-subtle">{names[message.authorId] ?? t("common.member")}</span>}
+      {!mine && (
+        <div className="flex items-center gap-1 text-xs text-subtle">
+          {/* Next to the name, so the menu takes no line of its own. */}
+          <span className="opacity-0 transition-opacity focus-within:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100">
+            <MessageMenu message={message} me={me} className="-my-1 size-6" />
+          </span>
+          <span>{names[message.authorId] ?? t("common.member")}</span>
+        </div>
+      )}
       {draft !== null ? (
         <div className="flex w-full max-w-[85%] flex-col gap-2 rounded-2xl rounded-br-md border border-accent-line bg-bubble px-3.5 py-2.5">
           <textarea
@@ -211,6 +228,20 @@ function PersonMessage({
       )}
       {onInterrupt && draft === null && <QueuedLine onInterrupt={onInterrupt} />}
       <Reactions reactions={reactions} />
+      {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
+    </div>
+  );
+}
+
+/** In place of a blocked member's message: no text, but what hangs under it (a thread's card) stays. */
+function HiddenMessage({ children }: { children?: ReactNode }) {
+  const t = useT();
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex items-center gap-1.5 rounded-xl border border-dashed border-edge px-3 py-1.5 text-xs text-subtle">
+        <Ban size={12} aria-hidden="true" />
+        {t("block.hidden")}
+      </div>
       {children && <div className="w-full max-w-[85%] self-end">{children}</div>}
     </div>
   );

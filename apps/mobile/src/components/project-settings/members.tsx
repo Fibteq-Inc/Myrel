@@ -2,18 +2,19 @@ import { useT } from "@myrel/i18n/react";
 import { InviteRole, type Member, type ProjectRole } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, useRouter } from "expo-router";
-import { ChevronDown, X } from "lucide-react-native";
+import { Ban, ChevronDown, X } from "lucide-react-native";
 import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSession } from "../../lib/session";
 import { makeStyles, radius, useColors } from "../../theme";
 import { Option, Sheet } from "../cli-picker";
+import { useBlockMember } from "../moderation";
 import { Notice, Section } from "../settings-section";
 import { Button, errorMessage, Input } from "../ui";
 
 const roleKey = (role: ProjectRole) => `role.${role}` as const;
 
-/** The project's members: roles, removing and leaving, as on the web. */
+/** The project's members: roles, removing and leaving, and blocking someone for yourself, as on the web. */
 export function MemberSettings({ projectId, myRole }: { projectId: string; myRole: ProjectRole }) {
   const t = useT();
   const colors = useColors();
@@ -39,6 +40,8 @@ export function MemberSettings({ projectId, myRole }: { projectId: string; myRol
     },
   });
 
+  const blocking = useBlockMember(projectId);
+
   const canManage = myRole === "owner" || myRole === "admin";
   const roleOptions: ProjectRole[] = myRole === "owner" ? ["owner", "admin", "member"] : ["admin", "member"];
 
@@ -62,6 +65,7 @@ export function MemberSettings({ projectId, myRole }: { projectId: string; myRol
               <Text style={styles.name} numberOfLines={1}>
                 {m.name}
                 {isMe && <Text style={styles.sub}>{`  ${t("members.you")}`}</Text>}
+                {m.blocked && <Text style={styles.sub}>{`  ${t("block.blocked")}`}</Text>}
               </Text>
               {m.email && (
                 <Text style={styles.sub} numberOfLines={1}>
@@ -84,6 +88,28 @@ export function MemberSettings({ projectId, myRole }: { projectId: string; myRol
             ) : (
               <Text style={styles.sub}>{t(roleKey(m.role))}</Text>
             )}
+            {!isMe &&
+              (m.blocked ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("block.unblockLabel", { name: m.name })}
+                  hitSlop={6}
+                  disabled={blocking.pending}
+                  onPress={() => blocking.unblock(m.id)}
+                >
+                  <Text style={styles.roleText}>{t("block.unblock")}</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("block.action", { name: m.name })}
+                  hitSlop={8}
+                  disabled={blocking.pending}
+                  onPress={() => blocking.confirmBlock(m.id, m.name)}
+                >
+                  <Ban size={16} color={colors.subtle} />
+                </Pressable>
+              ))}
             {(editable || isMe) && (
               <Pressable
                 accessibilityRole="button"
