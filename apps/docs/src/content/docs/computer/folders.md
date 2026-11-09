@@ -51,7 +51,7 @@ Some projects need their threads in the folder itself, for example a game whose 
 
 With it off, threads work in your checkout, on the branch it is on. On each computer only one of the project's threads works at a time: another one that has something to do shows **Queued** and starts when the first one's turn ends. Threads do not switch your branch or put your changes aside, and commit only the files they changed. A thread that checks another thread's work (a visual check) still works in a copy of its own, and turns in the cloud always do.
 
-Work a thread did in its copy before you turned this off stays there; the thread starts a new session in the folder. If the Folders tab says myrel-runner on your computer needs an update for this, update it first.
+Work a thread did in its copy before you turned this off stays there; the thread starts a new session in the folder. It needs myrel-runner 0.37.0 or later; with an older one, the Folders tab and the thread say to update it.
 
 ### Cloning and pushing
 
