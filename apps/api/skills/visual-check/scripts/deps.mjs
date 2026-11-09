@@ -43,14 +43,14 @@ async function depsDir(log) {
   return dir;
 }
 
-/** Playwright's chromium and the axe-core source, ready to use. */
+/** Playwright's chromium (and its Electron driver) and the axe-core source, ready to use. */
 export async function loadDeps(log = (m) => console.error(m)) {
   const dir = await depsDir(log);
   const require = createRequire(join(dir, "package.json"));
   const playwright = require("playwright");
   const axeSource = await readFile(require.resolve("axe-core/axe.min.js"), "utf8");
   const cli = join(dirname(require.resolve("playwright/package.json")), "cli.js");
-  return { chromium: playwright.chromium, axeSource, playwrightCli: cli };
+  return { chromium: playwright.chromium, electron: playwright._electron, axeSource, playwrightCli: cli };
 }
 
 /**

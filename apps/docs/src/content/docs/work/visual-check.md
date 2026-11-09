@@ -53,6 +53,15 @@ By default Myrel picks another CLI than the one that made the change, and one th
 
 For one check only, say so in the thread ("check it with Codex"). A CLI, model or effort the computer does not have is skipped, and the agent is told.
 
+## What it can check
+
+- Websites and web apps (Next, Nuxt, Astro, Remix, Angular, Vite and others, or plain HTML), found in the repository without any setup.
+- Web games, with their animation checked frame by frame.
+- Electron apps, opened as the desktop app at two window sizes.
+- Expo and React Native apps through their web build, and Tauri apps through their pages in the browser.
+
+Native iOS and Android screens and games outside a web build are not checked yet; the card says so.
+
 ## Needs a browser
 
 The check runs Chromium on your computer. Myrel downloads it the first time. On Linux it may also need system libraries; then **Devices** and the check's card show the command to run once (it asks for your password):
@@ -61,4 +70,6 @@ The check runs Chromium on your computer. Myrel downloads it the first time. On 
 sudo npx playwright@1.64.1 install-deps chromium
 ```
 
-A round that could not start for this does not count toward the two. Tasks that run in the cloud cannot be checked yet.
+A round that could not start for this does not count toward the two.
+
+Work done in the cloud is checked in the cloud: the sandbox has the browser. Whether the evaluator there also judges the look depends on the server's model for checks; when that model cannot read images, the automatic checks and flows still run and the card says **Look not judged**.

@@ -131,6 +131,9 @@
   // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
   // RUNNER_IMAGES: "true" or "false" when that model does or does not read images (screenshots);
   // empty = guessed from its name.
+  // CHECK_MODEL: model for a visual check's evaluator in the cloud, one that reads screenshots;
+  // empty = RUNNER_MODEL (a model that cannot read them only runs the automatic checks and flows).
+  // CHECK_IMAGES: like RUNNER_IMAGES, for CHECK_MODEL.
   //
   // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
   //
@@ -159,6 +162,8 @@
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_MODEL": "auto",
     "RUNNER_IMAGES": "",
+    "CHECK_MODEL": "",
+    "CHECK_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
     // Where the connector catalog is copied from; empty means the official MCP Registry.
     "CONNECTOR_REGISTRY_URL": "",

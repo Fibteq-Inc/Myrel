@@ -83,7 +83,7 @@ export type EvaluatorChoice = {
   model: ThreadModel | null;
   /** The CLI's login (RunnerCli.accounts' id); null: the CLI's own. */
   account: string | null;
-  source: "request" | "project" | "account" | "auto";
+  source: "request" | "project" | "account" | "auto" | "cloud";
   /** A setting that could not be followed on this computer, and why. */
   skipped?: string;
 };
