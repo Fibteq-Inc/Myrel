@@ -1,5 +1,6 @@
 import type { Message } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
+import { appPage } from "../src/lib/app-page";
 import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
 import { dataUrlBase64, displayName, fileKind } from "../src/lib/files";
 import { surelyLong } from "../src/lib/fold";
@@ -129,5 +130,13 @@ describe("files", () => {
   it("takes the payload of a data URL", () => {
     expect(dataUrlBase64("data:image/png;base64,iVBORw0K")).toBe("iVBORw0K");
     expect(dataUrlBase64("nonsense")).toBe("");
+  });
+});
+
+describe("appPage", () => {
+  it("marks a server page ?app, keeping its own query and fragment", () => {
+    expect(appPage("https://myrel.test/devices")).toBe("https://myrel.test/devices?app");
+    expect(appPage("https://myrel.test/settings/projects/p1?tab=github")).toBe("https://myrel.test/settings/projects/p1?tab=github&app");
+    expect(appPage("https://myrel.test/privacy/#en")).toBe("https://myrel.test/privacy/?app#en");
   });
 });

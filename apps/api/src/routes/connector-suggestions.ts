@@ -2,7 +2,7 @@ import { CONNECTOR_OFFER_PREFIX, ConnectSuggestionInput } from "@myrel/protocol"
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { connectOffer, signInAgain } from "../connectors/suggest";
-import { type AppEnv, requireUser } from "../middleware";
+import { type AppEnv, fromApp, requireUser } from "../middleware";
 import { publicOrigin } from "./connectors";
 import { findMembership } from "./projects";
 
@@ -29,9 +29,10 @@ export const connectorSuggestionRoutes = new Hono<AppEnv>()
     const offer = await thread.openOffer(suggestionId, input.data.offerId);
     if (!offer) return c.json({ error: "not_found", message: "This card was already answered." }, 404);
     const back = { projectId, threadId, suggestionId, offerId: offer.id };
+    const app = fromApp(c);
     const result = offer.id.startsWith(CONNECTOR_OFFER_PREFIX)
-      ? await signInAgain(c.env, { userId, projectId, manages: member.role === "owner" || member.role === "admin", offer, origin: publicOrigin(c), back })
-      : await connectOffer(c.env, { userId, projectId, offer, headers: input.data.headers, origin: publicOrigin(c), back });
+      ? await signInAgain(c.env, { userId, projectId, manages: member.role === "owner" || member.role === "admin", offer, origin: publicOrigin(c), back, app })
+      : await connectOffer(c.env, { userId, projectId, offer, headers: input.data.headers, origin: publicOrigin(c), back, app });
     if (!result.ok) {
       const status = { limit_reached: 402, failed: 502, forbidden: 403, invalid_input: 400 } as const;
       return c.json({ error: result.error, message: result.message }, status[result.error]);

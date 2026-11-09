@@ -7,6 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { CircleCheck, CircleSlash, KeyRound, LoaderCircle, LogIn, Plug, Sparkles } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { api, platform } from "../../lib/api";
+import { openedFromApp } from "../../lib/app-tab";
 import { Button, cn, errorMessage, GhostButton, Input } from "../../lib/ui";
 import { OfferIcon, OfficialBadge } from "../connectors";
 
@@ -153,9 +154,12 @@ export function ConnectorSuggestionCard({
           {limited ? (
             <div className="flex flex-wrap items-center gap-2 text-[13px] text-warn">
               {t("suggestion.limit")}
-              <Link to="/settings/billing" className="font-medium text-accent hover:underline">
-                {t("suggestion.upgrade")}
-              </Link>
+              {/* A tab an app opened shows no plans: the store apps sell them in the app. */}
+              {!openedFromApp() && (
+                <Link to="/settings/billing" className="font-medium text-accent hover:underline">
+                  {t("suggestion.upgrade")}
+                </Link>
+              )}
             </div>
           ) : error ? (
             <p className="text-[13px] text-bad">{suggestionError(error, t)}</p>

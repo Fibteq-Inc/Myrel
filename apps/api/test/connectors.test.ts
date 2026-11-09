@@ -84,13 +84,15 @@ async function json<T>(res: Response | Promise<Response>, status = 200): Promise
   return (text ? JSON.parse(text) : null) as T;
 }
 
-async function signUp(): Promise<{ token: string; id: string; email: string }> {
+async function signUp(): Promise<{ token: string; cookie: string; id: string; email: string }> {
   const res = await api("/api/auth/sign-up/email", {
     method: "POST",
     body: { email: `u${crypto.randomUUID()}@example.org`, password: "correct-horse-battery", name: "Test" },
   });
   const { user } = (await res.json()) as { user: { id: string; email: string } };
-  return { token: res.headers.get("set-auth-token")!, id: user.id, email: user.email };
+  // The web app's session cookie, for requests made as the web app does.
+  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  return { token: res.headers.get("set-auth-token")!, cookie, id: user.id, email: user.email };
 }
 
 describe("connector addresses", () => {
@@ -361,7 +363,8 @@ describe("connectors API", () => {
 
     const back = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state2)}`, { token: me.token });
     expect(back.status).toBe(302);
-    expect(back.headers.get("location")).toBe(`${BASE}/settings?section=connectors&connector=${created.connector.id}&result=ok`);
+    // Started with a bearer token, as the desktop and mobile apps sign in: the page is marked ?app.
+    expect(back.headers.get("location")).toBe(`${BASE}/settings?section=connectors&connector=${created.connector.id}&result=ok&app`);
     const { connectors } = await json<{ connectors: Connector[] }>(api("/api/account/connectors", { token: me.token }));
     expect(connectors[0]).toMatchObject({ status: "ok", tools: [{ name: "create_issue" }, { name: "list_issues" }] });
     expect(JSON.stringify(connectors)).not.toContain("oauth-token");
@@ -370,6 +373,27 @@ describe("connectors API", () => {
     // The same sign-in cannot be used twice.
     const replay = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state2)}`, { token: me.token });
     expect(replay.headers.get("location")).toContain("result=error");
+  });
+
+  it("marks the page a sign-in ends on ?app only when an app started it", async () => {
+    const me = await signUp();
+    const created = await json<{ connector: Connector; authorizeUrl: string }>(
+      api("/api/account/connectors", { method: "POST", headers: { cookie: me.cookie }, body: { transport: "http", name: "Flow", url: "https://oauth.example.com/mcp", auth: "oauth" } }),
+      201,
+    );
+    const finish = async (authorizeUrl: string) => {
+      const state = new URL(authorizeUrl).searchParams.get("state")!;
+      const back = await api(`/api/connectors/oauth/callback?code=good-code&state=${encodeURIComponent(state)}`, { headers: { cookie: me.cookie } });
+      expect(back.status).toBe(302);
+      return back.headers.get("location");
+    };
+    // The web app (its session cookie) goes back to its settings as they are.
+    expect(await finish(created.authorizeUrl)).toBe(`${BASE}/settings?section=connectors&connector=${created.connector.id}&result=ok`);
+    // The mobile app's in-app browser ends there too, but marked, so that tab shows no plans or purchases.
+    const fromApp = await json<{ authorizeUrl: string }>(
+      api(`/api/account/connectors/${created.connector.id}/authorize`, { method: "POST", token: me.token }),
+    );
+    expect(await finish(fromApp.authorizeUrl)).toBe(`${BASE}/settings?section=connectors&connector=${created.connector.id}&result=ok&app`);
   });
 
   it("finishes a sign-in from the confirmation page", async () => {

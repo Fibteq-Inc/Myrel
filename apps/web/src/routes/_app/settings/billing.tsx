@@ -1,16 +1,22 @@
 import { useI18n, useT } from "@myrel/i18n/react";
 import type { BillingSummary } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Check, Gift, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Badge, List, Notice, Row, Section } from "../../../components/settings";
 import { api, billingQuery } from "../../../lib/api";
+import { openedFromApp } from "../../../lib/app-tab";
 import { useFormat } from "../../../lib/format";
 import { pendingGift, setPendingGift } from "../../../lib/gift";
 import { Button, cn, errorMessage, GhostButton, IconButton, Input } from "../../../lib/ui";
 
 export const Route = createFileRoute("/_app/settings/billing")({
+  // A tab an app opened never reaches plans or Stripe (a gift link, a "See plans" link or a sign-in
+  // would lead here): the store apps sell plans only in the app. See lib/app-tab.ts.
+  beforeLoad: () => {
+    if (openedFromApp()) throw redirect({ to: "/settings" });
+  },
   component: BillingSettings,
 });
 
