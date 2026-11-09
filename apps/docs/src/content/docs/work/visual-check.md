@@ -15,10 +15,14 @@ Each check is an extra agent run on your computer, so it uses your CLI's usage l
 
 1. The agent that made the change pushes its branch and asks for a check. A **Visual check** card appears in its thread.
 2. Myrel opens an evaluator thread just below it in the thread list. It runs on the same computer, with another CLI than the one that made the change when the computer has one: an agent grades its own work too kindly.
-3. The evaluator first runs automatic checks (blank or frozen screens, pages that scroll sideways, buttons cut off or covered, broken images, errors, accessibility problems), then looks at the screenshots itself.
+3. The evaluator first runs automatic checks (blank or frozen screens, pages that scroll sideways, buttons cut off or covered, broken images, errors, accessibility problems, text that tells people how to use the screen), then looks at the screenshots itself.
 4. The card shows the result, and the first agent fixes what it lists and asks for the next round.
 
 The pull request does not wait for the check. The thread cannot be resolved while a round is running. There are two rounds per piece of work; for a third the agent asks you first.
+
+## Screens that explain themselves
+
+Agents tend to write how-to text onto the screen ("Click the + button in the top right to add a task", "Bu sayfada tüm projelerinizi görebilirsiniz") instead of designing a screen that shows the way. The check looks for such text and for help boxes that never go away, and the evaluator counts them against the work: when a screen leans on the text, it must change, and the finding says what design replaces it (an obvious main button, an empty state with one action, labels on icons, a hint at the moment it is needed). Help and docs pages, legal text and error messages that say how to recover are fine.
 
 ## The card
 

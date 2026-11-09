@@ -21,8 +21,19 @@ Anchors: **9–10** ready to ship, would pass a strict design review; **7–8** 
 - Broken at one of the widths or themes: overlapping or cut-off content, unreadable text, a control hidden or unreachable, a broken image, a layout that falls apart.
 - Something a user would notice at once as a bug: misalignment that looks broken, wrong images, a dark theme with light-theme leftovers.
 - A regression: the base branch looked right and this one does not.
+- A screen that leans on text to say how to use it where the design should show it (see "Guide by design" below).
 
 Everything else (taste, polish, nice-to-haves, problems that predate the change) is `advice`. Keep advice to the few points that matter most.
+
+## Guide by design, not by text
+
+A screen should show people what to do, not tell them. Text that explains how to operate it ("Click the + button in the top right to add a task", "Here you can manage…", "Bu sayfada tüm projelerinizi görebilirsiniz", "Soldaki menüden seçin", a numbered list of clicks, a tip box that never goes away) usually covers for a design that does not guide: a main action that is not obvious, icons without labels, an empty state with nothing to do. Agents write such text by habit; look for it in every language, whether or not capture.mjs flagged it.
+
+- Count it against `craft` and `design`.
+- **Blocking** when the screen leans on it: the main action is only findable by reading, an empty state explains instead of offering the first step, instructions stand between people and the content, or the text describes the layout ("the button above", "sağ üstteki").
+- Otherwise (one short line that could go) it is `advice`.
+- In `expected`, name the design that replaces the text: a primary button with a verb label where the eye lands first, an empty state with one action, labels on icons, a hint at the moment it is needed (a tooltip, a first-run highlight that goes away), sensible defaults, visible affordances (a drag handle, a + on the list), feedback right after the action.
+- Fine where reading is the point: help and docs pages, legal text, a landing page explaining the product (not its buttons), a form hint about the value ("8 characters or more"), an error message saying how to recover. Dismiss `explains-ui` for these with the reason.
 
 ## Games
 

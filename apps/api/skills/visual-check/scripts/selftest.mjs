@@ -27,6 +27,7 @@ const config = {
     { name: "clean", path: "/clean.html" },
     { name: "broken", path: "/broken.html" },
     { name: "blank", path: "/blank.html" },
+    { name: "explains", path: "/explains.html" },
     { name: "game", path: "/game.html", motion: true, actions: [{ step: 4000 }], frames: 3, expectMotion: true, axe: false },
     { name: "frozen", path: "/game.html?bug=frozen", motion: true, actions: [{ step: 4000 }], frames: 3, expectMotion: true, axe: false },
   ],
@@ -39,7 +40,7 @@ execFileSync(process.execPath, [join(here, "capture.mjs"), "--config", join(out,
 const report = JSON.parse(await readFile(join(out, "report.json"), "utf8"));
 const on = (screen, sev) => new Set(report.findings.filter((f) => f.screen.startsWith(`${screen}@`) && (!sev || f.severity === sev)).map((f) => f.id));
 
-check(report.shots.length === 20, "20 screenshots (5 screens × 2 widths × 2 themes)");
+check(report.shots.length === 24, "24 screenshots (6 screens × 2 widths × 2 themes)");
 check(on("clean").size === 0, `clean page has no findings (${[...on("clean")].join(", ") || "none"})`);
 const broken = on("broken", "blocking");
 for (const id of ["overflow-x", "covered-control", "cut-off-control", "broken-image", "exception", "axe:button-name"]) check(broken.has(id), `broken page: ${id} is blocking`);
@@ -54,7 +55,15 @@ const game = report.shots.find((s) => s.id === "game@390-dark");
 check(game?.gameState?.phase === "play" && game.gameState.stars > 0, "game state is read through the hook");
 check(game?.frames?.diffs.every((d) => d > 0), "game frames differ");
 check(on("frozen", "blocking").has("frozen"), "frozen game is caught");
-check(report.sheets.length === 5, "one contact sheet per screen");
+check(report.sheets.length === 6, "one contact sheet per screen");
+const explains = report.findings.filter((f) => f.id === "explains-ui" && f.screen.startsWith("explains@"));
+check(explains.length === 2 && explains.every((f) => f.severity === "warning" && f.screen.endsWith("-light")), "explains-ui: a warning per width, in the first theme only");
+const said = (explains[0]?.details?.items ?? []).map((i) => `${i.kind}:${i.target}`);
+for (const want of ["layout:p#intro", "help-box:div#tip", "how-to:p#tr"]) check(said.includes(want), `explains-ui finds ${want} (${said.join(", ") || "nothing"})`);
+check(!said.some((s) => s.includes("help-article") || s.includes("empty")), "explains-ui skips the help article and the empty state");
+check(explains[0]?.details?.items.find((i) => i.kind === "how-to")?.text === "Bu sayfada tüm görevlerinizi görebilirsiniz.", "explains-ui quotes the whole sentence");
+check((explains[0]?.boxes ?? []).length === 3, "explains-ui frames what it found");
+check(!on("explains").has("overlapping-text"), "text wrapping after a bold word does not count as overlapping");
 
 // Verdict rules.
 const verdict = (v) => writeFile(join(out, "verdict.json"), JSON.stringify(v));
