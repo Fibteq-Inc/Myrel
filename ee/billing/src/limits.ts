@@ -37,7 +37,7 @@ async function unpricedModel(env: Env, projectId: string): Promise<string | null
 export const billingExtensions: Extensions = {
   billing: true,
   // Fibteq's policies, served by the web app (apps/web/public). Change the version with their effective date.
-  legal: { terms: "/terms/", privacy: "/privacy/", version: "2026-10-20" },
+  legal: { terms: "/terms/", privacy: "/privacy/", version: "2026-11-09" },
 
   async canCreateProject(env, userId) {
     const standing = await standingOf(env, userId);

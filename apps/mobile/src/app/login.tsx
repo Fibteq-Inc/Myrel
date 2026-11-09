@@ -206,7 +206,16 @@ function SignInForm() {
       {signUpInBrowser ? (
         <>
           <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.signUpInBrowser")}</Text>
-          <Button onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?signup`)}>{t("login.openSignUp")}</Button>
+          <Button
+            onPress={() => {
+              // ?app: the page ends on "go back to the app" instead of going on into the web app, and
+              // the person comes back to this form to sign in.
+              void WebBrowser.openBrowserAsync(`${session.server}/login?signup&app`);
+              setMode("signin");
+            }}
+          >
+            {t("login.openSignUp")}
+          </Button>
         </>
       ) : (
         <Button onPress={submit} pending={pending} disabled={!email || password.length < 8 || (legal != null && !accepted)}>
@@ -215,7 +224,7 @@ function SignInForm() {
       )}
       {mode === "signin" && session.info?.auth.passwordReset && (
         // The page that sets a new password is on the server's own site.
-        <Pressable onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?forgot`)} accessibilityRole="link">
+        <Pressable onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?forgot&app`)} accessibilityRole="link">
           <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.forgot")}</Text>
         </Pressable>
       )}
