@@ -34,6 +34,15 @@ export const fakeGithub = {
     string,
     { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
+  /** A check run's annotations, by check run id. */
+  annotations: {} as Record<number, { path: string; start_line: number | null; annotation_level: string; title: string | null; message: string }[]>,
+  /** GitHub Actions jobs by id (a job's id is its check run's), and the workflow runs they belong to; unlisted ones are refused as on a private repository. */
+  jobs: {} as Record<number, { run_id: number; steps: { name: string; conclusion: string | null }[] }>,
+  workflowRuns: {} as Record<number, { event: string }>,
+  /** The pull requests a commit belongs to (a merge commit: the one merged), by sha. */
+  commitPulls: {} as Record<string, { number: number; merged_at: string | null; base: { ref: string } }[]>,
+  /** A commit's parents, by sha. */
+  parents: {} as Record<string, string[]>,
   requests: [] as { method: string; url: string; body?: unknown; auth?: string }[],
   /** A second installation ("zeta", with repo 9): off unless a test opens it, as installs are read from `installations`. */
   otherInstallation: { id: 43, account: { login: "zeta", type: "Organization", avatar_url: "https://avatars.test/zeta" } },
@@ -169,11 +178,24 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const ci = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/commits\/([^/]+)\/(check-runs|status)$/);
   if (ci) {
-    const { check_runs, statuses } = fakeGithub.checks[ci[1]!] ?? { check_runs: [], statuses: [] };
+    const { check_runs: all, statuses } = fakeGithub.checks[ci[1]!] ?? { check_runs: [], statuses: [] };
+    const name = url.searchParams.get("check_name");
+    const check_runs = name ? all.filter((r) => r.name === name) : all;
     if (ci[2] === "check-runs") return Response.json({ total_count: check_runs.length, check_runs });
     const state = statuses.some((s) => s.state !== "success") ? "pending" : "success";
     return Response.json({ state, total_count: statuses.length, statuses });
   }
+  const annotations = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/check-runs\/(\d+)\/annotations$/);
+  if (annotations) return Response.json(fakeGithub.annotations[Number(annotations[1])] ?? []);
+  const job = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/actions\/(jobs|runs)\/(\d+)$/);
+  if (job) {
+    const found = (job[1] === "jobs" ? fakeGithub.jobs : fakeGithub.workflowRuns)[Number(job[2])];
+    return found ? Response.json(found) : Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
+  }
+  const commitPulls = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/commits\/([^/]+)\/pulls$/);
+  if (commitPulls) return Response.json(fakeGithub.commitPulls[commitPulls[1]!] ?? []);
+  const gitCommit = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/git\/commits\/([^/]+)$/);
+  if (gitCommit) return Response.json({ sha: gitCommit[1], parents: (fakeGithub.parents[gitCommit[1]!] ?? []).map((sha) => ({ sha })) });
   const contents = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/contents\/?(.*)$/);
   if (contents) {
     const files = fakeGithub.files[contents[1]!] ?? {};

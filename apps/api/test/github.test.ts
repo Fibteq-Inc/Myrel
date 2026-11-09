@@ -330,6 +330,17 @@ describe("pull requests", () => {
     expect(res.status).toBe(200);
   }
 
+  /** A check run's completed event the way GitHub sends it, failed. */
+  const failedCheck = (id: number, sha: string, branch: string, name = "test") => ({
+    id,
+    name,
+    head_sha: sha,
+    conclusion: "failure",
+    html_url: `https://github.com/acme/app/actions/runs/9/job/${id}`,
+    check_suite: { head_branch: branch },
+    app: { slug: "github-actions" },
+  });
+
   async function githubEvents(threadId: string) {
     const stub = env.THREAD_AGENT.get(env.THREAD_AGENT.idFromName(threadId));
     return runInDurableObject(stub, (_: ThreadAgent, state) =>
@@ -351,10 +362,10 @@ describe("pull requests", () => {
 
     // CI fails: the card turns red and the thread's agent is woken with the failing check.
     fakeGithub.checks["sha-1"] = { check_runs: [{ name: "test", status: "completed", conclusion: "failure" }], statuses: [] };
-    await hook("check_run", { action: "completed", check_run: { head_sha: "sha-1" } });
+    await hook("check_run", { action: "completed", check_run: failedCheck(501, "sha-1", "myrel/fix-login") });
     expect((await listPullRequests(env.DB, project.id, thread.id))[0]?.checks).toBe("failure");
     expect(events.some((e) => e.type === "pr.updated" && e.pullRequest.checks === "failure")).toBe(true);
-    expect(await githubEvents(thread.id)).toEqual([expect.stringContaining("failing CI on its latest commit: test")]);
+    expect(await githubEvents(thread.id)).toEqual([expect.stringContaining('failing CI on its latest commit.\nCheck "test" ended with failure')]);
 
     // The fix is pushed: CI starts again, which wakes nobody.
     await hook("pull_request", { action: "synchronize", pull_request: pull({ head: { sha: "sha-2", ref: "myrel/fix-login" } }) });
@@ -412,6 +423,100 @@ describe("pull requests", () => {
     expect(woken).toHaveLength(3);
     expect(woken[1]).toMatch(/mona asking for changes:\n<external source="github-pr-review" ref="acme\/app#\d+" author="mona" trust="member" id="\w+">\nPlease add a test\.\n<\/external/);
     expect(woken[2]).toContain("was merged.");
+  });
+
+  it("wakes the thread with what each failed check said", async () => {
+    const { project, thread } = await setup();
+    const sha = `sha-red-${number}`;
+    fakeGithub.pulls[`acme/app#${number}`] = pull({ head: { sha, ref: "myrel/fix-login" } });
+    fakeGithub.checks[sha] = { check_runs: [{ name: "test", status: "in_progress", conclusion: null }], statuses: [] };
+    await trackPullRequest(env, project.id, thread.id, url);
+
+    // The failing test and its assertion come as GitHub's error notes; the generic exit-code ones go last.
+    fakeGithub.checks[sha] = {
+      check_runs: [
+        { name: "test", status: "completed", conclusion: "failure" },
+        { name: "lint", status: "in_progress", conclusion: null },
+      ],
+      statuses: [],
+    };
+    fakeGithub.annotations[601] = [
+      { path: ".github", start_line: 2, annotation_level: "warning", title: "", message: "Node.js 20 is deprecated." },
+      { path: ".github", start_line: 1176, annotation_level: "failure", title: "", message: "command (ee/billing) pnpm run test exited (1)" },
+      {
+        path: "ee/billing/test/billing.test.ts",
+        start_line: 416,
+        annotation_level: "failure",
+        title: "test/billing.test.ts > hosted billing > cancels a web subscription at once when its account is deleted",
+        message: "AssertionError: expected [ …(2) ] to deeply equal [ …(2) ]\n- \"url\": \".../sub_late\"\n+ \"url\": \".../sub_f5Ze\"",
+      },
+    ];
+    fakeGithub.jobs[601] = { run_id: 9, steps: [{ name: "Run pnpm turbo run test $AFFECTED", conclusion: "failure" }] };
+    await hook("check_run", { action: "completed", check_run: failedCheck(601, sha, "myrel/fix-login") });
+    const [first] = await githubEvents(thread.id);
+    expect(first).toContain('Check "test" ended with failure: https://github.com/acme/app/actions/runs/9/job/601');
+    expect(first).toContain("Failed step: Run pnpm turbo run test $AFFECTED");
+    expect(first).toMatch(/<external source="github-ci" ref="acme\/app@sha-red" trust="repository" id="\w+">\nee\/billing\/test\/billing\.test\.ts:416 test\/billing/);
+    expect(first).toContain("cancels a web subscription at once when its account is deleted\nAssertionError");
+    expect(first!.indexOf("billing.test.ts:416")).toBeLessThan(first!.indexOf("pnpm run test exited (1)"));
+    expect(first).not.toContain("Node.js 20 is deprecated");
+
+    // A second check failing on the same commit wakes it again, though the card was red already.
+    // Without the Actions API (a private repository) the steps are left out; no notes, the link says where to look.
+    fakeGithub.checks[sha]!.check_runs[1] = { name: "lint", status: "completed", conclusion: "failure" };
+    await hook("check_run", { action: "completed", check_run: failedCheck(602, sha, "myrel/fix-login", "lint") });
+    const woken = await githubEvents(thread.id);
+    expect(woken).toHaveLength(2);
+    expect(woken[1]).toContain('Check "lint" ended with failure');
+    expect(woken[1]).not.toContain("Failed step");
+    expect(woken[1]).toContain("GitHub has no error notes for it");
+
+    // A run cancelled for newer commits on an already red pull request wakes nobody.
+    await hook("check_run", { action: "completed", check_run: { ...failedCheck(603, sha, "myrel/fix-login", "build"), conclusion: "cancelled" } });
+    expect(await githubEvents(thread.id)).toHaveLength(2);
+  });
+
+  it("tells the thread whose merge turned the default branch red, once", async () => {
+    const { project, thread } = await setup();
+    const head = `sha-head-${number}`;
+    const [before, merged, next] = ["a", "b", "c"].map((c) => `sha-main-${c}-${number}`);
+    fakeGithub.pulls[`acme/app#${number}`] = pull({ head: { sha: head, ref: "myrel/fix-login" } });
+    fakeGithub.checks[head] = { check_runs: [{ name: "test", status: "completed", conclusion: "success" }], statuses: [] };
+    await trackPullRequest(env, project.id, thread.id, url);
+    await hook("pull_request", { action: "closed", pull_request: pull({ state: "closed", merged: true, head: { sha: head, ref: "myrel/fix-login" } }) });
+    const settled = (await githubEvents(thread.id)).length;
+    const repository = { id: 7, full_name: "acme/app", default_branch: "main" };
+    const onMain = (id: number, sha: string, name = "test") => ({ action: "completed", repository, check_run: failedCheck(id, sha, "main", name) });
+
+    // The merge commit's CI fails where the commit before passed: the thread that merged it hears, and how to fix it.
+    fakeGithub.parents[merged!] = [before!];
+    fakeGithub.checks[before!] = { check_runs: [{ name: "test", status: "completed", conclusion: "success" }], statuses: [] };
+    fakeGithub.checks[merged!] = { check_runs: [{ name: "test", status: "completed", conclusion: "failure" }], statuses: [] };
+    fakeGithub.commitPulls[merged!] = [{ number, merged_at: "2026-11-09T14:26:26Z", base: { ref: "main" } }];
+    fakeGithub.jobs[701] = { run_id: 70, steps: [{ name: "Run pnpm turbo run test", conclusion: "failure" }] };
+    fakeGithub.workflowRuns[70] = { event: "push" };
+    fakeGithub.annotations[701] = [{ path: "src/a.test.ts", start_line: 3, annotation_level: "failure", title: "a > b", message: "AssertionError" }];
+    await hook("check_run", onMain(701, merged!));
+    let woken = await githubEvents(thread.id);
+    expect(woken).toHaveLength(settled + 1);
+    expect(woken.at(-1)).toContain(`was merged, and CI then failed on main at the commit the merge made (${merged!.slice(0, 7)})`);
+    expect(woken.at(-1)).toContain("src/a.test.ts:3 a > b\nAssertionError");
+    expect(woken.at(-1)).toContain("the fix goes in a new pull request from main");
+
+    // Another merge on the red branch: the check was failing already, so nobody is told again.
+    fakeGithub.parents[next!] = [merged!];
+    fakeGithub.commitPulls[next!] = [{ number, merged_at: "2026-11-09T15:07:03Z", base: { ref: "main" } }];
+    fakeGithub.jobs[702] = { run_id: 71, steps: [] };
+    fakeGithub.workflowRuns[71] = { event: "push" };
+    await hook("check_run", onMain(702, next!));
+    // Runs that only land on the branch's latest commit (another pull request's CLA check, Dependabot) are not the merge's.
+    fakeGithub.jobs[703] = { run_id: 72, steps: [] };
+    fakeGithub.workflowRuns[72] = { event: "dynamic" };
+    await hook("check_run", onMain(703, merged!, "Dependabot"));
+    // Nor is one GitHub will not say anything about (a private repository without actions: read).
+    await hook("check_run", onMain(704, merged!, "cla"));
+    woken = await githubEvents(thread.id);
+    expect(woken).toHaveLength(settled + 1);
   });
 
   it("settles a merge with nothing left to do without starting the agent", async () => {
