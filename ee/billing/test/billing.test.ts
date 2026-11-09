@@ -74,7 +74,7 @@ describe("hosted billing", () => {
   it("tells clients this server sells plans and which terms sign-up accepts", async () => {
     expect(await (await api("/api/info")).json()).toMatchObject({
       billing: true,
-      legal: { terms: `${BASE}/terms/`, privacy: `${BASE}/privacy/`, version: "2026-10-20" },
+      legal: { terms: `${BASE}/terms/`, privacy: `${BASE}/privacy/`, version: "2026-11-09" },
     });
   });
 
@@ -85,7 +85,7 @@ describe("hosted billing", () => {
     expect(await refused.json()).toMatchObject({ code: "TERMS_NOT_ACCEPTED" });
     const { userId } = await signUp();
     const row = await env.DB.prepare("SELECT terms_accepted_at, terms_version FROM user WHERE id = ?").bind(userId).first();
-    expect(row).toMatchObject({ terms_version: "2026-10-20" });
+    expect(row).toMatchObject({ terms_version: "2026-11-09" });
     expect(row?.terms_accepted_at).toBeGreaterThan(Date.now() - 60_000);
   });
 
