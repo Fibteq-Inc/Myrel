@@ -9,7 +9,7 @@ import { AppUpdateSection } from "../../../components/app-update";
 import { EvaluatorPicker, mergeClis } from "../../../components/evaluator-picker";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
-import { api, meQuery, platform, runnersQuery, sessionQuery } from "../../../lib/api";
+import { api, billingQuery, meQuery, platform, runnersQuery, serverInfoQuery, sessionQuery } from "../../../lib/api";
 import { drafts } from "../../../lib/drafts";
 import { currentPushSubscription } from "../../../lib/push";
 import { setThemePreference, useThemePreference } from "../../../lib/theme";
@@ -196,6 +196,10 @@ function DeleteAccount({ email }: { email: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
+  // On a server that sells plans, someone paying on the web is told the plan ends with the account.
+  const { data: info } = useQuery(serverInfoQuery);
+  const { data: billing } = useQuery({ ...billingQuery, enabled: Boolean(info?.billing) });
+  const webPlan = billing?.source === "stripe" && billing.owner && (billing.plan === "pro" || billing.plan === "team") ? billing.plan : null;
   const remove = useMutation({
     mutationFn: async () => {
       await api.deleteAccount();
@@ -225,7 +229,17 @@ function DeleteAccount({ email }: { email: string }) {
       {confirming && (
         <ConfirmDialog
           title={t("deleteAccount.confirmTitle")}
-          body={t("deleteAccount.confirmBody", { email })}
+          body={
+            <>
+              <p>{t("deleteAccount.confirmBody", { email })}</p>
+              {webPlan && (
+                <p className="mt-2">
+                  {t("deleteAccount.confirmWebPlan", { plan: t(`billing.plan.${webPlan}`) })}
+                  {webPlan === "team" && ` ${t("deleteAccount.confirmWebTeam")}`}
+                </p>
+              )}
+            </>
+          }
           confirmLabel={t("deleteAccount.confirm")}
           busyLabel={t("deleteAccount.deleting")}
           typeToConfirm={email}

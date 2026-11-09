@@ -7,7 +7,7 @@ directory and have no limits.
 ## How it plugs in
 
 The core defines optional hooks in `apps/api/src/extensions.ts`: `canCreateProject`,
-`canUseSandbox`, `canUseCoordinator`, `canAddConnector`, `canAddSkill`, `canStoreFile`, `legal` and `billing` (shown to clients in `/api/info`). This
+`canUseSandbox`, `canUseCoordinator`, `canAddConnector`, `canAddSkill`, `canStoreFile`, `beforeDeleteAccount`, `legal` and `billing` (shown to clients in `/api/info`). This
 package's `src/worker.ts` is the hosted Worker's entry: it sets the hooks, adds `/api/billing`,
 and hands everything else to the core Worker. The core never imports this package.
 
@@ -18,6 +18,7 @@ and hands everything else to the core Worker. The core never imports this packag
 | `src/limits.ts` | The hooks: refuse a new project, a cloud turn or a coordinator turn over the plan |
 | `src/routes.ts` | `GET /api/billing`, Checkout, billing portal, Team members, the Stripe webhook |
 | `src/gifts.ts` | Gift links: Pro free for some months, made by the server's admins |
+| `src/account.ts` | Before an account is deleted: cancels its Stripe subscriptions and takes it off Teams |
 | `src/stripe.ts` | A small fetch-based Stripe client and webhook signature check |
 | `src/revenuecat.ts` | Pro bought in the mobile app (App Store, Google Play), mirrored from RevenueCat |
 | `scripts/setup-stripe.mjs` | Creates products, prices, the portal configuration and the webhook endpoint |
@@ -58,6 +59,14 @@ charge goes through; removing one gives no credit back.
 
 When a paid plan ends, nothing is deleted. Projects keep working; only new projects, cloud turns
 and coordinator turns over the Free limits are refused.
+
+Deleting an account cancels its Stripe subscriptions at once (no refund for the rest of the period,
+nothing charged again): the ones Myrel has a record of and any other on the person's Stripe
+customer. A Team owner's Team ends with it; a member's seat stops being billed to their Team's
+owner. If Stripe cannot cancel, the account is not deleted and the person is asked to try again.
+A subscription bought in the mobile app is left alone, since only the store can cancel it; the
+deletion confirmation tells the person to cancel it there first. The Stripe customer and its
+invoices stay, as billing records.
 
 ## Setting it up
 
