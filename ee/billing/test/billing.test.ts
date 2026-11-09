@@ -413,10 +413,14 @@ describe("hosted billing", () => {
     expect(calls[0]).toMatchObject({ method: "GET" });
     expect(calls[0]!.url).toContain(`customer=cus_${userId}`);
     expect(calls[0]!.url).toContain("status=all");
-    expect(calls.slice(1).sort((a, b) => a.url.localeCompare(b.url))).toEqual([
-      { method: "DELETE", url: "https://api.stripe.com/v1/subscriptions/sub_late" },
-      { method: "DELETE", url: `https://api.stripe.com/v1/subscriptions/sub_${userId}` },
-    ]);
+    // Both, in no particular order: sorted alike on both sides, as the user id is random.
+    const byUrl = (a: { url: string }, b: { url: string }) => a.url.localeCompare(b.url);
+    expect(calls.slice(1).sort(byUrl)).toEqual(
+      [
+        { method: "DELETE", url: "https://api.stripe.com/v1/subscriptions/sub_late" },
+        { method: "DELETE", url: `https://api.stripe.com/v1/subscriptions/sub_${userId}` },
+      ].sort(byUrl),
+    );
     const row = await env.DB.prepare("SELECT status FROM billing_subscriptions WHERE id = ?").bind(`sub_${userId}`).first();
     expect(row).toEqual({ status: "canceled" });
   });
