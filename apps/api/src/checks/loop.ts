@@ -1,6 +1,6 @@
 import {
   type CheckModels,
-  type CliId,
+  CliId,
   effortsFor,
   type RunnerCli,
   type ThreadModel,
@@ -35,7 +35,14 @@ export type VisualCheckState = {
   branch: string;
   /** The thread's last message when the result came, so a further round after the limit waits for a person. */
   resultSeq?: number;
+  /** The round never started (no browser, no evaluator): it does not count, and the next request takes its number. */
+  unstarted?: boolean;
 };
+
+/** The rounds that ran. */
+export function roundsDone(state: VisualCheckState | null): number {
+  return state ? state.round - (state.unstarted ? 1 : 0) : 0;
+}
 
 /** What an evaluator thread checks, kept in its agent's meta (visual_check_role). */
 export type VisualCheckRole = {
@@ -76,20 +83,26 @@ export type EvaluatorChoice = {
   model: ThreadModel | null;
   /** The CLI's login (RunnerCli.accounts' id); null: the CLI's own. */
   account: string | null;
-  source: "project" | "account" | "auto";
+  source: "request" | "project" | "account" | "auto";
   /** A setting that could not be followed on this computer, and why. */
   skipped?: string;
 };
 
+/** A CLI, model or effort the person asked for one check (request_visual_check's evaluator). */
+export type EvaluatorRequest = { cli: CliId; model?: string; effort?: string };
+
 /**
- * The evaluator for a round on a computer with `clis`: one of the CLIs the project lists (CheckModels),
- * else one the person lists, else any other CLI than the coder's (pickEvaluatorCli). Among the listed
+ * The evaluator for a round on a computer with `clis`: the one asked for this check (`once`), else
+ * one of the CLIs the project lists (CheckModels), else one the person lists, else any other CLI than
+ * the coder's (pickEvaluatorCli). A model or effort asked for once that the CLI does not list is
+ * dropped and said so in `skipped`; the login is the one a list gives that CLI. Among the listed
  * ones the computer runs, it prefers one not at its usage limit, then one other than the coder's, then
  * EVALUATOR_PREFERENCE; a list none of whose CLIs runs here falls to the next level. Of a model or
  * effort only what the CLI lists is kept, like resolveTaskModel. Non-Claude CLIs need a runner that
  * runs them (othersAllowed).
  */
 export function resolveEvaluator(input: {
+  once?: EvaluatorRequest;
   project: CheckModels;
   account: CheckModels;
   clis: RunnerCli[];
@@ -104,6 +117,24 @@ export function resolveEvaluator(input: {
     return i < 0 ? EVALUATOR_PREFERENCE.length : i;
   };
   const cost = (id: string) => (installed(id)?.limits?.status === "limited" ? 2 : 0) + (id === input.coderCli ? 1 : 0);
+  const once = input.once;
+  if (once) {
+    if (!runs(once.cli)) skipped.push(`${once.cli}, asked for this check, does not run on this computer`);
+    else {
+      const models = installed(once.cli)?.models ?? [];
+      const model = once.model && models.some((m) => m.id === once.model) ? once.model : null;
+      const effort = once.effort && effortsFor(models, model).includes(once.effort) ? once.effort : null;
+      if (once.model && !model) skipped.push(`${once.cli} does not list the model ${once.model}, so it runs with its default`);
+      if (once.effort && !effort) skipped.push(`${once.cli} takes no effort ${once.effort} with that model`);
+      return {
+        cli: once.cli,
+        model: model || effort ? { cli: once.cli, model, effort } : null,
+        account: input.project[once.cli]?.account ?? input.account[once.cli]?.account ?? null,
+        source: "request",
+        ...(skipped.length && { skipped: skipped.join("; ") }),
+      };
+    }
+  }
   for (const [source, list] of [
     ["project", input.project],
     ["account", input.account],
@@ -223,7 +254,7 @@ export function resultNote(card: VisualCheckCard): string {
 
 /** The two tools: request_visual_check for the thread that made the change, submit_visual_check for the evaluator. */
 export function visualCheckTools(host: {
-  request?: (input: { branch: string; repo?: string; what: string }) => Promise<string>;
+  request?: (input: { branch: string; repo?: string; what: string; evaluator?: EvaluatorRequest }) => Promise<string>;
   submit?: (input: { checkId: string; couldNotCheck?: string }) => Promise<string>;
   links?: (checkId: string) => Promise<string>;
 }): Tool[] {
@@ -254,6 +285,16 @@ export function visualCheckTools(host: {
             .min(1)
             .max(4000)
             .describe("What changed and what the evaluator should look at: the screens or routes, how to reach them, and what should be true on each (acceptance criteria)."),
+          evaluator: z
+            .object({
+              cli: CliId,
+              model: z.string().min(1).max(120).optional().describe("A model id the CLI lists."),
+              effort: z.string().min(1).max(30).optional(),
+            })
+            .optional()
+            .describe(
+              "Only when the person asked for a particular CLI, model or effort to judge this check (\"check it with Codex\"). Leave it out otherwise: Myrel picks from the project's and the person's evaluator settings.",
+            ),
         }),
         run: (input) => request(input),
       }),

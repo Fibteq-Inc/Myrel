@@ -59,10 +59,12 @@ import {
   checkFolder,
   checkNotice,
   checkTitle,
+  type EvaluatorRequest,
   evaluatorBrief,
   judgedCard,
   resolveEvaluator,
   resultNote,
+  roundsDone,
   VISUAL_CHECK_TIMEOUT_SEC,
   type VisualCheckRole,
   type VisualCheckState,
@@ -1502,12 +1504,13 @@ export class ThreadAgent extends Agent<Env> {
    * request_visual_check: starts the next round. The evaluator runs on the computer this thread runs
    * on (its branch and the browser are there), with another CLI when the computer has one.
    */
-  private async requestVisualCheck(input: { branch: string; repo?: string; what: string }): Promise<string> {
+  private async requestVisualCheck(input: { branch: string; repo?: string; what: string; evaluator?: EvaluatorRequest }): Promise<string> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const current = this.visualCheck();
     if (current?.status === "running") return `Round ${current.round} of the visual check is still running; its result will wake you. End your turn.`;
-    if (current && current.round >= VISUAL_CHECK_ROUNDS && !(await this.personWroteSince(current.resultSeq ?? 0))) {
+    const done = roundsDone(current);
+    if (current && done >= VISUAL_CHECK_ROUNDS && !(await this.personWroteSince(current.resultSeq ?? 0))) {
       return `${VISUAL_CHECK_ROUNDS} rounds are done. Ask the person with ask_decision whether to accept the work as it is, run one more round, or change the brief; another round can start once they have answered.`;
     }
     const row = this.runningTask();
@@ -1517,45 +1520,62 @@ export class ThreadAgent extends Agent<Env> {
     }
     const thread = await project.getThread(threadId);
     if (!thread) throw new Error("This thread is gone.");
-    // A computer whose runner said its browser cannot start is told now, not after an evaluator's turn.
+    const tr = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language === "tr";
+    const id = current?.id ?? createId("check");
+    const round = done + 1;
+    const folder = checkFolder(id, round);
+    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], sheets: [], diffs: [] };
+    const post = async (body: VisualCheckCard) => {
+      const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatVisualCheck(body) });
+      if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      return m;
+    };
+    // A computer whose runner said its browser cannot start is told now, not after an evaluator's
+    // turn, and on a card, so people see the command wherever they read the thread.
     const browser = await runnerBrowser(this.env, spec.runnerId).catch(() => undefined);
     if (browser?.status === "missing-libs") {
-      return `Not started: this computer lacks the system libraries the check's browser needs (${(browser.missing ?? []).slice(0, 5).join(", ")}). The computer's owner runs once: ${VISUAL_CHECK_DEPS_COMMAND} . Tell the person that in one line, carry on without the check, and ask for it again once they have run it (the runner picks the change up when it restarts).`;
+      const missing = (browser.missing ?? []).slice(0, 5).join(", ");
+      const note = tr
+        ? `Başlamadı: bu bilgisayarda kontrolün tarayıcısının ihtiyaç duyduğu sistem kütüphaneleri eksik (${missing}). Bilgisayarın sahibi aşağıdaki komutu bir kez çalıştırsın; runner yeniden başlayınca kontrol yeniden istenebilir.`
+        : `Not started: this computer lacks the system libraries the check's browser needs (${missing}). The computer's owner runs the command below once; once the runner restarts the check can be asked for again.`;
+      const m = await post({ ...card, status: "not_checked", note, command: VISUAL_CHECK_DEPS_COMMAND });
+      this.setMeta("visual_check", JSON.stringify({ id, round, status: "not_checked", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch, unstarted: true } satisfies VisualCheckState));
+      return `Not started: this computer lacks the system libraries the check's browser needs (${missing}); a card in this thread shows the person the command to run (${VISUAL_CHECK_DEPS_COMMAND}). Tell them in one line, carry on without the check, and ask for it again once they have run it.`;
     }
     const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId });
     const othersAllowed = await runnerHasFeature(this.env, spec.runnerId, "agent-clis");
     const requester = this.getMeta("requester") || null;
-    // The project's choice, else the person's own, else another CLI than this one (see resolveEvaluator).
+    // The one asked for this check, else the project's choice, else the person's own, else another
+    // CLI than this one (see resolveEvaluator).
     const choice = resolveEvaluator({
+      ...(input.evaluator && { once: input.evaluator }),
       ...(await checkModels(this.env, projectId, requester)),
       clis: workspace?.clis ?? [],
       coderCli: spec.harness,
       othersAllowed,
     });
     const cli = choice.cli;
-    const id = current?.id ?? createId("check");
-    const round = (current?.round ?? 0) + 1;
-    const folder = checkFolder(id, round);
-    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], sheets: [], diffs: [] };
-    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatVisualCheck(card) });
-    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
-    const tr = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language === "tr";
+    const m = await post(card);
     const reason =
-      choice.source === "project"
+      choice.source === "request"
         ? tr
-          ? "Görsel kontrol: projenin değerlendirici ayarı"
-          : "Visual check: the project's evaluator setting"
-        : choice.source === "account"
+          ? "Görsel kontrol: bu kontrol için istenen"
+          : "Visual check: asked for this check"
+        : choice.source === "project"
           ? tr
-            ? "Görsel kontrol: kişinin değerlendirici ayarı"
-            : "Visual check: the person's evaluator setting"
-          : cli === spec.harness
+            ? "Görsel kontrol: projenin değerlendirici ayarı"
+            : "Visual check: the project's evaluator setting"
+          : choice.source === "account"
             ? tr
-              ? "Görsel kontrol: bu bilgisayarda başka bir CLI yok"
-              : "Visual check: no other CLI on this computer"
-            : tr
-              ? "Görsel kontrol: işi yapandan farklı bir CLI"
-              : "Visual check: another CLI than the one that made the change";
+              ? "Görsel kontrol: kişinin değerlendirici ayarı"
+              : "Visual check: the person's evaluator setting"
+            : cli === spec.harness
+              ? tr
+                ? "Görsel kontrol: bu bilgisayarda başka bir CLI yok"
+                : "Visual check: no other CLI on this computer"
+              : tr
+                ? "Görsel kontrol: işi yapandan farklı bir CLI"
+                : "Visual check: another CLI than the one that made the change";
     const cliLabel = CLI_NAMES[cli as keyof typeof CLI_NAMES] ?? cli;
     const runsAs = choice.model
       ? `${cliLabel} (${[choice.model.model && `model ${choice.model.model}`, choice.model.effort && `effort ${choice.model.effort}`].filter(Boolean).join(", ")})`
@@ -1577,13 +1597,13 @@ export class ThreadAgent extends Agent<Env> {
       await project.editMessage(m.id, formatVisualCheck({ ...card, evaluatorThreadId: evaluator.id }));
     } catch (err) {
       const note = `The evaluator thread could not start: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600);
-      this.setMeta("visual_check", JSON.stringify({ ...state, status: "not_checked" }));
+      this.setMeta("visual_check", JSON.stringify({ ...state, status: "not_checked", unstarted: true } satisfies VisualCheckState));
       await project.editMessage(m.id, formatVisualCheck({ ...card, status: "not_checked", note }));
       return `Not started. ${note}`;
     }
     await this.schedule(VISUAL_CHECK_TIMEOUT_SEC, "visualCheckTimeout", { id, round });
     const skipped = choice.skipped ? ` (Not as set: ${choice.skipped}.)` : "";
-    return `Round ${round} started: an evaluator thread with ${runsAs} checks branch ${input.branch}, and its card is in this thread.${skipped} Its result wakes you. Do not open the pull request yet; end your turn.`;
+    return `Round ${round} started: an evaluator thread with ${runsAs} checks branch ${input.branch}, and its card is in this thread.${skipped} Its result wakes you. The pull request does not have to wait for it: open it now if you would anyway, then end your turn.`;
   }
 
   /** A person wrote in this thread after the given message. */

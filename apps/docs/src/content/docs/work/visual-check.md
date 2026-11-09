@@ -1,0 +1,54 @@
+---
+title: Visual check
+description: A second agent looks at what a change does to the screen and sends back what to fix.
+---
+
+With the visual check on, work that changes what people see (a page, a component, styles, a game) is looked at by a second agent before its thread is resolved. It opens the app in a browser, takes screenshots at phone, tablet and desktop widths in light and dark, and sends what must change back to the agent that made the change.
+
+## Turn it on
+
+**Project settings** → **General** → **Checks** → **Visual check**, then **Save**. It is off by default. Nothing else needs setting up: the agents call the check themselves when a change affects the screen, not for backend, test or docs changes.
+
+Each check is an extra agent run on your computer, so it uses your CLI's usage like any other task.
+
+## What happens
+
+1. The agent that made the change pushes its branch and asks for a check. A **Visual check** card appears in its thread.
+2. Myrel opens an evaluator thread just below it in the thread list. It runs on the same computer, with another CLI than the one that made the change when the computer has one: an agent grades its own work too kindly.
+3. The evaluator first runs automatic checks (blank or frozen screens, pages that scroll sideways, buttons cut off or covered, broken images, errors, accessibility problems), then looks at the screenshots itself.
+4. The card shows the result, and the first agent fixes what it lists and asks for the next round.
+
+The pull request does not wait for the check. The thread cannot be resolved while a round is running. There are two rounds per piece of work; for a third the agent asks you first.
+
+## The card
+
+| Shows | What it means |
+|---|---|
+| **Passed** | Nothing must change |
+| **Needs fixes** | The **Must fix** list says what, numbered |
+| **Look not judged** | Only the automatic checks ran: the model did not prove it could see the screenshots |
+| **Could not check** | The check did not run; the card says why |
+
+Each finding in **Must fix** is framed and numbered in red on its screenshot; with findings on several screens, pick a screen above the picture. **Full result** and the contact sheets (every width and theme of a screen side by side) open in the project's files.
+
+- **Accept anyway**: the findings need no fixing. The agent carries on without another round for them.
+- **Approve as reference**: this round's screenshots become the approved look. Later checks compare against them, show what changed (**Changed: …**), and judge only the changed and new screens.
+
+## Choose who judges
+
+By default Myrel picks another CLI than the one that made the change, and one that is not at its usage limit. To choose yourself, tick the CLIs that may judge, each with its model and effort:
+
+- for one project: **Project settings** → **General** → **Checks**, under the switch once it is on
+- for all your projects that tick none: **Settings** → **Visual check evaluator**
+
+For one check only, say so in the thread ("check it with Codex"). A CLI, model or effort the computer does not have is skipped, and the agent is told.
+
+## Needs a browser
+
+The check runs Chromium on your computer. Myrel downloads it the first time. On Linux it may also need system libraries; then **Devices** and the check's card show the command to run once (it asks for your password):
+
+```sh
+sudo npx playwright@1.64.1 install-deps chromium
+```
+
+A round that could not start for this does not count toward the two. Tasks that run in the cloud cannot be checked yet.

@@ -64,6 +64,8 @@ export const VisualCheckCard = z.object({
   summary: z.string().max(400).optional(),
   /** Why it could not run, for not_checked; otherwise a short note. */
   note: z.string().max(600).optional(),
+  /** A command the computer's owner runs so the next round can start (shown to copy). */
+  command: z.string().max(300).optional(),
 });
 export type VisualCheckCard = z.infer<typeof VisualCheckCard>;
 export type VisualCheckCardInput = z.input<typeof VisualCheckCard>;

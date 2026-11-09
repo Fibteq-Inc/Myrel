@@ -136,6 +136,26 @@ describe("evaluator setting", () => {
       source: "auto",
     });
   });
+
+  it("puts the CLI asked for one check first, keeping only the model and effort it lists", () => {
+    const project = { claude: { model: "opus", effort: "high", account: "work" } };
+    expect(resolveEvaluator({ ...base, once: { cli: "claude", model: "sonnet" }, project, account: {}, coderCli: "codex" })).toEqual({
+      cli: "claude",
+      model: { cli: "claude", model: "sonnet", effort: null },
+      account: "work",
+      source: "request",
+    });
+    // Even the coder's own CLI, when that is what was asked for.
+    expect(resolveEvaluator({ ...base, once: { cli: "codex" }, project, account: {}, coderCli: "codex" })).toMatchObject({ cli: "codex", model: null, source: "request" });
+    const loose = resolveEvaluator({ ...base, once: { cli: "codex", model: "gpt-9", effort: "max" }, project, account: {}, coderCli: "claude" });
+    expect(loose).toMatchObject({ cli: "codex", model: null, source: "request" });
+    expect(loose.skipped).toContain("gpt-9");
+    expect(loose.skipped).toContain("max");
+    // A CLI not on this computer falls to the settings.
+    const away = resolveEvaluator({ ...base, once: { cli: "cursor" }, project, account: {}, coderCli: "codex" });
+    expect(away).toMatchObject({ cli: "claude", source: "project" });
+    expect(away.skipped).toContain("cursor");
+  });
 });
 
 describe("built-in skill", () => {

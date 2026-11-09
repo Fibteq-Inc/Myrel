@@ -694,7 +694,7 @@ export const tr: Catalog = {
   "projectSettings.cloudCli": "Bulutta CLI",
   "projectSettings.cloudCliHint": "Claude Code Claude modelleriyle ve Fireworks modelleriyle, Codex OpenAI uyumlu modellerle (OpenAI, Fireworks) çalışır. Başka bir modelle bulut turları OpenCode ile çalışır.",
   "projectSettings.checks": "Kontroller",
-  "projectSettings.checksDescription": "Kullanıcının gördüğü bir şeyi değiştiren işler, pull request'ten önce ikinci bir ajan tarafından kontrol edilir.",
+  "projectSettings.checksDescription": "Kullanıcının gördüğü bir şeyi değiştiren işler, thread çözülmeden önce ikinci bir ajan tarafından kontrol edilir.",
   "projectSettings.visualCheck": "Görsel kontrol",
   "projectSettings.visualCheckHint": "Ayrı bir ajan uygulamayı açar, telefon, tablet ve masaüstü genişliğinde, açık ve koyu temada ekran görüntüsü alır ve bulduklarını değişikliği yapan ajana geri gönderir. Her kontrol fazladan bir ajan turu harcar ve bilgisayarda tarayıcı ister.",
   "visualCheck.title": "Görsel kontrol · tur {round}",
