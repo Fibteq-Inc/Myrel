@@ -696,7 +696,7 @@ export const en = {
   "projectSettings.cloudCli": "CLI in the cloud",
   "projectSettings.cloudCliHint": "Claude Code runs with Claude and Fireworks models, Codex with OpenAI-compatible ones (OpenAI, Fireworks). With another model, cloud turns run with OpenCode.",
   "projectSettings.checks": "Checks",
-  "projectSettings.checksDescription": "Work that changes what people see is checked by a second agent before its pull request.",
+  "projectSettings.checksDescription": "Work that changes what people see is checked by a second agent before its thread is resolved.",
   "projectSettings.visualCheck": "Visual check",
   "projectSettings.visualCheckHint": "A separate agent opens the app, takes screenshots at phone, tablet and desktop widths in light and dark, and sends what it finds back to the agent that made the change. Each check is an extra agent run and needs a browser on the computer.",
   "visualCheck.title": "Visual check · round {round}",

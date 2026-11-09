@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { cn, errorMessage } from "../../lib/ui";
 import { useProjectView } from "../project-view";
+import { Command } from "../runners";
 
 const TONE: Record<VisualCheckStatus, { icon: typeof CircleCheck; className: string }> = {
   running: { icon: LoaderCircle, className: "text-accent" },
@@ -97,6 +98,11 @@ export function VisualCheckCard({ card, projectId, threadId }: { card: Card; pro
       </div>
 
       {card.note && <p className="mt-2 text-xs text-body">{card.note}</p>}
+      {card.command && (
+        <div className="mt-2">
+          <Command>{card.command}</Command>
+        </div>
+      )}
 
       {images.length > 0 && (
         <div className="mt-3">

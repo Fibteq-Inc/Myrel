@@ -28,7 +28,7 @@ export default defineConfig({
         { label: "Projects", items: ["projects/create", "projects/members", "projects/knowledge"] },
         {
           label: "Working with Myrel",
-          items: ["work/asking", "work/threads", "work/decisions", "work/artifacts", "work/finishing"],
+          items: ["work/asking", "work/threads", "work/decisions", "work/artifacts", "work/visual-check", "work/finishing"],
         },
         {
           label: "Your computer",

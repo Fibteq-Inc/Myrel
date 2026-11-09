@@ -2,8 +2,9 @@ import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
 import type { VisualCheckAction, VisualCheckCard as Card, VisualCheckStatus } from "@myrel/protocol";
 import { useMutation } from "@tanstack/react-query";
+import * as Clipboard from "expo-clipboard";
 import { type Href, useRouter } from "expo-router";
-import { CircleAlert, CircleCheck, CircleDashed, CircleX, FileImage, ScanEye } from "lucide-react-native";
+import { CircleAlert, CircleCheck, CircleDashed, CircleX, Copy, FileImage, ScanEye } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSession } from "../lib/session";
 import { makeStyles, mono, radius, useColors } from "../theme";
@@ -69,6 +70,21 @@ export function VisualCheckCard({ card, projectId, threadId }: { card: Card; pro
         </Pressable>
       )}
       {!!card.note && <Text style={styles.note}>{card.note}</Text>}
+      {!!card.command && (
+        <View style={styles.command}>
+          <Text selectable style={styles.commandText}>
+            {card.command}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("runners.copyCommand")}
+            hitSlop={10}
+            onPress={() => void Clipboard.setStringAsync(card.command!)}
+          >
+            <Copy size={16} color={colors.subtle} />
+          </Pressable>
+        </View>
+      )}
 
       {card.blocking.length > 0 && (
         <View style={{ gap: 8 }}>
@@ -148,6 +164,8 @@ const useStyles = makeStyles((colors) =>
     statusText: { fontSize: 13, fontWeight: "600" },
     meta: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
     note: { color: colors.body, fontSize: 13, lineHeight: 18 },
+    command: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.edge, backgroundColor: colors.panel, paddingHorizontal: 10, paddingVertical: 8 },
+    commandText: { flex: 1, color: colors.fg, fontSize: 12.5, fontFamily: mono },
     section: { color: colors.fg, fontSize: 13, fontWeight: "600", marginTop: 6 },
     finding: { gap: 2 },
     findingHead: { flexDirection: "row", alignItems: "center", gap: 8 },
