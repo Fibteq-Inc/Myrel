@@ -59,6 +59,7 @@ describe("the coordinator", () => {
     evaluatorThreadId: null,
     folder: "checks/chk_1/2",
     blocking: [{ n: 1, screen: "home@390-light", problem: "Cut off.", evidence: "home-390-light.png" }],
+    acceptance: [],
     sheets: [],
     diffs: [],
     ...over,
@@ -148,7 +149,7 @@ describe("resolving work that changed what people see", () => {
         (instance as unknown as { finishedThreads(inbox: unknown[]): FinishedThread[] }).finishedThreads([{ kind: "finished", threadId: thread.id }]),
       );
     expect((await finished())[0]?.check).toBeNull();
-    const round: VisualCheckCard = { id: "chk_x", round: 1, status: "passed", evaluatorThreadId: null, folder: "checks/chk_x/1", blocking: [], sheets: [], diffs: [] };
+    const round: VisualCheckCard = { id: "chk_x", round: 1, status: "passed", evaluatorThreadId: null, folder: "checks/chk_x/1", blocking: [], acceptance: [], sheets: [], diffs: [] };
     await projectAgent.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: "thread-agent", body: formatVisualCheck(round) });
     await projectAgent.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: "thread-agent", body: formatVisualCheck({ ...round, round: 2, status: "failed", acceptedBy: "İsmail" }) });
     await projectAgent.updateThread(thread.id, { resolved: true });

@@ -179,14 +179,72 @@ async function serveDir(dir) {
   return { base: `http://127.0.0.1:${port}`, stop: () => server.close() };
 }
 
+/** The criteria of all expect steps, once each: met only when it held in every screenshot that ran it. */
+function criteriaOf(shots) {
+  const byCriterion = new Map();
+  for (const shot of shots) {
+    for (const c of shot.criteria ?? []) {
+      const key = `${shot.screen}\0${c.criterion}`;
+      const e = byCriterion.get(key) ?? { criterion: c.criterion, screen: shot.screen, met: true, heldOn: [], failedOn: [], evidence: shot.file };
+      if (c.met) e.heldOn.push(shot.id);
+      else {
+        if (e.met) e.evidence = shot.file;
+        e.met = false;
+        e.failedOn.push(shot.id);
+      }
+      byCriterion.set(key, e);
+    }
+  }
+  return [...byCriterion.values()];
+}
+
 // ---------------------------------------------------------------- one screen at one size
 
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
-async function runActions(page, actions = []) {
+/**
+ * An `expect` step: what must be true at this point of a flow, checked until `timeout` ms (5000)
+ * pass. Several conditions in one step must all hold. Returns what it expected and whether it held.
+ */
+async function expectStep(page, e) {
+  const conditions = [];
+  if (e.text != null) conditions.push([`the text "${e.text}" shows`, () => page.getByText(String(e.text)).first().isVisible()]);
+  if (e.visible) conditions.push([`${e.visible} shows`, () => page.locator(e.visible).first().isVisible()]);
+  if (e.hidden) conditions.push([`${e.hidden} does not show`, async () => !(await page.locator(e.hidden).first().isVisible())]);
+  if (e.url) conditions.push([`the address matches ${e.url}`, async () => new RegExp(e.url).test(page.url())]);
+  if (e.count) conditions.push([`${e.count[1]} × ${e.count[0]}`, async () => (await page.locator(e.count[0]).count()) === Number(e.count[1])]);
+  if (e.value) conditions.push([`${e.value[0]} holds "${e.value[1]}"`, async () => (await page.locator(e.value[0]).first().inputValue({ timeout: 1000 })) === String(e.value[1])]);
+  if (!conditions.length) throw new Error(`An expect step needs text, visible, hidden, url, count or value: ${JSON.stringify(e)}`);
+  const what = conditions.map(([w]) => w).join(" and ");
+  const until = Date.now() + Number(e.timeout ?? 5000);
+  for (;;) {
+    const held = await Promise.all(conditions.map(([, test]) => test().catch(() => false)));
+    if (held.every(Boolean)) return { what, met: true };
+    if (Date.now() > until) return { what: conditions.filter((_, i) => !held[i]).map(([w]) => w).join(" and "), met: false };
+    await page.waitForTimeout(200);
+  }
+}
+
+/** A step that did not hold: the flow stops there, and its criterion is not met. */
+class Unmet extends Error {
+  constructor(what, criterion) {
+    super(`expected ${what}`);
+    this.criterion = criterion;
+  }
+}
+
+/** Runs a screen's steps in order; each expect step's result goes to `criteria`. */
+async function runActions(page, actions = [], criteria = []) {
   for (const step of actions) {
     const [kind, arg] = Object.entries(step)[0] ?? [];
     switch (kind) {
+      case "expect": {
+        const r = await expectStep(page, arg);
+        const criterion = arg.criterion ?? r.what;
+        criteria.push({ criterion, met: r.met, ...(!r.met && { failed: r.what }) });
+        if (!r.met) throw new Unmet(r.what, criterion);
+        break;
+      }
       case "click": await page.locator(arg).first().click({ timeout: 10_000 }); break;
       case "hover": await page.locator(arg).first().hover({ timeout: 10_000 }); break;
       case "fill": await page.locator(arg[0]).first().fill(String(arg[1]), { timeout: 10_000 }); break;
@@ -285,11 +343,18 @@ async function shoot(ctx) {
     await page.evaluate((seed) => window.__myrelTest.seed?.(seed), config.seed ?? 1).catch((err) => add("blocking", "game-hook-error", `__myrelTest.seed() threw: ${err.message}`));
   }
 
+  const criteria = [];
   try {
-    await runActions(page, screen.actions);
+    await runActions(page, screen.actions, criteria);
   } catch (err) {
-    add("blocking", "action-failed", `A scripted step failed: ${err.message.split("\n")[0]}`);
+    if (err instanceof Unmet) add("blocking", "expect-failed", `Not met: ${err.criterion} (${err.message} after the screen's steps; the screenshot shows where the flow stopped).`);
+    else add("blocking", "action-failed", `A scripted step failed: ${err.message.split("\n")[0]}`);
   }
+  // Steps after a failed one never ran: their criteria are not met either.
+  for (const step of (screen.actions ?? []).filter((a) => a.expect).slice(criteria.length)) {
+    criteria.push({ criterion: step.expect.criterion ?? JSON.stringify(step.expect).slice(0, 120), met: false, failed: "not reached" });
+  }
+  if (criteria.length) shot.criteria = criteria;
   if (screen.waitFor) {
     await page.locator(screen.waitFor).first().waitFor({ timeout: 15_000 }).catch(() => add("blocking", "missing-element", `Expected element never appeared: ${screen.waitFor}`));
   }
@@ -478,9 +543,12 @@ async function main() {
     for (const screen of config.screens) {
       screen.name = screenName(screen.name ?? screen.path ?? "screen");
       const rows = [];
-      for (const theme of config.themes) {
+      // A flow can differ by width (a menu only on phones): a screen may name its own widths and themes.
+      const themes = screen.themes ? config.themes.filter((t) => screen.themes.includes(t)) : config.themes;
+      const viewports = screen.viewports ? config.viewports.filter((v) => screen.viewports.map(Number).includes(v.width)) : config.viewports;
+      for (const theme of themes) {
         const row = [];
-        for (const vp of config.viewports) {
+        for (const vp of viewports) {
           log(`${screen.name} @ ${vp.width}x${vp.height} ${theme}`);
           const r = await shoot({ browser, pixels, axeSource: deps.axeSource, config, base, screen, vp, theme, outDir });
           shots.push(r.shot);
@@ -533,6 +601,8 @@ async function main() {
       sheets,
       shots,
       findings: [...blocking, ...warnings],
+      // Every expect step's criterion with the screenshots it held or failed on, for verdict.json's acceptance.
+      criteria: criteriaOf(shots),
     };
     await writeFile(join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 
@@ -541,6 +611,7 @@ async function main() {
     for (const [severity, list] of [["BLOCKING", blocking], ["warning", warnings]]) {
       for (const g of groupFindings(list).slice(0, 20)) console.log(`  ${severity} ${g.screen} [${g.where}] ${g.id}: ${g.message}`);
     }
+    for (const c of report.criteria) console.log(`  ${c.met ? "✓" : "✗"} ${c.criterion}${c.met ? "" : ` (not met on ${c.failedOn.join(", ")})`}`);
     console.log(`Contact sheets: ${sheets.map((s) => s.file).join(", ") || "none"}; vision probe: probe.png`);
   } finally {
     await cleanup();

@@ -19,6 +19,17 @@ const check = (ok, what) => {
   if (!ok) failed++;
 };
 
+// A sign-in flow with expect steps; the silent build forgets the error and the email.
+const signIn = (suffix) => [
+  { fill: ["input[name=email]", "ada@example.com"] },
+  { fill: ["input[name=password]", "wrong"] },
+  { click: "button[type=submit]" },
+  { expect: { text: "Wrong email or password", value: ["input[name=email]", "ada@example.com"], timeout: 1500, criterion: `A wrong password shows an error and keeps the email${suffix}` } },
+  { fill: ["input[name=password]", "right"] },
+  { click: "button[type=submit]" },
+  { expect: { url: "#projects$", text: "Projects", criterion: `The right password signs in${suffix}` } },
+];
+
 const config = {
   serve: fixtures,
   viewports: [390, 1280],
@@ -28,6 +39,8 @@ const config = {
     { name: "broken", path: "/broken.html" },
     { name: "blank", path: "/blank.html" },
     { name: "explains", path: "/explains.html" },
+    { name: "flow", path: "/flow.html", viewports: [1280], themes: ["light"], actions: signIn("") },
+    { name: "flow-silent", path: "/flow.html?bug=silent", viewports: [1280], themes: ["light"], actions: signIn(" (silent build)") },
     { name: "game", path: "/game.html", motion: true, actions: [{ step: 4000 }], frames: 3, expectMotion: true, axe: false },
     { name: "frozen", path: "/game.html?bug=frozen", motion: true, actions: [{ step: 4000 }], frames: 3, expectMotion: true, axe: false },
   ],
@@ -40,7 +53,7 @@ execFileSync(process.execPath, [join(here, "capture.mjs"), "--config", join(out,
 const report = JSON.parse(await readFile(join(out, "report.json"), "utf8"));
 const on = (screen, sev) => new Set(report.findings.filter((f) => f.screen.startsWith(`${screen}@`) && (!sev || f.severity === sev)).map((f) => f.id));
 
-check(report.shots.length === 24, "24 screenshots (6 screens × 2 widths × 2 themes)");
+check(report.shots.length === 26, "26 screenshots (6 screens × 2 widths × 2 themes, and 2 flows at one width and theme)");
 check(on("clean").size === 0, `clean page has no findings (${[...on("clean")].join(", ") || "none"})`);
 const broken = on("broken", "blocking");
 for (const id of ["overflow-x", "covered-control", "cut-off-control", "broken-image", "exception", "axe:button-name"]) check(broken.has(id), `broken page: ${id} is blocking`);
@@ -64,6 +77,13 @@ check(!said.some((s) => s.includes("help-article") || s.includes("empty")), "exp
 check(explains[0]?.details?.items.find((i) => i.kind === "how-to")?.text === "Bu sayfada tüm görevlerinizi görebilirsiniz.", "explains-ui quotes the whole sentence");
 check((explains[0]?.boxes ?? []).length === 3, "explains-ui frames what it found");
 check(!on("explains").has("overlapping-text"), "text wrapping after a bold word does not count as overlapping");
+const crit = (c) => report.criteria.find((x) => x.criterion === c);
+check(on("flow").size === 0 || !on("flow", "blocking").size, `a flow whose steps hold has no blocking findings (${[...on("flow", "blocking")].join(", ") || "none"})`);
+check(crit("A wrong password shows an error and keeps the email")?.met === true && crit("The right password signs in")?.met === true, "a flow's criteria are met when its expect steps hold");
+check(on("flow-silent", "blocking").has("expect-failed"), "a step that does not hold is blocking");
+const silent = crit("A wrong password shows an error and keeps the email (silent build)");
+check(silent?.met === false && silent.failedOn[0] === "flow-silent@1280-light" && silent.evidence === "flow-silent-1280-light.png", "the unmet criterion names its screenshot");
+check(crit("The right password signs in (silent build)")?.met === false, "a criterion after a failed step is not met");
 
 // Verdict rules.
 const verdict = (v) => writeFile(join(out, "verdict.json"), JSON.stringify(v));
@@ -107,6 +127,28 @@ check(r.code === 1 && /does not exist/.test(r.out), "missing evidence file is se
 await verdict({ verdict: "deterministic_only", evaluator: { cli: "selftest", model: "text-only" }, dismissed: dismissAll });
 r = runVerdict();
 check(r.code === 0 && /look not judged/.test(r.out), "deterministic_only says the look was not judged");
+
+// Acceptance: an unmet criterion fails, also one the evaluator called met while its step failed.
+const keepFlow = dismissAll.filter((d) => !(d.id === "expect-failed" && d.screen === "flow-silent"));
+await verdict({
+  ...base,
+  verdict: "pass",
+  evaluator: { ...base.evaluator, probeAnswer: "K7FQX" },
+  dismissed: keepFlow,
+  acceptance: [{ criterion: "A wrong password shows an error and keeps the email (silent build)", met: true, evidence: "flow-silent-1280-light.png" }],
+});
+r = runVerdict();
+v = JSON.parse(await readFile(join(out, "verdict.json"), "utf8"));
+check(r.code === 0 && v.verdict === "fail", "an unmet flow criterion fails the check");
+check(v.acceptance.find((a) => a.criterion.startsWith("A wrong password") && a.criterion.endsWith("(silent build)"))?.met === false, "a criterion called met while its step failed is set to not met");
+check(v.acceptance.some((a) => a.criterion === "The right password signs in" && a.met), "the flows' met criteria are merged into acceptance");
+await verdict({ ...base, verdict: "pass", evaluator: { ...base.evaluator, probeAnswer: "K7FQX" }, dismissed: dismissAll, acceptance: [{ criterion: "Three plans show", met: false }] });
+r = runVerdict();
+check(r.code === 1 && /give it the screenshot/.test(r.out), "an unmet criterion without a screenshot is sent back");
+await verdict({ ...base, verdict: "pass", evaluator: { ...base.evaluator, probeAnswer: "K7FQX" }, dismissed: dismissAll, acceptance: [{ criterion: "Three plans show", met: false, evidence: "clean-1280-light.png" }] });
+r = runVerdict();
+v = JSON.parse(await readFile(join(out, "verdict.json"), "utf8"));
+check(r.code === 0 && v.verdict === "fail" && v.blocking.some((b) => b.problem === "Not met: Three plans show" && b.evidence === "clean-1280-light.png"), "an unmet criterion becomes a blocking finding with its screenshot");
 
 // Findings are framed on their screenshots: the deterministic one from its element's box, the
 // evaluator's from the box it gave.

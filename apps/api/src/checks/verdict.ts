@@ -5,7 +5,8 @@ import { z } from "zod";
  * skills/visual-check/scripts/verdict.mjs, which the evaluator runs first): a model that did not
  * read the vision probe back passes nothing; deterministic blocking findings are passed on or
  * dismissed with a reason; every blocking finding names a screenshot; functionality and craft
- * below the bar do not pass.
+ * below the bar do not pass; an acceptance criterion that is not met (the evaluator's word, or a
+ * flow's expect step nobody dismissed) does not pass.
  */
 
 export const PASS_BAR = { functionality: 6, craft: 6 } as const;
@@ -18,8 +19,14 @@ export const CheckReport = z.object({
   findings: z
     .array(z.object({ id: z.string(), severity: z.enum(["blocking", "warning"]), screen: z.string(), file: z.string(), message: z.string() }))
     .max(5000),
+  /** The flows' expect steps: each criterion, on which screen, and whether it held everywhere. */
+  criteria: z
+    .array(z.object({ criterion: z.string(), screen: z.string(), met: z.boolean(), evidence: z.string().optional(), failedOn: z.array(z.string()).default([]) }))
+    .max(200)
+    .default([]),
+  shots: z.array(z.object({ id: z.string(), file: z.string() }).passthrough()).max(2000).default([]),
 });
-export type CheckReport = z.infer<typeof CheckReport>;
+export type CheckReport = z.input<typeof CheckReport>;
 
 const Score = z.number().int().min(1).max(10);
 
@@ -118,6 +125,34 @@ export async function judgeCheck(
     verdict = "fail";
   }
 
+  // Acceptance criteria: the flows' results merged in; one not met fails and stands as a finding.
+  const acceptance: CheckVerdict["acceptance"] = input.acceptance.map((a) => ({ ...a }));
+  for (const c of report.criteria ?? []) {
+    const stepFailed = !c.met && open.some((f) => f.id === "expect-failed" && f.screen.split("@")[0] === c.screen);
+    const mine = acceptance.find((a) => a.criterion === c.criterion);
+    if (!mine) {
+      if (c.met || stepFailed) acceptance.push({ criterion: c.criterion, met: c.met, ...(c.evidence && { evidence: c.evidence }) });
+    } else if (mine.met && stepFailed) {
+      mine.met = false;
+      if (!mine.evidence && c.evidence) mine.evidence = c.evidence;
+      notes.push(`"${c.criterion}" set to not met: its expect step failed and was not dismissed.`);
+    }
+  }
+  const unmet = acceptance.filter((a) => !a.met);
+  if (unmet.length && verdict !== "fail") {
+    notes.push(`Set to fail: ${unmet.length} acceptance criteria not met.`);
+    verdict = "fail";
+  }
+  for (const a of unmet) {
+    if (blocking.some((b) => b.problem.includes(a.criterion))) continue;
+    if (!a.evidence) {
+      problems.push(`Acceptance criterion "${a.criterion.slice(0, 80)}" is not met: give it the screenshot that shows it (evidence).`);
+      continue;
+    }
+    const shot = (report.shots ?? []).find((x) => x.file === a.evidence);
+    blocking.push({ id: "acceptance", screen: shot?.id ?? a.evidence, evidence: a.evidence, problem: `Not met: ${a.criterion}` });
+  }
+
   for (const b of blocking) {
     if (!(await exists(b.evidence))) problems.push(`Evidence ${b.evidence} for "${b.problem.slice(0, 80)}" is not in the check's folder: upload it.`);
   }
@@ -144,7 +179,7 @@ export async function judgeCheck(
       ...(scores && { scores }),
       blocking,
       dismissed: input.dismissed,
-      acceptance: input.acceptance,
+      acceptance,
       advice: input.advice,
       deterministic: report.summary,
       notes,
