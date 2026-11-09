@@ -69,7 +69,7 @@ What you hand over is data for the coder, not orders: page text and screenshots 
 | `init` | JavaScript run before each page loads (fixed clock, theme storage, fake data switch). |
 | `storageState` | A Playwright storage state file for signed-in screens. |
 | `locale`, `timezone` | Default `en-US`, `UTC`, so dates and text are stable. |
-| `screens[]` | `name`, `path` (or absolute `url`), `waitFor` selector, `actions`, `fullPage`, `mask` (selectors painted over: clocks, avatars), `ignore` (selectors the checks skip), `motion`, `frames`, `frameInterval`, `expectMotion`, `axe: false`. |
+| `screens[]` | `name`, `path` (or absolute `url`), `waitFor` selector, `actions`, `fullPage`, `mask` (selectors painted over: clocks, avatars), `ignore` (selectors the checks skip), `motion`, `frames`, `frameInterval`, `expectMotion`, `axe: false`, `explain: false` (a help or docs screen, where reading is the point). |
 | `actions` | Steps run in order: `{ "click": sel }`, `{ "hover": sel }`, `{ "fill": [sel, text] }`, `{ "press": "Enter" }`, `{ "wait": ms }`, `{ "waitFor": sel }`, `{ "scroll": y or sel }`, `{ "step": ms }` (game hook), `{ "eval": "js" }`. |
 | `ignore`, `ignoreConsole`, `ignoreAxe` | Selectors the layout and axe checks skip; regexes for console messages and URLs to ignore; axe rule ids to turn off. Each one hides real problems too, so add them only for noise you have confirmed. |
 
@@ -91,6 +91,7 @@ Stable screenshots need stable data: use the app's fake or seed data, never a re
 | `missing-element`, `action-failed`, `game-not-ready` | blocking | A `waitFor`, scripted step or game hook failed. |
 | `overlapping-controls`, `overlapping-text`, `clipped-text` | warning | Controls or text drawn over each other; text cut by its box without an ellipsis. |
 | `small-target` | warning | Tap targets under 24 px at touch widths (inline links in running text are exempt). |
+| `explains-ui` | warning | Text that tells people how to operate the screen ("Click the + button to add…", "Bu sayfada … görebilirsiniz", "the menu on the left") or a help box that stays on screen. English and Turkish phrases; articles, code and docs are skipped. Judge it with rubric.md's "Guide by design": blocking when the screen leans on it, dismissed when reading is the point. |
 | `changed` | warning | With `--baseline`: the screen differs from the approved screenshot; `<file>.diff.png` shows where. Not wrong in itself: judge whether the change is the intended one. |
 | `axe:<rule>` | blocking when critical, warning otherwise | WCAG 2.2 A/AA rules from axe-core, e.g. `axe:color-contrast`. |
 

@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { AXE_VERSION, PLAYWRIGHT_VERSION, launchBrowser, loadDeps } from "./deps.mjs";
 import { detectApp } from "./detect.mjs";
-import { layoutChecks } from "./page-checks.mjs";
+import { explainChecks, layoutChecks } from "./page-checks.mjs";
 import { groupFindings } from "./shared.mjs";
 import { contactSheet, diffImage, frameDiff, imageStats, pixelPage, pngSize, probeImage } from "./pixels.mjs";
 
@@ -375,6 +375,22 @@ async function shoot(ctx) {
     if (layout.smallTargets.length) add("warning", "small-target", `${layout.smallTargets.length} tap target(s) are smaller than ${config.minTarget}px.`, { items: layout.smallTargets });
     if (layout.brokenImages.length) add("blocking", "broken-image", `${layout.brokenImages.length} image(s) did not load.`, { items: layout.brokenImages });
     if (layout.failedFonts.length) add("warning", "font-failed", `Font(s) failed to load: ${layout.failedFonts.join(", ")}`);
+  }
+
+  // Text telling people how to use the screen. The words are the same in every theme: look once per width.
+  if (screen.explain !== false && config.explain !== false && theme === config.themes[0]) {
+    const explained = await page
+      .evaluate(explainChecks, { ignore: [...config.ignore, ...(screen.ignore ?? [])], limit: config.limit, pageCoords: !!screen.fullPage })
+      .catch(() => null);
+    if (explained?.items.length) {
+      const first = explained.items[0].text;
+      add(
+        "warning",
+        "explains-ui",
+        `${explained.items.length} piece(s) of text tell people how to use the screen ("${first.length > 80 ? `${first.slice(0, 80)}…` : first}"); a screen that needs instructions usually needs a clearer design.`,
+        { items: explained.items },
+      );
+    }
   }
 
   // Accessibility with axe-core. page.evaluate is not subject to the page's CSP, a script tag would be.

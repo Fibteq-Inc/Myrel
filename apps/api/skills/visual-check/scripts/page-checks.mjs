@@ -174,8 +174,12 @@ export function layoutChecks(opts) {
     textEls.add(el);
     const range = document.createRange();
     range.selectNodeContents(t);
-    const r = visibleBox(el, range.getBoundingClientRect());
-    if (r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw && area(r) > 4 && textRects.length < 600) textRects.push({ el, r, text: t.nodeValue.trim().slice(0, 40) });
+    // One box per line: the bounding box of text that wraps after other inline text (a bold
+    // "Note:" then a long sentence) spans the whole first line and would overlap its neighbour.
+    const lines = [...range.getClientRects()]
+      .map((line) => visibleBox(el, line))
+      .filter((r) => r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw && area(r) > 4);
+    if (lines.length && textRects.length < 600) textRects.push({ el, lines, text: t.nodeValue.trim().slice(0, 40) });
   }
   for (const el of textEls) {
     const s = getComputedStyle(el);
@@ -192,10 +196,11 @@ export function layoutChecks(opts) {
     for (let j = i + 1; j < textRects.length; j++) {
       const a = textRects[i], b = textRects[j];
       if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el) || scrollsUnder(a.el, b.el) || scrollsUnder(b.el, a.el)) continue;
-      const shared = intersect(a.r, b.r);
-      if (shared && shared / Math.min(area(a.r), area(b.r)) > 0.25) {
-        push(out.textOverlaps, { a: path(a.el), aText: a.text, b: path(b.el), bText: b.text, box: box(a.r) });
-      }
+      const hit = a.lines.find((ra) => b.lines.some((rb) => {
+        const shared = intersect(ra, rb);
+        return shared && shared / Math.min(area(ra), area(rb)) > 0.25;
+      }));
+      if (hit) push(out.textOverlaps, { a: path(a.el), aText: a.text, b: path(b.el), bText: b.text, box: box(hit) });
     }
   }
 
@@ -220,4 +225,140 @@ export function layoutChecks(opts) {
   out.brokenImages = [...document.images].filter((img) => img.complete && img.naturalWidth === 0 && img.currentSrc && shown(img)).slice(0, limit).map((img) => ({ target: path(img), src: img.currentSrc.slice(0, 200), box: box(img.getBoundingClientRect()) }));
   out.failedFonts = document.fonts ? [...document.fonts].filter((f) => f.status === "error").slice(0, limit).map((f) => f.family) : [];
   return out;
+}
+
+/**
+ * Text that tells people how to operate the screen ("Click the + button to add a task", "Bu
+ * sayfada projelerinizi görebilirsiniz"), the usual sign of a screen that explains itself instead of
+ * guiding by design. Runs inside the page like layoutChecks. English and Turkish phrases; the model
+ * judges other languages from the screenshots (rubric.md).
+ *
+ * @param {{ ignore: string[], limit: number, pageCoords: boolean }} opts
+ */
+export function explainChecks(opts) {
+  const { ignore, limit, pageCoords } = opts;
+  const sx = pageCoords ? window.scrollX : 0;
+  const sy = pageCoords ? window.scrollY : 0;
+  const box = (r) => ({ x: Math.round(r.left + sx), y: Math.round(r.top + sy), w: Math.round(r.width), h: Math.round(r.height) });
+  const vh = window.innerHeight;
+  const isIgnored = (el) => ignore.some((sel) => { try { return el.closest(sel); } catch { return false; } });
+  const shown = (el) => {
+    const s = getComputedStyle(el);
+    if (s.display === "none" || s.visibility === "hidden" || Number(s.opacity) === 0) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  };
+  const hidden = (el) =>
+    !!el.closest('[inert],[aria-hidden="true"]') ||
+    (typeof el.checkVisibility === "function" && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true }));
+  // Prose people came to read (an article, docs, a code sample) may well say "click": not the app's own UI.
+  const prose = 'article,[role="article"],pre,code,kbd,samp,blockquote,[class*="prose"],[class*="markdown"],[class*="docs"],[contenteditable="true"],textarea,[role="textbox"]';
+  const path = (el) => {
+    const parts = [];
+    for (let n = el; n && n.nodeType === 1 && parts.length < 4; n = n.parentElement) {
+      let part = n.tagName.toLowerCase();
+      if (n.id) { parts.unshift(`${part}#${n.id}`); break; }
+      const cls = [...n.classList].filter((c) => c.length < 30).slice(0, 2);
+      if (cls.length) part += `.${cls.join(".")}`;
+      parts.unshift(part);
+      if (n === document.body) break;
+    }
+    return parts.join(" > ");
+  };
+
+  // How-to sentences: an action verb aimed at a control or a place on the screen, "this page lets
+  // you", "here you can", numbered steps of clicks. \b is rewritten to a Unicode word boundary so
+  // Turkish letters count as letters.
+  const W = "[\\p{L}\\p{N}_]";
+  const B = `(?:(?<=${W})(?!${W})|(?<!${W})(?=${W}))`;
+  const rx = (s) => new RegExp(s.replaceAll("\\b", B), "iu");
+  const how = [
+    String.raw`\b(click|tap|press|select|choose|drag|swipe|hover|double[- ]click|right[- ]click)(s|ing)?\b[^.!?\n]{0,50}\b(button|icon|link|menu|tab|toggle|switch|checkbox|field|here|below|above|left|right|top|bottom|corner|sidebar|toolbar)\b`,
+    String.raw`\b(click|tap|press)\b[^.!?\n]{0,40}\bto (add|create|start|open|edit|delete|remove|save|see|view|change|upload|begin|continue|get started)\b`,
+    String.raw`\b(here|on this (page|screen)|in this (section|panel|view|tab)) you('ll| will)? (can|may)\b`,
+    String.raw`\bthis (page|screen|section|panel|dashboard|view|tab) (shows|lists|lets you|allows you|helps you|is where|displays|contains|gives you)\b`,
+    String.raw`\b(use|using) the [^.!?\n]{0,40}\b(button|menu|tab|panel|sidebar|toolbar|field|form|filter|icon|search bar|dropdown|arrow|key)s? (to|on|above|below|at)\b`,
+    String.raw`\bto (add|create|start|open|edit|delete|remove|save|see|view|change|upload|filter|sort|search|get started)\b[^.!?\n]{0,50}, (click|tap|press|select|choose|use|drag)\b`,
+    String.raw`(düğme|buton|simge|ikon|bağlantı|menü|sekme|butona|linke)\p{L}*[^.!?\n]{0,30}(tıklayın|tıklayarak|tıklayınız|dokunun|dokunarak|basın|basarak)`,
+    String.raw`\biçin\b[^.!?\n]{0,60}(tıklayın|tıklayınız|dokunun|basın|seçin|sürükleyin)`,
+    String.raw`\b(simply|just) (click|tap|press|enter|drag|select|type|choose)\b`,
+    String.raw`\b(first|then|next|finally|step \d+)[,:]? (click|tap|press|select|enter|type|choose|drag)\b`,
+    String.raw`\bhow to use (this|the) (app|page|screen|tool|dashboard)\b`,
+    String.raw`(tıkla|tıklay|tıklan|dokun|basın|basarak|basıp|seçerek|sürükle)[^.!?\n]{0,50}(düğme|buton|simge|ikon|bağlantı|menü|sekme|burada|buraya|aşağı|yukarı|sol|sağ|köşe|ekle|oluştur|başla|aç|düzenle|sil|kaydet|yükle)`,
+    String.raw`\bbu (sayfa|ekran|bölüm|panel|alan|sekme)(da|de|dan|den|ya|ye)\b[^.!?\n]{0,80}(yapabilir|edebilir|görebilir|bulabilir|ulaşabilir|ekleyebilir|yönetebilir|izleyebilir|inceleyebilir)`,
+    String.raw`\b(buradan|burada|bu alandan|bu ekrandan|bu sayfadan)\b[^.!?\n]{0,80}(yapabilir|edebilir|görebilir|ekleyebilir|yönetebilir|ulaşabilir)`,
+    String.raw`(kullanarak|aracılığıyla|yardımıyla)[^.!?\n]{0,50}(yapabilir|edebilir|ekleyebilir|oluşturabilir|filtreleyebilir|arayabilir)`,
+    String.raw`\b(önce|ardından|sonra|son olarak|adım \d+)[,:]? [^.!?\n]{0,30}(tıkla|seçin|girin|yazın|dokunun|basın)`,
+    String.raw`\bnasıl kullanılır\b|\bkullanım (kılavuzu|talimat)`,
+  ].map(rx);
+  // The screen narrating its own layout: "the menu on the left", "soldaki menü".
+  const where = [
+    String.raw`\b(button|icon|menu|link|tab|panel|sidebar|toolbar|form|field|filter|search|list|bar|option|setting|control)s? (above|below|on the (left|right)|at the (top|bottom)|in the (top|bottom|upper|lower) (left|right|corner))\b`,
+    String.raw`\b(sağ|sol) ?(üst|alt)(teki|taki|deki|daki)\b`,
+    String.raw`\bthe (left|right|top|bottom|upper|lower)[- ](hand )?(menu|panel|sidebar|corner|toolbar|bar)\b`,
+    String.raw`\b(yukarıdaki|aşağıdaki|soldaki|sağdaki|üstteki|alttaki|köşedeki) (düğme|buton|menü|simge|ikon|form|alan|sekme|bağlantı|panel)`,
+    String.raw`\b(sol|sağ|üst|alt) (taraftaki|köşedeki|menüdeki|paneldeki)\b`,
+  ].map(rx);
+  // Boxes named for help that stay on screen ("hint", "tip", "instructions", "onboarding"), by a
+  // class, id or test id; not utility classes such as cursor-help.
+  const helpWord = /(^|[_-])(hint|help|helper|tip|tips|instruction|instructions|guide|howto|how-to|onboarding|explainer|walkthrough|tutorial)([_-]|$)/i;
+  const helpBox = (n) =>
+    [...n.classList, n.id, n.getAttribute("data-testid") ?? ""].some((w) => w && !/^cursor-|:/.test(w) && helpWord.test(w));
+
+  const blocks = new Map();
+  const blockOf = (el) => {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const d = getComputedStyle(n).display;
+      if (d !== "inline" && d !== "contents") return n;
+    }
+    return el;
+  };
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (t) => (t.nodeValue.trim().length > 2 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+  });
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    const el = t.parentElement;
+    if (!el || ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "OPTION"].includes(el.tagName) || el.closest(prose) || isIgnored(el) || !shown(el) || hidden(el)) continue;
+    const b = blockOf(el);
+    if (!blocks.has(b)) blocks.set(b, b.innerText.replace(/\s+/g, " ").trim());
+  }
+
+  const found = [];
+  for (const [el, text] of blocks) {
+    const count = text.split(" ").filter(Boolean).length;
+    if (count > 400) continue;
+    const sentence = (re) => {
+      const m = re.exec(text);
+      if (!m) return null;
+      // The sentence it is in (innerText's line breaks are already spaces).
+      const dot = Math.max(text.lastIndexOf(". ", m.index), text.lastIndexOf("! ", m.index), text.lastIndexOf("? ", m.index));
+      const from = dot < 0 ? 0 : dot + 2;
+      return text.slice(from, from + 160);
+    };
+    let kind = null;
+    let quote = null;
+    for (const [k, list] of [["layout", where], ["how-to", how]]) {
+      for (const re of list) if (!quote) quote = sentence(re);
+      if (quote) { kind = k; break; }
+    }
+    let at = el;
+    if (!kind && count >= 15) {
+      // The block or one of its three nearest boxes; a page-wide wrapper named "guide" is not a help box.
+      let n = el;
+      for (let up = 0; n && n !== document.body && up < 4; n = n.parentElement, up++) {
+        if (helpBox(n)) { kind = "help-box"; at = n; quote = text.slice(0, 160); break; }
+      }
+    }
+    if (!kind) continue;
+    const r = at.getBoundingClientRect();
+    if (!pageCoords && (r.bottom <= 0 || r.top >= vh)) continue;
+    found.push({ el: at, kind, quote, count, r });
+  }
+  // A block holding a found one says the same thing again: keep the innermost.
+  const items = found
+    .filter((f) => !found.some((o) => o !== f && f.el !== o.el && f.el.contains(o.el)))
+    .filter((f, i, all) => all.findIndex((o) => o.el === f.el) === i)
+    .slice(0, limit)
+    .map((f) => ({ kind: f.kind, target: path(f.el), text: f.quote, words: f.count, box: box(f.r) }));
+  return { items };
 }
