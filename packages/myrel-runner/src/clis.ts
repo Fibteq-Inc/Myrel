@@ -104,7 +104,18 @@ export type CliAdapter = {
   models?(): Promise<CliModel[] | undefined>;
   /** The flags that run this model and effort, both already checked with safeModelArg. */
   modelArgs?(model: TaskModel): string[];
+  /**
+   * For a CLI that can work as the project's coordinator (task.start's `coordinator`): its whole command
+   * line for one turn, before the model flags, with none of its built-in tools, only Myrel's
+   * coordinator server, `system` instead of its own system prompt and no session kept. `dir` is a
+   * private folder for config files, deleted after the run. Null when the installed version cannot run
+   * without its tools; a CLI without it never works as the coordinator.
+   */
+  coordinator?(opts: CoordinatorRun): Promise<{ args: string[]; env?: Record<string, string> } | null>;
 };
+
+/** What a coordinator turn's CLI connects to (see CliAdapter.coordinator). */
+export type CoordinatorRun = { url: string; token: string; dir: string; system: string };
 
 /**
  * Whether a model id or effort from the server may go on the command line. Windows runs the CLI
@@ -323,6 +334,43 @@ const claude: CliAdapter = {
     };
   },
   streamInput: true,
+  async coordinator({ url, token, dir, system }) {
+    if (!(await hasToolsSwitch("claude"))) return null;
+    const config = await privateFile(dir, "mcp.json", {
+      mcpServers: { [MYREL_MCP_SERVER]: { type: "http", url, headers: { Authorization: `Bearer ${token}` }, alwaysLoad: true } },
+    });
+    // A file, not the command line: Windows runs the CLI through a shell, whose command line is short.
+    const prompt = join(dir, "system.md");
+    await writeFile(prompt, system, { mode: 0o600 });
+    return {
+      args: [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        // No built-in tool at all (no commands, files, web or subagents), whatever the computer's access level.
+        "--tools",
+        // Windows: through the shell, an empty argument needs its quotes or it is dropped.
+        process.platform === "win32" ? '""' : "",
+        // Anything not allowed below is refused, never asked about: nobody could answer.
+        "--permission-mode",
+        "dontAsk",
+        "--mcp-config",
+        config,
+        "--strict-mcp-config",
+        "--allowedTools",
+        `mcp__${MYREL_MCP_SERVER}`,
+        "--system-prompt-file",
+        quotePath(prompt),
+        "--disable-slash-commands",
+        "--no-session-persistence",
+      ],
+      env: {
+        ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+        ...(!process.env.MCP_TIMEOUT && { MCP_TIMEOUT: String(MCP_START_TIMEOUT_MS) }),
+      },
+    };
+  },
   line(line, state) {
     const event = parseJson(line);
     if (!event) return;
@@ -1108,6 +1156,24 @@ export async function hasStreamInput(bin: string): Promise<boolean> {
   if (!known) {
     known = output(bin, ["--help"], 10_000).then((help) => !!help?.includes("--replay-user-messages"));
     streamInputs.set(version, known);
+  }
+  return known;
+}
+
+/** Whether each Claude Code version can run with none of its tools, by version. */
+const toolSwitches = new Map<string, Promise<boolean>>();
+
+/**
+ * Whether this computer's Claude Code can run with none of its built-in tools and refuse whatever
+ * was not allowed (`--tools ""`, permission mode dontAsk), asked once per version.
+ */
+export async function hasToolsSwitch(bin: string): Promise<boolean> {
+  const version = await cliVersion(bin);
+  if (!version) return false;
+  let known = toolSwitches.get(version);
+  if (!known) {
+    known = output(bin, ["--help"], 10_000).then((help) => !!help?.includes("--tools <") && help.includes("dontAsk"));
+    toolSwitches.set(version, known);
   }
   return known;
 }

@@ -511,6 +511,93 @@ echo "args: $*" >&2`,
     });
   });
 
+  /** Starts a coordinator turn of `cli` in `folder` (shared) on a computer with full access. */
+  async function coordinatorTurn(folder: string, cli: "claude" | "codex" = "claude") {
+    const config: RunnerConfig = { server: "https://myrel.test/", folders: [{ path: folder, name: "proj" }], access: "full" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    await runner.start({
+      type: "task.start",
+      taskId: "task_01JTEST000000000000000000C",
+      threadId: "thr_01JTEST000000000000000000C",
+      folder,
+      cli,
+      prompt: "route the new message",
+      model: { model: "opus", effort: "low" },
+      agent: { mcpPath: "/api/coordinator-mcp/prj_01JTEST000000000000000000C", token: "t".repeat(32) },
+      coordinator: { system: "You only route." },
+    });
+    return frames.at(-1) as { ok: boolean; result: string };
+  }
+
+  it("runs a coordinator turn without the CLI's tools, in an empty folder of its own, keeping no session", async () => {
+    const args = join(home, "args.txt");
+    const where = join(home, "where.txt");
+    await fakeClaude(`case "$1" in
+--version) echo "9.0.0-coordinator (Claude Code)"; exit 0 ;;
+--help) echo '  --tools <tools...>  Use "" to disable all tools'; echo '  --permission-mode <mode>  (choices: "dontAsk", "plan")'; exit 0 ;;
+esac
+read prompt
+for a in "$@"; do printf '%s\n' "$a"; done > "${args}"
+sys=""; cfg=""; prev=""; for a in "$@"; do [ "$prev" = "--system-prompt-file" ] && sys="$a"; [ "$prev" = "--mcp-config" ] && cfg="$a"; prev="$a"; done
+{ pwd; ls -A; cat "$sys"; echo; cat "$cfg"; } > "${where}"
+echo '{"type":"system","subtype":"init","session_id":"sess-c"}'
+printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$prompt"`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const done = await coordinatorTurn(folder);
+    expect(done).toMatchObject({ ok: true, result: "route the new message" });
+
+    const argv = (await readFile(args, "utf8")).split("\n").slice(0, -1);
+    const after = (flag: string) => argv[argv.indexOf(flag) + 1];
+    // None of its own tools, whatever the computer's access level; anything not allowed is refused.
+    expect(argv).toContain("--tools");
+    expect(after("--tools")).toBe("");
+    expect(after("--permission-mode")).toBe("dontAsk");
+    expect(after("--allowedTools")).toBe("mcp__myrel");
+    expect(argv).toEqual(expect.arrayContaining(["--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands"]));
+    expect(argv).not.toContain("--add-dir");
+    expect(argv).not.toContain("bypassPermissions");
+    expect(after("--model")).toBe("opus");
+    expect(after("--effort")).toBe("low");
+
+    // An empty folder of its own, not the project's; the system prompt and the coordinator's endpoint.
+    // Its working folder lists nothing (`ls -A` printed no line), then come the system prompt and the config.
+    const [cwd, system, config] = (await readFile(where, "utf8")).split("\n");
+    expect(cwd).not.toBe(await realpath(folder));
+    expect(cwd).toContain("myrel-coordinator-");
+    expect(system).toBe("You only route.");
+    expect(JSON.parse(config!)).toEqual({
+      mcpServers: {
+        myrel: {
+          type: "http",
+          url: "https://myrel.test/api/coordinator-mcp/prj_01JTEST000000000000000000C",
+          headers: { Authorization: `Bearer ${"t".repeat(32)}` },
+          alwaysLoad: true,
+        },
+      },
+    });
+    // Its folder (and the token in it) goes once the run ends, and no session waits to be continued.
+    const gone = async () => !(await stat(join(cwd!, "..")).catch(() => null));
+    for (let i = 0; i < 100 && !(await gone()); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(await gone()).toBe(true);
+    expect(await new SessionStore().get("thr_01JTEST000000000000000000C", "claude")).toBeUndefined();
+  });
+
+  it("refuses a coordinator turn for a CLI that cannot run without its own tools", async () => {
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    expect(await coordinatorTurn(folder, "codex")).toMatchObject({ ok: false, result: expect.stringContaining("cannot work as the coordinator") });
+    // A Claude Code too old to switch its tools off.
+    await fakeClaude(`case "$1" in
+--version) echo "1.0.0-old (Claude Code)"; exit 0 ;;
+--help) echo '  --permission-mode <mode>  (choices: "plan")'; exit 0 ;;
+esac
+echo '{"type":"result","subtype":"success","is_error":false,"result":"ran anyway"}'`);
+    expect(await coordinatorTurn(folder)).toMatchObject({ ok: false, result: expect.stringContaining("too old to work as the coordinator") });
+  });
+
   it("gives the agent the project's other shared folders and reports where it works", async () => {
     await fakeClaude(`read prompt
 printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$*"`);

@@ -183,6 +183,8 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "shared-folder": runs a task in the shared folder itself when task.start's `worktree` is false (a project
  * whose threads work in its folder, ProjectSettings.worktrees), and leaves the thread's worktrees out of
  * "file.read" when its `worktrees` is false.
+ * "coordinator": runs task.start's `coordinator` turns (ProjectSettings.coordinator): the CLI with none of
+ * its built-in tools, in an empty folder of its own, with only Myrel's coordinator tools.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -205,6 +207,7 @@ export const RunnerFeature = z.enum([
   "stats",
   "cli-accounts",
   "shared-folder",
+  "coordinator",
 ]);
 
 /**
@@ -541,6 +544,16 @@ export const ServerToRunner = z.discriminatedUnion("type", [
       .optional(),
     /** The turn's GitHub token (feature "git-token"); older runners ignore it. */
     github: TaskGithub.optional(),
+    /**
+     * Present when the CLI works as the project's coordinator for one turn (feature "coordinator",
+     * ProjectSettings.coordinator), with `agent` naming the coordinator's MCP endpoint: `system`
+     * replaces the CLI's own system prompt. Every member's message starts such a turn on this computer,
+     * so the CLI gets none of its built-in tools whatever the computer's access level, works in an
+     * empty folder of its own (`folder` only shows the project is shared here), keeps no session and
+     * takes no connectors, skills, GitHub token or other folders. `threadId` is a fresh id the runner
+     * does nothing with. A CLI that cannot run like that fails the task.
+     */
+    coordinator: z.object({ system: z.string().min(1).max(MAX_TASK_TEXT) }).optional(),
   }),
   /** A new GitHub token for a running task, before its last one expires (feature "git-token"). */
   z.object({ type: z.literal("task.github"), taskId: TaskId, github: TaskGithub }),

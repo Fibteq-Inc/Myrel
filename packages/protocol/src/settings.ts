@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProjectColor, ProjectIcon, ProjectRole } from "./models";
-import { CliAccountId, CliId } from "./runner";
+import { CliAccountId, CliId, RunnerId } from "./runner";
 
 /** Model providers a server can call. Each has its own key format and default model. */
 export const ProviderId = z.enum(["fireworks", "anthropic", "openai"]);
@@ -77,6 +77,52 @@ export type CliModelDefaults = z.infer<typeof CliModelDefaults>;
 export const CheckModels = CliModelDefaults;
 export type CheckModels = CliModelDefaults;
 
+/**
+ * The CLIs a project's coordinator can run with (ProjectSettings.coordinator): only ones that can run
+ * with none of their built-in tools for one run, since every member's message then starts one on a
+ * person's computer. Claude Code can (`--tools ""`); Codex cannot yet, its commands come from many
+ * separate features and it loads the person's own MCP servers.
+ */
+export const COORDINATOR_CLIS = ["claude"] as const satisfies readonly CliId[];
+export const CoordinatorCli = z.enum(COORDINATOR_CLIS);
+export type CoordinatorCli = z.infer<typeof CoordinatorCli>;
+
+/**
+ * How a project's coordinator works. model: with the server's model (ProjectSettings.provider and
+ * model), as always. cli: with a CLI on the computer of the person who turned it on, in a session of
+ * its own each turn and with only Myrel's coordinator tools; the server's model answers whenever it
+ * cannot (the computer offline, the CLI failing or at its limit).
+ */
+export const CoordinatorSettings = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("model") }),
+  z.object({
+    mode: z.literal("cli"),
+    runnerId: RunnerId,
+    /** The computer's name, for the members who do not own it. */
+    computer: z.string(),
+    /** Whose computer it is: the person who turned it on, who alone changes it. */
+    by: z.string(),
+    cli: CliId,
+    /** From the CLI's own list (RunnerCli.models); null: the CLI's own default. */
+    model: z.string().nullable(),
+    effort: z.string().nullable(),
+  }),
+]);
+export type CoordinatorSettings = z.infer<typeof CoordinatorSettings>;
+
+/** Turns the coordinator's CLI on (on one of your own computers with the project's folder) or off. */
+export const CoordinatorInput = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("model") }),
+  z.object({
+    mode: z.literal("cli"),
+    runnerId: RunnerId,
+    cli: CoordinatorCli,
+    model: z.string().trim().min(1).max(200).nullable(),
+    effort: z.string().trim().min(1).max(20).nullable(),
+  }),
+]);
+export type CoordinatorInput = z.infer<typeof CoordinatorInput>;
+
 export const ProjectSettings = z.object({
   name: z.string(),
   provider: ProviderId.nullable(),
@@ -106,6 +152,8 @@ export const ProjectSettings = z.object({
    * queue. Cloud turns always work in their own sandbox. Older servers never send it.
    */
   worktrees: z.boolean().default(true),
+  /** How the coordinator works; older servers never send it. One the app cannot read counts as the server's model. */
+  coordinator: CoordinatorSettings.catch({ mode: "model" }).default({ mode: "model" }),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -124,6 +172,7 @@ export const UpdateProjectSettingsInput = z.object({
   /** Replaces the whole list. */
   checkModels: CheckModels.optional(),
   worktrees: z.boolean().optional(),
+  coordinator: CoordinatorInput.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 

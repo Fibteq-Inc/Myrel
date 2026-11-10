@@ -30,6 +30,7 @@ import { ProjectLookPicker } from "./project-badge";
 import { ConfirmDialog } from "./ui/confirm-dialog";
 import { Switch } from "./ui/controls";
 import { EvaluatorPicker } from "./evaluator-picker";
+import { type CoordinatorDraft, CoordinatorSection, coordinatorChange, coordinatorDraft } from "./coordinator-settings";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
   api,
@@ -366,11 +367,13 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
   const [model, setModel] = useState(settings.model ?? "");
   const [keyId, setKeyId] = useState(settings.keyId ?? "");
   const [cliModels, setCliModels] = useState<CliModelDefaults>(settings.cliModels);
+  const [coordinator, setCoordinator] = useState<CoordinatorDraft>(coordinatorDraft(settings.coordinator));
   useEffect(() => {
     setProvider(settings.provider ?? "");
     setModel(settings.model ?? "");
     setKeyId(settings.keyId ?? "");
     setCliModels(settings.cliModels);
+    setCoordinator(coordinatorDraft(settings.coordinator));
   }, [settings]);
   const save = useSaveSettings(projectId);
 
@@ -386,14 +389,25 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
     // Every CLI it ever had a default for goes along, so one set back to its own default is cleared.
     const clis = new Set([...Object.keys(settings.cliModels), ...Object.keys(cliModels)] as CliId[]);
     const nextCliModels = Object.fromEntries([...clis].map((c) => [c, cliModels[c] ?? { model: null, effort: null }]));
-    save.mutate({ provider: provider || null, model: model.trim() || null, keyId: keyId || null, cliModels: nextCliModels });
+    const nextCoordinator = coordinatorChange(settings.coordinator, coordinator);
+    save.mutate({
+      provider: provider || null,
+      model: model.trim() || null,
+      keyId: keyId || null,
+      cliModels: nextCliModels,
+      ...(nextCoordinator && { coordinator: nextCoordinator }),
+    });
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-10">
+      <CoordinatorSection projectId={projectId} saved={settings.coordinator} value={coordinator} onChange={setCoordinator} disabled={!canManage} />
+
       <Section
         title={t("projectSettings.model")}
-        description={t("projectSettings.modelDescription")}
+        description={
+          settings.coordinator.mode === "cli" ? `${t("projectSettings.modelDescription")} ${t("coordinator.modelFallback")}` : t("projectSettings.modelDescription")
+        }
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("projectSettings.provider")}>

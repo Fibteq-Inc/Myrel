@@ -42,7 +42,9 @@ import { deleteProject } from "../projects/delete";
 import { blockedIds } from "../moderation";
 import { emailEnabled } from "../notifications/channels";
 import { sendInviteEmail } from "../notifications/invite";
-import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, projectWorktrees, setWorkspaceFolder } from "../runners";
+import { coordinatorSettings, type StoredCoordinator } from "../coordinator-cli";
+import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, projectWorktrees, setWorkspaceFolder, workspaceClis } from "../runners";
+import { ownsComputer } from "../sandbox/backend";
 import { parseCliModels } from "../task-model";
 import { parseCheckModels } from "../checks/visual";
 
@@ -147,7 +149,22 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels, worktrees } = input.data;
+    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels, worktrees, coordinator } = input.data;
+    // The coordinator works with a CLI only on a computer of the person turning it on, one with this
+    // project's folder and that CLI: their own subscription, and every member's message starts it there.
+    let storedCoordinator: string | null | undefined;
+    if (coordinator?.mode === "cli") {
+      if (!(await ownsComputer(c.env, coordinator.runnerId, me.id))) {
+        return c.json({ error: "forbidden", message: "Only the computer's owner can have the coordinator work on it." }, 403);
+      }
+      const installed = await workspaceClis(c.env, id, { runnerId: coordinator.runnerId });
+      if (!installed) return c.json({ error: "invalid_input", message: "This project has no folder on that computer." }, 400);
+      if (!installed.clis.some((cli) => cli.id === coordinator.cli)) {
+        return c.json({ error: "invalid_input", message: "That CLI is not on that computer." }, 400);
+      }
+      const { runnerId, cli, model: cliModel, effort } = coordinator;
+      storedCoordinator = JSON.stringify({ mode: "cli", runnerId, cli, model: cliModel, effort, by: me.id } satisfies StoredCoordinator);
+    } else if (coordinator) storedCoordinator = null;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -173,6 +190,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(visualCheck !== undefined && { visualCheck }),
         ...(checkModels !== undefined && { checkModels: Object.keys(checkModels).length ? JSON.stringify(checkModels) : null }),
         ...(worktrees !== undefined && { worktrees }),
+        ...(storedCoordinator !== undefined && { coordinator: storedCoordinator }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -844,11 +862,13 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       visualCheck: projects.visualCheck,
       checkModels: projects.checkModels,
       worktrees: projects.worktrees,
+      coordinator: projects.coordinator,
     })
     .from(projects)
     .where(eq(projects.id, projectId));
   return {
     ...row!,
+    coordinator: await coordinatorSettings(env, projectId, row!.coordinator),
     provider: row!.provider as ProjectSettings["provider"],
     icon: ProjectIcon.nullable().catch(null).parse(row!.icon),
     color: ProjectColor.nullable().catch(null).parse(row!.color),

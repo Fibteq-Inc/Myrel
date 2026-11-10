@@ -139,6 +139,7 @@ describe("project settings", () => {
       visualCheck: false,
       checkModels: {},
       worktrees: true,
+      coordinator: { mode: "model" },
     });
     const claude = await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "claude" }));
     expect(claude.settings.cloudCli).toBe("claude");

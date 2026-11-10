@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } from "@myrel/protocol";
@@ -80,6 +80,7 @@ export class TaskRunner {
     // The login the CLI runs with: its own, or another the person added (Claude Code's config folder).
     const login = accountEnv(config, task.cli, task.account);
     if ("error" in login) return fail(login.error);
+    if (task.coordinator) return this.startCoordinator(task, task.coordinator.system, login);
 
     // Read-only tasks change nothing, so they can share the folder. A project whose threads work in its
     // folder itself (its setting, task.worktree false) shares it too; Myrel then runs one of its turns at a time.
@@ -182,6 +183,39 @@ export class TaskRunner {
   }
 
   /**
+   * One turn of the project's coordinator (task.start's `coordinator`). Every member's message starts
+   * one on this computer, so the CLI gets none of its built-in tools whatever this computer's access
+   * level, an empty folder of its own to work in, and no session, connectors, skills, GitHub token or
+   * other folders: only Myrel's coordinator tools.
+   */
+  private async startCoordinator(task: TaskStart, system: string, login: Record<string, string>): Promise<void> {
+    const fail = (result: string) => this.send({ type: "task.done", taskId: task.taskId, ok: false, result });
+    const config = this.opts.config();
+    const adapter = ADAPTERS[task.cli];
+    if (!task.agent || !config.server) return fail("A coordinator turn needs Myrel's coordinator endpoint.");
+    if (!adapter.coordinator) return fail(`${adapter.bin} cannot work as the coordinator: it cannot run without its own tools.`);
+    // The config files (they hold the turn's token) stay outside the folder the CLI works in.
+    const dir = await mkdtemp(join(tmpdir(), "myrel-coordinator-"));
+    const cleanup = () => rm(dir, { recursive: true, force: true }).catch(() => {});
+    try {
+      const cwd = join(dir, "work");
+      await mkdir(cwd);
+      const url = `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`;
+      const run = await adapter.coordinator({ url, token: task.agent.token, dir, system });
+      if (!run) {
+        await cleanup();
+        return fail(`This computer's ${adapter.bin} is too old to work as the coordinator, which needs it without its own tools. Update it.`);
+      }
+      (this.opts.log ?? (() => {}))(`▶ ${adapter.id}${task.account ? `@${task.account}` : ""} as the coordinator`);
+      const env = { ...login, ...run.env };
+      await this.attempt(task, { cwd, adapter, agent: { args: [] }, env, dirs: [], asks: false, skills: null, where: "", cleanup, fixed: run.args }, undefined, task.prompt);
+    } catch (err) {
+      await cleanup();
+      fail(`Could not start ${adapter.bin} as the coordinator: ${errorLine(err)}`);
+    }
+  }
+
+  /**
    * People's new messages for a running task, mid-turn ("task.steer"): true once its CLI took them.
    * Only Codex's app server and Claude Code's streaming input take them; for other CLIs they reach the
    * agent with its next Myrel tool call.
@@ -213,6 +247,8 @@ export class TaskRunner {
       appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "approvalsReviewer" | "config" | "ask">;
       /** Claude Code's streaming input instead of a prompt on a stdin that ends at once. */
       stream?: boolean;
+      /** A coordinator turn's whole command line (CliAdapter.coordinator), instead of args(): it keeps no session either. */
+      fixed?: string[];
     },
     resume: string | undefined,
     prompt: string,
@@ -223,7 +259,7 @@ export class TaskRunner {
     // The prompt lists the skills; only the runner knows where they are on this computer.
     const withSkills = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
     // A sandbox AppArmor blocks fails every command; the agent is told why, and the fix, instead of retrying.
-    const blocked = sandboxed(adapter.id, config.access) ? await sandboxNote(adapter.id).catch(() => null) : null;
+    const blocked = !run.fixed && sandboxed(adapter.id, config.access) ? await sandboxNote(adapter.id).catch(() => null) : null;
     const text = blocked ? `${withSkills}\n\n${blocked}` : withSkills;
     const input = adapter.input ? adapter.input(text, config.access) : text;
     // A CLI that reads the prompt only from a file gets a private one, deleted when the run ends.
@@ -232,7 +268,13 @@ export class TaskRunner {
     if (promptFile) await writeFile(promptFile, input, { mode: 0o600 });
     // The app server takes the model in the session; its flags are agent()'s config overrides.
     const extra = [...(run.appServer ? [] : modelFlags(adapter, task.model)), ...agent.args];
-    const args = run.appServer ? ["app-server", ...agent.args] : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile, stream: run.stream });
+    const args = run.fixed
+      ? [...run.fixed, ...modelFlags(adapter, task.model)]
+      : run.appServer
+        ? ["app-server", ...agent.args]
+        : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile, stream: run.stream });
+    // A coordinator turn starts afresh each time: nothing to continue next turn.
+    const keepsSession = !run.fixed && RESUMES.has(task.cli);
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: childEnv(run.env),
@@ -293,7 +335,7 @@ export class TaskRunner {
       reportLimits(state.limits);
       // Saved as soon as the CLI names it, not only at the end: a run stopped midway (the runner
       // restarting for an update) is then continued in the same session instead of a new one.
-      if (state.sessionId && state.sessionId !== savedSession && RESUMES.has(task.cli)) {
+      if (state.sessionId && state.sessionId !== savedSession && keepsSession) {
         savedSession = state.sessionId;
         void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
       }
@@ -392,7 +434,7 @@ export class TaskRunner {
           return resolve(true);
         }
         // The session now holds this turn too, so the next one can continue it with only what is new.
-        if (state.sessionId && RESUMES.has(task.cli)) {
+        if (state.sessionId && keepsSession) {
           await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
         }
         const result =

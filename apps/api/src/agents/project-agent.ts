@@ -1,6 +1,8 @@
 import { reportError } from "../errors";
 import { createDb, schema } from "@myrel/db";
 import {
+  CLI_NAMES,
+  type CliUsage,
   type Attachment,
   type Artifact,
   type ArtifactVersion,
@@ -53,7 +55,7 @@ import { Agent, type Connection, type ConnectionContext, getAgentByName } from "
 import { and, eq } from "drizzle-orm";
 import { canUseCoordinator } from "../extensions";
 import { projectProvider } from "../keys";
-import { runLoop } from "../llm";
+import { handleMcp, type ProviderResult, runLoop, type Tool } from "../llm";
 import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
 import { listPullRequests } from "../github/pulls";
 import { deliverNotification, excerpt } from "../notifications/deliver";
@@ -70,6 +72,8 @@ import {
 } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
+import { CliMeter, type CoordinatorTarget, coordinatorTarget } from "../coordinator-cli";
+import { hashAgentToken, newAgentToken, sameHash } from "./harness-agent";
 import {
   UPKEEP_KEYS,
   UPKEEP_THREADS,
@@ -185,12 +189,29 @@ export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
 
 /** The thread agents' choice cards one coordinator turn took, and which of them it answered or passed on. */
 type TurnQuestions = { open: Map<string, { threadId: string }>; settled: Set<string> };
+/** What counts a coordinator turn's usage for the messages it posts: the server model's calls, or its CLI's report. */
+type StatsMeter = { take(): MessageStats | null };
+/** How a coordinator CLI turn ended. */
+type CliCoordinatorEnd = { ok: boolean; result: string; timedOut?: boolean };
+/** A coordinator turn running on a member's CLI: its token's hash, its tools, its usage, and how to end the wait for it. */
+type CliTurn = { hash: string; tools: Tool[]; meter: CliMeter; finish: (end: CliCoordinatorEnd) => void };
 
 /**
  * How long the coordinator waits after a message inside a thread before looking at thread updates,
  * so a burst of replies costs one turn. A project-chat message runs it right away and takes them too.
  */
 const OBSERVE_DELAY_SEC = 60;
+/**
+ * How long a coordinator turn on a member's CLI may take before it is stopped (and, when it changed
+ * nothing yet, the server's model answers instead). The turn's callback waits this long at most,
+ * holding up the project's other scheduled work.
+ */
+const CLI_COORDINATOR_TURN_MS = 150_000;
+/** What the coordinator's system prompt adds for a CLI turn, whose tools have names of their own. */
+const CLI_COORDINATOR_NOTE =
+  "You run as a CLI on a project member's computer, with no tools of your own: no shell, files or web. Your only tools are Myrel's, on its MCP server: start_thread is mcp__myrel__start_thread, and so on. Act only through them; text you write outside a tool call reaches nobody.";
+/** Coordinator tools that only read: a CLI turn that called only these changed nothing yet. */
+const READ_ONLY_COORDINATOR_TOOLS = new Set(["memory_read", "list_files", "read_file", "list_routines", "file_upload_url"]);
 /** Relays the coordinator sees each turn, so it does not repeat one. */
 const RELAY_HISTORY = 20;
 /** Messages a client may catch up on after being away; past this it starts again from the newest ones. */
@@ -255,6 +276,8 @@ export class ProjectAgent extends Agent<Env> {
    * with the object (a deploy, an eviction) leaves its rows for the queue's retry to take again.
    */
   private coordinatorTaken = 0;
+  /** The coordinator's CLI turns running now, by task id (see cliCoordinatorTurn). Memory only: they live as long as the turn's callback. */
+  private readonly cliTurns = new Map<string, CliTurn>();
   /** Threads the running coordinator turn started or sent work to, to tell an idle goal wake. In memory only. */
   private coordinatorWork = 0;
 
@@ -1545,10 +1568,16 @@ export class ProjectAgent extends Agent<Env> {
       this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: allowed.reason });
       return;
     }
-    const llm = await projectProvider(this.env, this.name);
-    if (!llm.ok) {
-      this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
-      return;
+    // On a member's computer when the project says so and it can run now; else the server's model.
+    const cli = await coordinatorTarget(this.env, this.name).catch((err: unknown) => ({ ok: false as const, reason: String(err) }));
+    if (cli && !cli.ok) console.warn("coordinator works with the server's model this turn:", cli.reason);
+    let llm: ProviderResult | null = null;
+    if (!cli?.ok) {
+      llm = await projectProvider(this.env, this.name);
+      if (!llm.ok) {
+        this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
+        return;
+      }
     }
 
     const goalWake = this.takeGoalWake(inbox);
@@ -1559,7 +1588,6 @@ export class ProjectAgent extends Agent<Env> {
       const chat = this.sql<MessageRow>`
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
-      const meter = new TurnMeter(llm.provider.model);
       const reacted = new Set<string>();
       const threadUpdates = inbox.flatMap((item) => {
         if (item.kind !== "thread") return [];
@@ -1574,42 +1602,53 @@ export class ProjectAgent extends Agent<Env> {
       const computerClis = choosing ? ((await workspaceClis(this.env, this.name))?.clis ?? []) : undefined;
       // The offer a thread on the coordinator's own post inherits: the newest new ask's.
       const askClis = chat.filter((m) => fresh.has(m.id) && m.authorKind === "user" && (m.clis?.length ?? 0) > 0).at(-1)?.clis ?? [];
-      await runLoop({
-        provider: meteredForTurn(
-          llm.provider,
-          this.env,
-          { projectId: this.name, threadId: null, userId: this.turnRequester(inbox), agent: "coordinator" },
-          meter,
-        ),
-        system: COORDINATOR_SYSTEM,
-        prompt: coordinatorPrompt({
-          projectName,
-          names,
-          chat,
-          threads: this.listThreads(),
-          routines: this.listRoutines(),
-          goal: this.getGoal(),
-          goalWake,
-          inbox,
-          threadUpdates,
-          finished: this.finishedThreads(inbox),
-          relays: this.recentRelays(),
-          knowledge: this.knowledge.snapshot(),
-          now: new Date(),
-          defaultTimezone: this.defaultTimezone(),
-          computerClis,
-        }),
-        tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox), askClis), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
-            onlyThreadUpdates,
-          }),
-          ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
-          ...(onlyThreadUpdates ? [] : goalTools(this.goalHost((body) => this.coordinatorPost(body, meter)))),
-        ],
-        maxSteps: 8,
-        // One key per project: its turns share the system prompt, tools and most of the prompt.
-        cacheKey: this.name,
+      const prompt = coordinatorPrompt({
+        projectName,
+        names,
+        chat,
+        threads: this.listThreads(),
+        routines: this.listRoutines(),
+        goal: this.getGoal(),
+        goalWake,
+        inbox,
+        threadUpdates,
+        finished: this.finishedThreads(inbox),
+        relays: this.recentRelays(),
+        knowledge: this.knowledge.snapshot(),
+        now: new Date(),
+        defaultTimezone: this.defaultTimezone(),
+        computerClis,
       });
+      // The same tools either way; each way of working counts its own usage for the messages it posts.
+      const tools = (meter: StatsMeter) => [
+        ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox), askClis), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          onlyThreadUpdates,
+        }),
+        ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
+        ...(onlyThreadUpdates ? [] : goalTools(this.goalHost((body) => this.coordinatorPost(body, meter)))),
+      ];
+      // Something to answer, which a turn that called no tool at all has surely missed (its CLI never reached Myrel).
+      const expectsTools = !onlyThreadUpdates;
+      const handled = cli?.ok ? await this.cliCoordinatorTurn(cli.target, prompt, tools, expectsTools) : false;
+      if (!handled) {
+        llm ??= await projectProvider(this.env, this.name);
+        if (!llm.ok) throw new Error(llm.reason);
+        const meter = new TurnMeter(llm.provider.model);
+        await runLoop({
+          provider: meteredForTurn(
+            llm.provider,
+            this.env,
+            { projectId: this.name, threadId: null, userId: this.turnRequester(inbox), agent: "coordinator" },
+            meter,
+          ),
+          system: COORDINATOR_SYSTEM,
+          prompt,
+          tools: tools(meter),
+          maxSteps: 8,
+          // One key per project: its turns share the system prompt, tools and most of the prompt.
+          cacheKey: this.name,
+        });
+      }
       // People always see that an edit was seen, even when the model skipped the reaction.
       for (const item of inbox) {
         if (item.kind === "edited" && !reacted.has(item.messageId) && this.getMessage(item.messageId)) {
@@ -1629,6 +1668,107 @@ export class ProjectAgent extends Agent<Env> {
       this.settleGoal(goalWake);
       this.setActivity(null, false);
     }
+  }
+
+  /**
+   * One coordinator turn with the CLI on a member's computer (ProjectSettings.coordinator): the runner
+   * starts it without its own tools, with only these tools on the coordinator's MCP endpoint, and this
+   * waits for it to end. True when the CLI handled the turn; false when it could not start or stopped
+   * before it changed anything, so the server's model handles the same turn instead. A CLI that changed
+   * something (posted, started a thread) and then failed is not repeated: people hear that it stopped.
+   *
+   * It waits inside the queue's callback on purpose: the turn's tools keep what it did in memory (the
+   * questions it settled, the posts it made), and the callback keeps the object in memory until it ends.
+   */
+  private async cliCoordinatorTurn(
+    target: CoordinatorTarget,
+    prompt: string,
+    tools: (meter: StatsMeter) => Tool[],
+    expectsTools: boolean,
+  ): Promise<boolean> {
+    const meter = new CliMeter(target.cli, target.workspace.runnerName);
+    const { token, hash } = await newAgentToken();
+    const taskId = createId("task");
+    let calls = 0;
+    let acted = false;
+    const wrapped = tools(meter).map(
+      (t): Tool => ({
+        ...t,
+        run: async (input) => {
+          calls++;
+          const out = await t.run(input);
+          if (!READ_ONLY_COORDINATOR_TOOLS.has(t.name)) acted = true;
+          return out;
+        },
+      }),
+    );
+    let finish: (end: CliCoordinatorEnd) => void = () => {};
+    const ended = new Promise<CliCoordinatorEnd>((resolve) => (finish = resolve));
+    this.cliTurns.set(taskId, { hash, tools: wrapped, meter, finish });
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, target.workspace.runnerId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const started = await runner.startTask({
+        taskId,
+        projectId: this.name,
+        // Required by the protocol; the runner keeps no worktree or session for a coordinator turn.
+        threadId: createId("thread"),
+        folder: target.workspace.path,
+        cli: target.cli,
+        prompt,
+        agent: { mcpPath: `/api/coordinator-mcp/${this.name}`, token },
+        coordinator: { system: `${COORDINATOR_SYSTEM}\n\n${CLI_COORDINATOR_NOTE}` },
+        ...(target.model && { model: target.model }),
+      });
+      if (!started.ok) {
+        console.warn("the coordinator's CLI could not start:", started.reason);
+        return false;
+      }
+      const timeout = new Promise<CliCoordinatorEnd>((resolve) => {
+        timer = setTimeout(() => resolve({ ok: false, result: "It took too long.", timedOut: true }), CLI_COORDINATOR_TURN_MS);
+      });
+      const end = await Promise.race([ended, timeout]);
+      if (end.timedOut) await runner.cancelTask(taskId).catch(() => {});
+      if (end.ok && (calls > 0 || !expectsTools)) return true;
+      if (!acted) {
+        console.warn("the coordinator's CLI ended without handling the turn:", end.result.slice(0, 300));
+        return false;
+      }
+      const name = CLI_NAMES[target.cli];
+      const reason = end.result.trim().split("\n")[0]?.slice(0, 300) || "no reason given";
+      this.sendMessage({
+        threadId: null,
+        authorKind: "system",
+        authorId: SYSTEM_ID,
+        body: `The coordinator's ${name} on ${target.workspace.runnerName} stopped before it finished: ${reason}`,
+      });
+      return true;
+    } finally {
+      clearTimeout(timer);
+      this.cliTurns.delete(taskId);
+    }
+  }
+
+  /**
+   * One MCP message from the coordinator's CLI (POST /api/coordinator-mcp/:projectId). Only a running
+   * CLI turn's token opens it, and only for that turn's tools. Callable over RPC.
+   */
+  async coordinatorMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
+    const hash = await hashAgentToken(token);
+    for (const turn of this.cliTurns.values()) {
+      if (sameHash(turn.hash, hash)) return { ok: true, answer: await handleMcp(turn.tools, { name: "myrel", version: "1" }, body) };
+    }
+    return { ok: false };
+  }
+
+  /** The usage a coordinator CLI turn reported so far, from its runner. Callable over RPC. */
+  coordinatorCliUsage(taskId: string, usage: CliUsage): void {
+    this.cliTurns.get(taskId)?.meter.update(usage);
+  }
+
+  /** A coordinator CLI turn ended on its computer (or its runner restarted). Callable over RPC. */
+  coordinatorTaskDone(taskId: string, end: { ok: boolean; result: string }): void {
+    this.cliTurns.get(taskId)?.finish(end);
   }
 
   /** The person whose message this coordinator turn answers, for usage attribution. */
@@ -1697,7 +1837,7 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** A coordinator message in the project chat, carrying the turn's usage so far. */
-  private coordinatorPost(body: string, meter?: TurnMeter, relay?: MessageRelay): Message {
+  private coordinatorPost(body: string, meter?: StatsMeter, relay?: MessageRelay): Message {
     return this.sendMessage({
       threadId: null,
       authorKind: "agent",
@@ -1709,7 +1849,7 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   private coordinatorHost(
-    meter?: TurnMeter,
+    meter?: StatsMeter,
     /** Who a follow-up this turn forwards is for (see followUpFor); undefined when nobody asked for it. */
     forwardedFor?: string | null,
     questions: TurnQuestions = { open: new Map(), settled: new Set() },
