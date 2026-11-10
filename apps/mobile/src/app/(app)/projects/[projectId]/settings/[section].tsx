@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { CliModelSettings } from "../../../../../components/project-settings/cli-models";
+import { CoordinatorSettingsSection } from "../../../../../components/project-settings/coordinator";
 import { ConnectorSettings } from "../../../../../components/project-settings/connectors";
 import { FolderSettings } from "../../../../../components/project-settings/folders";
 import { DeleteProject, GeneralSettings, WorktreeSettings } from "../../../../../components/project-settings/general";
@@ -45,6 +46,7 @@ export default function ProjectSettingsSectionScreen() {
           )}
           {known === "model" && (
             <>
+              <CoordinatorSettingsSection projectId={projectId} canManage={canManage} />
               <ModelSettings projectId={projectId} canManage={canManage} />
               <CliModelSettings projectId={projectId} canManage={canManage} />
             </>

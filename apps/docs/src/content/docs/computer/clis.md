@@ -63,6 +63,17 @@ Then:
 
 A thread that switches accounts starts a new Claude Code session, with the thread's history. A new account has none of your `~/.claude` settings or plugins. If an account is removed from the computer, the thread's next turn runs with Claude Code's own login and says so. Use accounts that are all yours: Claude's terms don't allow sharing a login with someone else. Needs runner 0.34.0 or newer.
 
+## The coordinator on your CLI
+
+The coordinator, which routes every message in the project chat, normally works with the server's model. You can have it work with Claude Code on your own computer instead, in **Project settings › Model › Coordinator**:
+
+- **Works with**: **A CLI on my computer**. Then pick the **Computer** (one of yours that has the project's folder), the **CLI**, and its **Model** and **Effort** from the CLI's own list. These show only while a CLI is picked.
+- Each coordinator turn then runs on that computer with your subscription, and any member's message starts one. Myrel shows no cost for them.
+- The CLI gets none of its own tools: no commands, files or web, whatever the computer's access level. It works in an empty folder of its own, with only Myrel's coordinator tools, and starts a fresh session each turn.
+- When it cannot answer (the computer is offline, the runner is too old, the CLI fails or is at its limit), the server's model answers that turn. A CLI turn that already did something and then stopped is not repeated; the chat says it stopped.
+
+Only the computer's owner turns this on or changes it. Other owners and admins see whose computer it runs on and can switch it back to the server's model. Only Claude Code can do this for now, since it can run without its own tools. Needs runner 0.38.0 or newer.
+
 ## Usage limits
 
 For Claude Code and Codex, **Devices** shows how much of the 5-hour and weekly limits you have used, for each Claude Code account on its own. The CLI picker marks a CLI **near its limit** or **at its limit**.

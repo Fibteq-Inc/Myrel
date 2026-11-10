@@ -1,4 +1,4 @@
-import { API_VERSION, type ServerInfo, ThreadId } from "@myrel/protocol";
+import { API_VERSION, ProjectId, type ServerInfo, ThreadId } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -84,6 +84,20 @@ const app = new Hono<AppEnv>()
     if (body === undefined) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
     const thread = await getAgentByName(c.env.THREAD_AGENT, threadId.data);
     const result = await thread.agentMcp(token, body);
+    if (!result.ok) return c.json({ error: "unauthorized" }, 401);
+    return result.answer === null ? c.body(null, 202) : c.json(result.answer);
+  })
+  // MCP endpoint of the coordinator while it works with a member's CLI (ProjectSettings.coordinator): the
+  // bearer token is the one the project gave that coordinator turn, which opens only its tools.
+  .on(["GET", "DELETE"], "/coordinator-mcp/:projectId", (c) => c.body(null, 405))
+  .post("/coordinator-mcp/:projectId", async (c) => {
+    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const projectId = ProjectId.safeParse(c.req.param("projectId"));
+    if (!token || !projectId.success) return c.json({ error: "unauthorized" }, 401);
+    const body: unknown = await c.req.json().catch(() => undefined);
+    if (body === undefined) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
+    const project = await getAgentByName(c.env.PROJECT_AGENT, projectId.data);
+    const result = await project.coordinatorMcp(token, body);
     if (!result.ok) return c.json({ error: "unauthorized" }, 401);
     return result.answer === null ? c.body(null, 202) : c.json(result.answer);
   })

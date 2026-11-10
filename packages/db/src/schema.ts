@@ -133,6 +133,12 @@ export const projects = sqliteTable("projects", {
    * default). Off: threads work in the project's folder itself, one turn at a time per computer.
    */
   worktrees: integer("worktrees", { mode: "boolean" }).notNull().default(true),
+  /**
+   * The coordinator works with a CLI on a member's computer: JSON { mode: "cli", runnerId, cli, model,
+   * effort, by } (CoordinatorSettings in @myrel/protocol, without the computer's name). null: with the
+   * server's model, as always.
+   */
+  coordinator: text("coordinator"),
   /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
   activeCount: integer("active_count").notNull().default(0),
   /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */

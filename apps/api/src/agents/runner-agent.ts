@@ -50,6 +50,11 @@ export type TaskStart = {
    * only runners with feature "shared-folder"): one such turn of the project at a time, see claimFolder.
    */
   shared?: boolean;
+  /**
+   * The CLI works as the project's coordinator for one turn (only runners with feature "coordinator"):
+   * what it reports goes to the project, not to a thread (`threadId` is a fresh id nothing uses).
+   */
+  coordinator?: { system: string };
 };
 export type TaskStartResult = { ok: true } | { ok: false; reason: string };
 /** A thread's turn may work in the project's shared folder now, or waits for `busy`, the thread working there. */
@@ -72,6 +77,8 @@ type TaskRow = {
   status: "running" | "done" | "failed";
   /** 1: it works in the project's folder itself (TaskStart.shared). */
   shared: number;
+  /** 1: a turn of the project's coordinator (TaskStart.coordinator), reported to the project. */
+  coordinator: number;
 };
 
 /**
@@ -98,6 +105,10 @@ export class RunnerAgent extends Agent<Env> {
     // Added with projects whose threads work in their folder itself (TaskStart.shared).
     if (!this.sql<{ name: string }>`PRAGMA table_info(tasks)`.some((c) => c.name === "shared")) {
       this.sql`ALTER TABLE tasks ADD COLUMN shared INTEGER NOT NULL DEFAULT 0`;
+    }
+    // Added with the coordinator working on a member's CLI (TaskStart.coordinator).
+    if (!this.sql<{ name: string }>`PRAGMA table_info(tasks)`.some((c) => c.name === "coordinator")) {
+      this.sql`ALTER TABLE tasks ADD COLUMN coordinator INTEGER NOT NULL DEFAULT 0`;
     }
     // A thread about to start a turn in a project's shared folder, and threads waiting for it (see claimFolder).
     this.sql`CREATE TABLE IF NOT EXISTS folder_claims (
@@ -179,6 +190,12 @@ export class RunnerAgent extends Agent<Env> {
         const [recent] = this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM connects WHERE at >= ${Date.now() - FLAP_WINDOW_MS}`;
         for (const task of this.sql<TaskRow>`SELECT * FROM tasks WHERE status = 'running'`) {
           if (alive.has(task.id)) continue;
+          if (task.coordinator) {
+            // A coordinator turn is not continued: the server's model takes it if it changed nothing yet.
+            await (await this.project(task)).coordinatorTaskDone(task.id, { ok: false, result: "The computer's runner restarted." });
+            this.sql`UPDATE tasks SET status = 'failed' WHERE id = ${task.id}`;
+            continue;
+          }
           const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
           await thread.taskInterrupted(task.id, { restarted: restarted.has(task.id), flapping: (recent?.n ?? 0) > FLAP_MAX_CONNECTS });
           this.sql`UPDATE tasks SET status = 'failed' WHERE id = ${task.id}`;
@@ -189,6 +206,11 @@ export class RunnerAgent extends Agent<Env> {
       case "task.progress": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
         if (task?.status !== "running") return;
+        // A coordinator turn's steps are its tool calls, which people see as they happen.
+        if (task.coordinator) {
+          if (frame.usage) (await this.project(task)).coordinatorCliUsage(task.id, frame.usage);
+          return;
+        }
         const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
         if (frame.usage) await thread.cliUsage(task.id, frame.usage);
         // Empty text: only the usage changed (a subagent starting or ending may have none).
@@ -205,13 +227,20 @@ export class RunnerAgent extends Agent<Env> {
       }
       case "task.folders": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
-        if (task?.status !== "running") return;
+        if (task?.status !== "running" || task.coordinator) return;
         await (await getAgentByName(this.env.THREAD_AGENT, task.thread_id)).agentFolders(task.id, frame.folders);
         return;
       }
       case "task.done": {
         const [task] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${frame.taskId}`;
         if (task?.status !== "running") return;
+        if (task.coordinator) {
+          const project = await this.project(task);
+          if (frame.usage) await project.coordinatorCliUsage(task.id, frame.usage);
+          await project.coordinatorTaskDone(task.id, { ok: frame.ok, result: frame.result });
+          this.sql`UPDATE tasks SET status = ${frame.ok ? "done" : "failed"} WHERE id = ${task.id}`;
+          return;
+        }
         if (frame.usage) await (await getAgentByName(this.env.THREAD_AGENT, task.thread_id)).cliUsage(task.id, frame.usage);
         await this.finish(task, frame.ok, frame.result, frame.cancelled);
         return;
@@ -296,6 +325,7 @@ export class RunnerAgent extends Agent<Env> {
       ...(input.model && { model: input.model }),
       ...(input.github && { github: input.github }),
       ...(input.account && { account: input.account }),
+      ...(input.coordinator && { coordinator: input.coordinator }),
     };
     // A runner drops a frame it cannot read, and the task would then wait for output forever.
     const checked = ServerToRunner.safeParse(frame);
@@ -311,8 +341,8 @@ export class RunnerAgent extends Agent<Env> {
       }
       this.sql`DELETE FROM folder_claims WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}`;
     }
-    this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at, shared)
-      VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()}, ${input.shared ? 1 : 0})`;
+    this.sql`INSERT INTO tasks (id, project_id, thread_id, status, created_at, shared, coordinator)
+      VALUES (${taskId}, ${input.projectId}, ${input.threadId}, 'running', ${new Date().toISOString()}, ${input.shared ? 1 : 0}, ${input.coordinator ? 1 : 0})`;
     send(connection, frame);
     return { ok: true };
   }
@@ -561,12 +591,22 @@ export class RunnerAgent extends Agent<Env> {
       .where(eq(schema.runners.id, this.name));
   }
 
+  /** The project a coordinator turn works for. */
+  private project(task: TaskRow) {
+    return getAgentByName(this.env.PROJECT_AGENT, task.project_id);
+  }
+
   /**
    * Hands a task's result to its thread, then records it as finished. If the thread cannot take it
    * (it is restarting for a new version of Myrel), the task stays running, so the result the runner
    * sends again after reconnecting is delivered then.
    */
   private async finish(task: TaskRow, ok: boolean, result: string, cancelled = false) {
+    if (task.coordinator) {
+      await (await this.project(task)).coordinatorTaskDone(task.id, { ok, result });
+      this.sql`UPDATE tasks SET status = ${ok ? "done" : "failed"} WHERE id = ${task.id}`;
+      return;
+    }
     const detail = ok || cancelled ? undefined : result.trim().split("\n")[0]?.slice(0, 300) || undefined;
     const thread = await getAgentByName(this.env.THREAD_AGENT, task.thread_id);
     await thread.taskEvents(task.id, [
