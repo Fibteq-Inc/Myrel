@@ -1,4 +1,6 @@
 import { chmod, mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
@@ -472,6 +474,61 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"new / %s
     await mkdir(folder);
     await new SessionStore().set("thr_01JTEST0000000000000000000", "claude", { id: "sess-1", task: "task_01JTEST0000000000000000001" });
     expect(await agentTurn(folder, "task_01JTEST0000000000000000001")).toMatchObject({ ok: true, result: "new / whole thread" });
+  });
+
+  /** An agent turn against a local stand-in for Myrel whose MCP endpoint answers `status`; the frames it sent. */
+  async function unreachableTurn(status: number) {
+    const server = createServer((_req, res) => res.writeHead(status).end());
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const folder = join(home, "proj");
+    await mkdir(folder, { recursive: true });
+    const config: RunnerConfig = { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, folders: [{ path: folder, name: "proj" }], access: "edit" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore(), mcpRetryMs: 10 });
+    runner.setSender((f) => frames.push(f));
+    try {
+      await runner.start({
+        type: "task.start",
+        taskId: "task_01JTEST0000000000000000002",
+        threadId: "thr_01JTEST0000000000000000000",
+        folder,
+        cli: "claude",
+        prompt: "answer the person",
+        agent: { mcpPath: "/api/agent-mcp/thr_01JTEST0000000000000000000", token: "t".repeat(32) },
+      });
+    } finally {
+      server.close();
+    }
+    return frames;
+  }
+
+  /** A Claude Code that starts without Myrel's tools (as it does when they answer too slowly) for its first `failing` runs. */
+  const withoutMyrel = (failing: number) => `read prompt
+n=$(cat "${join(home, "runs")}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${join(home, "runs")}"
+if [ $n -le ${failing} ]; then
+  echo '{"type":"system","subtype":"init","session_id":"sess-down","mcp_servers":[{"name":"myrel","status":"failed"}]}'
+  sleep 30
+fi
+echo '{"type":"system","subtype":"init","session_id":"sess-up","mcp_servers":[{"name":"myrel","status":"connected"}]}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"answered"}'`;
+
+  it("starts Claude Code again, before it does anything, when it started without Myrel's tools", async () => {
+    await fakeClaude(withoutMyrel(1));
+    const frames = await unreachableTurn(200);
+    expect(frames.at(-1)).toMatchObject({ type: "task.done", ok: true, result: expect.stringMatching(/^answered/) });
+    expect(await readFile(join(home, "runs"), "utf8")).toBe("2\n");
+    // The run that was stopped left no session for the next turn to continue.
+    expect((await new SessionStore().get("thr_01JTEST0000000000000000000", "claude"))?.id).toBe("sess-up");
+  });
+
+  it("fails the turn saying why when Claude Code cannot reach Myrel's tools twice", async () => {
+    await fakeClaude(withoutMyrel(5));
+    const frames = await unreachableTurn(401);
+    const done = frames.at(-1) as { type: string; ok: boolean; result: string };
+    expect(done).toMatchObject({ type: "task.done", ok: false });
+    expect(done.result).toMatch(/^claude could not connect to Myrel's tools twice \(its MCP server: failed; Myrel answers HTTP 401\)/);
+    expect(await readFile(join(home, "runs"), "utf8")).toBe("2\n");
+    expect(frames.some((f) => f.type === "task.progress")).toBe(false);
   });
 
   it("connects the CLI to the thread's MCP endpoint when it runs as the thread's agent", async () => {

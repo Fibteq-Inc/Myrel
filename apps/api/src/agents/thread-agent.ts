@@ -1209,7 +1209,8 @@ export class ThreadAgent extends Agent<Env> {
   async agentMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
-    const answer = await handleMcp(await this.agentToolset(), { name: "myrel", version: "1" }, body);
+    // Built only for a message that needs the tools: connecting (initialize) must stay quick.
+    const answer = await handleMcp(() => this.agentToolset(), { name: "myrel", version: "1" }, body);
     return { ok: true, answer };
   }
 
@@ -2281,7 +2282,11 @@ export class ThreadAgent extends Agent<Env> {
     const local = this.runningTask()?.backend === "local";
     // An evaluator thread hands in its check; any other thread of a project with the check on asks for one.
     const role = this.visualCheckRole();
-    const checksOn = !role && (await visualCheckOn(this.env, projectId).catch(() => false));
+    // Side by side: each is a query, and every tools/list and call waits for them.
+    const [checksOn, ssh] = await Promise.all([
+      !role && visualCheckOn(this.env, projectId).catch(() => false),
+      local ? this.sshRunTool() : null,
+    ]);
     const reply = async (text: string, needs?: ReplyNeeds, files?: string[]): Promise<Message> => {
       // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
       const attachments = files?.length ? await project.attachmentsFor(files) : [];
@@ -2563,7 +2568,6 @@ export class ThreadAgent extends Agent<Env> {
         },
       }),
     );
-    const ssh = local ? await this.sshRunTool() : null;
     return [...(local ? [this.approveAccessTool()] : []), ...(ssh ? [ssh] : []), ...delivering];
   }
 
