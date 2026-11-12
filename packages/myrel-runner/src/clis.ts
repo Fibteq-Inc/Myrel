@@ -47,6 +47,11 @@ export type ParseState = {
   appServer?: AppServerTurn;
   /** Claude Code's streaming input of this run (see CliAdapter.streamInput). */
   claudeStream?: ClaudeStreamTurn;
+  /**
+   * How Claude Code found Myrel's MCP server when it started without it ("failed", "needs-auth"):
+   * without Myrel's tools its first step fails (approve_access not found), so the run is stopped.
+   */
+  mcpDown?: string;
 };
 
 /**
@@ -236,6 +241,8 @@ export type AgentMcp = {
 
 /** Claude Code's permission prompt tool on Myrel's MCP server. */
 export const APPROVE_TOOL = "mcp__myrel__approve_access";
+/** An MCP server's statuses in Claude Code's init event that mean it started without that server ("pending" may still connect). */
+const MCP_DOWN = new Set(["failed", "needs-auth"]);
 
 /** How long Claude Code waits on one Myrel tool call: the person may take a few minutes to answer. */
 const ASK_TIMEOUT_MS = 15 * 60 * 1000;
@@ -377,6 +384,11 @@ const claude: CliAdapter = {
     state.claudeStream?.receive(event);
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.type === "system" && typeof event.model === "string") state.model = event.model;
+    // Claude Code does not wait for a slow MCP server (5 s per request) and starts without it.
+    if (event.type === "system" && event.subtype === "init" && Array.isArray(event.mcp_servers)) {
+      const myrel = (event.mcp_servers as Array<{ name?: unknown; status?: unknown }>).find((s) => s?.name === MYREL_MCP_SERVER);
+      if (typeof myrel?.status === "string" && MCP_DOWN.has(myrel.status)) state.mcpDown = myrel.status;
+    }
     if (event.type === "rate_limit_event") state.limits = claudeLimits(event.rate_limit_info, state.limits);
     // A subagent's messages name the Agent tool use that started it.
     const parent = typeof event.parent_tool_use_id === "string" && event.parent_tool_use_id ? event.parent_tool_use_id : undefined;

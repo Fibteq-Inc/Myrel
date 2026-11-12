@@ -24,6 +24,8 @@ const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "h
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
 const PROGRESS_EVERY_MS = 1000;
+/** The wait before starting Claude Code once more when it could not connect to Myrel's tools. */
+const MCP_RETRY_MS = 5000;
 
 export type TaskRunnerOptions = {
   config: () => RunnerConfig;
@@ -39,6 +41,8 @@ export type TaskRunnerOptions = {
   onLimits?: (cli: CliId, limits: CliLimits, account?: string) => void;
   /** This runner's version, which it gives the CLIs that ask (Codex's app server). */
   version?: string;
+  /** For tests: the wait before trying again when Claude Code started without Myrel's tools. Default MCP_RETRY_MS. */
+  mcpRetryMs?: number;
 };
 
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
@@ -249,6 +253,8 @@ export class TaskRunner {
       stream?: boolean;
       /** A coordinator turn's whole command line (CliAdapter.coordinator), instead of args(): it keeps no session either. */
       fixed?: string[];
+      /** Set on the run started again because the first could not connect to Myrel's tools (ParseState.mcpDown). */
+      again?: boolean;
     },
     resume: string | undefined,
     prompt: string,
@@ -299,6 +305,7 @@ export class TaskRunner {
     let sentUsage = "";
     let sentLimits: CliLimits | undefined;
     let savedSession: string | undefined;
+    let stoppedForMcp = false;
     const reportLimits = (limits: CliLimits | undefined) => {
       if (!limits || limits === sentLimits) return;
       sentLimits = limits;
@@ -332,6 +339,15 @@ export class TaskRunner {
       const lines = buffered.split("\n");
       buffered = lines.pop()!;
       for (const line of lines) adapter.line(line.trim(), state);
+      // Without Myrel's tools the agent would work unseen and fail at its first step: stopped before it.
+      if (state.mcpDown && task.agent) {
+        if (!stoppedForMcp) {
+          stoppedForMcp = true;
+          child.kill("SIGTERM");
+          setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill("SIGKILL"), 5000).unref();
+        }
+        return;
+      }
       reportLimits(state.limits);
       // Saved as soon as the CLI names it, not only at the end: a run stopped midway (the runner
       // restarting for an update) is then continued in the same session instead of a new one.
@@ -409,11 +425,31 @@ export class TaskRunner {
             : `Could not start ${adapter.bin}: ${err.message}`,
         );
       });
+      // Claude Code started without Myrel's tools and was stopped (see ParseState.mcpDown): a server slow
+      // for a moment or a connection that dropped, so it starts once more after a pause, in the same session.
+      let startingAgain = false;
+      const startAgain = async () => {
+        if (startingAgain || done) return;
+        startingAgain = true;
+        clearTimeout(timer);
+        // New messages wait for the next run, which gets them with its first call to Myrel.
+        this.turns.delete(task.taskId);
+        const why = await this.mcpProbe(task);
+        if (run.again) return finish(false, mcpDownMessage(adapter.bin, state.mcpDown!, why));
+        log(`  ${adapter.bin} could not connect to Myrel's tools (${state.mcpDown}${why ? `; ${why}` : ""}); starting it again`);
+        await new Promise((r) => setTimeout(r, this.opts.mcpRetryMs ?? MCP_RETRY_MS));
+        // Stopped from Myrel, or the runner shutting down, meanwhile: finish says which.
+        if (this.cancelled.has(task.taskId) || this.interrupted.has(task.taskId)) return finish(false, "");
+        done = true;
+        resolve(await this.attempt(task, { ...run, again: true }, resume, prompt));
+      };
       // A stopped CLI can leave children holding its output open, so "close" may come late.
       child.on("exit", () => {
         if (this.cancelled.has(task.taskId) || this.interrupted.has(task.taskId)) finish(false, "");
+        else if (stoppedForMcp) void startAgain();
       });
       child.on("close", async (code, signal) => {
+        if (stoppedForMcp) return;
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
         reportLimits(state.limits ?? (await adapter.limits?.(state).catch(() => undefined)));
@@ -473,6 +509,42 @@ export class TaskRunner {
     }
     return ids;
   }
+
+  /** What Myrel's MCP endpoint of a task answers now, for why its CLI could not connect; undefined without one. */
+  private async mcpProbe(task: TaskStart): Promise<string | undefined> {
+    const server = this.opts.config().server;
+    if (!server || !task.agent) return undefined;
+    const started = Date.now();
+    try {
+      const res = await fetch(`${server.replace(/\/$/, "")}${task.agent.mcpPath}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${task.agent.token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+        // What Claude Code waits for before it starts without the server.
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "myrel-runner", version: this.opts.version ?? "0" } },
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      await res.body?.cancel();
+      if (!res.ok) return `Myrel answers HTTP ${res.status}`;
+      return `Myrel answers now, in ${((Date.now() - started) / 1000).toFixed(1)} s`;
+    } catch (err) {
+      const cause = (err as { cause?: { code?: unknown } }).cause?.code;
+      const detail = (err as Error).name === "TimeoutError" ? "no answer in 15 s" : typeof cause === "string" ? cause : errorLine(err);
+      return `${new URL(server).host} cannot be reached from here (${detail})`;
+    }
+  }
+}
+
+/** Why a turn failed when its CLI could not connect to Myrel's tools twice (see ParseState.mcpDown). */
+export function mcpDownMessage(bin: string, status: string, why: string | undefined): string {
+  return [
+    `${bin} could not connect to Myrel's tools twice (its MCP server: ${status}${why ? `; ${why}` : ""}), so it was stopped before doing anything.`,
+    "This is usually Myrel answering too slowly for a moment or this computer's connection dropping: send your message again.",
+  ].join(" ");
 }
 
 /** The shared folder `requested` is (after resolving symlinks), or null. Never trust the server's path alone. */
