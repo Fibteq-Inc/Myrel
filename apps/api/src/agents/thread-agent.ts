@@ -110,45 +110,9 @@ import {
   trackPullRequest,
 } from "../github/pulls";
 import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
-import { memberHasKey, personKey, personKeyById, projectTaskModel } from "../keys";
-import {
-  denyWaiting,
-  interruptResearch,
-  RESEARCH_MODEL,
-  type ResearchClient,
-  type ResearchProgress,
-  raiseBudget,
-  researchClient,
-  researchError,
-  researchProgress,
-  researchReport,
-  startResearch,
-} from "../research/managed";
-import {
-  nextPollSec,
-  noteReport,
-  RESEARCH_DEFAULT_BUDGET_USD,
-  RESEARCH_MAX_RUN_SEC,
-  RESEARCH_POLL_FIRST_SEC,
-  RESEARCH_POLL_SEC,
-  type ResearchLine,
-  type ResearchRequest,
-  type ResearchState,
-  researchAskMessage,
-  researchBudgetAnswer,
-  researchBudgetForbiddenMessage,
-  researchBudgetMessage,
-  researchFile,
-  researchNoKeyMessage,
-  researchNote,
-  researchPath,
-  researchStartAnswer,
-  researchStartFailedMessage,
-  researchStatusLine,
-  researchTools,
-  stepCents,
-  usd,
-} from "../research/research";
+import { memberHasKey, projectTaskModel } from "../keys";
+import { type ResearchState, researchTools } from "../research/research";
+import { answerResearch, pollResearch, type ResearchHost, readResearch, requestResearch } from "../research/thread";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
@@ -491,7 +455,7 @@ export class ThreadAgent extends Agent<Env> {
     // A tap on the branch card deletes it (or keeps it) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
     // A tap on a research card starts it, raises its budget or finishes it, without a turn.
-    if (reason.kind === "message" && reason.body !== undefined && (await this.answerResearch(reason))) return;
+    if (reason.kind === "message" && reason.body !== undefined && (await answerResearch(this.researchHost(), reason))) return;
     // A tap on a card for a guarded call (memory, routine, new issues) makes the change (or not) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerExternalApproval(reason))) return;
     // One answer of several the person gives in turn waits for the others.
@@ -2018,260 +1982,29 @@ export class ThreadAgent extends Agent<Env> {
 
   /** The thread's research (start_research), from the card asking for it until it ends. */
   private research(): ResearchState | null {
-    return JSON.parse(this.getMeta("research") ?? "null") as ResearchState | null;
+    return readResearch(this.researchHost());
   }
 
-  /** start_research: the card that asks people first. The research starts when someone taps "Start" (answerResearch). */
-  private async requestResearch(input: ResearchRequest, reply: (text: string, needs?: ReplyNeeds) => Promise<Message>): Promise<string> {
-    const open = this.research();
-    if (open?.status === "asking") return `A card already asks people to start the research "${open.title}". End your turn; its report will wake you once it runs.`;
-    if (open) return `The research "${open.title}" is still running; its report will wake you. One research at a time: end your turn.`;
-    const budgetCents = Math.round((input.budgetUsd ?? RESEARCH_DEFAULT_BUDGET_USD) * 100);
-    const draft = { title: input.title.trim(), question: input.question.trim(), budgetCents };
-    const m = await reply(researchAskMessage(draft, input.why ?? "", this.language()), "decision");
-    this.setMeta("research", JSON.stringify({ id: createId("research"), ...draft, status: "asking", askMessageId: m.id } satisfies ResearchState));
-    return `A card asks people to start the research "${draft.title}" (up to ${usd(budgetCents, "en")}, paid from the own Anthropic key of whoever approves it). End your turn now: once it runs, its report wakes you. If they decline, their answer wakes you.`;
-  }
-
-  /**
-   * A person answered a research card. "Start" starts it on their own Anthropic key, "Add" raises the
-   * budget (only for the person who approved it), "Finish" keeps what it has; none of these needs a
-   * turn. "Don't start it" goes to the agent like any message. Returns true when it needs no turn.
-   */
-  private async answerResearch(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
-    const state = this.research();
-    if (!state || state.status === "running") return false;
-    const onCard = (id: string | undefined) => !reason.pick || reason.pick.messageId === id;
-    const start = state.status === "asking" && onCard(state.askMessageId) ? researchStartAnswer(reason.body ?? "", state.budgetCents) : null;
-    const budget = state.status === "budget" && onCard(state.budgetMessageId) ? researchBudgetAnswer(reason.body ?? "", state.budgetCents) : null;
-    if (!start && !budget) return false;
-    if (start === "skip") {
-      this.deleteMeta("research");
-      return false;
-    }
-    const { projectId, threadId } = this.ids();
-    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const language = this.language();
-    let body: string | null = null;
-    if (start === "start") {
-      // A second tap while the first one is still starting it starts nothing more.
-      const starting = Number(this.getMeta("research_starting") ?? 0);
-      if (Date.now() - starting < 2 * 60_000) return true;
-      this.setMeta("research_starting", String(Date.now()));
-      try {
-        body = reason.authorId ? await this.startResearch(state, reason.authorId) : researchNoKeyMessage(language);
-      } finally {
-        this.deleteMeta("research_starting");
-      }
-    } else if (budget === "raise") {
-      if (reason.authorId !== state.approver) {
-        body = researchBudgetForbiddenMessage(language);
-      } else {
-        body = await this.raiseResearchBudget(state);
-      }
-    } else if (budget === "finish") {
-      await this.endResearch(state, { phase: "budget" });
-    }
-    const line = body ? await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body }) : null;
-    const seen = line?.seq ?? reason.seq;
-    // Neither the answer nor the line after it is news for the next turn, unless someone wrote in between.
-    if (reason.seq !== undefined && seen !== undefined && reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1 && seen <= reason.seq + 1) {
-      this.setMeta("last_seen_seq", String(seen));
-      await project.updateThread(threadId, { seenSeq: seen });
-    }
-    return true;
-  }
-
-  /** Starts the research on the approver's own key. Returns the line to show when it did not start. */
-  private async startResearch(state: ResearchState, approver: string): Promise<string | null> {
-    const language = this.language();
-    const key = await personKey(this.env, approver, "anthropic").catch((err) => {
-      console.error("could not read the approver's Anthropic key", err);
-      return null;
-    });
-    if (!key) return researchNoKeyMessage(language);
-    const { projectId, threadId } = this.ids();
-    let sessionId: string;
-    try {
-      sessionId = await startResearch(researchClient(key.secret), {
-        title: state.title,
-        question: state.question,
-        budgetCents: state.budgetCents,
-        metadata: { myrel_research: state.id },
-      });
-    } catch (err) {
-      const e = researchError(err);
-      console.warn("research did not start", e.kind, e.message);
-      return researchStartFailedMessage(e.kind, e.message, language);
-    }
-    const [user] = await createDb(this.env.DB).select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, approver));
-    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const running: ResearchState = {
-      ...state,
-      status: "running",
-      approver,
-      approverName: user?.name ?? undefined,
-      keyId: key.id,
-      sessionId,
-      spentCents: 0,
-      startedAt: new Date().toISOString(),
+  /** What research/thread.ts needs of this thread. */
+  private researchHost(): ResearchHost {
+    return {
+      env: this.env,
+      getMeta: (key) => this.getMeta(key),
+      setMeta: (key, value) => this.setMeta(key, value),
+      deleteMeta: (key) => this.deleteMeta(key),
+      ids: () => this.ids(),
+      language: () => this.language(),
+      schedule: async (sec, payload) => {
+        await this.schedule(sec, "researchPoll", payload);
+      },
+      wake: (note) => this.wake({ kind: "coordinator", note }),
+      markExternal: (source) => this.markExternal(source),
     };
-    const m = await project.sendMessage({
-      threadId,
-      authorKind: "system",
-      authorId: SYSTEM_ID,
-      body: researchStatusLine(running, { kind: "running", spentCents: 0 }, language),
-    });
-    this.setMeta("research", JSON.stringify({ ...running, statusMessageId: m.id } satisfies ResearchState));
-    await this.schedule(RESEARCH_POLL_FIRST_SEC, "researchPoll", { id: state.id });
-    return null;
-  }
-
-  /** The approver let a run paused at its budget go on, by as much again (at most the default). */
-  private async raiseResearchBudget(state: ResearchState): Promise<string | null> {
-    const client = await this.researchClientFor(state);
-    if (!client || !state.sessionId) {
-      await this.endResearch(state, { phase: "failed", reason: this.language() === "tr" ? "anahtar artık yok" : "the key is gone" });
-      return null;
-    }
-    const budgetCents = state.budgetCents + stepCents(state.budgetCents);
-    try {
-      await raiseBudget(client, state.sessionId, budgetCents);
-    } catch (err) {
-      const e = researchError(err);
-      console.warn("research budget not raised", e.message);
-      return researchStartFailedMessage(e.kind, e.message, this.language());
-    }
-    const running: ResearchState = { ...state, status: "running", budgetCents, budgetMessageId: undefined };
-    this.setMeta("research", JSON.stringify(running));
-    await this.editResearchLine(running, { kind: "running", spentCents: state.spentCents ?? 0 });
-    await this.schedule(RESEARCH_POLL_FIRST_SEC, "researchPoll", { id: state.id });
-    return null;
-  }
-
-  private async researchClientFor(state: ResearchState): Promise<ResearchClient | null> {
-    if (!state.approver || !state.keyId) return null;
-    const secret = await personKeyById(this.env, state.approver, state.keyId).catch((err) => {
-      console.error("could not read the research key", err);
-      return null;
-    });
-    return secret ? researchClient(secret) : null;
-  }
-
-  private async editResearchLine(state: ResearchState, line: ResearchLine): Promise<void> {
-    if (!state.statusMessageId) return;
-    const project = await getAgentByName(this.env.PROJECT_AGENT, this.ids().projectId);
-    await project.editMessage(state.statusMessageId, researchStatusLine(state, line, this.language())).catch((err) => console.warn("research line not edited", err));
   }
 
   /** Scheduled while a research runs: its spend on the status line, and its end. */
   async researchPoll(payload: { id: string }): Promise<void> {
-    const state = this.research();
-    if (!state || state.id !== payload.id || state.status !== "running" || !state.sessionId) return;
-    const client = await this.researchClientFor(state);
-    if (!client) {
-      await this.endResearch(state, { phase: "failed", reason: this.language() === "tr" ? "onaylayanın anahtarı silindi" : "the approver's key was deleted" });
-      return;
-    }
-    let progress: ResearchProgress;
-    try {
-      progress = await researchProgress(client, state.sessionId);
-    } catch (err) {
-      const e = researchError(err);
-      console.warn("research progress", e.kind, e.message);
-      if (e.kind === "key") {
-        await this.endResearch(state, { phase: "failed", reason: e.message.slice(0, 200) });
-        return;
-      }
-      // A passing error: look again later.
-      await this.schedule(RESEARCH_POLL_SEC, "researchPoll", { id: state.id });
-      return;
-    }
-    const now = Date.now();
-    const ranSec = state.startedAt ? (now - Date.parse(state.startedAt)) / 1000 : 0;
-    if (progress.phase === "running" || progress.phase === "waiting") {
-      if (progress.phase === "waiting") await denyWaiting(client, state.sessionId, progress.waitingOn ?? []).catch((err) => console.warn("research deny", err));
-      let next = state;
-      if (ranSec > RESEARCH_MAX_RUN_SEC && !state.interruptedAt) {
-        await interruptResearch(client, state.sessionId).catch((err) => console.warn("research interrupt", err));
-        next = { ...next, interruptedAt: new Date(now).toISOString() };
-      }
-      if (progress.spentCents !== state.spentCents) {
-        next = { ...next, spentCents: progress.spentCents };
-        await this.editResearchLine(next, { kind: "running", spentCents: progress.spentCents });
-      }
-      if (next !== state) this.setMeta("research", JSON.stringify(next));
-      await this.schedule(nextPollSec(state.startedAt, now), "researchPoll", { id: state.id });
-      return;
-    }
-    const current = { ...state, spentCents: progress.spentCents };
-    if (progress.phase === "budget") {
-      const { projectId, threadId } = this.ids();
-      const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-      await this.editResearchLine(current, { kind: "budget", spentCents: progress.spentCents });
-      const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: researchBudgetMessage(current, this.language()) });
-      this.setMeta("research", JSON.stringify({ ...current, status: "budget", budgetMessageId: m.id } satisfies ResearchState));
-      await project.updateThread(threadId, { needs: "decision" }).catch((err) => console.warn("research needs", err));
-      return;
-    }
-    if (progress.phase === "done") {
-      await this.endResearch(current, { phase: state.interruptedAt ? "time" : "done", client });
-      return;
-    }
-    await this.endResearch(current, { phase: "failed", reason: progress.detail ?? "failed", client });
-  }
-
-  /**
-   * The research ended: what the researcher wrote last goes to the project files, the status line
-   * says how it ended, and the thread wakes with the report (as text from outside the project).
-   */
-  private async endResearch(
-    state: ResearchState,
-    end: { phase: "done" | "time" | "budget" | "failed"; reason?: string; client?: ResearchClient },
-  ): Promise<void> {
-    this.deleteMeta("research");
-    const language = this.language();
-    const tr = language === "tr";
-    const { projectId } = this.ids();
-    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const client = end.client ?? (await this.researchClientFor(state));
-    const report = client && state.sessionId ? await researchReport(client, state.sessionId).catch((err) => (console.warn("research report", err), null)) : null;
-    const spentCents = state.spentCents ?? 0;
-    const partial =
-      end.phase === "budget"
-        ? tr
-          ? "Araştırma bütçesinde bitirildi; rapor eksik olabilir."
-          : "The research was finished at its budget; the report may be incomplete."
-        : end.phase === "time"
-          ? tr
-            ? "Araştırma süre sınırında durduruldu; rapor eksik olabilir."
-            : "The research was stopped at the time limit; the report may be incomplete."
-          : end.phase === "failed"
-            ? tr
-              ? `Araştırma bitmedi (${end.reason ?? "bilinmiyor"}); bu, gelen son metin.`
-              : `The research did not finish (${end.reason ?? "unknown"}); this is the last text it wrote.`
-            : undefined;
-    let path: string | null = null;
-    if (report) {
-      const at = new Date();
-      path = researchPath(state.title, at, language);
-      await project.writeFileText(path, researchFile(state, report, { spentCents, model: RESEARCH_MODEL, at, partial }, language), BY);
-    }
-    const line: ResearchLine =
-      end.phase === "failed" || !path
-        ? { kind: "failed", spentCents, reason: end.reason ?? (tr ? "rapor gelmedi" : "no report came"), ...(path && { path }) }
-        : { kind: "done", spentCents, path, ...(end.phase !== "done" && { partial: end.phase }) };
-    await this.editResearchLine(state, line);
-    let wrapped: string | null = null;
-    if (report && path) {
-      const w = wrapExternal({ source: "claude-research", ref: path, trust: "untrusted" }, noteReport(report, path));
-      if (w.taints) await this.markExternal("claude-research");
-      wrapped = w.text;
-    }
-    await this.wake({
-      kind: "coordinator",
-      note: researchNote(state, { spentCents, path, wrapped, reason: end.reason, ...(end.phase !== "done" && end.phase !== "failed" && { partial: end.phase === "budget" ? "at its budget" : "at the time limit" }) }),
-    });
+    await pollResearch(this.researchHost(), payload);
   }
 
   /**
@@ -2831,7 +2564,7 @@ export class ThreadAgent extends Agent<Env> {
           return `${done} A card asks the person whether to delete its branch ${branch.branch}; Myrel deletes it if they say so, without you. Do not ask again.`;
         },
       }),
-      ...(researchOn ? researchTools({ start: (input) => this.requestResearch(input, reply) }) : []),
+      ...(researchOn ? researchTools({ start: (input) => requestResearch(this.researchHost(), input, reply) }) : []),
       ...visualCheckTools({
         request: role ? undefined : checksOn ? (input) => this.requestVisualCheck(input) : undefined,
         submit: role ? (input) => this.submitVisualCheck(role, input) : undefined,

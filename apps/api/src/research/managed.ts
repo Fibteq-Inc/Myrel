@@ -1,11 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
-
 /**
  * Research tasks run on Claude Managed Agents, on the Anthropic key of the person who approved
  * them (see research.ts): Anthropic hosts the agent loop, the agent searches and reads the web, and
  * the session stops at a hard dollar budget (budget.max_list_cost). Myrel keeps no Anthropic state
  * of its own: the researcher agent and its environment are found again by their metadata, so each
  * key's organization gets one of each, made on its first research.
+ *
+ * Plain HTTP like llm/anthropic.ts, not the Anthropic SDK: loading the SDK in the Workers test pool
+ * pushed one of its internal WebSocket messages over workerd's 1 MB limit and crashed the API test
+ * run, and these few calls need none of its features.
  */
 
 /** Bumped when the researcher's model, prompt or tools change: the next research makes a new agent. */
@@ -32,24 +34,85 @@ Your LAST message is the complete report in Markdown and nothing else, in the la
 - then "Sources": the sources you relied on, as a list of links.
 Keep it under about 4,000 words. Do not write progress notes after the report.`;
 
-export type ResearchClient = Anthropic;
+const API = "https://api.anthropic.com";
+const HEADERS = { "anthropic-version": "2026-10-21", "anthropic-beta": "managed-agents-2026-04-01" };
+
+/** A call Anthropic refused: its HTTP status and message. */
+export class ResearchApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export type ResearchClient = {
+  call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T>;
+};
+
+type Query = Record<string, string | number | string[] | undefined>;
+
+/** Query strings the way the API reads arrays (`types[]=a&types[]=b`). */
+function query(q: Query): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) {
+    if (v === undefined) continue;
+    if (Array.isArray(v)) for (const item of v) params.append(`${k}[]`, item);
+    else params.set(k, String(v));
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
 
 /** A client on the approver's key. The global fetch is looked up per call, so tests can stand in for Anthropic. */
 export function researchClient(apiKey: string): ResearchClient {
-  return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000, fetch: (input, init) => fetch(input, init) });
+  return {
+    async call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+      let res: Response | null = null;
+      // Overloaded or briefly unavailable: once more after a moment.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        res = await fetch(`${API}${path}`, {
+          method,
+          headers: { ...HEADERS, "x-api-key": apiKey, ...(body !== undefined && { "content-type": "application/json" }) },
+          ...(body !== undefined && { body: JSON.stringify(body) }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (res.status !== 429 && res.status !== 529 && res.status < 500) break;
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
+      const data = (await res!.json().catch(() => null)) as { error?: { message?: string } } | null;
+      if (!res!.ok) throw new ResearchApiError(res!.status, data?.error?.message ?? `HTTP ${res!.status}`);
+      return data as T;
+    },
+  };
 }
+
+type Page<T> = { data: T[]; next_page?: string | null };
+
+/** Every item of a paged list. */
+async function all<T>(client: ResearchClient, path: string): Promise<T[]> {
+  const items: T[] = [];
+  let page: string | undefined;
+  for (let i = 0; i < 20; i++) {
+    const res = await client.call<Page<T>>("GET", `${path}${query({ limit: 100, page })}`);
+    items.push(...res.data);
+    if (!res.next_page) break;
+    page = res.next_page;
+  }
+  return items;
+}
+
+type Tagged = { id: string; archived_at: string | null; metadata?: Record<string, string> | null };
+type Money = { amount: string; currency: string };
+type IdleEvent = { id: string; type: string; stop_reason?: { type: string; event_ids?: string[] }; stop_details?: { category?: string | null } | null };
+type MessageEvent = { id: string; type: string; content?: { type: string; text?: string }[] };
 
 /** The researcher agent and its environment in the key's organization, made on first use. */
 export async function ensureResearcher(client: ResearchClient): Promise<{ agentId: string; environmentId: string }> {
-  let agentId: string | null = null;
-  for await (const agent of client.beta.agents.list()) {
-    if (agent.metadata?.[AGENT_TAG] === RESEARCHER_VERSION && !agent.archived_at) {
-      agentId = agent.id;
-      break;
-    }
-  }
+  let agentId = (await all<Tagged>(client, "/v1/agents")).find((a) => a.metadata?.[AGENT_TAG] === RESEARCHER_VERSION && !a.archived_at)?.id ?? null;
   if (!agentId) {
-    const agent = await client.beta.agents.create({
+    const agent = await client.call<{ id: string }>("POST", "/v1/agents", {
       name: "Myrel researcher",
       description: "Multi-step web research with cited sources, started from Myrel threads.",
       model: { id: RESEARCH_MODEL, effort: "low" },
@@ -69,17 +132,11 @@ export async function ensureResearcher(client: ResearchClient): Promise<{ agentI
     });
     agentId = agent.id;
   }
-  let environmentId: string | null = null;
-  for await (const environment of client.beta.environments.list()) {
-    if (environment.metadata?.[ENVIRONMENT_TAG] === "1" && !environment.archived_at) {
-      environmentId = environment.id;
-      break;
-    }
-  }
+  let environmentId = (await all<Tagged>(client, "/v1/environments")).find((e) => e.metadata?.[ENVIRONMENT_TAG] === "1" && !e.archived_at)?.id ?? null;
   if (!environmentId) {
     // The web tools reach every site only without a host list (a limited network limits them too);
     // with the shell and file tools off, the sandbox itself does not use the network.
-    const environment = await client.beta.environments.create({
+    const environment = await client.call<{ id: string }>("POST", "/v1/environments", {
       name: "Myrel research",
       description: "Web research for Myrel; no shell or file tools.",
       config: { type: "cloud", networking: { type: "unrestricted" } },
@@ -100,7 +157,7 @@ export async function startResearch(
   input: { title: string; question: string; budgetCents: number; metadata: Record<string, string> },
 ): Promise<string> {
   const { agentId, environmentId } = await ensureResearcher(client);
-  const session = await client.beta.sessions.create({
+  const session = await client.call<{ id: string }>("POST", "/v1/sessions", {
     agent: agentId,
     environment_id: environmentId,
     title: input.title.slice(0, 200),
@@ -125,20 +182,20 @@ export type ResearchProgress = {
   detail?: string;
 };
 
-function cents(amount: { amount: string } | null | undefined): number {
+function cents(amount: Money | null | undefined): number {
   const n = Number(amount?.amount ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
 export async function researchProgress(client: ResearchClient, sessionId: string): Promise<ResearchProgress> {
-  const session = await client.beta.sessions.retrieve(sessionId);
+  const session = await client.call<{ status: string; usage?: { list_cost?: Money | null } }>("GET", `/v1/sessions/${sessionId}`);
   const spentCents = cents(session.usage?.list_cost);
   if (session.status === "terminated") return { phase: "failed", spentCents, detail: "terminated" };
   if (session.status !== "idle") return { phase: "running", spentCents };
   // Why it is idle is on its last idle event.
-  const page = await client.beta.sessions.events.list(sessionId, { order: "desc", types: ["session.status_idle"], limit: 1 });
+  const page = await client.call<Page<IdleEvent>>("GET", `/v1/sessions/${sessionId}/events${query({ order: "desc", types: ["session.status_idle"], limit: 1 })}`);
   const idle = page.data[0];
-  if (!idle || idle.type !== "session.status_idle") return { phase: "running", spentCents };
+  if (!idle?.stop_reason || idle.type !== "session.status_idle") return { phase: "running", spentCents };
   switch (idle.stop_reason.type) {
     case "end_turn":
       return { phase: "done", spentCents };
@@ -155,11 +212,11 @@ export async function researchProgress(client: ResearchClient, sessionId: string
 
 /** The agent's latest message: its report when it finished, the furthest it got otherwise. */
 export async function researchReport(client: ResearchClient, sessionId: string): Promise<string | null> {
-  const page = await client.beta.sessions.events.list(sessionId, { order: "desc", types: ["agent.message"], limit: 5 });
+  const page = await client.call<Page<MessageEvent>>("GET", `/v1/sessions/${sessionId}/events${query({ order: "desc", types: ["agent.message"], limit: 5 })}`);
   for (const event of page.data) {
-    if (event.type !== "agent.message") continue;
+    if (event.type !== "agent.message" || !event.content) continue;
     const text = event.content
-      .map((b) => (b.type === "text" ? b.text : ""))
+      .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
       .join("")
       .trim();
     if (text) return text;
@@ -169,28 +226,28 @@ export async function researchReport(client: ResearchClient, sessionId: string):
 
 /** Lets a session paused at its budget go on, up to a new cap. */
 export async function raiseBudget(client: ResearchClient, sessionId: string, budgetCents: number): Promise<void> {
-  await client.beta.sessions.update(sessionId, { budget: { type: "limit", max_list_cost: money(budgetCents) } });
+  await client.call("POST", `/v1/sessions/${sessionId}`, { budget: { type: "limit", max_list_cost: money(budgetCents) } });
 }
 
 /** Denies tool calls a session waits on; nobody watches a research run to allow them. */
 export async function denyWaiting(client: ResearchClient, sessionId: string, eventIds: string[]): Promise<void> {
   if (!eventIds.length) return;
-  await client.beta.sessions.events.send(sessionId, {
+  await client.call("POST", `/v1/sessions/${sessionId}/events`, {
     events: eventIds.map((id) => ({ type: "user.tool_confirmation" as const, tool_use_id: id, result: "deny" as const, deny_message: "Not allowed in this research." })),
   });
 }
 
 /** Stops a session's current work (a research that ran too long). */
 export async function interruptResearch(client: ResearchClient, sessionId: string): Promise<void> {
-  await client.beta.sessions.events.send(sessionId, { events: [{ type: "user.interrupt" }] });
+  await client.call("POST", `/v1/sessions/${sessionId}/events`, { events: [{ type: "user.interrupt" }] });
 }
 
 /** Why a call failed, in a line people can act on. */
 export function researchError(err: unknown): { kind: "key" | "credit" | "other"; message: string } {
-  if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+  if (err instanceof ResearchApiError && (err.status === 401 || err.status === 403)) {
     return { kind: "key", message: err.message };
   }
-  if (err instanceof Anthropic.APIError) {
+  if (err instanceof ResearchApiError) {
     // An empty credit balance comes back as a 400 that says so.
     if (/credit balance/i.test(err.message)) return { kind: "credit", message: err.message };
     return { kind: "other", message: err.message };
