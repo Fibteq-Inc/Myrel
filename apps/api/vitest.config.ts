@@ -60,7 +60,15 @@ export default defineConfig(async () => {
         },
       }),
     ],
-    test: { setupFiles: ["./test/setup.ts"] },
+    test: {
+      setupFiles: ["./test/setup.ts"],
+      // With the file cache on, Vitest hands each new test file every module it already transformed
+      // ("warm modules"), and the Cloudflare pool inlines them all into ONE WebSocket message to
+      // workerd. That message grows with the dependency graph and past workerd's 32 MiB limit the
+      // pool crashes ("Message is too large", 1009) and most test files never run. Off, each
+      // module travels on its own.
+      fsModuleCache: false,
+    },
   };
 });
 

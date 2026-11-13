@@ -19,6 +19,7 @@
     "sandbox:image": "node scripts/sandbox-image.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
     "@myrel/db": "workspace:*",
     "@myrel/protocol": "workspace:*",
     "@myrel/runner-core": "workspace:*",

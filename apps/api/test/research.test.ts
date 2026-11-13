@@ -32,7 +32,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const method = init?.method ?? request?.method ?? "GET";
   const raw = init?.body ?? (request ? await request.text() : undefined);
   const body = raw ? (JSON.parse(raw as string) as Record<string, unknown>) : undefined;
-  const key = new Headers(init?.headers ?? request?.headers).get("x-api-key");
+  // The SDK sends an API key as a bearer token.
+  const key = new Headers(init?.headers ?? request?.headers).get("authorization")?.replace(/^Bearer /, "") ?? null;
   fakeClaude.requests.push({ method, path: `${url.pathname}${url.search}`, body, key });
   const page = (data: unknown[]) => Response.json({ data, next_page: null });
   if (url.pathname === "/v1/agents") {
