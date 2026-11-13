@@ -3,7 +3,7 @@ import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { type Href, Stack, useRouter } from "expo-router";
 import { Settings } from "lucide-react-native";
-import type { CliId, ProjectIssue } from "@myrel/protocol";
+import type { CliId, DecisionPick, ProjectIssue } from "@myrel/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AskCliPicker, OfferedClis, usePickableClis } from "../../../../components/cli-picker";
@@ -135,6 +135,8 @@ function ChatTab({ owner }: { owner: boolean }) {
     },
     [send, pickable, clis],
   );
+  // A tap on a card answers it; it is not a new ask, so it offers no CLIs.
+  const onPick = useCallback((label: string, pick: DecisionPick) => send(label, null, undefined, undefined, pick), [send]);
 
   return (
     <Conversation
@@ -150,6 +152,7 @@ function ChatTab({ owner }: { owner: boolean }) {
       working={state.active[""] ? (state.progress[""] ?? t("message.thinking")) : null}
       placeholder={t("chat.placeholder")}
       onSend={onSend}
+      onPick={onPick}
       onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
       tools={pickable && <AskCliPicker pickable={pickable} value={clis} onChange={setClis} />}
       composer={composer}

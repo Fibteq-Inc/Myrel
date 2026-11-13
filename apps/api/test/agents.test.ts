@@ -530,8 +530,10 @@ describe("coordinator and thread agent", () => {
       else if (index === 1) {
         expect(turn.prompt).toContain('The coordinator answered your question "Open a PR?"');
         await ask("Which color?");
-      } else if (index === 2) await ask("Ship it?");
-      else await ask("Delete the branch?", { ask_person: true });
+      } else if (index === 2) {
+        expect(turn.prompt).toContain('(picked on the card "Which color?" in [');
+        await ask("Ship it?");
+      } else await ask("Delete the branch?", { ask_person: true });
     };
 
     const { ws, agent, turns } = await setup(play);
@@ -559,17 +561,25 @@ describe("coordinator and thread agent", () => {
     expect(colorCard.body.startsWith("Renkler için daha önce verilmiş bir karar yok.\n\n```decision")).toBe(true);
     await until(async () => ((await agent.getThread(thread.id))?.status === "review_ready" ? true : null), "waiting on the person");
 
+    // A tap answers its own card: the server keeps which one (with its question, whatever the client said).
+    ws.send(
+      JSON.stringify({ type: "message.send", threadId: thread.id, body: "Yes", pick: { messageId: colorCard.id, card: 0, question: "forged" } }),
+    );
+    const tapped = await until(async () => (await messages()).find((m) => m.body === "Yes") ?? null, "the tap");
+    expect(tapped.pick).toEqual({ messageId: colorCard.id, card: 0, question: "Which color?" });
+
     // Left alone by the coordinator: the card still reaches the person when its turn ends.
-    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "Blue" }));
     const shipCard = await until(card("Ship it?"), "the card the coordinator skipped");
     expect(shipCard.body.startsWith("```decision")).toBe(true);
 
-    // Only the person can answer: straight to them, without the coordinator.
-    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "go" }));
+    // Only the person can answer: straight to them, without the coordinator. A pick naming no option
+    // of that card goes as a plain message.
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "go", pick: { messageId: shipCard.id, card: 0 } }));
     await until(card("Delete the branch?"), "the card for the person");
     // The card is posted before the tool's answer gets back to the agent.
     await until(() => answers.length === 4 || null, "the agent's answer");
-    expect(answers[3]).toContain("The person's choice will arrive");
+    expect(answers[3]).toContain("The person's choice arrives as their message");
+    expect((await messages()).find((m) => m.body === "go")?.pick).toBeUndefined();
     expect(questions.some((q) => q.includes("Delete the branch?"))).toBe(false);
     expect(turns).toHaveLength(4);
     ws.close();

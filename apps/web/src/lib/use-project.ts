@@ -9,7 +9,14 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import { type CliId, type ClientEventInput, CONVERSATION_PAGE_SIZE, type ConversationPage, type Message } from "@myrel/protocol";
+import {
+  type CliId,
+  type ClientEventInput,
+  CONVERSATION_PAGE_SIZE,
+  type ConversationPage,
+  type DecisionPick,
+  type Message,
+} from "@myrel/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api, queryClient, runnersQuery, workspaceQuery } from "./api";
 
@@ -110,8 +117,8 @@ export function useProject(projectId: string) {
   }, [projectId, ready, state]);
 
   const send = useCallback(
-    (body: string, threadId: string | null = null, attachments: string[] = [], clis: CliId[] = []) =>
-      socketRef.current?.sendMessage(body, { threadId, attachments, clis }),
+    (body: string, threadId: string | null = null, attachments: string[] = [], clis: CliId[] = [], pick?: DecisionPick) =>
+      socketRef.current?.sendMessage(body, { threadId, attachments, clis, pick }),
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
+import { DecisionPick } from "./decision";
 import { Routine, RoutineId } from "./routines";
 import { Goal } from "./goal";
 import { CliAccountId, CliId, RunnerId } from "./runner";
@@ -46,6 +47,11 @@ export const ClientEvent = z.discriminatedUnion("type", [
      * Message.clis). Ignored in a thread and for anyone but the computer's owner.
      */
     clis: z.array(CliId).max(MAX_THREAD_CLIS).optional(),
+    /**
+     * A tap on a decision card: the card the body (the option's label) answers, so it answers only
+     * that card. The server drops it when it names no card in the same conversation with that option.
+     */
+    pick: DecisionPick.optional(),
   }).refine((e) => e.body.length > 0 || e.attachments.length > 0, "Write something or attach a file"),
   /**
    * A person changes the text of their own message. Attachments stay; the text may be empty only when

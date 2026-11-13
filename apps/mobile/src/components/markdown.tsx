@@ -7,14 +7,19 @@ import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
 import { type ImageStyle, Linking, Pressable, ScrollView, StyleSheet, Text, type TextStyle, View, type ViewStyle } from "react-native";
 import { type MarkedStyles, MarkedTokenizer, Renderer, useMarkdown } from "react-native-marked";
-import { DECISION_LANG, parseDecision } from "../lib/decision";
+import { DECISION_LANG, type DecisionAnswer, decisionIndex, parseDecision } from "../lib/decision";
 import { useFileRefContext } from "../lib/file-refs";
 import { unwrapHref, wrapHref } from "../lib/raw-href";
 import { makeStyles, mono, radius, useColors, useTheme } from "../theme";
 import { CodeLines } from "./code-view";
 import { DecisionCard } from "./decision-card";
 
-export type DecisionHandlers = { answer?: string; onChoose?: (label: string) => void };
+export type DecisionHandlers = {
+  /** What answered each of the message's decision cards, in order (decisionState); undefined while open. */
+  answers?: readonly (DecisionAnswer | undefined)[];
+  /** `card`: which of the message's cards the option is on. */
+  onChoose?: (label: string, card: number) => void;
+};
 
 /** Keeps link targets as written (see wrapHref), so thread links and relative file paths survive parsing. */
 class RawHrefTokenizer extends MarkedTokenizer {
@@ -37,7 +42,7 @@ const tokenizer = new RawHrefTokenizer();
 /** Draws ```decision blocks as cards, code with a copy button, and routes links (and file paths in code) to `onLink`. */
 class MyrelRenderer extends Renderer {
   constructor(
-    private readonly decision: DecisionHandlers | undefined,
+    private readonly decision: (DecisionHandlers & { body: string }) | undefined,
     private readonly onLink: (href: string) => void,
     private readonly projectFiles: ReadonlySet<string>,
     private readonly linkStyle: TextStyle | undefined,
@@ -49,7 +54,19 @@ class MyrelRenderer extends Renderer {
   override code(text: string, language?: string, containerStyle?: ViewStyle, textStyle?: TextStyle): ReactNode {
     if (language === DECISION_LANG) {
       const decision = parseDecision(text);
-      if (decision) return <DecisionCard key={this.getKey()} decision={decision} {...this.decision} />;
+      if (decision) {
+        // Each card answers on its own: a pick on one leaves the message's other cards open.
+        const card = Math.max(0, this.decision ? decisionIndex(this.decision.body, decision) : 0);
+        const onChoose = this.decision?.onChoose;
+        return (
+          <DecisionCard
+            key={this.getKey()}
+            decision={decision}
+            answer={this.decision?.answers?.[card]}
+            onChoose={onChoose && ((label) => onChoose(label, card))}
+          />
+        );
+      }
     }
     return <CodeBlock key={this.getKey()} text={text} language={language} containerStyle={containerStyle} textStyle={textStyle} />;
   }
@@ -234,12 +251,12 @@ export function MessageMarkdown({
   const markedStyles = useMarkedStyles();
   const { projectFiles } = useFileRefContext();
   const hasDecision = decision !== undefined;
-  const answer = decision?.answer;
+  const answers = decision?.answers;
   const onChoose = decision?.onChoose;
   // Rebuilding the renderer re-parses the message, so only do it when what it draws changes.
   const renderer = useMemo(
-    () => new MyrelRenderer(hasDecision ? { answer, onChoose } : undefined, onLink, projectFiles, markedStyles.link, selectable),
-    [hasDecision, answer, onChoose, onLink, projectFiles, markedStyles.link, selectable],
+    () => new MyrelRenderer(hasDecision ? { answers, onChoose, body } : undefined, onLink, projectFiles, markedStyles.link, selectable),
+    [hasDecision, answers, onChoose, body, onLink, projectFiles, markedStyles.link, selectable],
   );
   const elements = useMarkdown(body, { colorScheme: theme, renderer, tokenizer, styles: markedStyles });
   return <View>{elements}</View>;

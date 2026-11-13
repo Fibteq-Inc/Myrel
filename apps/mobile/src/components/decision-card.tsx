@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import * as Haptics from "expo-haptics";
 import { CircleCheck, CircleHelp, TriangleAlert } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { chosenOption, type Decision } from "../lib/decision";
+import { chosenOption, type Decision, type DecisionAnswer } from "../lib/decision";
 import { makeStyles, radius, useColors } from "../theme";
 import { DecisionTip, useDecisionTip } from "./tips";
 
@@ -16,8 +16,8 @@ export function DecisionCard({
   onChoose,
 }: {
   decision: Decision;
-  /** The reply that answered it, if any. */
-  answer?: string;
+  /** The reply that answered it; null when a message of the person's closed several cards at once. */
+  answer?: DecisionAnswer;
   /** Missing when the viewer cannot answer here. */
   onChoose?: (label: string) => void;
 }) {
@@ -32,12 +32,15 @@ export function DecisionCard({
 
   // Answered: one line with the question and the pick, so the conversation moves on.
   if (answered) {
-    const picked = chosen >= 0 ? decision.options[chosen]!.label : answer;
+    const picked = chosen >= 0 ? decision.options[chosen]!.label : (answer ?? t("decision.inMessage"));
     return (
       <View accessibilityRole="none" style={[styles.compact, styles.cardAnswered]}>
         <CircleCheck size={15} color={colors.accent} accessibilityLabel={t("decision.answered")} />
         <Text style={styles.compactQuestion}>{decision.question}</Text>
-        <Text style={styles.compactPick} accessibilityLabel={`${t("decision.chosen")}: ${picked}`}>
+        <Text
+          style={answer === null ? styles.compactNone : styles.compactPick}
+          accessibilityLabel={answer === null ? picked : `${t("decision.chosen")}: ${picked}`}
+        >
           {picked.length > 80 ? `${picked.slice(0, 80)}…` : picked}
         </Text>
       </View>
@@ -125,6 +128,7 @@ const useStyles = makeStyles((colors) =>
     },
     compactQuestion: { flexShrink: 1, color: colors.muted, fontSize: 14, lineHeight: 20 },
     compactPick: { marginLeft: "auto", color: colors.fg, fontSize: 14, fontWeight: "600" },
+    compactNone: { marginLeft: "auto", color: colors.subtle, fontSize: 14 },
     kicker: { flexDirection: "row", alignItems: "center", gap: 8 },
     question: { color: colors.fg, fontSize: 16, fontWeight: "600", lineHeight: 22 },
     option: { gap: 3, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },

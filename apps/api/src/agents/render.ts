@@ -35,7 +35,9 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
   // The note itself is in the prompt already (the brief, or the coordinator's notes).
   if (m.relay) return `${head}\n${indent(`${m.body}\n(marker for a coordinator note people can open)`)}`;
   const files = (m.attachments ?? []).map((a) => `📎 attached: ${a.path} (${a.contentType}, ${a.size} bytes)`);
-  return `${head}\n${indent([m.body, ...files].filter(Boolean).join("\n"))}`;
+  // A tap on one of several cards answers that card only, so the prompt names it.
+  const body = m.pick ? `(picked on the card "${m.pick.question ?? ""}" in [${m.pick.messageId}]) ${m.body}` : m.body;
+  return `${head}\n${indent([body, ...files].filter(Boolean).join("\n"))}`;
 }
 
 export function renderThread(t: Thread): string {

@@ -310,6 +310,7 @@ export const tr: Catalog = {
   "decision.yourCall": "Karar senin",
   "decision.recommended": "önerilen",
   "decision.chosen": "Seçildi",
+  "decision.inMessage": "Mesajla yanıtlandı",
   "decision.danger": "Dikkat: bu geri alınamaz",
 
   // Thread status

@@ -1,6 +1,6 @@
 import { conversationState, draftKey, projectChat, threadByCard, threadChildren, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { type CliId, decisionPicks, type Message } from "@myrel/protocol";
+import { type CliId, decisionState, type Message } from "@myrel/protocol";
 import { MessagesSquare } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { api } from "../../lib/api";
@@ -11,7 +11,7 @@ import { AskCliPicker, OfferedClis, usePickableClis } from "./cli-picker";
 import { Composer, type ComposerHandle } from "./composer";
 import { GoalBanner } from "./goal-banner";
 import { EarlierMessages, useHistoryWindow } from "./history";
-import { decisionAnswers, MessageView, Thinking } from "./message";
+import { MessageView, Thinking } from "./message";
 import { ScrollToEnd } from "./scroll-to-end";
 import { ChatSkeleton } from "./skeleton";
 import { StarterExamples, StarterList } from "./starter";
@@ -30,12 +30,14 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
     hasEarlier: ready && conversationState(state, null).hasEarlier,
     load: () => loadConversation(null, chat[0]?.seq),
   });
-  const choose = useCallback((label: string) => send(label), [send]);
+  const choose = useCallback(
+    (messageId: string, card: number, label: string) => send(label, null, [], [], { messageId, card }),
+    [send],
+  );
   const roots = threadByCard(state);
   const checks = threadChildren(state);
-  const answers = decisionAnswers(chat);
-  // A tap on a card is shown on the card itself, not again as a bubble.
-  const picks = decisionPicks(chat);
+  // Each card has its own answer; a tap on a card is shown on the card itself, not again as a bubble.
+  const { answers, picks } = decisionState(chat);
   const thinking = !!state.active[""];
   const last = chat.at(-1);
   // The CLIs the next ask's thread may run with; each ask picks its own.
@@ -87,7 +89,7 @@ export function ProjectChat({ me, className = "" }: { me: string; className?: st
                 me={me}
                 names={names}
                 reactions={state.reactions[m.id]}
-                decision={{ answer: answers.get(m.id), onChoose: choose }}
+                decision={{ answers: answers.get(m.id), onChoose: (label, card) => choose(m.id, card, label) }}
                 onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
               >
                 {m.artifacts?.length ? (

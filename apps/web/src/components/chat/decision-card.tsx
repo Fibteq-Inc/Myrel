@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import type { Decision } from "@myrel/protocol";
+import { chosenOption, type Decision, type DecisionAnswer } from "@myrel/protocol";
 import { CircleCheck, CircleHelp, TriangleAlert } from "lucide-react";
 import { useId } from "react";
 import { cn } from "../../lib/ui";
@@ -15,16 +15,14 @@ export function DecisionCard({
   onChoose,
 }: {
   decision: Decision;
-  /** The reply that answered it, if any. */
-  answer?: string;
+  /** The reply that answered it; null when a message of the person's closed several cards at once. */
+  answer?: DecisionAnswer;
   /** Missing when the viewer cannot answer here (e.g. read-only). */
   onChoose?: (label: string) => void;
 }) {
   const t = useT();
   const titleId = useId();
-  const chosen = answer
-    ? decision.options.findIndex((o) => o.label.trim().toLocaleLowerCase() === answer.trim().toLocaleLowerCase())
-    : -1;
+  const chosen = chosenOption(decision, answer);
   const answered = answer !== undefined;
   const danger = !!decision.danger;
   const tip = useDecisionTip();
@@ -32,7 +30,7 @@ export function DecisionCard({
 
   // Answered: one line with the question and the pick, so the conversation moves on.
   if (answered) {
-    const picked = chosen >= 0 ? decision.options[chosen]!.label : answer;
+    const picked = chosen >= 0 ? decision.options[chosen]!.label : (answer ?? t("decision.inMessage"));
     return (
       <div
         role="group"
@@ -43,7 +41,7 @@ export function DecisionCard({
         <span id={titleId} className="min-w-0 text-muted">
           {decision.question}
         </span>
-        <span className="ml-auto font-medium text-fg" title={t("decision.chosen")}>
+        <span className={cn("ml-auto", answer === null ? "text-subtle" : "font-medium text-fg")} title={t("decision.chosen")}>
           {picked.length > 80 ? `${picked.slice(0, 80)}…` : picked}
         </span>
       </div>

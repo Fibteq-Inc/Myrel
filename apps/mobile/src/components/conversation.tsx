@@ -1,11 +1,11 @@
 import { useT } from "@myrel/i18n/react";
-import { type Artifact, decisionPicks, hiddenByBlock, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
+import { type Artifact, hiddenByBlock, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import * as Haptics from "expo-haptics";
 import { ArrowDown } from "lucide-react-native";
 import { type ComponentRef, memo, type ReactNode, type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { decisionAnswers } from "../lib/decision";
+import { type DecisionAnswer, type DecisionPick, decisionState } from "../lib/decision";
 import { useOpenArtifact, useOpenLink } from "../lib/links";
 import { useBlocked } from "../lib/use-names";
 import { makeStyles, useColors } from "../theme";
@@ -37,6 +37,7 @@ export function Conversation({
   workingCli,
   placeholder,
   onSend,
+  onPick,
   onEdit,
   onInterrupt,
   onStop,
@@ -68,6 +69,8 @@ export function Conversation({
   placeholder: string;
   /** `attachments` are paths of files the composer uploaded. */
   onSend: (body: string, attachments?: string[]) => void;
+  /** A tap on a decision card's option: its label goes as the person's reply to that card. */
+  onPick: (label: string, pick: DecisionPick) => void;
   /** Changes the text of a message the person sent. */
   onEdit?: (messageId: string, body: string) => void;
   /** Set when a message waits for the thread's working agent: stops its turn so the message goes now. */
@@ -94,9 +97,8 @@ export function Conversation({
   const insets = useSafeAreaInsets();
   const openLink = useOpenLink(projectId, threadId);
   const openArtifact = useOpenArtifact(projectId);
-  const answers = useMemo(() => decisionAnswers(messages), [messages]);
-  // A tap on a card is shown on the card itself, not again as a bubble.
-  const picks = useMemo(() => decisionPicks(messages), [messages]);
+  // Each card has its own answer; a tap on a card is shown on the card itself, not again as a bubble.
+  const { answers, picks } = useDecisions(messages);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
   const data = useMemo(() => (loading ? [] : [...messages].reverse()), [loading, messages]);
   const list = useRef<FlatList<Message>>(null);
@@ -109,7 +111,7 @@ export function Conversation({
     if (sent) list.current?.scrollToOffset({ offset: 0, animated: true });
   }, [newest, me]);
   // Rows hold on to these while the screen redraws around them, so they stay the same functions.
-  const send = useLatest(onSend);
+  const choose = useLatest((messageId: string, card: number, label: string) => onPick(label, { messageId, card }));
   const edit = useLatest((messageId: string, body: string) => onEdit?.(messageId, body));
   const interrupt = useLatest(() => onInterrupt?.run() ?? Promise.resolve());
   const openPlan = useLatest(() => onOpenPlan?.());
@@ -202,7 +204,7 @@ export function Conversation({
                   names={names}
                   reactions={reactions[item.id]}
                   artifacts={artifacts}
-                  answer={answers.get(item.id)}
+                  answers={answers.get(item.id)}
                   planText={current ? plan.text : undefined}
                   planLive={current ? plan.live : undefined}
                   onOpenPlan={onOpenPlan && openPlan}
@@ -210,7 +212,7 @@ export function Conversation({
                   onOpenArtifact={openArtifact}
                   onEdit={onEdit && edit}
                   onInterrupt={item.id === onInterrupt?.messageId ? interrupt : undefined}
-                  onChoose={send}
+                  onChoose={choose}
                   hidden={hiddenByBlock(item, blocked)}
                   onActions={openActions}
                 >
@@ -250,7 +252,7 @@ const Row = memo(function Row({
   names,
   reactions,
   artifacts,
-  answer,
+  answers,
   planText,
   planLive,
   onOpenPlan,
@@ -268,7 +270,7 @@ const Row = memo(function Row({
   names: Names;
   reactions?: Reaction[];
   artifacts: Record<string, Artifact>;
-  answer?: string;
+  answers?: readonly (DecisionAnswer | undefined)[];
   /** Its author is someone the person blocked. */
   hidden: boolean;
   onActions: (message: Message) => void;
@@ -280,10 +282,11 @@ const Row = memo(function Row({
   onOpenArtifact: (artifactId: string, version?: number) => void;
   onEdit?: (messageId: string, body: string) => void;
   onInterrupt?: () => Promise<unknown>;
-  onChoose: (label: string) => void;
+  onChoose: (messageId: string, card: number, label: string) => void;
   children?: ReactNode;
 }) {
   const agent = message.authorKind === "agent";
+  const choose = useCallback((label: string, card: number) => onChoose(message.id, card, label), [onChoose, message.id]);
   const checklist = agent ? planChecklist(message.body) : null;
   if (checklist !== null) return <PlanCard text={planText ?? checklist} live={planLive ?? false} />;
   const update = agent ? parsePlanUpdate(message.body) : null;
@@ -299,7 +302,7 @@ const Row = memo(function Row({
       onOpenArtifact={onOpenArtifact}
       onEdit={onEdit && ((body) => onEdit(message.id, body))}
       onInterrupt={onInterrupt}
-      decision={agent ? { answer, onChoose } : undefined}
+      decision={agent ? { answers, onChoose: choose } : undefined}
       hidden={hidden}
       onLongPress={() => onActions(message)}
     >
@@ -307,6 +310,23 @@ const Row = memo(function Row({
     </MessageView>
   );
 });
+
+/**
+ * The answers to the conversation's decision cards and the picks it leaves out (decisionState). A
+ * message whose cards' answers did not change keeps the same array, so its row does not redraw.
+ */
+function useDecisions(messages: Message[]) {
+  const previous = useRef(new Map<string, (DecisionAnswer | undefined)[]>());
+  return useMemo(() => {
+    const state = decisionState(messages);
+    for (const [id, answers] of state.answers) {
+      const before = previous.current.get(id);
+      if (before && before.length === answers.length && before.every((a, i) => a === answers[i])) state.answers.set(id, before);
+    }
+    previous.current = state.answers;
+    return state;
+  }, [messages]);
+}
 
 /** A function that stays the same across renders and always calls the latest `fn`. */
 function useLatest<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {

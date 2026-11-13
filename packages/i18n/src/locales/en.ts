@@ -313,6 +313,7 @@ export const en = {
   "decision.yourCall": "Your call",
   "decision.recommended": "recommended",
   "decision.chosen": "Chosen",
+  "decision.inMessage": "Answered in a message",
   "decision.danger": "Careful: this cannot be undone",
 
   // Thread status
