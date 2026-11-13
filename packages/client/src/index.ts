@@ -8,6 +8,7 @@ export * from "./platform";
 export * from "./live-threads";
 export * from "./project-pins";
 export * from "./project-state";
+export * from "./secrets";
 export * from "./server";
 export * from "./tasks";
 export * from "./socket";
