@@ -59,10 +59,16 @@ describe("external text", () => {
     expect(issueCardReason({ connected: false, marked: true, requester: null, overLimit: true, outsider: true })).toBe("not_connected");
   });
 
-  it("counts a card as on screen only until a person's next message", () => {
-    expect(cardStillOpen({ seq: 5 }, [])).toBe(true);
-    expect(cardStillOpen({ seq: 5 }, [{ authorKind: "agent" }, { authorKind: "system" }])).toBe(true);
-    expect(cardStillOpen({ seq: 5 }, [{ authorKind: "agent" }, { authorKind: "user" }])).toBe(false);
+  it("counts a card as on screen until it is tapped or a person writes in their own words", () => {
+    const card = { id: "msg_card", authorKind: "agent", body: approvalMessage("memory_write", { name: "n", description: "d", content: "c" }, [], "en") };
+    const other = { id: "msg_other", authorKind: "agent", body: '```decision\n{"question":"Q?","options":[{"label":"A"},{"label":"B"}]}\n```' };
+    expect(cardStillOpen(card, [])).toBe(true);
+    expect(cardStillOpen(card, [{ id: "a", authorKind: "agent", body: "" }, { id: "s", authorKind: "system", body: "" }])).toBe(true);
+    // A tap on another card answers that one alone.
+    expect(cardStillOpen(card, [other, { id: "u", authorKind: "user", body: "A", pick: { messageId: "msg_other", card: 0 } }])).toBe(true);
+    expect(cardStillOpen(card, [{ id: "u", authorKind: "user", body: "Allow this change", pick: { messageId: "msg_card", card: 0 } }])).toBe(false);
+    expect(cardStillOpen(card, [{ id: "u", authorKind: "user", body: "why?" }])).toBe(false);
+    expect(cardStillOpen({ id: "msg_x", authorKind: "agent", body: "no card here" }, [{ id: "u", authorKind: "user", body: "ok" }])).toBe(false);
     expect(cardStillOpen(null, [])).toBe(false);
   });
 

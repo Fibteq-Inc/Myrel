@@ -665,7 +665,15 @@ export class ProjectAgent extends Agent<Env> {
     const threadId = message.threadId!;
     const reopened = !!this.getThread(threadId)?.resolved;
     if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
-    await this.wakeThread(threadId, { kind: "message", messageId: message.id, body: message.body, authorId: userId, seq: message.seq, reopened });
+    await this.wakeThread(threadId, {
+      kind: "message",
+      messageId: message.id,
+      body: message.body,
+      authorId: userId,
+      seq: message.seq,
+      reopened,
+      ...(message.pick && { pick: message.pick }),
+    });
   }
 
   /** Messages with seq > afterSeq, oldest first. Callable over RPC. */
@@ -2344,7 +2352,17 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
   /** edited: a person changed an earlier message's text; it shows as new in the agent's next turn. */
-  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean; edited?: boolean }
+  | {
+      kind: "message";
+      messageId: string;
+      body?: string;
+      authorId?: string;
+      seq?: number;
+      reopened?: boolean;
+      edited?: boolean;
+      /** The decision card the message is a tap on, if it is one. */
+      pick?: DecisionPick;
+    }
   /**
    * forwardedFor: set when the note forwards a person's ask from the project chat: who asked (see
    * ProjectAgent.forwardedFor), or null when that is not one known person.

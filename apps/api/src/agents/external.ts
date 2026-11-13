@@ -1,4 +1,4 @@
-import { type DecisionInput, formatDecision } from "@myrel/protocol";
+import { type DecisionInput, type DecisionPick, decisionState, formatDecision } from "@myrel/protocol";
 
 /**
  * Text from outside the project (a connector's answer, a pull request comment, an uploaded file, a
@@ -151,12 +151,17 @@ export function cardOccupiedResult(open: Pick<ExternalApproval, "tool" | "input"
     : `Not done yet: a card for another change is already waiting for the person (${what}). Mention this change in your reply; it can be asked for once that card is answered.`;
 }
 
+type CardMessage = { id: string; authorKind: string; body: string; attachments?: unknown[] | null; pick?: DecisionPick | null };
+
 /**
- * Whether a card that is on record is still on screen: clients show a card as answered from the first
- * person's message after it, whatever that says (decisionAnswers), so from then on nobody can tap it.
+ * Whether a card that is on record is still on screen: clients show it as answered from a person's
+ * tap on it or a message of their own words after it (decisionState), so from then on nobody can tap
+ * it. A tap on another card leaves it open.
  */
-export function cardStillOpen(card: { seq: number } | null, later: { authorKind: string }[]): boolean {
-  return !!card && !later.some((m) => m.authorKind === "user");
+export function cardStillOpen(card: CardMessage | null, later: CardMessage[]): boolean {
+  if (!card) return false;
+  const answers = decisionState([card, ...later]).answers.get(card.id);
+  return answers ? answers.every((a) => a === undefined) : !later.some((m) => m.authorKind === "user");
 }
 
 /** One call waiting on a person's card, kept on the thread until answered. `requester`: who may answer besides owners and admins. */
