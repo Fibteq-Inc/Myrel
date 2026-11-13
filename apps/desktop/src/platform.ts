@@ -1,4 +1,4 @@
-import type { KeyValueStore, PickedFile, Platform } from "@myrel/client";
+import { type KeyValueStore, keychainStore, type PickedFile, type Platform } from "@myrel/client";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -25,36 +25,27 @@ function settingsStore(): KeyValueStore {
 
 /**
  * Credentials in the OS keychain (macOS Keychain, Windows Credential Manager,
- * Secret Service on Linux). Linux desktops without a Secret Service fall back
- * to the settings store so sign-in still works.
+ * Secret Service on Linux). When it fails (or a Linux desktop has no Secret
+ * Service), the settings store keeps them so sign-in still works; see keychainStore.
  */
 function keychain(fallback: KeyValueStore): KeyValueStore {
-  let available = true;
-  return {
-    async get(key) {
-      if (available) {
-        try {
-          return await invoke<string | null>("secret_get", { key });
-        } catch (err) {
-          console.warn("Keychain unavailable, using app storage", err);
-          available = false;
-        }
-      }
-      return fallback.get(key);
+  return keychainStore(
+    {
+      get: (key) => invoke<string | null>("secret_get", { key }),
+      set: async (key, value) => {
+        await invoke("secret_set", { key, value });
+      },
     },
-    async set(key, value) {
-      if (available) {
-        try {
-          await invoke("secret_set", { key, value });
-          return;
-        } catch (err) {
-          console.warn("Keychain unavailable, using app storage", err);
-          available = false;
-        }
-      }
-      await fallback.set(key, value);
+    fallback,
+    (err) => {
+      console.warn("Keychain unavailable, using app storage", err);
+      // Reported like an uncaught error, so it shows under Settings › Server › Errors. The OS's message
+      // names what failed, never the stored value.
+      const error = new Error(`Keychain: ${err instanceof Error ? err.message : String(err)}`);
+      error.name = "KeychainError";
+      globalThis.reportError?.(error);
     },
-  };
+  );
 }
 
 const MIME: Record<string, string> = {
