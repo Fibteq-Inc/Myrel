@@ -1222,9 +1222,12 @@ export class ProjectAgent extends Agent<Env> {
     this.checkSchedule(input.schedule);
     const id = createId("routine");
     const now = new Date().toISOString();
-    this.sql`INSERT INTO routines (id, name, prompt, target, schedule, paused, run_count, created_by, created_at)
+    // Its next run goes in with the row: arm() awaits the alarm before it writes, and a list read in
+    // between must not show a new routine as unscheduled.
+    const nextRunAt = nextRun(input.schedule, null)?.toISOString() ?? null;
+    this.sql`INSERT INTO routines (id, name, prompt, target, schedule, paused, next_run_at, run_count, created_by, created_at)
       VALUES (${id}, ${input.name}, ${input.prompt}, ${JSON.stringify(input.target)}, ${JSON.stringify(input.schedule)},
-        0, 0, ${createdBy}, ${now})`;
+        0, ${nextRunAt}, 0, ${createdBy}, ${now})`;
     return this.arm(id);
   }
 
