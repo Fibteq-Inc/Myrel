@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DecisionPick } from "./decision";
 import { idPattern } from "./ids";
 import { FilePath } from "./paths";
 
@@ -154,6 +155,11 @@ export const Message = z.object({
    * project folder's CLI.
    */
   clis: z.array(z.string().max(40)).max(MAX_THREAD_CLIS).optional(),
+  /**
+   * A person's message that picks an option on a decision card: which card it answers. Absent on
+   * typed replies and on picks from clients older than this (decisionState matches those by text).
+   */
+  pick: DecisionPick.optional(),
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,

@@ -326,7 +326,7 @@ export function threadTools(host: ThreadHost): Tool[] {
       run: async ({ context, ask_person, ...decision }) => {
         const to = await host.askDecision({ decision, context, askPerson: ask_person ?? false });
         return to === "person"
-          ? "Asked. The person's choice will arrive as their next message."
+          ? "Asked. The person's choice arrives as their message, naming this card's question."
           : "Sent to the coordinator first. Its answer, or the person's choice if it passes the card on, arrives in a later turn. Carry on with the recommended option if you can; otherwise end your turn.";
       },
     }),

@@ -2,6 +2,8 @@ import { fenceLanguage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import {
   DECISION_LANG,
+  type DecisionAnswer,
+  decisionIndex,
   type FileRef,
   type FileRefContext,
   isLocalHref,
@@ -25,30 +27,36 @@ import { FilePreview } from "../files";
 import { DecisionCard } from "./decision-card";
 
 export type DecisionHandlers = {
-  /** The reply that answered this message's decision, if any. */
-  answer?: string;
-  onChoose?: (label: string) => void;
+  /** What answered each of the message's decision cards, in order (decisionState); undefined while open. */
+  answers?: readonly (DecisionAnswer | undefined)[];
+  /** `card`: which of the message's cards the option is on. */
+  onChoose?: (label: string, card: number) => void;
 };
 
 /** An agent message body: GitHub-flavored Markdown, code blocks with a copy button, decision cards. */
 export function MessageMarkdown({ body, decision }: { body: string; decision?: DecisionHandlers }) {
   // Parsing Markdown is the costly part of drawing a message; the body is parsed again only when it
-  // (or its decision's answer) changes, however often the conversation around it redraws.
+  // (or its cards' answers) changes, however often the conversation around it redraws.
   const latest = useRef(decision?.onChoose);
   latest.current = decision?.onChoose;
-  const onChoose = useCallback((label: string) => latest.current?.(label), []);
-  return <MarkdownBody body={body} answer={decision?.answer} onChoose={decision?.onChoose ? onChoose : undefined} />;
+  const onChoose = useCallback((label: string, card: number) => latest.current?.(label, card), []);
+  return <MarkdownBody body={body} answers={decision?.answers} onChoose={decision?.onChoose ? onChoose : undefined} />;
+}
+
+type BodyProps = { body: string; answers?: readonly (DecisionAnswer | undefined)[]; onChoose?: (label: string, card: number) => void };
+
+/** The cards' answers are worked out again on each redraw of the conversation, so they compare by value. */
+function sameBody(a: BodyProps, b: BodyProps): boolean {
+  if (a.body !== b.body || a.onChoose !== b.onChoose) return false;
+  if (a.answers === b.answers) return true;
+  return !!a.answers && !!b.answers && a.answers.length === b.answers.length && a.answers.every((x, i) => x === b.answers![i]);
 }
 
 const MarkdownBody = memo(function MarkdownBody({
   body,
-  answer,
+  answers,
   onChoose,
-}: {
-  body: string;
-  answer?: string;
-  onChoose?: (label: string) => void;
-}) {
+}: BodyProps) {
   const { projectId, threadId } = useParams({ strict: false });
   const projectFiles = useProjectFiles(projectId);
   const remarkPlugins = useMemo(() => [remarkGfm, remarkFilePaths(projectFiles)], [projectFiles]);
@@ -64,7 +72,17 @@ const MarkdownBody = memo(function MarkdownBody({
       }
       if (lang === DECISION_LANG) {
         const parsed = parseDecision(text);
-        if (parsed) return <DecisionCard decision={parsed} answer={answer} onChoose={onChoose} />;
+        if (parsed) {
+          // Each card answers on its own: a pick on one leaves the message's other cards open.
+          const card = Math.max(0, decisionIndex(body, parsed));
+          return (
+            <DecisionCard
+              decision={parsed}
+              answer={answers?.[card]}
+              onChoose={onChoose && ((label) => onChoose(label, card))}
+            />
+          );
+        }
       }
       return <CodeBlock lang={lang}>{text.replace(/\n$/, "")}</CodeBlock>;
     },
@@ -94,7 +112,7 @@ const MarkdownBody = memo(function MarkdownBody({
       </Markdown>
     </div>
   );
-});
+}, sameBody);
 
 const OUTSIDE_LINK = /^(https?:|mailto:)/i;
 

@@ -2213,10 +2213,12 @@ export class ThreadAgent extends Agent<Env> {
   private async answerExternalApproval(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
     const request = JSON.parse(this.getMeta("external_approval") ?? "null") as ExternalApproval | null;
     if (!request) return false;
+    // A tap on another card answers that card alone; this one stays open on screen.
+    if (reason.pick && reason.pick.messageId !== request.messageId) return false;
     const answer = approvalAnswer(reason.body ?? "");
-    // Clients show a card as answered from the first person's message after it, so nobody can tap it
-    // from here on. Keeping it on record would hold up every later card with none on screen. The
-    // message itself carries on to the agent as usual.
+    // Clients show a card as answered from a message in the person's own words after it, so nobody
+    // can tap it from here on. Keeping it on record would hold up every later card with none on
+    // screen. The message itself carries on to the agent as usual.
     if (!answer) {
       await this.closeExternalCard(request);
       return false;

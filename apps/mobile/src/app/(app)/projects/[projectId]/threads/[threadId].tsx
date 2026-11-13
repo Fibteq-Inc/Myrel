@@ -9,7 +9,7 @@ import {
   threadUsage,
 } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { lastPromptSize, waitsForAgent } from "@myrel/protocol";
+import { type DecisionPick, lastPromptSize, waitsForAgent } from "@myrel/protocol";
 import { type Href, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ChartColumn,
@@ -83,6 +83,7 @@ export default function ThreadScreen() {
     (body: string, attachments?: string[]) => send(body, threadId, attachments),
     [send, threadId],
   );
+  const onPick = useCallback((label: string, pick: DecisionPick) => send(label, threadId, undefined, undefined, pick), [send, threadId]);
 
   // Earlier tasks and their output are not in the live sync; fetch them when the thread opens.
   useEffect(() => {
@@ -217,6 +218,7 @@ export default function ThreadScreen() {
           workingCli={thread ? threadCli(thread, messages) : null}
           placeholder={t("thread.placeholder")}
           onSend={onSend}
+          onPick={onPick}
           onEdit={(messageId, body) => emit({ type: "message.edit", messageId, body })}
           onInterrupt={waiting && { messageId: waiting.id, run: () => api.interruptThread(projectId, threadId) }}
           onStop={() => api.stopThread(projectId, threadId)}

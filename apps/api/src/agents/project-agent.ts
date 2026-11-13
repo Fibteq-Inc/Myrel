@@ -13,6 +13,8 @@ import {
   ClientEvent,
   type CreateRoutineInput,
   createId,
+  type DecisionPick,
+  decisionsIn,
   type MarkMemoryInput,
   MEMORY_INDEX,
   MemoryUpkeepMode,
@@ -113,6 +115,8 @@ type MessageRow = {
   relay: string | null;
   /** JSON array of CliId, or null. */
   clis: string | null;
+  /** JSON DecisionPick, or null. */
+  pick: string | null;
   /** When its author last changed the text, or null. */
   edited_at: string | null;
   created_at: string;
@@ -167,6 +171,7 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
   stats?: MessageStats;
   relay?: MessageRelay;
   clis?: string[];
+  pick?: DecisionPick;
 };
 
 export type ThreadPatch = Partial<
@@ -310,6 +315,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "clis")) this.sql`ALTER TABLE messages ADD COLUMN clis TEXT`;
     // Added with people editing their messages.
     if (!columns.some((c) => c.name === "edited_at")) this.sql`ALTER TABLE messages ADD COLUMN edited_at TEXT`;
+    // Added with picks that name the decision card they answer.
+    if (!columns.some((c) => c.name === "pick")) this.sql`ALTER TABLE messages ADD COLUMN pick TEXT`;
     // A thread's messages, for its summary and (later) for paging a thread from its newest message.
     this.sql`CREATE INDEX IF NOT EXISTS messages_thread ON messages (thread_id, seq)`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
@@ -452,6 +459,8 @@ export class ProjectAgent extends Agent<Env> {
         }
         // Only a new ask carries CLIs, and only ones installed on the sender's own computer.
         const clis = !event.threadId && event.clis?.length ? await this.offeredClis(userId, event.clis) : [];
+        const question = event.pick ? this.pickedQuestion(event.pick, event.threadId, event.body) : null;
+        const pick = event.pick && question !== null ? { messageId: event.pick.messageId, card: event.pick.card, question } : undefined;
         const message = this.sendMessage({
           threadId: event.threadId,
           authorKind: "user",
@@ -459,6 +468,7 @@ export class ProjectAgent extends Agent<Env> {
           body: event.body,
           attachments,
           ...(clis.length && { clis }),
+          ...(pick && { pick }),
         });
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
@@ -616,10 +626,11 @@ export class ProjectAgent extends Agent<Env> {
     const stored = attachments.length ? JSON.stringify(attachments) : null;
     const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, clis, created_at)
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, clis, pick, created_at)
       VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
         ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null},
-        ${input.relay ? JSON.stringify(input.relay) : null}, ${input.clis?.length ? JSON.stringify(input.clis) : null}, ${createdAt})
+        ${input.relay ? JSON.stringify(input.relay) : null}, ${input.clis?.length ? JSON.stringify(input.clis) : null},
+        ${input.pick ? JSON.stringify(input.pick) : null}, ${createdAt})
       RETURNING seq`;
     const { artifacts: _, ...rest } = input;
     const message: Message = {
@@ -654,7 +665,15 @@ export class ProjectAgent extends Agent<Env> {
     const threadId = message.threadId!;
     const reopened = !!this.getThread(threadId)?.resolved;
     if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
-    await this.wakeThread(threadId, { kind: "message", messageId: message.id, body: message.body, authorId: userId, seq: message.seq, reopened });
+    await this.wakeThread(threadId, {
+      kind: "message",
+      messageId: message.id,
+      body: message.body,
+      authorId: userId,
+      seq: message.seq,
+      reopened,
+      ...(message.pick && { pick: message.pick }),
+    });
   }
 
   /** Messages with seq > afterSeq, oldest first. Callable over RPC. */
@@ -703,6 +722,18 @@ export class ProjectAgent extends Agent<Env> {
   getMessage(id: string): Message | null {
     const [row] = this.sql<MessageRow>`SELECT * FROM messages WHERE id = ${id}`;
     return row ? this.toMessage(row) : null;
+  }
+
+  /**
+   * The question of the card a person's tap names, when it is a card of an agent message in the same
+   * conversation and `label` is one of its options; otherwise null, and the tap is sent as a plain message.
+   */
+  private pickedQuestion(pick: DecisionPick, threadId: string | null, label: string): string | null {
+    const target = this.getMessage(pick.messageId);
+    if (!target || target.authorKind !== "agent" || target.threadId !== threadId) return null;
+    const card = decisionsIn(target.body)[pick.card];
+    const key = label.trim().toLocaleLowerCase();
+    return card?.options.some((o) => o.label.trim().toLocaleLowerCase() === key) ? card.question : null;
   }
 
   /** Replaces a message's body and tells every client. Callable over RPC. */
@@ -2247,6 +2278,7 @@ export class ProjectAgent extends Agent<Env> {
       ...(r.stats && { stats: JSON.parse(r.stats) as MessageStats }),
       ...(r.relay && { relay: JSON.parse(r.relay) as MessageRelay }),
       ...(r.clis && { clis: JSON.parse(r.clis) as string[] }),
+      ...(r.pick && { pick: JSON.parse(r.pick) as DecisionPick }),
       seq: r.seq,
       createdAt: r.created_at,
       ...(r.edited_at && { editedAt: r.edited_at }),
@@ -2320,7 +2352,17 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
   /** edited: a person changed an earlier message's text; it shows as new in the agent's next turn. */
-  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean; edited?: boolean }
+  | {
+      kind: "message";
+      messageId: string;
+      body?: string;
+      authorId?: string;
+      seq?: number;
+      reopened?: boolean;
+      edited?: boolean;
+      /** The decision card the message is a tap on, if it is one. */
+      pick?: DecisionPick;
+    }
   /**
    * forwardedFor: set when the note forwards a person's ask from the project chat: who asked (see
    * ProjectAgent.forwardedFor), or null when that is not one known person.
