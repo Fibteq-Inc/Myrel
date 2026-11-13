@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import { COORDINATOR_CLIS, type CoordinatorCli, type CoordinatorInput, effortsFor, type Runner } from "@myrel/protocol";
+import { cliLogins, COORDINATOR_CLIS, type CoordinatorCli, type CoordinatorInput, effortsFor, type Runner } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text } from "react-native";
@@ -17,8 +17,8 @@ const coordinatorClis = (runner: Runner | undefined) => runner?.clis.filter((c) 
 /**
  * How the coordinator works, as on the web: with the server's model, or with a CLI on one of your own
  * computers that has this project's folder. The computer, CLI, model and effort show only while a CLI
- * is picked, and only the computer's owner changes them; others see whose computer it is and can switch
- * it back to the server's model. Each pick saves.
+ * is picked, the CLI's login too when the computer has several, and only the computer's owner changes
+ * them; others see whose computer it is and can switch it back to the server's model. Each pick saves.
  */
 export function CoordinatorSettingsSection({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const t = useT();
@@ -28,7 +28,7 @@ export function CoordinatorSettingsSection({ projectId, canManage }: { projectId
   const own = useOwnWorkspaces(projectId);
   const { data: runners = [] } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners() });
   const names = useNames(projectId);
-  const [open, setOpen] = useState<"mode" | "computer" | "cli" | "model" | null>(null);
+  const [open, setOpen] = useState<"mode" | "computer" | "cli" | "model" | "account" | null>(null);
   // No computer of yours to pick: say so rather than offer an empty list.
   const [noComputer, setNoComputer] = useState(false);
   if (!settings.data) return null;
@@ -40,7 +40,7 @@ export function CoordinatorSettingsSection({ projectId, canManage }: { projectId
   };
   const onComputer = (runner: Runner) => {
     const cli = coordinatorClis(runner)[0]?.id as CoordinatorCli | undefined;
-    if (cli) set({ mode: "cli", runnerId: runner.id, cli, model: null, effort: null });
+    if (cli) set({ mode: "cli", runnerId: runner.id, cli, model: null, effort: null, account: null });
     else setOpen(null);
   };
 
@@ -55,7 +55,16 @@ export function CoordinatorSettingsSection({ projectId, canManage }: { projectId
     if (!cliMode || !cli) return;
     // An effort the model does not take would be dropped when it runs: clear it here instead.
     const kept = effort && effortsFor(models, model).includes(effort) ? effort : null;
+    // No account: the saved login stays.
     set({ mode: "cli", runnerId: cliMode.runnerId, cli: cli.id as CoordinatorCli, model, effort: kept });
+  };
+  // Whose subscription its turns use, when the computer has more than the CLI's own login.
+  const logins = cli?.accounts?.length ? cliLogins(cli) : [];
+  const account = cliMode?.account ?? null;
+  const accountLabel = logins.find((l) => l.account === account)?.name ?? (account && !logins.some((l) => l.account === account) ? account : t("cliPicker.ownLogin"));
+  const pickAccount = (next: string | null) => {
+    if (!cliMode || !cli) return;
+    set({ mode: "cli", runnerId: cliMode.runnerId, cli: cli.id as CoordinatorCli, model: cliMode.model, effort: cliMode.effort, account: next });
   };
   const modelName = cliMode?.model ? (models.find((m) => m.id === cliMode.model)?.name ?? cliMode.model) : t("modelPicker.cliDefault");
   const effortLabel = cliMode?.effort ? effortName(cliMode.effort, t) : t("modelPicker.effortDefault");
@@ -80,6 +89,9 @@ export function CoordinatorSettingsSection({ projectId, canManage }: { projectId
             {cli && (
               <>
                 <ValueRow label={t("coordinator.cli")} value={cliName(cli.id)} onPress={canManage && clis.length > 1 ? () => setOpen("cli") : undefined} />
+                {logins.length > 0 && (
+                  <ValueRow label={t("coordinator.account")} value={accountLabel} onPress={canManage ? () => setOpen("account") : undefined} />
+                )}
                 <ValueRow
                   label={t("coordinator.model")}
                   value={[modelName, efforts.length > 0 && effortLabel].filter(Boolean).join(" · ")}
@@ -123,9 +135,17 @@ export function CoordinatorSettingsSection({ projectId, canManage }: { projectId
               kind="radio"
               checked={cliMode.cli === c.id}
               title={cliName(c.id)}
-              onPress={() => set({ mode: "cli", runnerId: cliMode.runnerId, cli: c.id as CoordinatorCli, model: null, effort: null })}
+              onPress={() => set({ mode: "cli", runnerId: cliMode.runnerId, cli: c.id as CoordinatorCli, model: null, effort: null, account: null })}
             />
           ))}
+      </Sheet>
+      <Sheet open={open === "account"} onClose={() => setOpen(null)} title={t("coordinator.account")}>
+        {logins.map((l) => (
+          <Option key={l.account ?? ""} kind="radio" checked={account === l.account} title={l.name ?? t("cliPicker.ownLogin")} onPress={() => pickAccount(l.account)} />
+        ))}
+        {/* A login the computer no longer has stays visible until someone changes it; its turns run with the CLI's own. */}
+        {account && !logins.some((l) => l.account === account) && <Option kind="radio" checked title={account} onPress={() => setOpen(null)} />}
+        <Text style={styles.note}>{t("coordinator.accountHint")}</Text>
       </Sheet>
       <Sheet open={open === "model"} onClose={() => setOpen(null)} title={t("coordinator.model")}>
         <ScrollView style={{ maxHeight: 280 }}>

@@ -10,6 +10,8 @@ const isCoordinator = (r: FakeRequest) => r.system.includes("coordinator of a sh
 const FEATURES = ["folders", "cancel", "agent", "models", "coordinator"];
 /** Claude Code as the runner lists it, with the models it takes. */
 const CLAUDE = { id: "claude", version: "2.1.0", models: [{ id: "opus", name: "Opus", efforts: ["low", "high"] }] };
+/** The same with a work login besides its own (`myrel-runner claude add work`). */
+const CLAUDE_WORK = { ...CLAUDE, defaultAccount: "Personal", accounts: [{ id: "work", name: "Work" }] };
 
 afterEach(resetFakeModel);
 
@@ -28,11 +30,12 @@ const patch = (projectId: string, token: string, body: unknown) =>
   api(`/api/projects/${projectId}/settings`, { method: "PATCH", token, body: JSON.stringify(body) });
 
 /** A project whose coordinator works with Claude Code on its owner's computer, played by `play`. */
-async function cliProject(play: Play, opts: { features?: string[] } = {}) {
+async function cliProject(play: Play, opts: { features?: string[]; clis?: unknown[]; account?: string } = {}) {
   const token = await signUp();
-  const computer = await agentProject(token, play, { features: opts.features ?? FEATURES, hello: { clis: [CLAUDE] } });
+  const computer = await agentProject(token, play, { features: opts.features ?? FEATURES, hello: { clis: opts.clis ?? [CLAUDE] } });
   const { project, runnerId } = computer;
-  await json(patch(project.id, token, { coordinator: { mode: "cli", runnerId, cli: "claude", model: "opus", effort: "low" } }));
+  const account = opts.account && { account: opts.account };
+  await json(patch(project.id, token, { coordinator: { mode: "cli", runnerId, cli: "claude", model: "opus", effort: "low", ...account } }));
   const ws = (await api(`/api/projects/${project.id}/ws?token=${encodeURIComponent(token)}`, { headers: { upgrade: "websocket" } })).webSocket!;
   ws.accept();
   const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
@@ -51,7 +54,7 @@ describe("coordinator on a member's CLI", () => {
     // Codex cannot run without its own tools yet, so it is no choice.
     expect((await patch(project.id, owner, { coordinator: { ...on, cli: "codex" } })).status).toBe(400);
     const saved = await json<{ settings: ProjectSettings }>(patch(project.id, owner, { coordinator: on }));
-    expect(saved.settings.coordinator).toEqual({ ...on, computer: "Laptop", by: await idOf(owner) });
+    expect(saved.settings.coordinator).toEqual({ ...on, account: null, computer: "Laptop", by: await idOf(owner) });
 
     // An admin sees whose computer it is, cannot move it onto that computer as theirs, and can turn it off.
     const admin = await signUp("Ayşe");
@@ -68,6 +71,44 @@ describe("coordinator on a member's CLI", () => {
     expect((await patch(project.id, owner, { coordinator: { ...on, runnerId: other.runnerId } })).status).toBe(400);
     await env.DB.prepare("UPDATE runners SET info = json_set(info, '$.clis', json('[]')) WHERE id = ?").bind(runnerId).run();
     expect((await patch(project.id, owner, { coordinator: on })).status).toBe(400);
+  });
+
+  it("keeps the Claude login picked for it, one the computer has", async () => {
+    const owner = await signUp();
+    const { project, runnerId } = await agentProject(owner, () => {}, { features: FEATURES, hello: { clis: [CLAUDE_WORK] } });
+    const on = { mode: "cli", runnerId, cli: "claude", model: "opus", effort: "low" };
+    const saved = async (body: unknown) => (await json<{ settings: ProjectSettings }>(patch(project.id, owner, { coordinator: body }))).settings.coordinator;
+
+    expect(await saved({ ...on, account: "work" })).toMatchObject({ mode: "cli", account: "work" });
+    // An app that does not know logins yet leaves it as it is when it changes the model.
+    expect(await saved({ ...on, model: null })).toMatchObject({ model: null, account: "work" });
+    expect(await saved({ ...on, account: null })).toMatchObject({ account: null });
+    expect((await patch(project.id, owner, { coordinator: { ...on, account: "side" } })).status).toBe(400);
+  });
+
+  it("runs the CLI with the picked login, and with its own once the computer lost that login", async () => {
+    setFakeModel(() => ({ text: "", toolCalls: [] }));
+    const starts: Turn["start"][] = [];
+    const play: Play = async (turn) => {
+      if (!turn.start.coordinator) return;
+      starts.push(turn.start);
+      await turn.call("post_message", { text: `Merhaba ${starts.length}.` });
+      return "Done.";
+    };
+    const { project, token, runnerId, ws, chat } = await cliProject(play, { clis: [CLAUDE_WORK], account: "work" });
+    ws.send(JSON.stringify({ type: "message.send", body: "Selam" }));
+    await until(async () => (await chat()).find((m) => m.body === "Merhaba 1."), "the first answer");
+    expect(starts[0]!.account).toBe("work");
+
+    // The person removed the work login on the computer: the turn still runs there, with the CLI's own.
+    await env.DB.prepare("UPDATE runners SET info = json_set(info, '$.clis', json(?)) WHERE id = ?").bind(JSON.stringify([CLAUDE]), runnerId).run();
+    // The settings keep showing it, and it can stay while the owner changes the model.
+    const on = { mode: "cli", runnerId, cli: "claude", model: null, effort: null, account: "work" };
+    expect((await json<{ settings: ProjectSettings }>(patch(project.id, token, { coordinator: on }))).settings.coordinator).toMatchObject({ account: "work" });
+    ws.send(JSON.stringify({ type: "message.send", body: "Tekrar selam" }));
+    await until(async () => (await chat()).find((m) => m.body === "Merhaba 2."), "the second answer");
+    expect(starts[1]).not.toHaveProperty("account");
+    ws.close();
   });
 
   it("works a turn with the CLI, without its tools, and the server's model is not called", async () => {
@@ -102,6 +143,8 @@ describe("coordinator on a member's CLI", () => {
     expect(start).not.toHaveProperty("github");
     expect(start).not.toHaveProperty("folders");
     expect(start.model).toEqual({ model: "opus", effort: "low" });
+    // No login picked: the CLI's own.
+    expect(start).not.toHaveProperty("account");
     expect(start.prompt).toContain("Selam");
     // Only the coordinator's tools, none of a thread agent's.
     expect(tools).toEqual(expect.arrayContaining(["start_thread", "message_thread", "post_message", "react"]));

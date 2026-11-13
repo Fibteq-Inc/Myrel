@@ -925,6 +925,8 @@ export const en = {
   "coordinator.computer": "Computer",
   "coordinator.cli": "CLI",
   "coordinator.model": "Model",
+  "coordinator.account": "Account",
+  "coordinator.accountHint": "Whose subscription its turns use: one of the computer's logins, from `myrel-runner claude add`.",
   "coordinator.cliHint":
     "Each coordinator turn then runs on {computer} with your subscription, and any member's message starts one. The CLI gets none of its own tools (no commands, files or web), only Myrel's. A fresh session each turn. When it cannot answer (the computer is offline, the CLI fails or is at its limit), the server's model does.",
   "coordinator.elsewhere": "It works with {cli} on {computer}, {person}'s computer. Only they can change that; you can switch it back to the server's model.",

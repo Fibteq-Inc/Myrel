@@ -106,6 +106,11 @@ export const CoordinatorSettings = z.discriminatedUnion("mode", [
     /** From the CLI's own list (RunnerCli.models); null: the CLI's own default. */
     model: z.string().nullable(),
     effort: z.string().nullable(),
+    /**
+     * The login it runs the CLI with (RunnerCli.accounts' id); null: the CLI's own. One the computer no
+     * longer has runs the CLI's own too. Older servers never send it.
+     */
+    account: CliAccountId.nullable().catch(null).default(null),
   }),
 ]);
 export type CoordinatorSettings = z.infer<typeof CoordinatorSettings>;
@@ -119,6 +124,8 @@ export const CoordinatorInput = z.discriminatedUnion("mode", [
     cli: CoordinatorCli,
     model: z.string().trim().min(1).max(200).nullable(),
     effort: z.string().trim().min(1).max(20).nullable(),
+    /** One of the computer's logins of the CLI; null: its own. Absent: the saved one stays while the computer and CLI do. */
+    account: CliAccountId.nullable().optional(),
   }),
 ]);
 export type CoordinatorInput = z.infer<typeof CoordinatorInput>;

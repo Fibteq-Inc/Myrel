@@ -1750,6 +1750,7 @@ export class ProjectAgent extends Agent<Env> {
         agent: { mcpPath: `/api/coordinator-mcp/${this.name}`, token },
         coordinator: { system: `${COORDINATOR_SYSTEM}\n\n${CLI_COORDINATOR_NOTE}` },
         ...(target.model && { model: target.model }),
+        ...(target.account && { account: target.account }),
       });
       if (!started.ok) {
         console.warn("the coordinator's CLI could not start:", started.reason);
