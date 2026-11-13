@@ -2,6 +2,7 @@ import {
   type Artifact,
   Decision,
   formatDecision,
+  MAX_DECISION_QUESTIONS,
   MAX_ARTIFACT_BYTES,
   type Message,
   type ProjectRepo,
@@ -31,7 +32,7 @@ export type ThreadHost = {
    * Puts a choice card to people: straight away when askPerson, otherwise to the coordinator first,
    * which answers from what the project already knows or passes the card on. Says where it went.
    */
-  askDecision(input: { decision: Decision; context?: string; askPerson: boolean }): Promise<"person" | "coordinator">;
+  askDecision(input: { decisions: Decision[]; context?: string; askPerson: boolean }): Promise<"person" | "coordinator">;
   /** Marks the thread finished, or says why it cannot be yet. */
   resolve(): Promise<string | null>;
   /** Follows a pull request on a connected repository; says what happened. */
@@ -242,9 +243,9 @@ function renderPullRequest(pr: PullRequest): string {
   return `- ${pr.repo}#${pr.number} "${pr.title}" ${pr.url}: ${pr.draft && pr.state === "open" ? "draft" : pr.state}, ${ci}${review}`;
 }
 
-/** The message body of a choice card: its context, then the card. */
-export function decisionCard(decision: Decision, context?: string): string {
-  return [context, formatDecision(decision)].filter(Boolean).join("\n\n");
+/** The message body of choice cards: their context, then one card per question, answered in turn. */
+export function decisionCard(decisions: Decision[], context?: string): string {
+  return [context, ...decisions.map((d) => formatDecision(d))].filter(Boolean).join("\n\n");
 }
 
 /** A choice card as plain text, for the coordinator to read. */
@@ -313,9 +314,14 @@ export function threadTools(host: ThreadHost): Tool[] {
     tool({
       name: "ask_decision",
       description:
-        "Ask the person to choose, shown as a card with buttons. Options: 2 to 4, each a 1-2 word label and a one-sentence consequence. Mark one as recommended (0-based index). The coordinator sees it first and answers it when the project's memory, instructions or an earlier decision already settle it; otherwise the card goes to the person.",
+        "Ask the person to choose, shown as a card with buttons. Options: 2 to 4, each a 1-2 word label and a one-sentence consequence. Mark one as recommended (0-based index). The coordinator sees it first and answers it when the project's memory, instructions or an earlier decision already settle it; otherwise the card goes to the person. Several choices at once go in one call (more_questions), never in several calls: the person answers them one by one in a single card, and you get every answer together, each naming its question.",
       input: Decision.extend({
         context: z.string().max(1200).optional(),
+        more_questions: z
+          .array(Decision)
+          .max(MAX_DECISION_QUESTIONS - 1)
+          .optional()
+          .describe("Further questions asked together with this one, each with its own 2 to 4 options; the coordinator settles each on its own."),
         ask_person: z
           .boolean()
           .optional()
@@ -323,8 +329,14 @@ export function threadTools(host: ThreadHost): Tool[] {
             "Skip the coordinator: only the person can answer (they asked to be asked, it approves something that cannot be undone, or it is about taste or work they must look at).",
           ),
       }),
-      run: async ({ context, ask_person, ...decision }) => {
-        const to = await host.askDecision({ decision, context, askPerson: ask_person ?? false });
+      run: async ({ context, ask_person, more_questions, ...decision }) => {
+        const decisions = [decision, ...(more_questions ?? [])];
+        const to = await host.askDecision({ decisions, context, askPerson: ask_person ?? false });
+        if (decisions.length > 1) {
+          return to === "person"
+            ? "Asked. The person answers the questions one by one; their answers arrive together, each naming its question."
+            : "Sent to the coordinator first; it settles each question on its own and passes the rest to the person in one card. The answers arrive together in a later turn, each naming its question. Carry on with the recommended options if you can; otherwise end your turn.";
+        }
         return to === "person"
           ? "Asked. The person's choice arrives as their message, naming this card's question."
           : "Sent to the coordinator first. Its answer, or the person's choice if it passes the card on, arrives in a later turn. Carry on with the recommended option if you can; otherwise end your turn.";

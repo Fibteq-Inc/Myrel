@@ -22,6 +22,9 @@ export type DecisionInput = z.input<typeof Decision>;
 
 export const DECISION_LANG = "decision";
 
+/** At most this many questions in one ask (ask_decision with more_questions), answered one by one in one card. */
+export const MAX_DECISION_QUESTIONS = 4;
+
 /** The fenced block an agent message carries for a decision card. */
 export function formatDecision(decision: DecisionInput): string {
   return "```" + DECISION_LANG + "\n" + JSON.stringify(Decision.parse(decision), null, 2) + "\n```";
@@ -37,14 +40,27 @@ export function parseDecision(json: string): Decision | null {
   }
 }
 
+const blockPattern = () => new RegExp("```" + DECISION_LANG + "\\n([\\s\\S]*?)\\n```", "g");
+
 /** The decision cards in a message body, in order. */
 export function decisionsIn(body: string): Decision[] {
   const found: Decision[] = [];
-  for (const m of body.matchAll(new RegExp("```" + DECISION_LANG + "\\n([\\s\\S]*?)\\n```", "g"))) {
+  for (const m of body.matchAll(blockPattern())) {
     const decision = parseDecision(m[1]!);
     if (decision) found.push(decision);
   }
   return found;
+}
+
+/**
+ * A message's text without its decision cards. Clients draw the questions an agent asked together
+ * as one card, answered in turn, under the rest of the message.
+ */
+export function withoutDecisions(body: string): string {
+  return body
+    .replace(blockPattern(), (block, json: string) => (parseDecision(json) ? "" : block))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**

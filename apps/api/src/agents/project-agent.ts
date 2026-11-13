@@ -1961,6 +1961,7 @@ export class ProjectAgent extends Agent<Env> {
         await this.wakeThread(threadId, {
           kind: "coordinator",
           note: `The coordinator answered your question "${taken.question}" from what the project already settles: ${answer} (source: ${source}). Carry on with it; people see the answer in the thread and can still change it there.`,
+          answered: questionId,
         });
       },
       askPerson: async (questionId, note) => {
@@ -2367,7 +2368,8 @@ export type ThreadWake =
    * forwardedFor: set when the note forwards a person's ask from the project chat: who asked (see
    * ProjectAgent.forwardedFor), or null when that is not one known person.
    */
-  | { kind: "coordinator"; note: string; reopened?: boolean; forwardedFor?: string | null }
+  /** answered: the note answers the agent's question with this id (answer_question). */
+  | { kind: "coordinator"; note: string; reopened?: boolean; forwardedFor?: string | null; answered?: string }
   /** actor: the person the routine works for (its author); none for one an agent made for its thread. */
   | { kind: "routine"; name: string; prompt: string; actor?: string; reopened?: boolean }
   /**

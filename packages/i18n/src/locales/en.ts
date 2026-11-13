@@ -314,6 +314,7 @@ export const en = {
   "decision.recommended": "recommended",
   "decision.chosen": "Chosen",
   "decision.inMessage": "Answered in a message",
+  "decision.step": "Question {n} of {total}",
   "decision.danger": "Careful: this cannot be undone",
 
   // Thread status
