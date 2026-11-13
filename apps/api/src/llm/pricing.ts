@@ -9,11 +9,12 @@ export type Price = { input: number; output: number; cachedInput?: number };
  * LLM_PRICES var, e.g. {"kimi-k3": {"input": 3, "output": 15}}.
  */
 export const DEFAULT_PRICES: Record<string, Price> = {
+  "claude-fable-5-2": { input: 8, output: 40, cachedInput: 0.2 },
   "claude-fable-5-1": { input: 10, output: 50, cachedInput: 0.25 },
   "claude-opus-5-5": { input: 4, output: 20, cachedInput: 0.2 },
   "claude-opus-5": { input: 5, output: 25, cachedInput: 0.5 },
   "claude-opus-4-8": { input: 5, output: 25, cachedInput: 0.5 },
-  "claude-sonnet-5-5": { input: 2, output: 10, cachedInput: 0.2 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cachedInput: 0.1 },
   "claude-sonnet-5": { input: 2, output: 10, cachedInput: 0.2 },
   "claude-sonnet-4-6": { input: 3, output: 15, cachedInput: 0.3 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cachedInput: 0.01 },
