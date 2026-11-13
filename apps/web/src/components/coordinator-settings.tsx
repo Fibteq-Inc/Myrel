@@ -1,5 +1,6 @@
 import { useT } from "@myrel/i18n/react";
 import {
+  cliLogins,
   COORDINATOR_CLIS,
   type CoordinatorCli,
   type CoordinatorInput,
@@ -13,13 +14,15 @@ import { membersQuery, runnersQuery, workspacesQuery } from "../lib/api";
 import { cliName, effortName } from "./chat/cli-picker";
 import { Field, Notice, Section, Select } from "./settings";
 
-/** What the form holds; a CLI not picked yet is "". */
-export type CoordinatorDraft = { mode: "model" } | { mode: "cli"; runnerId: string; cli: CoordinatorCli | ""; model: string | null; effort: string | null };
+/** What the form holds; a CLI not picked yet is "". `account`: the CLI's login, null for its own. */
+export type CoordinatorDraft =
+  | { mode: "model" }
+  | { mode: "cli"; runnerId: string; cli: CoordinatorCli | ""; model: string | null; effort: string | null; account: string | null };
 
 export function coordinatorDraft(settings: CoordinatorSettings): CoordinatorDraft {
   if (settings.mode === "model") return { mode: "model" };
   const cli = (COORDINATOR_CLIS as readonly string[]).includes(settings.cli) ? (settings.cli as CoordinatorCli) : "";
-  return { mode: "cli", runnerId: settings.runnerId, cli, model: settings.model, effort: settings.effort };
+  return { mode: "cli", runnerId: settings.runnerId, cli, model: settings.model, effort: settings.effort, account: settings.account };
 }
 
 /** The change to save, if the form holds one that can be saved. */
@@ -35,8 +38,9 @@ const coordinatorClis = (runner: Runner | undefined) => runner?.clis.filter((c) 
 /**
  * How the coordinator works (ProjectSettings.coordinator): with the server's model, or with a CLI on one
  * of your own computers that has this project's folder. The computer, CLI, model and effort show only
- * while a CLI is picked, and only the computer's owner changes them: others see whose computer it is and
- * can switch it back to the server's model. The lists of models and efforts come from the CLI itself.
+ * while a CLI is picked, the CLI's login too when the computer has several (`myrel-runner claude add`),
+ * and only the computer's owner changes them: others see whose computer it is and can switch it back to
+ * the server's model. The lists of models, efforts and logins come from the CLI itself.
  */
 export function CoordinatorSection({
   projectId,
@@ -62,7 +66,7 @@ export function CoordinatorSection({
 
   const pickComputer = (runnerId: string) => {
     const cli = coordinatorClis(runners.find((r) => r.id === runnerId))[0]?.id ?? "";
-    onChange({ mode: "cli", runnerId, cli: cli as CoordinatorCli | "", model: null, effort: null });
+    onChange({ mode: "cli", runnerId, cli: cli as CoordinatorCli | "", model: null, effort: null, account: null });
   };
   const onMode = (mode: string) => {
     if (mode === "model") return onChange({ mode: "model" });
@@ -79,6 +83,8 @@ export function CoordinatorSection({
   const cli = clis.find((c) => c.id === draft?.cli);
   const models = cli?.models ?? [];
   const efforts = effortsFor(models, draft?.model ?? null);
+  // Whose subscription its turns use, when the computer has more than the CLI's own login.
+  const accounts = cli?.accounts ?? [];
   const set = (patch: Partial<Extract<CoordinatorDraft, { mode: "cli" }>>) => {
     if (!draft) return;
     const next = { ...draft, ...patch };
@@ -125,9 +131,13 @@ export function CoordinatorSection({
             <Notice>{t("coordinator.noCli", { computer: runner.name })}</Notice>
           ) : (
             <>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className={`grid gap-3 ${accounts.length ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
                 <Field label={t("coordinator.cli")}>
-                  <Select value={draft.cli} disabled={disabled} onChange={(e) => set({ cli: e.target.value as CoordinatorCli, model: null, effort: null })}>
+                  <Select
+                    value={draft.cli}
+                    disabled={disabled}
+                    onChange={(e) => set({ cli: e.target.value as CoordinatorCli, model: null, effort: null, account: null })}
+                  >
                     {clis.map((c) => (
                       <option key={c.id} value={c.id}>
                         {cliName(c.id)}
@@ -135,6 +145,19 @@ export function CoordinatorSection({
                     ))}
                   </Select>
                 </Field>
+                {cli && accounts.length > 0 && (
+                  <Field label={t("coordinator.account")} hint={t("coordinator.accountHint")}>
+                    <Select value={draft.account ?? ""} disabled={disabled} onChange={(e) => set({ account: e.target.value || null })}>
+                      {cliLogins(cli).map((l) => (
+                        <option key={l.account ?? ""} value={l.account ?? ""}>
+                          {l.name ?? t("cliPicker.ownLogin")}
+                        </option>
+                      ))}
+                      {/* A login the computer no longer has stays visible until someone changes it; its turns run with the CLI's own. */}
+                      {draft.account && !accounts.some((a) => a.id === draft.account) && <option value={draft.account}>{draft.account}</option>}
+                    </Select>
+                  </Field>
+                )}
                 <Field label={t("coordinator.model")}>
                   <Select value={draft.model ?? ""} disabled={disabled || models.length === 0} onChange={(e) => set({ model: e.target.value || null })}>
                     <option value="">{t("modelPicker.cliDefault")}</option>

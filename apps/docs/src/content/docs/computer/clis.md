@@ -59,6 +59,7 @@ Then:
 
 - **How this thread works** lists **Claude Code · Personal** and **Claude Code · Work** under **CLI**, each with how much of its 5-hour limit is used.
 - **Project settings › Models on the computer** sets which account the project's threads use by default.
+- **Project settings › Model › Coordinator** sets which account the coordinator uses, when it works with Claude Code on that computer.
 - **Devices** shows each account's limits on its own.
 
 A thread that switches accounts starts a new Claude Code session, with the thread's history. A new account has none of your `~/.claude` settings or plugins. If an account is removed from the computer, the thread's next turn runs with Claude Code's own login and says so. Use accounts that are all yours: Claude's terms don't allow sharing a login with someone else. Needs runner 0.34.0 or newer.
@@ -68,6 +69,7 @@ A thread that switches accounts starts a new Claude Code session, with the threa
 The coordinator, which routes every message in the project chat, normally works with the server's model. You can have it work with Claude Code on your own computer instead, in **Project settings › Model › Coordinator**:
 
 - **Works with**: **A CLI on my computer**. Then pick the **Computer** (one of yours that has the project's folder), the **CLI**, and its **Model** and **Effort** from the CLI's own list. These show only while a CLI is picked.
+- **Account**: when the computer has [more than one Claude Code account](#more-than-one-claude-code-account), which one pays for the coordinator's turns. Without a pick it uses Claude Code's own login, and an account later removed from the computer falls back to it too.
 - Each coordinator turn then runs on that computer with your subscription, and any member's message starts one. Myrel shows no cost for them.
 - The CLI gets none of its own tools: no commands, files or web, whatever the computer's access level. It works in an empty folder of its own, with only Myrel's coordinator tools, and starts a fresh session each turn.
 - When it cannot answer (the computer is offline, the runner is too old, the CLI fails or is at its limit), the server's model answers that turn. A CLI turn that already did something and then stopped is not repeated; the chat says it stopped.

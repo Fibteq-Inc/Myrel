@@ -923,6 +923,8 @@ export const tr: Catalog = {
   "coordinator.computer": "Bilgisayar",
   "coordinator.cli": "CLI",
   "coordinator.model": "Model",
+  "coordinator.account": "Hesap",
+  "coordinator.accountHint": "Turlarının hangi aboneliği kullanacağı: bilgisayardaki girişlerden biri (`myrel-runner claude add` ile eklenir).",
   "coordinator.cliHint":
     "Her koordinatör turu {computer} üzerinde senin aboneliğinle çalışır ve projedeki herkesin mesajı bir tur başlatır. CLI kendi araçlarının hiçbirini almaz (komut, dosya, web yok), yalnız Myrel'in araçlarını kullanır. Her tur yeni bir oturumla başlar. Cevap veremediğinde (bilgisayar kapalıysa, CLI hata verirse ya da limiti dolarsa) sunucu modeli cevaplar.",
   "coordinator.elsewhere": "{person} adlı üyenin bilgisayarı {computer} üzerinde {cli} ile çalışıyor. Bunu yalnız o değiştirebilir; sen sunucu modeline döndürebilirsin.",

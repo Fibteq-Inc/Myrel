@@ -135,7 +135,7 @@ export const projects = sqliteTable("projects", {
   worktrees: integer("worktrees", { mode: "boolean" }).notNull().default(true),
   /**
    * The coordinator works with a CLI on a member's computer: JSON { mode: "cli", runnerId, cli, model,
-   * effort, by } (CoordinatorSettings in @myrel/protocol, without the computer's name). null: with the
+   * effort, account, by } (CoordinatorSettings in @myrel/protocol, without the computer's name). null: with the
    * server's model, as always.
    */
   coordinator: text("coordinator"),

@@ -159,11 +159,18 @@ export const projectRoutes = new Hono<AppEnv>()
       }
       const installed = await workspaceClis(c.env, id, { runnerId: coordinator.runnerId });
       if (!installed) return c.json({ error: "invalid_input", message: "This project has no folder on that computer." }, 400);
-      if (!installed.clis.some((cli) => cli.id === coordinator.cli)) {
-        return c.json({ error: "invalid_input", message: "That CLI is not on that computer." }, 400);
-      }
+      const installedCli = installed.clis.find((cli) => cli.id === coordinator.cli);
+      if (!installedCli) return c.json({ error: "invalid_input", message: "That CLI is not on that computer." }, 400);
       const { runnerId, cli, model: cliModel, effort } = coordinator;
-      storedCoordinator = JSON.stringify({ mode: "cli", runnerId, cli, model: cliModel, effort, by: me.id } satisfies StoredCoordinator);
+      // Absent: the saved login stays while the computer and CLI do (apps that predate the choice send none).
+      const saved = current.coordinator;
+      const before = saved.mode === "cli" && saved.runnerId === runnerId && saved.cli === cli ? saved.account : null;
+      const account = coordinator.account === undefined ? before : coordinator.account;
+      // A new pick must be a login the computer has; the saved one may stay after it lost it (its turns then run with the CLI's own).
+      if (account && account !== before && !installedCli.accounts?.some((a) => a.id === account)) {
+        return c.json({ error: "invalid_input", message: "That account is not on that computer." }, 400);
+      }
+      storedCoordinator = JSON.stringify({ mode: "cli", runnerId, cli, model: cliModel, effort, account, by: me.id } satisfies StoredCoordinator);
     } else if (coordinator) storedCoordinator = null;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {

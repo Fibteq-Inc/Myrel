@@ -1,11 +1,13 @@
 import { createDb, schema } from "@myrel/db";
 import {
+  CliAccountId,
   CliId,
   type CliUsage,
   COORDINATOR_CLIS,
   type CoordinatorSettings,
   type MessageStats,
   type ProjectWorkspace,
+  resolveAccount,
   RunnerId,
   type TaskModel,
 } from "@myrel/protocol";
@@ -21,6 +23,8 @@ export const StoredCoordinator = z.object({
   cli: CliId,
   model: z.string().nullable(),
   effort: z.string().nullable(),
+  /** The CLI's login it runs with (RunnerCli.accounts' id); null or absent (set before there was a choice): the CLI's own. */
+  account: CliAccountId.nullable().optional(),
   /** The computer's owner, who turned it on. */
   by: z.string(),
 });
@@ -60,11 +64,11 @@ export async function coordinatorSettings(env: Env, projectId: string, raw: stri
     .where(and(eq(projectWorkspaces.projectId, projectId), eq(projectWorkspaces.runnerId, stored.runnerId)));
   if (!runner) return { mode: "model" };
   const { mode, runnerId, cli, model, effort, by } = stored;
-  return { mode, runnerId, computer: runner.name, by, cli, model, effort };
+  return { mode, runnerId, computer: runner.name, by, cli, model, effort, account: stored.account ?? null };
 }
 
-/** Where a coordinator turn runs with its CLI: the computer's project folder (only to show it is shared), the CLI, its model. */
-export type CoordinatorTarget = { workspace: ProjectWorkspace; cli: CliId; model?: TaskModel; by: string };
+/** Where a coordinator turn runs with its CLI: the computer's project folder (only to show it is shared), the CLI, its model and login. */
+export type CoordinatorTarget = { workspace: ProjectWorkspace; cli: CliId; model?: TaskModel; account?: CliAccountId; by: string };
 
 /**
  * Where the project's coordinator works this turn: null with the server's model (the setting), or its
@@ -91,7 +95,10 @@ export async function coordinatorTarget(env: Env, projectId: string): Promise<{ 
   const installed = (await workspaceClis(env, projectId, { runnerId }))?.clis.find((c) => c.id === cli);
   if (!installed) return { ok: false, reason: `${cli} is not on ${workspace.runnerName} any more` };
   const model = resolveTaskModel(cli, null, { [cli]: { model: stored.model, effort: stored.effort } }, installed);
-  return { ok: true, target: { workspace, cli, by, ...(model && { model }) } };
+  // A login the computer no longer has runs the CLI's own, as a thread's does; the settings show the missing one.
+  const login = resolveAccount({ project: stored.account }, installed);
+  if (login.missing) console.warn(`the coordinator's ${cli} account "${login.missing}" is gone from ${workspace.runnerName}; it runs with the CLI's own login`);
+  return { ok: true, target: { workspace, cli, by, ...(model && { model }), ...(login.account && { account: login.account }) } };
 }
 
 /**
