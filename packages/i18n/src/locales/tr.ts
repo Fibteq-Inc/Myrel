@@ -311,6 +311,7 @@ export const tr: Catalog = {
   "decision.recommended": "önerilen",
   "decision.chosen": "Seçildi",
   "decision.inMessage": "Mesajla yanıtlandı",
+  "decision.step": "Soru {n} / {total}",
   "decision.danger": "Dikkat: bu geri alınamaz",
 
   // Thread status

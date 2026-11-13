@@ -585,6 +585,76 @@ describe("coordinator and thread agent", () => {
     ws.close();
   }, 20_000);
 
+  it("settles questions asked together one by one and wakes the agent once with every answer", async () => {
+    setFakeModel((req) => {
+      if (req.turns > 1) return { text: "", toolCalls: [] };
+      if (req.prompt.includes("## Questions from thread agents")) {
+        // Each question on its own: one the project settles, the others for the person.
+        const asked = [...req.prompt.matchAll(/- Question \[(qst_[0-9A-Z]{26})\][^\n]*\n\s+([^\n]+)/g)];
+        return {
+          text: "",
+          toolCalls: asked.map(([, id, question]) =>
+            question === "Open a PR?"
+              ? call("answer_question", { question_id: id, answer: "Yes", source: "proje talimatı" })
+              : call("ask_person", { question_id: id, ...(question === "Which color?" && { note: "Renk için bir karar yok." }) }),
+          ),
+        };
+      }
+      const id = newMessageId(req.prompt);
+      return id
+        ? { text: "", toolCalls: [call("start_thread", { message_id: id, title: "Button", instructions: "Fix the button.", project_ack: "On it." })] }
+        : { text: "", toolCalls: [] };
+    });
+    const yesNo = [{ label: "Yes", consequence: "" }, { label: "No", consequence: "" }];
+    const colors = [{ label: "Blue", consequence: "" }, { label: "Red", consequence: "" }];
+    const answers: string[] = [];
+    const play: Play = async (turn, index) => {
+      if (index > 0) return;
+      const result = await turn.call("ask_decision", {
+        question: "Open a PR?",
+        options: yesNo,
+        recommended: 0,
+        context: "Three things before I start.",
+        more_questions: [
+          { question: "Which color?", options: colors, recommended: 0 },
+          { question: "Ship it?", options: yesNo },
+        ],
+      });
+      answers.push(result.text);
+    };
+    const { ws, agent, turns } = await setup(play);
+    ws.send(JSON.stringify({ type: "message.send", body: "fix the button" }));
+    const thread: Thread = await until(async () => (await agent.listThreads())[0], "thread");
+    const messages = async () => ((await agent.getThreadContext(thread.id))?.messages ?? []) as Message[];
+
+    // The two the coordinator passed on reach the person in one card, its line above them.
+    const card = await until(async () => (await messages()).find((m) => m.body.includes('"question": "Ship it?"')) ?? null, "the card");
+    expect(card.body.startsWith("Renk için bir karar yok.\n\nThree things before I start.\n\n```decision")).toBe(true);
+    expect(card.body).toContain('"question": "Which color?"');
+    expect(card.body).not.toContain('"question": "Open a PR?"');
+    expect((await messages()).some((m) => m.relay?.kind === "answer" && m.relay.note.includes("Open a PR?"))).toBe(true);
+    expect(answers[0]).toContain("settles each question on its own");
+    await until(async () => ((await agent.getThread(thread.id))?.status === "review_ready" ? true : null), "waiting on the person");
+    // The coordinator's answer alone did not wake the agent.
+    expect(turns).toHaveLength(1);
+
+    // One answer of two waits for the other.
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "Red", pick: { messageId: card.id, card: 0 } }));
+    await until(async () => ((await messages()).some((m) => m.body === "Red") ? true : null), "the first answer");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(turns).toHaveLength(1);
+
+    ws.send(JSON.stringify({ type: "message.send", threadId: thread.id, body: "No", pick: { messageId: card.id, card: 1 } }));
+    await until(() => (turns.length === 2 ? true : null), "the agent's turn with every answer");
+    const prompt = turns[1]!.prompt;
+    expect(prompt).toContain('The coordinator answered your question "Open a PR?"');
+    expect(prompt).toContain('(picked on the card "Which color?" in [');
+    expect(prompt).toContain('(picked on the card "Ship it?" in [');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(turns).toHaveLength(2);
+    ws.close();
+  }, 20_000);
+
   it("keeps a thread waiting on the person after it presented work for their feedback", async () => {
     setFakeModel((req) => {
       if (req.turns > 1) return { text: "", toolCalls: [] };

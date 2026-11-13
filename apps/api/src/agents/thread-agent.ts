@@ -12,7 +12,10 @@ import {
   type ConnectorOffer,
   type ConnectorSuggestion,
   createId,
+  decisionsIn,
+  decisionState,
   formatConnectorSuggestion,
+  formatDecision,
   formatVisualCheck,
   parseVisualCheck,
   VISUAL_CHECK_BASELINE,
@@ -308,7 +311,21 @@ const QUESTION_TIMEOUT_SEC = 120;
 const COORDINATOR_STOP_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** A choice card the agent asked that waits on the coordinator: answered there, or passed on to people. */
-type PendingQuestion = { id: string; card: string; question: string };
+type PendingQuestion = {
+  id: string;
+  /** Its decision block. Saved before questions could be asked together: the whole card message, with its context. */
+  card: string;
+  question: string;
+  /** Absent: still with the coordinator. person: passed on (note: the coordinator's line for the person). */
+  to?: "person" | "answered";
+  note?: string;
+};
+
+/**
+ * The questions the agent asked in one ask_decision call. The coordinator settles each on its own;
+ * once it settled every one, the ones it passed on reach the person together in one card.
+ */
+type QuestionSet = { context?: string; questions: PendingQuestion[] };
 
 type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null; agent: string | null };
 
@@ -437,11 +454,16 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
     // A tap on a card for a guarded call (memory, routine, new issues) makes the change (or not) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerExternalApproval(reason))) return;
+    // One answer of several the person gives in turn waits for the others.
+    if (reason.kind === "message" && reason.pick && !reason.edited && (await this.cardsStillOpen(reason.pick.messageId))) return;
     if (reason.kind === "github" && reason.external) await this.markExternal(reason.external);
     if (reason.kind === "coordinator") {
       const forwarded = reason.forwardedFor !== undefined;
       this.sql`INSERT INTO notes (body, created_at, forwarded, actor)
         VALUES (${reason.note}, ${new Date().toISOString()}, ${forwarded ? 1 : 0}, ${reason.forwardedFor ?? null})`;
+      // The coordinator's answer to one of several questions: the agent reads it with the rest, once
+      // every one is settled (and the person answered the ones passed on to them).
+      if (reason.answered && (await this.settleQuestions()) !== "answered") return;
     }
     if (reason.kind === "github" && reason.settled && this.getMeta("thread_id") && !this.runningTask() && !this.planHasWork()) {
       // A merge or close with nothing left to do: said here and settled without starting the agent.
@@ -506,52 +528,101 @@ export class ThreadAgent extends Agent<Env> {
     await project.notifyThread(threadId, "done", body);
   }
 
-  /** The choice card waiting on the coordinator, taken off the wait when its id matches. */
-  private takeQuestion(id: string): PendingQuestion | null {
+  /** The questions waiting on the coordinator (see QuestionSet), or null when none do. */
+  private questionSet(): QuestionSet | null {
     const raw = this.getMeta("pending_question");
-    const q = raw ? (JSON.parse(raw) as PendingQuestion) : null;
-    if (q?.id !== id) return null;
-    this.deleteMeta("pending_question");
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as QuestionSet | PendingQuestion;
+    // Saved before questions could be asked together: one question, its card holding the context.
+    return "questions" in saved ? saved : { questions: [saved] };
+  }
+
+  /** Settles one question still with the coordinator; null when its id is not one, or it is settled already. */
+  private takeQuestion(id: string, to: "person" | "answered", note?: string): PendingQuestion | null {
+    const set = this.questionSet();
+    const q = set?.questions.find((x) => x.id === id);
+    if (!set || !q || q.to) return null;
+    q.to = to;
+    if (note?.trim()) q.note = note.trim();
+    // Answered by the coordinator, every one: nothing waits any more (the notes wake the agent).
+    if (set.questions.every((x) => x.to === "answered")) this.deleteMeta("pending_question");
+    else this.setMeta("pending_question", JSON.stringify(set));
     return q;
   }
 
   /**
-   * The coordinator answered the agent's choice card itself, so the card never reaches people.
-   * Returns the question, or null when the card was already answered or passed on. Callable over RPC.
+   * Once the coordinator settled every question asked together, the ones it passed on go to the
+   * person in one card (its lines above them). "waiting": some are still with the coordinator.
+   * "person": the card is in the thread, and the person's answers wake the agent. "answered": the
+   * coordinator answered every one, so its notes wake the agent.
+   */
+  private async settleQuestions(): Promise<"waiting" | "person" | "answered"> {
+    const set = this.questionSet();
+    if (!set) return "answered";
+    if (set.questions.some((q) => !q.to)) return "waiting";
+    this.deleteMeta("pending_question");
+    const passed = set.questions.filter((q) => q.to === "person");
+    if (!passed.length) return "answered";
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const notes = [...new Set(passed.flatMap((q) => (q.note ? [q.note] : [])))];
+    const body = [...notes, set.context, ...passed.map((q) => q.card)].filter(Boolean).join("\n\n");
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    const question = passed[0]!.question;
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    if (this.runningTask() && turn) {
+      // A turn still running says it when it ends, so the thread does not read "working" over the card.
+      this.setMeta("agent_turn", JSON.stringify({ ...turn, needs: louder("decision", turn.needs), lastReply: question }));
+    } else {
+      await project.updateThread(threadId, { status: "review_ready", needs: "decision" });
+      await project.notifyThread(threadId, "decision", question);
+    }
+    return "person";
+  }
+
+  /**
+   * The coordinator answered one of the agent's choice cards itself, so it never reaches people.
+   * Returns the question, or null when it was already answered or passed on. Its note (wake with
+   * `answered`) wakes the agent once every question asked with it is settled. Callable over RPC.
    */
   async answeredQuestion(id: string): Promise<{ question: string } | null> {
-    const q = this.takeQuestion(id);
+    const q = this.takeQuestion(id, "answered");
     return q && { question: q.question };
   }
 
   /**
    * The choice card goes to people after all: the coordinator passed it on (with an optional line of
-   * what it knows), its turn failed, or it took too long. Returns false when the card was already
+   * what it knows), its turn failed, or it took too long. It reaches them with the other questions
+   * asked together, once the coordinator settled those too. Returns false when it was already
    * answered or passed on. Callable over RPC.
    */
   async escalateQuestion(id: string, note?: string): Promise<boolean> {
-    const q = this.takeQuestion(id);
-    if (!q) return false;
-    const { projectId, threadId } = this.ids();
-    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const body = note?.trim() ? `${note.trim()}\n\n${q.card}` : q.card;
-    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
-    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
-    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
-    if (this.runningTask() && turn) {
-      // A turn still running says it when it ends, so the thread does not read "working" over the card.
-      this.setMeta("agent_turn", JSON.stringify({ ...turn, needs: louder("decision", turn.needs), lastReply: q.question }));
-    } else {
-      await project.updateThread(threadId, { status: "review_ready", needs: "decision" });
-      await project.notifyThread(threadId, "decision", q.question);
-    }
+    if (!this.takeQuestion(id, "person", note)) return false;
+    await this.settleQuestions();
     return true;
   }
 
-  /** Schedule callback: a choice card still waiting on the coordinator goes to the person. */
+  /** Schedule callback: the questions asked with this one that still wait on the coordinator go to the person. */
   async questionTimeout(payload: { id: string }): Promise<void> {
     if (this.getMeta("closed")) return;
-    await this.escalateQuestion(payload.id);
+    const set = this.questionSet();
+    if (!set?.questions.some((q) => q.id === payload.id)) return;
+    for (const q of set.questions) if (!q.to) this.takeQuestion(q.id, "person");
+    await this.settleQuestions();
+  }
+
+  /**
+   * Questions asked together are answered one by one: a tap on one of a message's cards waits while
+   * others in it are still open, so the agent hears every answer in one turn.
+   */
+  private async cardsStillOpen(messageId: string): Promise<boolean> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const card = await project.getMessage(messageId);
+    if (!card || card.threadId !== threadId || decisionsIn(card.body).length < 2) return false;
+    const { messages } = await project.threadMessagesAfter(threadId, card.seq);
+    return !!decisionState([card, ...messages]).answers.get(card.id)?.some((a) => a === undefined);
   }
 
   /**
@@ -2328,23 +2399,26 @@ export class ThreadAgent extends Agent<Env> {
     const tools: Tool[] = [
       ...threadTools({
         reply,
-        askDecision: async ({ decision, context, askPerson }) => {
-          const card = decisionCard(decision, context);
-          // One card waits on the coordinator at a time; another one goes straight to the person.
+        askDecision: async ({ decisions, context, askPerson }) => {
+          // One ask waits on the coordinator at a time; another one goes straight to the person.
           if (askPerson || this.getMeta("pending_question")) {
-            await reply(card, "decision");
+            await reply(decisionCard(decisions, context), "decision");
             return "person";
           }
-          const id = createId("question");
-          this.setMeta("pending_question", JSON.stringify({ id, card, question: decision.question } satisfies PendingQuestion));
+          // Each question is the coordinator's to settle on its own; the person gets the rest together.
+          const questions = decisions.map((d) => ({ id: createId("question"), card: formatDecision(d), question: d.question }));
+          this.setMeta("pending_question", JSON.stringify({ context, questions } satisfies QuestionSet));
           save({ questioned: true });
-          // Whatever happens to the coordinator's turn, the card reaches the person in the end.
-          await this.schedule(QUESTION_TIMEOUT_SEC, "questionTimeout", { id });
-          try {
-            await project.askCoordinator(threadId, { questionId: id, question: renderQuestion(decision, context) });
-          } catch (err) {
-            console.warn("asking the coordinator failed; asking the person", err);
-            await this.escalateQuestion(id);
+          // Whatever happens to the coordinator's turn, the cards reach the person in the end.
+          await this.schedule(QUESTION_TIMEOUT_SEC, "questionTimeout", { id: questions[0]!.id });
+          for (const [i, q] of questions.entries()) {
+            const together = questions.length > 1 ? `\n  (Question ${i + 1} of ${questions.length} the agent asked together; settle each on its own.)` : "";
+            try {
+              await project.askCoordinator(threadId, { questionId: q.id, question: renderQuestion(decisions[i]!, context) + together });
+            } catch (err) {
+              console.warn("asking the coordinator failed; asking the person", err);
+              await this.escalateQuestion(q.id);
+            }
           }
           return "coordinator";
         },

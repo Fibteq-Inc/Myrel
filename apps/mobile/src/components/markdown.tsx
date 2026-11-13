@@ -1,7 +1,7 @@
 import { fenceLanguage } from "@myrel/client";
 import { highlightLines } from "@myrel/client/highlight";
 import { useT } from "@myrel/i18n/react";
-import { mayBeFileName, resolveFileCode, splitFilePaths } from "@myrel/protocol";
+import { decisionsIn, mayBeFileName, resolveFileCode, splitFilePaths, withoutDecisions } from "@myrel/protocol";
 import * as Clipboard from "expo-clipboard";
 import { Copy } from "lucide-react-native";
 import { type ReactNode, useMemo } from "react";
@@ -12,7 +12,7 @@ import { useFileRefContext } from "../lib/file-refs";
 import { unwrapHref, wrapHref } from "../lib/raw-href";
 import { makeStyles, mono, radius, useColors, useTheme } from "../theme";
 import { CodeLines } from "./code-view";
-import { DecisionCard } from "./decision-card";
+import { DecisionCard, DecisionSteps } from "./decision-card";
 
 export type DecisionHandlers = {
   /** What answered each of the message's decision cards, in order (decisionState); undefined while open. */
@@ -253,13 +253,24 @@ export function MessageMarkdown({
   const hasDecision = decision !== undefined;
   const answers = decision?.answers;
   const onChoose = decision?.onChoose;
+  // Questions asked together are one card under the rest of the message, answered in turn.
+  const steps = useMemo(() => {
+    const cards = hasDecision ? decisionsIn(body) : [];
+    return cards.length > 1 ? { cards, text: withoutDecisions(body) } : null;
+  }, [hasDecision, body]);
   // Rebuilding the renderer re-parses the message, so only do it when what it draws changes.
   const renderer = useMemo(
     () => new MyrelRenderer(hasDecision ? { answers, onChoose, body } : undefined, onLink, projectFiles, markedStyles.link, selectable),
     [hasDecision, answers, onChoose, body, onLink, projectFiles, markedStyles.link, selectable],
   );
-  const elements = useMarkdown(body, { colorScheme: theme, renderer, tokenizer, styles: markedStyles });
-  return <View>{elements}</View>;
+  const elements = useMarkdown(steps ? steps.text : body, { colorScheme: theme, renderer, tokenizer, styles: markedStyles });
+  if (!steps) return <View>{elements}</View>;
+  return (
+    <View style={{ gap: 12 }}>
+      {!!steps.text && <View>{elements}</View>}
+      <DecisionSteps decisions={steps.cards} answers={answers} onChoose={onChoose} />
+    </View>
+  );
 }
 
 const useStyles = makeStyles((colors) =>

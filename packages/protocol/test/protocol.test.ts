@@ -5,6 +5,7 @@ import {
   decisionPicks,
   decisionsIn,
   decisionState,
+  withoutDecisions,
   CreateConnectorInput,
   CreateRoutineInput,
   CronExpression,
@@ -301,6 +302,10 @@ describe("decision answers", () => {
     expect(answers.get("msg_1")).toEqual([undefined, "Small"]);
     expect(decisionIndex(body, decisionsIn(size)[0]!)).toBe(1);
     expect(decisionIndex(body, decisionsIn(ship)[0]!)).toBe(-1);
+    // The text around them, for clients that draw questions asked together as one card.
+    expect(withoutDecisions(body)).toBe("Two questions.");
+    expect(withoutDecisions(`${color}\n\n${size}`)).toBe("");
+    expect(withoutDecisions("```decision\nnot json\n```")).toBe("```decision\nnot json\n```");
   });
 
   it("shows a tap whose card is not loaded as a bubble", () => {

@@ -4,6 +4,7 @@ import {
   DECISION_LANG,
   type DecisionAnswer,
   decisionIndex,
+  decisionsIn,
   type FileRef,
   type FileRefContext,
   isLocalHref,
@@ -13,6 +14,7 @@ import {
   resolveFileHref,
   splitFilePaths,
   threadIdFromHref,
+  withoutDecisions,
 } from "@myrel/protocol";
 import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +26,7 @@ import remarkGfm from "remark-gfm";
 import { filesQuery, runnersQuery, workspaceQuery } from "../../lib/api";
 import { CodeTokens, useCodeLines } from "../../lib/highlight";
 import { FilePreview } from "../files";
-import { DecisionCard } from "./decision-card";
+import { DecisionCard, DecisionSteps } from "./decision-card";
 
 export type DecisionHandlers = {
   /** What answered each of the message's decision cards, in order (decisionState); undefined while open. */
@@ -40,6 +42,19 @@ export function MessageMarkdown({ body, decision }: { body: string; decision?: D
   const latest = useRef(decision?.onChoose);
   latest.current = decision?.onChoose;
   const onChoose = useCallback((label: string, card: number) => latest.current?.(label, card), []);
+  // Questions asked together are one card under the rest of the message, answered in turn.
+  const steps = useMemo(() => {
+    const cards = decisionsIn(body);
+    return cards.length > 1 ? { cards, text: withoutDecisions(body) } : null;
+  }, [body]);
+  if (steps && decision) {
+    return (
+      <div className="flex flex-col gap-3">
+        {steps.text && <MarkdownBody body={steps.text} />}
+        <DecisionSteps decisions={steps.cards} answers={decision.answers} onChoose={decision.onChoose ? onChoose : undefined} />
+      </div>
+    );
+  }
   return <MarkdownBody body={body} answers={decision?.answers} onChoose={decision?.onChoose ? onChoose : undefined} />;
 }
 
