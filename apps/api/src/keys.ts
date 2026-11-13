@@ -92,3 +92,34 @@ async function projectOverride(
   }
   return { ok: true, value: override };
 }
+
+/** A person's own newest key for a provider (Settings › Keys), decrypted; null when they have none. */
+export async function personKey(env: Env, userId: string, provider: ProviderId): Promise<{ id: string; secret: string } | null> {
+  const [row] = await createDb(env.DB)
+    .select()
+    .from(apiKeys)
+    .where(and(eq(apiKeys.ownerId, userId), eq(apiKeys.provider, provider)))
+    .orderBy(desc(apiKeys.createdAt))
+    .limit(1);
+  return row ? { id: row.id, secret: await decryptSecret(env, row.secret, row.id) } : null;
+}
+
+/** One of a person's own keys by id, decrypted; null once they deleted it (or it is not theirs). */
+export async function personKeyById(env: Env, userId: string, keyId: string): Promise<string | null> {
+  const [row] = await createDb(env.DB)
+    .select()
+    .from(apiKeys)
+    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.ownerId, userId)));
+  return row ? decryptSecret(env, row.secret, row.id) : null;
+}
+
+/** Whether any member of the project has a key of their own for the provider. */
+export async function memberHasKey(env: Env, projectId: string, provider: ProviderId): Promise<boolean> {
+  const [row] = await createDb(env.DB)
+    .select({ id: apiKeys.id })
+    .from(apiKeys)
+    .innerJoin(projectMembers, and(eq(projectMembers.userId, apiKeys.ownerId), eq(projectMembers.projectId, projectId)))
+    .where(eq(apiKeys.provider, provider))
+    .limit(1);
+  return Boolean(row);
+}

@@ -110,7 +110,9 @@ import {
   trackPullRequest,
 } from "../github/pulls";
 import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
-import { projectTaskModel } from "../keys";
+import { memberHasKey, projectTaskModel } from "../keys";
+import { type ResearchState, researchTools } from "../research/research";
+import { answerResearch, pollResearch, type ResearchHost, readResearch, requestResearch } from "../research/thread";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
@@ -452,6 +454,8 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     // A tap on the branch card deletes it (or keeps it) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
+    // A tap on a research card starts it, raises its budget or finishes it, without a turn.
+    if (reason.kind === "message" && reason.body !== undefined && (await answerResearch(this.researchHost(), reason))) return;
     // A tap on a card for a guarded call (memory, routine, new issues) makes the change (or not) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerExternalApproval(reason))) return;
     // One answer of several the person gives in turn waits for the others.
@@ -633,6 +637,8 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("closed", "1");
     this.deleteMeta("pending_question");
     this.deleteMeta("branch_request");
+    // A research nobody started yet goes with it; one that runs still reports where it ends.
+    if (this.research()?.status === "asking") this.deleteMeta("research");
     this.setMeta("dirty", "0");
     await this.cancelRunningTask();
   }
@@ -1974,6 +1980,33 @@ export class ThreadAgent extends Agent<Env> {
     });
   }
 
+  /** The thread's research (start_research), from the card asking for it until it ends. */
+  private research(): ResearchState | null {
+    return readResearch(this.researchHost());
+  }
+
+  /** What research/thread.ts needs of this thread. */
+  private researchHost(): ResearchHost {
+    return {
+      env: this.env,
+      getMeta: (key) => this.getMeta(key),
+      setMeta: (key, value) => this.setMeta(key, value),
+      deleteMeta: (key) => this.deleteMeta(key),
+      ids: () => this.ids(),
+      language: () => this.language(),
+      schedule: async (sec, payload) => {
+        await this.schedule(sec, "researchPoll", payload);
+      },
+      wake: (note) => this.wake({ kind: "coordinator", note }),
+      markExternal: (source) => this.markExternal(source),
+    };
+  }
+
+  /** Scheduled while a research runs: its spend on the status line, and its end. */
+  async researchPoll(payload: { id: string }): Promise<void> {
+    await pollResearch(this.researchHost(), payload);
+  }
+
   /**
    * A person answered the repository card. "Connect" connects it as them (owner or admin, with
    * GitHub access to it): on success the turn their answer starts has it; otherwise a new card says
@@ -2356,9 +2389,11 @@ export class ThreadAgent extends Agent<Env> {
     // An evaluator thread hands in its check; any other thread of a project with the check on asks for one.
     const role = this.visualCheckRole();
     // Side by side: each is a query, and every tools/list and call waits for them.
-    const [checksOn, ssh] = await Promise.all([
+    const [checksOn, ssh, researchOn] = await Promise.all([
       !role && visualCheckOn(this.env, projectId).catch(() => false),
       local ? this.sshRunTool() : null,
+      // Research is paid from a member's own Anthropic key, so it is offered only when one has one.
+      !role && memberHasKey(this.env, projectId, "anthropic").catch(() => false),
     ]);
     const reply = async (text: string, needs?: ReplyNeeds, files?: string[]): Promise<Message> => {
       // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
@@ -2453,6 +2488,10 @@ export class ThreadAgent extends Agent<Env> {
           if (this.visualCheck()?.status === "running") {
             return "Not resolved: a visual check of this work is running, and its result will wake you. End your turn without resolving.";
           }
+          const research = this.research();
+          if (research) {
+            return `Not resolved: the research "${research.title}" ${research.status === "asking" ? "waits for people to start it" : "is running"}, and its end will wake you. End your turn without resolving.`;
+          }
           // Work whose pull requests change what people see, with no check run on it: asked once.
           if (checksOn && !this.visualCheck()) {
             const unchecked = await this.uncheckedChange().catch((err) => {
@@ -2525,6 +2564,7 @@ export class ThreadAgent extends Agent<Env> {
           return `${done} A card asks the person whether to delete its branch ${branch.branch}; Myrel deletes it if they say so, without you. Do not ask again.`;
         },
       }),
+      ...(researchOn ? researchTools({ start: (input) => requestResearch(this.researchHost(), input, reply) }) : []),
       ...visualCheckTools({
         request: role ? undefined : checksOn ? (input) => this.requestVisualCheck(input) : undefined,
         submit: role ? (input) => this.submitVisualCheck(role, input) : undefined,
