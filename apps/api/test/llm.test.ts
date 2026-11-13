@@ -130,13 +130,29 @@ describe("createProvider", () => {
     expect(headers["x-api-key"]).toBe("ak");
     expect(headers["cf-aig-authorization"]).toBe("Bearer gt");
     const body = f.body();
-    expect(body.system).toBe("sys");
+    // Cached at the system prompt (tools come before it) and at the conversation's end.
+    expect(body.system).toEqual([{ type: "text", text: "sys", cache_control: { type: "ephemeral" } }]);
+    expect(body.messages[0]).toEqual({ role: "user", content: "hi" });
     expect(body.messages[1].content[0]).toMatchObject({ type: "tool_use", id: "c1" });
-    expect(body.messages[2]).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "Sent." }] });
+    expect(body.messages[1].content[0].cache_control).toBeUndefined();
+    expect(body.messages[2]).toEqual({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "c1", content: "Sent.", cache_control: { type: "ephemeral" } }],
+    });
     expect(out.text).toBe("thinking");
     expect(out.toolCalls).toEqual([{ id: "tu1", name: "reply", input: { text: "ok" } }]);
     // Cache reads and writes are folded into the input count.
     expect(out.usage).toEqual({ inputTokens: 45, outputTokens: 4, cachedInputTokens: 30 });
+  });
+
+  it("marks a plain first message for the cache and sends no empty system block", async () => {
+    const f = recordingFetch({ content: [{ type: "text", text: "ok" }] });
+    const res = createProvider({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "ak" }, f.fetchImpl);
+    if (!res.ok) throw new Error(res.reason);
+    await res.provider.chat({ system: "", tools: [], turns: [{ role: "user", content: "hi" }] });
+    const body = f.body();
+    expect(body.system).toBeUndefined();
+    expect(body.messages).toEqual([{ role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] }]);
   });
 });
 
@@ -237,6 +253,8 @@ describe("pricing", () => {
     expect(priceFor("accounts/fireworks/models/kimi-k2p6", prices)).toEqual({ input: 0.6, output: 2.5 });
     expect(priceFor("claude-sonnet-5-5-20261001", prices)).toEqual(DEFAULT_PRICES["claude-sonnet-5-5"]);
     expect(priceFor("auto", prices)).toBeNull();
+    // Claude Code's "fable" alias runs Fable 5.2 since 2.1.322; a dated snapshot finds it by prefix.
+    expect(priceFor("claude-fable-5-2-20261101", prices)).toEqual({ input: 8, output: 40, cachedInput: 0.2 });
   });
 
   it("charges cached input at the cache rate, in micro-dollars", () => {
@@ -356,6 +374,23 @@ describe("readsImages", () => {
     const openai = taskModel({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "k" } as never);
     expect(openai.ok && openai.model.messages).toBeUndefined();
     expect(openai.ok && messagesBaseUrl(openai.model)).toBeNull();
+  });
+
+  it("keeps RUNNER_MODEL to the server's provider: a project on its own Anthropic key runs its own model", () => {
+    const env = { LLM_PROVIDER: "fireworks", FIREWORKS_API_KEY: "fw", RUNNER_MODEL: "auto", RUNNER_IMAGES: "false" };
+    const server = taskModel(env as never);
+    expect(server.ok && server.model).toMatchObject({ provider: "fireworks", id: "auto", images: false });
+    // A project's own Fireworks key is still the server's provider, so the server's harness model applies.
+    const ownFireworks = taskModel(env as never, { provider: "fireworks", apiKey: "mine" });
+    expect(ownFireworks.ok && ownFireworks.model.id).toBe("auto");
+
+    const anthropic = taskModel(env as never, { provider: "anthropic", apiKey: "ak" });
+    expect(anthropic.ok && anthropic.model).toMatchObject({ kind: "anthropic", provider: "anthropic", id: "claude-sonnet-5-5", images: true });
+    expect(anthropic.ok && anthropic.apiKey).toBe("ak");
+    const picked = taskModel(env as never, { provider: "anthropic", model: "claude-haiku-5-5", apiKey: "ak" });
+    expect(picked.ok && picked.model.id).toBe("claude-haiku-5-5");
+    const openai = taskModel(env as never, { provider: "openai", apiKey: "ok" });
+    expect(openai.ok && openai.model.id).toBe("gpt-5.1");
   });
 
   it("lets RUNNER_IMAGES decide for the harness's model", () => {

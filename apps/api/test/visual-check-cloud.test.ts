@@ -3,6 +3,7 @@ import { getAgentByName } from "agents";
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { checkTaskEnv } from "../src/keys";
+import { taskModel } from "../src/llm";
 import { api, until } from "./fake-agent";
 
 describe("a visual check in the cloud", () => {
@@ -10,6 +11,14 @@ describe("a visual check in the cloud", () => {
     const base = { RUNNER_MODEL: "auto", RUNNER_IMAGES: "" };
     expect(checkTaskEnv({ ...base, CHECK_MODEL: "vision-1", CHECK_IMAGES: "true" })).toMatchObject({ RUNNER_MODEL: "vision-1", RUNNER_IMAGES: "true" });
     expect(checkTaskEnv({ ...base, CHECK_MODEL: "", CHECK_IMAGES: "true" })).toMatchObject({ RUNNER_MODEL: "auto", RUNNER_IMAGES: "" });
+  });
+
+  it("keeps a project on its own Anthropic key on its own model, CHECK_MODEL being the server provider's", () => {
+    const server = { LLM_PROVIDER: "fireworks", FIREWORKS_API_KEY: "fw", RUNNER_MODEL: "auto", RUNNER_IMAGES: "", CHECK_MODEL: "vision-1", CHECK_IMAGES: "true" };
+    const own = taskModel(checkTaskEnv(server) as never, { provider: "anthropic", model: "claude-sonnet-5-5", apiKey: "ak" });
+    expect(own.ok && own.model).toMatchObject({ provider: "anthropic", id: "claude-sonnet-5-5", images: true });
+    const shared = taskModel(checkTaskEnv(server) as never);
+    expect(shared.ok && shared.model).toMatchObject({ provider: "fireworks", id: "vision-1", images: true });
   });
 
   it("opens its evaluator thread in the cloud with the check model, which reads images", { timeout: 30_000 }, async () => {

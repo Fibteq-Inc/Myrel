@@ -128,7 +128,8 @@
   //
   // Sandbox (the cloud thread agent, OpenCode). Repository access comes from the project's GitHub connection.
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
-  // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
+  // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL). Like LLM_MODEL it is
+  // a model of LLM_PROVIDER: a project with its own key for another provider runs on its own model.
   // RUNNER_IMAGES: "true" or "false" when that model does or does not read images (screenshots);
   // empty = guessed from its name.
   // CHECK_MODEL: model for a visual check's evaluator in the cloud, one that reads screenshots;

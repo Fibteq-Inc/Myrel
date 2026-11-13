@@ -1,9 +1,12 @@
 import { type ChatRequest, type ChatResponse, LlmError, type ModelProvider } from "./types";
 
-type Block =
+type CacheControl = { type: "ephemeral" };
+
+type Block = (
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
+) & { cache_control?: CacheControl };
 
 type AnthropicMessage = { role: "user" | "assistant"; content: string | Block[] };
 
@@ -45,8 +48,10 @@ export function anthropic(opts: AnthropicOptions): ModelProvider {
         body: JSON.stringify({
           model: opts.model,
           max_tokens: req.maxTokens ?? 4096,
-          system: req.system,
-          messages: toMessages(req),
+          // Two cache points (see cacheTail): the system prompt, with the tools rendered before it,
+          // and the end of the conversation. Reads cost a tenth of fresh input on Anthropic.
+          ...(req.system && { system: [{ type: "text", text: req.system, cache_control: EPHEMERAL }] }),
+          messages: cacheTail(toMessages(req)),
           tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })),
         }),
       });
@@ -74,6 +79,21 @@ export function anthropic(opts: AnthropicOptions): ModelProvider {
       };
     },
   };
+}
+
+const EPHEMERAL: CacheControl = { type: "ephemeral" };
+
+/**
+ * Marks the conversation's last block for Anthropic's prompt cache, so the loop's next call (the
+ * same system, tools and turns plus the new ones) reads all of it back instead of paying for it
+ * again. Explicit markers, not the top-level automatic field, which some gateways reject.
+ */
+function cacheTail(messages: AnthropicMessage[]): AnthropicMessage[] {
+  const last = messages.at(-1);
+  if (!last) return messages;
+  const blocks: Block[] = typeof last.content === "string" ? (last.content ? [{ type: "text", text: last.content }] : []) : last.content;
+  if (!blocks.length) return messages;
+  return [...messages.slice(0, -1), { role: last.role, content: [...blocks.slice(0, -1), { ...blocks.at(-1)!, cache_control: EPHEMERAL }] }];
 }
 
 function toMessages(req: ChatRequest): AnthropicMessage[] {
