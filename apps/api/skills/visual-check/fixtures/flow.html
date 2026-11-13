@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fbfaf7; --fg: #1d1f24; --muted: #555b66; --accent: #2a55c9; --bad: #a3231b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15171b; --fg: #eceef2; --muted: #a9afba; --accent: #8fb0ff; --bad: #ff9b8f; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  main { max-width: 420px; margin: 0 auto; padding: 48px 24px; }
+  form { display: grid; gap: 16px; }
+  label { display: grid; gap: 6px; }
+  input { font: inherit; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--muted); background: transparent; color: var(--fg); }
+  button { font: inherit; min-height: 44px; border-radius: 8px; border: 0; background: var(--accent); color: var(--bg); }
+  [role="alert"] { color: var(--bad); margin: 0; }
+  .projects { list-style: none; padding: 0; display: grid; gap: 12px; }
+  .projects li { border: 1px solid var(--muted); border-radius: 12px; padding: 16px 20px; }
+  .projects h2 { margin: 0 0 4px; font-size: 18px; }
+  .projects p { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<!-- A sign-in flow for the selftest's expect steps. ?bug=silent: a wrong password shows no error and clears the email. -->
+<main id="app">
+  <h1>Sign in</h1>
+  <form id="f">
+    <label>Email <input name="email" type="email" autocomplete="email"></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password"></label>
+    <p id="error" role="alert" hidden>Wrong email or password</p>
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+<script>
+  const bug = new URLSearchParams(location.search).get("bug");
+  const f = document.getElementById("f");
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (f.password.value === "right") {
+      location.hash = "projects";
+      document.getElementById("app").innerHTML =
+        "<h1>Projects</h1><ul class=\"projects\"><li><h2>Website</h2><p>Three open threads, last change an hour ago.</p></li><li><h2>Mobile app</h2><p>One open thread, waiting for your answer.</p></li><li><h2>Docs</h2><p>Nothing open.</p></li></ul>";
+      return;
+    }
+    f.password.value = "";
+    if (bug === "silent") f.email.value = "";
+    else document.getElementById("error").hidden = false;
+  });
+</script>
+</body>
+</html>

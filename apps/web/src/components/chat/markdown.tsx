@@ -2,6 +2,9 @@ import { fenceLanguage } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import {
   DECISION_LANG,
+  type DecisionAnswer,
+  decisionIndex,
+  decisionsIn,
   type FileRef,
   type FileRefContext,
   isLocalHref,
@@ -11,6 +14,7 @@ import {
   resolveFileHref,
   splitFilePaths,
   threadIdFromHref,
+  withoutDecisions,
 } from "@myrel/protocol";
 import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -22,33 +26,52 @@ import remarkGfm from "remark-gfm";
 import { filesQuery, runnersQuery, workspaceQuery } from "../../lib/api";
 import { CodeTokens, useCodeLines } from "../../lib/highlight";
 import { FilePreview } from "../files";
-import { DecisionCard } from "./decision-card";
+import { DecisionCard, DecisionSteps } from "./decision-card";
 
 export type DecisionHandlers = {
-  /** The reply that answered this message's decision, if any. */
-  answer?: string;
-  onChoose?: (label: string) => void;
+  /** What answered each of the message's decision cards, in order (decisionState); undefined while open. */
+  answers?: readonly (DecisionAnswer | undefined)[];
+  /** `card`: which of the message's cards the option is on. */
+  onChoose?: (label: string, card: number) => void;
 };
 
 /** An agent message body: GitHub-flavored Markdown, code blocks with a copy button, decision cards. */
 export function MessageMarkdown({ body, decision }: { body: string; decision?: DecisionHandlers }) {
   // Parsing Markdown is the costly part of drawing a message; the body is parsed again only when it
-  // (or its decision's answer) changes, however often the conversation around it redraws.
+  // (or its cards' answers) changes, however often the conversation around it redraws.
   const latest = useRef(decision?.onChoose);
   latest.current = decision?.onChoose;
-  const onChoose = useCallback((label: string) => latest.current?.(label), []);
-  return <MarkdownBody body={body} answer={decision?.answer} onChoose={decision?.onChoose ? onChoose : undefined} />;
+  const onChoose = useCallback((label: string, card: number) => latest.current?.(label, card), []);
+  // Questions asked together are one card under the rest of the message, answered in turn.
+  const steps = useMemo(() => {
+    const cards = decisionsIn(body);
+    return cards.length > 1 ? { cards, text: withoutDecisions(body) } : null;
+  }, [body]);
+  if (steps && decision) {
+    return (
+      <div className="flex flex-col gap-3">
+        {steps.text && <MarkdownBody body={steps.text} />}
+        <DecisionSteps decisions={steps.cards} answers={decision.answers} onChoose={decision.onChoose ? onChoose : undefined} />
+      </div>
+    );
+  }
+  return <MarkdownBody body={body} answers={decision?.answers} onChoose={decision?.onChoose ? onChoose : undefined} />;
+}
+
+type BodyProps = { body: string; answers?: readonly (DecisionAnswer | undefined)[]; onChoose?: (label: string, card: number) => void };
+
+/** The cards' answers are worked out again on each redraw of the conversation, so they compare by value. */
+function sameBody(a: BodyProps, b: BodyProps): boolean {
+  if (a.body !== b.body || a.onChoose !== b.onChoose) return false;
+  if (a.answers === b.answers) return true;
+  return !!a.answers && !!b.answers && a.answers.length === b.answers.length && a.answers.every((x, i) => x === b.answers![i]);
 }
 
 const MarkdownBody = memo(function MarkdownBody({
   body,
-  answer,
+  answers,
   onChoose,
-}: {
-  body: string;
-  answer?: string;
-  onChoose?: (label: string) => void;
-}) {
+}: BodyProps) {
   const { projectId, threadId } = useParams({ strict: false });
   const projectFiles = useProjectFiles(projectId);
   const remarkPlugins = useMemo(() => [remarkGfm, remarkFilePaths(projectFiles)], [projectFiles]);
@@ -64,7 +87,17 @@ const MarkdownBody = memo(function MarkdownBody({
       }
       if (lang === DECISION_LANG) {
         const parsed = parseDecision(text);
-        if (parsed) return <DecisionCard decision={parsed} answer={answer} onChoose={onChoose} />;
+        if (parsed) {
+          // Each card answers on its own: a pick on one leaves the message's other cards open.
+          const card = Math.max(0, decisionIndex(body, parsed));
+          return (
+            <DecisionCard
+              decision={parsed}
+              answer={answers?.[card]}
+              onChoose={onChoose && ((label) => onChoose(label, card))}
+            />
+          );
+        }
       }
       return <CodeBlock lang={lang}>{text.replace(/\n$/, "")}</CodeBlock>;
     },
@@ -90,6 +123,49 @@ const MarkdownBody = memo(function MarkdownBody({
   return (
     <div className="prose-myrel">
       <Markdown remarkPlugins={remarkPlugins} components={components}>
+        {body}
+      </Markdown>
+    </div>
+  );
+}, sameBody);
+
+const OUTSIDE_LINK = /^(https?:|mailto:)/i;
+
+/**
+ * Markdown from outside the project (an issue, its comments), read by people. Unlike an agent's
+ * message it can open nothing of the project: no decision cards, thread or file links. Only web and
+ * mail links work, and an image stays a link: loading it would tell its host who read this.
+ */
+export const OutsideMarkdown = memo(function OutsideMarkdown({ body }: { body: string }) {
+  const t = useT();
+  const components: Components = {
+    pre: ({ children }) => <>{children}</>,
+    code: ({ className, children }) => {
+      const lang = /language-([\w-]+)/.exec(className ?? "")?.[1];
+      const text = String(children ?? "");
+      if (!lang && !text.includes("\n")) return <code>{children}</code>;
+      return <CodeBlock lang={lang}>{text.replace(/\n$/, "")}</CodeBlock>;
+    },
+    a: ({ href, children }) =>
+      href && OUTSIDE_LINK.test(href) ? (
+        <a href={href} target="_blank" rel="noreferrer nofollow">
+          {children}
+        </a>
+      ) : (
+        <>{children}</>
+      ),
+    img: ({ src, alt }) =>
+      typeof src === "string" && OUTSIDE_LINK.test(src) ? (
+        <a href={src} target="_blank" rel="noreferrer nofollow">
+          {t("issues.image", { alt: alt || src })}
+        </a>
+      ) : (
+        <>{alt}</>
+      ),
+  };
+  return (
+    <div className="prose-myrel break-words">
+      <Markdown remarkPlugins={[remarkGfm]} components={components}>
         {body}
       </Markdown>
     </div>

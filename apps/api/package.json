@@ -11,10 +11,11 @@
     "deploy:preview": "WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST=1 wrangler versions upload",
     "deploy:hosted": "wrangler d1 migrations apply myrel --remote && WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST=1 wrangler deploy --config wrangler.jsonc ../../ee/billing/src/worker.ts",
     "deploy:hosted:preview": "WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST=1 wrangler versions upload --config wrangler.jsonc ../../ee/billing/src/worker.ts",
-    "typecheck": "tsc",
+    "typecheck": "node scripts/builtin-skills.mjs --check && tsc",
     "test": "vitest run",
     "cf-typegen": "wrangler types --include-runtime=false --strict-vars=false",
     "vapid": "node scripts/vapid.mjs",
+    "builtin-skills": "node scripts/builtin-skills.mjs",
     "sandbox:image": "node scripts/sandbox-image.mjs"
   },
   "dependencies": {
@@ -24,7 +25,7 @@
     "agents": "0.28.1",
     "better-auth": "1.7.11",
     "drizzle-orm": "0.45.4",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "zod": "4.6.7"
   },
   "devDependencies": {

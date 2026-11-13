@@ -77,7 +77,14 @@ export function closeRunners() {
 export async function agentProject(
   token: string,
   play: Play,
-  opts: { features?: string[]; cli?: "claude" | "codex"; /** Other CLIs installed on the computer besides `cli`. */ clis?: ("claude" | "codex")[] } = {},
+  opts: {
+    features?: string[];
+    cli?: "claude" | "codex";
+    /** Other CLIs installed on the computer besides `cli`. */
+    clis?: ("claude" | "codex")[];
+    /** More of the hello, as a newer runner sends it (e.g. browser). */
+    hello?: Record<string, unknown>;
+  } = {},
 ) {
   const cli = opts.cli ?? "claude";
   const codeRes = await api("/api/runners/pairing", { method: "POST", token });
@@ -136,6 +143,7 @@ export async function agentProject(
     clis: [cli, ...(opts.clis ?? []).filter((c) => c !== cli)].map((id) => ({ id, version: id === "claude" ? "2.1.0" : "0.164.0" })),
     features: opts.features ?? ["folders", "cancel", "agent"],
     running: [],
+    ...opts.hello,
   });
   await until(() => frames.some((f) => f.type === "welcome"), "welcome");
 

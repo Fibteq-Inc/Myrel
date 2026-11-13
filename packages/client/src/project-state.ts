@@ -1,3 +1,4 @@
+import { type ChecklistItem, checklistProgress, parseChecklist } from "@myrel/protocol";
 import {
   type Artifact,
   type ConversationPage,
@@ -305,6 +306,24 @@ export function threadReplyCount(s: ProjectState, threadId: string): number {
   return threadSummary(s, threadId).replies;
 }
 
+/**
+ * Threads Myrel opened to check another thread's work (Thread.parentId), by that thread, oldest
+ * first: they show under it rather than as threads of their own.
+ */
+export function threadChildren(s: ProjectState): Map<string, Thread[]> {
+  const out = new Map<string, Thread[]>();
+  for (const t of Object.values(s.threads).sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    if (!t.parentId) continue;
+    out.set(t.parentId, [...(out.get(t.parentId) ?? []), t]);
+  }
+  return out;
+}
+
+/** The visual check status an evaluator thread's label carries (`check:<status>`), once it handed in. */
+export function checkLabelStatus(t: Thread): string | null {
+  return t.label?.startsWith("check:") ? t.label.slice("check:".length) : null;
+}
+
 export function threadByRoot(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.rootMessageId, t]));
 }
@@ -317,40 +336,6 @@ export function threadByCard(s: ProjectState): Map<string, Thread> {
   return new Map(Object.values(s.threads).map((t) => [t.ackMessageId ?? t.rootMessageId, t]));
 }
 
-export type ChecklistItem = {
-  state: "done" | "active" | "todo" | "skipped" | "failed";
-  text: string;
-  /** 0 for a step of the agent's plan; 1 and 2 for the steps of a task nested under it. */
-  depth: number;
-};
-
-/**
- * Parses a thread's checklist: a header line, then ✓ / ✱ / ○ steps (✗ marks a
- * failed step, – one the agent decided to skip). Indented steps belong to the
- * step above them.
- */
-export function parseChecklist(text: string): { title: string; items: ChecklistItem[] } {
-  const marks: Record<string, ChecklistItem["state"]> = { "✓": "done", "✱": "active", "○": "todo", "–": "skipped", "✗": "failed" };
-  const items: ChecklistItem[] = [];
-  let title = "";
-  for (const raw of text.split("\n")) {
-    const indent = raw.length - raw.trimStart().length;
-    // The just-finished step may be bolded: **✓ step**.
-    const line = raw.trim().replace(/^\*\*(.*)\*\*$/, "$1").trim();
-    if (!line) continue;
-    const state = marks[line[0]!];
-    if (state) items.push({ state, text: line.slice(1).trim(), depth: Math.min(2, Math.floor(indent / 2)) });
-    else if (!title && items.length === 0) title = line;
-  }
-  return { title, items };
-}
-
-/** How far a checklist is: its top-level steps done, out of those not skipped. */
-export function checklistProgress(items: ChecklistItem[]): { done: number; total: number } {
-  const steps = items.filter((i) => i.depth === 0 && i.state !== "skipped");
-  return { done: steps.filter((i) => i.state === "done").length, total: steps.length };
-}
-
 /**
  * The plan's top-level steps the person has not seen yet: those whose text is
  * not in `seen`, the step texts they had in view last time. A step the agent
@@ -359,3 +344,5 @@ export function checklistProgress(items: ChecklistItem[]): { done: number; total
 export function freshSteps(items: ChecklistItem[], seen: ReadonlySet<string>): Set<string> {
   return new Set(items.filter((i) => i.depth === 0 && !seen.has(i.text)).map((i) => i.text));
 }
+
+export { type ChecklistItem, checklistProgress, parseChecklist };

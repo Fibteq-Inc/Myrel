@@ -20,6 +20,7 @@ import {
   WorkspaceFolderInput,
   CloudCli,
   ProjectColor,
+  LiveThread,
   ProjectIcon,
   TaskTarget,
   UpdateProjectSettingsInput,
@@ -32,15 +33,20 @@ import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
+import { projectIssue, projectIssues } from "../github/issues";
 import { listPullRequests, MergeError, mergePullRequest, pullFiles, pullMergeState } from "../github/pulls";
 import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
 import { deleteProject } from "../projects/delete";
+import { blockedIds } from "../moderation";
 import { emailEnabled } from "../notifications/channels";
 import { sendInviteEmail } from "../notifications/invite";
-import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, setWorkspaceFolder } from "../runners";
+import { coordinatorSettings, type StoredCoordinator } from "../coordinator-cli";
+import { getWorkspace, listWorkspaces, notifyProject, parseFolders, parseInfo, projectWorktrees, setWorkspaceFolder, workspaceClis } from "../runners";
+import { ownsComputer } from "../sandbox/backend";
 import { parseCliModels } from "../task-model";
+import { parseCheckModels } from "../checks/visual";
 
 const { apiKeys, projects, projectInvites, projectMembers, projectRepos, projectWorkspaces, runners, user } = schema;
 
@@ -54,6 +60,8 @@ const projectColumns = {
   pinnedAt: projectMembers.pinnedAt,
   activeCount: projects.activeCount,
   waitingCount: projects.waitingCount,
+  lastActivityAt: projects.lastActivityAt,
+  liveThreads: projects.liveThreads,
 };
 
 export const projectRoutes = new Hono<AppEnv>()
@@ -66,8 +74,14 @@ export const projectRoutes = new Hono<AppEnv>()
         .from(projectMembers)
         .innerJoin(projects, eq(projects.id, projectMembers.projectId))
         .where(eq(projectMembers.userId, userId))
-        // Pinned first (in the order they were pinned), then the rest newest first as before.
-        .orderBy(sql`${projectMembers.pinnedAt} IS NULL`, projectMembers.pinnedAt, desc(projects.createdAt)),
+        // Pinned first (in the order they were pinned), then the rest: working ones, then latest activity.
+        // Mirrored by compareUnpinnedProjects in @myrel/client.
+        .orderBy(
+          sql`${projectMembers.pinnedAt} IS NULL`,
+          projectMembers.pinnedAt,
+          sql`${projects.activeCount} > 0 DESC`,
+          sql`COALESCE(${projects.lastActivityAt}, ${projects.createdAt}) DESC`,
+        ),
       projectCosts(c.env.DB, userId),
     ]);
     return c.json({ projects: rows.map((row) => ({ ...toProject(row), cost: costs.get(row.id) ?? emptyCost })) });
@@ -87,7 +101,7 @@ export const projectRoutes = new Hono<AppEnv>()
       db.insert(projectMembers).values({ projectId: id, userId, role: "owner", createdAt }),
     ]);
     return c.json(
-      { project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0 }) },
+      { project: toProject({ id, name: input.data.name, role: "owner", icon: null, color: null, createdAt, pinnedAt: null, activeCount: 0, waitingCount: 0, lastActivityAt: null, liveThreads: null }) },
       201,
     );
   })
@@ -135,7 +149,29 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, icon, color, model, taskTarget, cloudCli, cliModels } = input.data;
+    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels, worktrees, coordinator } = input.data;
+    // The coordinator works with a CLI only on a computer of the person turning it on, one with this
+    // project's folder and that CLI: their own subscription, and every member's message starts it there.
+    let storedCoordinator: string | null | undefined;
+    if (coordinator?.mode === "cli") {
+      if (!(await ownsComputer(c.env, coordinator.runnerId, me.id))) {
+        return c.json({ error: "forbidden", message: "Only the computer's owner can have the coordinator work on it." }, 403);
+      }
+      const installed = await workspaceClis(c.env, id, { runnerId: coordinator.runnerId });
+      if (!installed) return c.json({ error: "invalid_input", message: "This project has no folder on that computer." }, 400);
+      const installedCli = installed.clis.find((cli) => cli.id === coordinator.cli);
+      if (!installedCli) return c.json({ error: "invalid_input", message: "That CLI is not on that computer." }, 400);
+      const { runnerId, cli, model: cliModel, effort } = coordinator;
+      // Absent: the saved login stays while the computer and CLI do (apps that predate the choice send none).
+      const saved = current.coordinator;
+      const before = saved.mode === "cli" && saved.runnerId === runnerId && saved.cli === cli ? saved.account : null;
+      const account = coordinator.account === undefined ? before : coordinator.account;
+      // A new pick must be a login the computer has; the saved one may stay after it lost it (its turns then run with the CLI's own).
+      if (account && account !== before && !installedCli.accounts?.some((a) => a.id === account)) {
+        return c.json({ error: "invalid_input", message: "That account is not on that computer." }, 400);
+      }
+      storedCoordinator = JSON.stringify({ mode: "cli", runnerId, cli, model: cliModel, effort, account, by: me.id } satisfies StoredCoordinator);
+    } else if (coordinator) storedCoordinator = null;
     let { provider = current.provider, keyId = current.keyId } = input.data;
     if (input.data.keyId) {
       // Only your own keys or the server's shared ones can be attached to a project.
@@ -158,6 +194,10 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(taskTarget !== undefined && { taskTarget }),
         ...(cloudCli !== undefined && { cloudCli: cloudCli === "opencode" ? null : cloudCli }),
         ...(cliModels !== undefined && { cliModels: mergeCliModels(current.cliModels, cliModels) }),
+        ...(visualCheck !== undefined && { visualCheck }),
+        ...(checkModels !== undefined && { checkModels: Object.keys(checkModels).length ? JSON.stringify(checkModels) : null }),
+        ...(worktrees !== undefined && { worktrees }),
+        ...(storedCoordinator !== undefined && { coordinator: storedCoordinator }),
         llmProvider: provider,
         llmKeyId: keyId,
       })
@@ -171,13 +211,20 @@ export const projectRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     const project = await findMembership(c.env, id, c.get("user").id);
     if (!project) return c.json({ error: "not_found" }, 404);
-    const rows = await createDb(c.env.DB)
-      .select({ id: user.id, name: user.name, email: user.email, role: projectMembers.role })
-      .from(projectMembers)
-      .innerJoin(user, eq(user.id, projectMembers.userId))
-      .where(eq(projectMembers.projectId, id))
-      .orderBy(projectMembers.createdAt);
-    const members: Member[] = rows.map(({ email, ...m }) => (canManage(project.role) ? { ...m, email } : m));
+    const [rows, blocked] = await Promise.all([
+      createDb(c.env.DB)
+        .select({ id: user.id, name: user.name, email: user.email, role: projectMembers.role })
+        .from(projectMembers)
+        .innerJoin(user, eq(user.id, projectMembers.userId))
+        .where(eq(projectMembers.projectId, id))
+        .orderBy(projectMembers.createdAt),
+      blockedIds(c.env, c.get("user").id),
+    ]);
+    const members: Member[] = rows.map(({ email, ...m }) => ({
+      ...m,
+      ...(canManage(project.role) && { email }),
+      ...(blocked.has(m.id) && { blocked: true }),
+    }));
     return c.json({ members });
   })
   .patch("/:id/members/:userId", async (c) => {
@@ -336,6 +383,32 @@ export const projectRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
     return c.json({ repos: await listProjectRepos(c.env.DB, id) });
+  })
+  // The Issues tab: each connected repository's issues, read with a token limited to issues (github/issues.ts).
+  .get("/:id/issues", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const state = c.req.query("state");
+    const repos = (await listProjectRepos(c.env.DB, id)).map((r) => r.fullName);
+    return c.json({ repos: await projectIssues(c.env, id, repos, state === "closed" || state === "all" ? state : "open") });
+  })
+  // One issue, opened in the Issues tab. A repository that is not connected is as unknown as a missing issue.
+  .get("/:id/issues/:owner/:name/:number", async (c) => {
+    const id = c.req.param("id");
+    if (!(await findMembership(c.env, id, c.get("user").id))) return c.json({ error: "not_found" }, 404);
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`.toLowerCase();
+    const number = Number(c.req.param("number"));
+    const page = Number(c.req.query("page") ?? 1);
+    if (!Number.isInteger(number) || number < 1 || !Number.isInteger(page) || page < 1) return c.json({ error: "not_found" }, 404);
+    const connected = (await listProjectRepos(c.env.DB, id)).some((r) => r.fullName.toLowerCase() === repo);
+    if (!connected) return c.json({ error: "not_found" }, 404);
+    try {
+      const issue = await projectIssue(c.env, id, repo, number, page);
+      return issue ? c.json({ issue }) : c.json({ error: "not_found" }, 404);
+    } catch (err) {
+      console.warn("reading an issue failed", repo, number, err);
+      return c.json({ error: "github_failed" }, 502);
+    }
   })
   .post("/:id/repos", async (c) => {
     const id = c.req.param("id");
@@ -522,7 +595,9 @@ export const projectRoutes = new Hono<AppEnv>()
       return c.json({ error: "forbidden", message: "Only the person whose computer this is can open its files." }, 403);
     }
     const agent = await getAgentByName(c.env.RUNNER_AGENT, workspace.runnerId);
-    const result = await agent.readFile({ path, folders: [workspace.path, ...workspace.folders], ...(threadId && { threadId }) });
+    // Threads that work in the folder itself leave older worktrees behind, whose copy of a file is not the one meant.
+    const worktrees = await projectWorktrees(c.env, id);
+    const result = await agent.readFile({ path, folders: [workspace.path, ...workspace.folders], ...(threadId && { threadId }), ...(!worktrees && { worktrees }) });
     if (!result.ok) return c.json({ error: "runner_failed", message: result.reason }, 409);
     const { file } = result;
     const bytes = Uint8Array.from(atob(file.data), (ch) => ch.charCodeAt(0));
@@ -700,6 +775,17 @@ async function findThread(env: Env, projectId: string, threadId: string, userId:
   return (await project.getThread(threadId)) ? threadId : null;
 }
 
+/** Null until the project first syncs; written by ProjectAgent, so a bad value only hides the list. */
+function parseLiveThreads(json: string | null): LiveThread[] | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = LiveThread.array().safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toProject(row: {
   id: string;
   name: string;
@@ -710,8 +796,10 @@ function toProject(row: {
   pinnedAt: Date | null;
   activeCount: number;
   waitingCount: number;
+  lastActivityAt: Date | null;
+  liveThreads: string | null;
 }): Project {
-  const { activeCount, waitingCount, pinnedAt, icon, color, ...rest } = row;
+  const { activeCount, waitingCount, lastActivityAt, liveThreads, pinnedAt, icon, color, ...rest } = row;
   return {
     ...rest,
     icon: ProjectIcon.nullable().catch(null).parse(icon),
@@ -719,6 +807,8 @@ function toProject(row: {
     createdAt: row.createdAt.toISOString(),
     pinned: pinnedAt !== null,
     activity: { working: activeCount, waiting: waitingCount },
+    live: parseLiveThreads(liveThreads),
+    lastActivityAt: (lastActivityAt ?? row.createdAt).toISOString(),
   };
 }
 
@@ -776,17 +866,23 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       taskTarget: projects.taskTarget,
       cloudCli: projects.cloudCli,
       cliModels: projects.cliModels,
+      visualCheck: projects.visualCheck,
+      checkModels: projects.checkModels,
+      worktrees: projects.worktrees,
+      coordinator: projects.coordinator,
     })
     .from(projects)
     .where(eq(projects.id, projectId));
   return {
     ...row!,
+    coordinator: await coordinatorSettings(env, projectId, row!.coordinator),
     provider: row!.provider as ProjectSettings["provider"],
     icon: ProjectIcon.nullable().catch(null).parse(row!.icon),
     color: ProjectColor.nullable().catch(null).parse(row!.color),
     taskTarget: TaskTarget.catch("auto").parse(row!.taskTarget),
     cloudCli: CloudCli.catch("opencode").parse(row!.cloudCli ?? "opencode"),
     cliModels: parseCliModels(row!.cliModels),
+    checkModels: parseCheckModels(row!.checkModels),
   };
 }
 
@@ -794,7 +890,10 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
 function mergeCliModels(current: CliModelDefaults, changes: CliModelDefaults): string | null {
   const next: CliModelDefaults = { ...current };
   for (const [cli, value] of Object.entries(changes) as [keyof CliModelDefaults, CliModelDefaults[keyof CliModelDefaults]][]) {
-    if (value && (value.model || value.effort)) next[cli] = value;
+    // A client that does not know accounts leaves the saved one as it is.
+    const account = value?.account === undefined ? current[cli]?.account : value.account;
+    const merged = value && { model: value.model, effort: value.effort, ...(account && { account }) };
+    if (merged && (merged.model || merged.effort || merged.account)) next[cli] = merged;
     else delete next[cli];
   }
   return Object.keys(next).length ? JSON.stringify(next) : null;

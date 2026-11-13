@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DecisionPick } from "./decision";
 import { idPattern } from "./ids";
 import { FilePath } from "./paths";
 
@@ -154,6 +155,11 @@ export const Message = z.object({
    * project folder's CLI.
    */
   clis: z.array(z.string().max(40)).max(MAX_THREAD_CLIS).optional(),
+  /**
+   * A person's message that picks an option on a decision card: which card it answers. Absent on
+   * typed replies and on picks from clients older than this (decisionState matches those by text).
+   */
+  pick: DecisionPick.optional(),
   /** Per-project monotonically increasing sequence number, used for sync. */
   seq: z.number().int().positive(),
   createdAt: Timestamp,
@@ -168,6 +174,10 @@ export type Message = z.infer<typeof Message>;
  */
 export const ThreadStatus = z.enum(["working", "blocked", "review_ready", "done", "failed"]);
 export type ThreadStatus = z.infer<typeof ThreadStatus>;
+
+/** What a thread that finished its turn asks of a person: a decision, unblocking it, or a look at what it showed. */
+export const ThreadNeeds = z.enum(["decision", "blocked", "review"]);
+export type ThreadNeeds = z.infer<typeof ThreadNeeds>;
 
 /**
  * Why a resolved thread was closed without its work being done: it repeated another thread's ask,
@@ -185,6 +195,12 @@ export const ThreadCli = z.object({
   options: z.array(z.string().max(40)).max(MAX_THREAD_CLIS),
   by: z.enum(["person", "coordinator"]),
   reason: z.string().max(300).nullable(),
+  /**
+   * Which of the CLI's logins on the computer runs it (RunnerCli.accounts' id, or OWN_ACCOUNT for the
+   * CLI's own); null: the project's default for the CLI, else the CLI's own login (and from older
+   * servers, which leave it out). One the computer no longer has falls back to the CLI's own.
+   */
+  account: z.string().max(40).nullable().optional(),
 });
 export type ThreadCli = z.infer<typeof ThreadCli>;
 
@@ -245,6 +261,8 @@ export const Thread = z.object({
   status: ThreadStatus,
   /** The thread agent's progress checklist (`update_status`), shown while it works. */
   statusText: z.string().nullable(),
+  /** What it waits on a person for; null while it works, and when its turn only delivered something. */
+  needs: ThreadNeeds.nullable().default(null),
   resolved: z.boolean(),
   closeReason: ThreadCloseReason.nullable().default(null),
   /** For a duplicate: the thread that carries the work. */
@@ -257,6 +275,12 @@ export const Thread = z.object({
   /** The model and effort picked for this thread; null: the project's defaults (and from older servers). */
   model: ThreadModel.nullable().default(null),
   /**
+   * The thread this one works for, when Myrel opened it to check another thread's work (a visual
+   * check's evaluator): clients show it under that thread instead of as a thread of its own in the
+   * project chat. Null for every other thread (and from older servers).
+   */
+  parentId: ThreadId.nullable().default(null),
+  /**
    * The last message the thread's agent has taken in. A person's message after it, while the thread
    * is working, waits for the agent: clients show it as queued. Null: not known (older servers).
    */
@@ -267,6 +291,12 @@ export const Thread = z.object({
   updatedAt: Timestamp,
 });
 export type Thread = z.infer<typeof Thread>;
+
+/** Whether a person has to act for an open thread to go on. The project list counts the same threads. */
+export function threadWaitsOnPerson(thread: Pick<Thread, "status" | "needs" | "resolved">): boolean {
+  if (thread.resolved) return false;
+  return thread.status === "blocked" || thread.status === "failed" || (thread.status === "review_ready" && thread.needs !== null);
+}
 
 /** running: the runner is working. The other states are final. */
 export const TaskStatus = z.enum(["running", "done", "failed", "cancelled"]);
@@ -348,6 +378,20 @@ export const ProjectActivity = z.object({
 });
 export type ProjectActivity = z.infer<typeof ProjectActivity>;
 
+/** An open thread as the project list shows it. */
+export const LiveThread = z.object({
+  id: ThreadId,
+  title: z.string(),
+  /** working: mid-turn. queued: marked working with no turn running yet. waiting, failed: a person has to act. */
+  state: z.enum(["working", "queued", "waiting", "failed"]),
+  needs: ThreadNeeds.nullable(),
+  /** The step its plan is on, and how far the plan is ("2/5"). */
+  step: z.string().nullable(),
+  progress: z.string().nullable(),
+  updatedAt: Timestamp,
+});
+export type LiveThread = z.infer<typeof LiveThread>;
+
 /** What a project's model calls have cost, for the project list. Priced calls only. */
 export const ProjectCost = z.object({
   /** Since the start of this calendar month (UTC), the period plan limits count. */
@@ -402,6 +446,13 @@ export const Project = z.object({
   createdAt: Timestamp,
   /** Missing from servers older than this field. */
   activity: ProjectActivity.optional(),
+  /**
+   * Its threads waiting on a person, then those at work, each oldest first, without the coordinator. A project
+   * with a great many lists only the first of each. Missing from older servers and until the project next syncs.
+   */
+  live: z.array(LiveThread).optional(),
+  /** When an agent last started or stopped working in the project, else when it was made. Missing from older servers. */
+  lastActivityAt: Timestamp.optional(),
   /** Missing from servers older than this field. */
   cost: ProjectCost.optional(),
   /** Pinned to the top of this user's own project lists; every member pins for themselves. Missing from older servers. */
@@ -423,6 +474,8 @@ export const Member = z.object({
   role: ProjectRole,
   /** Shown to project owners and admins only. */
   email: z.string().optional(),
+  /** The person asking blocked this member: the apps hide their messages. Missing from older servers. */
+  blocked: z.boolean().optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -469,6 +522,53 @@ export const ProjectRepo = z.object({
   createdAt: Timestamp,
 });
 export type ProjectRepo = z.infer<typeof ProjectRepo>;
+
+/** An issue of a connected repository, as the project's Issues tab lists it. The list carries no text (ProjectIssueDetail does). */
+export const ProjectIssue = z.object({
+  /** owner/name. */
+  repo: z.string(),
+  number: z.number().int(),
+  title: z.string(),
+  state: z.enum(["open", "closed"]),
+  url: z.string(),
+  author: z.string(),
+  /** Whether its author has a hand in the repository (owner, member or collaborator). */
+  member: z.boolean(),
+  labels: z.array(z.string()),
+  comments: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ProjectIssue = z.infer<typeof ProjectIssue>;
+
+/** One connected repository's issues; `error` when GitHub would not list them. */
+export const ProjectRepoIssues = z.object({
+  repo: z.string(),
+  issues: z.array(ProjectIssue),
+  error: z.enum(["no_access", "failed"]).optional(),
+});
+export type ProjectRepoIssues = z.infer<typeof ProjectRepoIssues>;
+
+/** One comment on an issue, for people to read. */
+export const ProjectIssueComment = z.object({
+  author: z.string(),
+  member: z.boolean(),
+  body: z.string(),
+  createdAt: z.string(),
+});
+export type ProjectIssueComment = z.infer<typeof ProjectIssueComment>;
+
+/**
+ * One issue for people to read in the Issues tab, with a page of its comments. It never reaches an
+ * agent's prompt this way: agents read issues with repo_read_issue, as data.
+ */
+export const ProjectIssueDetail = ProjectIssue.extend({
+  body: z.string(),
+  commentList: z.array(ProjectIssueComment),
+  /** Whether a later page of comments exists. */
+  moreComments: z.boolean(),
+});
+export type ProjectIssueDetail = z.infer<typeof ProjectIssueDetail>;
 
 /** A pull request a thread's task opened, with its live state from GitHub. */
 export const PullRequest = z.object({

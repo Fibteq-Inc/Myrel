@@ -66,7 +66,7 @@
       "name": "altair-sandbox",
       "class_name": "Sandbox",
       "scheduling_policy": "durable_object",
-      "images": { "base": { "image": "registry.cloudflare.com/823f369ba8524ed9b4bee423749f128b/myrel-sandbox@sha256:301a2c1c9d3ce72f063f2e9cb6e825386e365e25d1d820dbed8ef84892696d30" } }
+      "images": { "base": { "image": "registry.cloudflare.com/823f369ba8524ed9b4bee423749f128b/myrel-sandbox@sha256:f242af684102e819827bda1b2106bed471e49d09f0bbb2fa9d57a80af5ad3ba3" } }
     }
   ],
 
@@ -128,9 +128,13 @@
   //
   // Sandbox (the cloud thread agent, OpenCode). Repository access comes from the project's GitHub connection.
   // SANDBOX_INSTANCE_TYPE: container size (lite, basic, standard-1 ... standard-4).
-  // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL).
+  // RUNNER_MODEL: model for the harness; empty = the agents' model (LLM_MODEL). Like LLM_MODEL it is
+  // a model of LLM_PROVIDER: a project with its own key for another provider runs on its own model.
   // RUNNER_IMAGES: "true" or "false" when that model does or does not read images (screenshots);
   // empty = guessed from its name.
+  // CHECK_MODEL: model for a visual check's evaluator in the cloud, one that reads screenshots;
+  // empty = RUNNER_MODEL (a model that cannot read them only runs the automatic checks and flows).
+  // CHECK_IMAGES: like RUNNER_IMAGES, for CHECK_MODEL.
   //
   // Routines. DEFAULT_TIMEZONE: IANA zone agents use for schedules when nobody names one.
   //
@@ -141,6 +145,9 @@
   // Web Push: VAPID_PUBLIC_KEY here + VAPID_PRIVATE_KEY secret (generate both with
   // `pnpm --filter @myrel/api vapid`); VAPID_SUBJECT: a contact, "mailto:you@example.com".
   // Mobile push goes through Expo; EXPO_ACCESS_TOKEN secret only if enhanced push security is on.
+  //
+  // Content reports (Report on a message or artifact): kept in D1 and emailed to the server's admins
+  // and to REPORTS_EMAIL, comma-separated addresses (empty = admins only).
   "vars": {
     "BETTER_AUTH_URL": "",
     "TRUSTED_ORIGINS": "",
@@ -159,11 +166,14 @@
     "SANDBOX_INSTANCE_TYPE": "standard-1",
     "RUNNER_MODEL": "auto",
     "RUNNER_IMAGES": "",
+    "CHECK_MODEL": "",
+    "CHECK_IMAGES": "",
     "DEFAULT_TIMEZONE": "UTC",
     // Where the connector catalog is copied from; empty means the official MCP Registry.
     "CONNECTOR_REGISTRY_URL": "",
     "EMAIL_FROM": "Myrel <myrel@mail.fibteq.app>",
     "VAPID_PUBLIC_KEY": "BDEi14Fu6ZV06LgGppMptF4Na94NxXTccqXRBCG0xqvdhRbjzKyUpzLHUXyk_ZbuKYrbMVXfXkGnAflgnuqBKME",
-    "VAPID_SUBJECT": "mailto:myrel@fibteq.io"
+    "VAPID_SUBJECT": "mailto:myrel@fibteq.io",
+    "REPORTS_EMAIL": "myrel@fibteq.io"
   }
 }

@@ -4,7 +4,7 @@ import { type ProjectColor, type ProjectIcon, routineFinished } from "@myrel/pro
 import { useT } from "@myrel/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { BarChart3, Blocks, Brain, Check, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
+import { BarChart3, Blocks, Brain, Check, CircleDot, ChevronsUpDown, FolderOpen, List, MessageSquareText, Plus, Settings, WifiOff } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { projectsQuery } from "../../lib/api";
 import { useProjectContext } from "../../lib/project-context";
@@ -24,6 +24,7 @@ export const PROJECT_TABPANEL = "project-tabpanel";
 const TABS: { id: ProjectView; label: MessageKey; icon: typeof List }[] = [
   { id: "chat", label: "tabs.chat", icon: MessageSquareText },
   { id: "threads", label: "sidebar.threads", icon: List },
+  { id: "issues", label: "tabs.issues", icon: CircleDot },
   { id: "artifacts", label: "sidebar.artifacts", icon: Blocks },
   { id: "files", label: "tabs.files", icon: FolderOpen },
   { id: "knowledge", label: "tabs.knowledge", icon: Brain },
@@ -58,6 +59,11 @@ export function ProjectHeader() {
     return () => window.removeEventListener("keydown", onKey);
   }, [go]);
 
+  // On a phone the tabs scroll sideways: keep the open one in sight.
+  useEffect(() => {
+    tabs.current?.querySelector<HTMLElement>(`[data-tab="${view}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [view]);
+
   // Arrow keys move between tabs, as in any tab list.
   function onTabKey(e: KeyboardEvent<HTMLDivElement>) {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
@@ -71,7 +77,9 @@ export function ProjectHeader() {
   return (
     <header className="@container flex h-14 flex-none items-center gap-2 border-b border-line px-3 sm:gap-3 sm:px-4">
       <NavToggle />
-      <div className="min-w-0 max-w-[240px] flex-initial">
+      {/* The switcher gives way before the tabs but keeps room for a readable name; on a phone it is just
+          the project's badge, and the tabs scroll sideways rather than push the buttons off the screen. */}
+      <div className="min-w-[120px] max-w-[240px] flex-initial @max-[520px]:min-w-0 @max-[520px]:flex-none">
         <ProjectSwitcher
           current={project.id}
           name={project.name}
@@ -86,7 +94,7 @@ export function ProjectHeader() {
         role="tablist"
         aria-label={t("tabs.label")}
         onKeyDown={onTabKey}
-        className="flex flex-none items-center gap-0.5 rounded-[10px] border border-card bg-well p-[3px]"
+        className="flex flex-none items-center gap-0.5 rounded-[10px] border border-card bg-well p-[3px] [scrollbar-width:none] @max-[520px]:min-w-0 @max-[520px]:flex-initial @max-[520px]:overflow-x-auto"
       >
         {TABS.map((tab) => {
           const selected = tab.id === view;
@@ -120,8 +128,8 @@ export function ProjectHeader() {
             >
               <tab.icon size={15} strokeWidth={1.9} aria-hidden="true" />
               {/* Only the selected tab spells out its name; the others are icons with a tooltip. */}
-              <span className={selected ? "@max-[560px]:sr-only" : "sr-only"}>{label}</span>
-              {count ? <span className="font-mono text-[11px] text-subtle @max-[560px]:hidden">{count}</span> : null}
+              <span className={selected ? "@max-[760px]:sr-only" : "sr-only"}>{label}</span>
+              {count ? <span className="font-mono text-[11px] text-subtle @max-[760px]:hidden">{count}</span> : null}
             </button>
           );
         })}
@@ -185,11 +193,11 @@ function ProjectSwitcher({
       trigger={
         <>
           <ProjectBadge name={name} icon={icon} color={color} />
-          <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex min-w-0 flex-1 flex-col @max-[520px]:hidden">
             <span className="truncate font-semibold">{name}</span>
             <span className="text-xs text-subtle @max-[760px]:hidden">{t("sidebar.members", { count: memberCount })}</span>
           </span>
-          <ChevronsUpDown size={15} className="flex-none text-subtle" aria-hidden="true" />
+          <ChevronsUpDown size={15} className="flex-none text-subtle @max-[520px]:hidden" aria-hidden="true" />
         </>
       }
     >
@@ -232,7 +240,7 @@ function ProjectSwitcher({
 /**
  * The switcher's projects, each with how many agents work in it. Mounted only while the menu is open,
  * so it fetches fresh counts on opening and polls like the project list, without polling in the background.
- * Pinned projects come first, in the server's order; each row has its own pin toggle.
+ * Pinned projects come first, then working ones and the latest activity, in the server's order; each row has its own pin toggle.
  */
 function ProjectList({ current, working, onSelect }: { current: string; working: number; onSelect: (projectId: string) => void }) {
   const t = useT();

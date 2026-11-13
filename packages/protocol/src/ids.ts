@@ -18,6 +18,8 @@ export const ID_PREFIXES = {
   question: "qst",
   sshHost: "ssh",
   sshRun: "sshr",
+  check: "chk",
+  report: "rep",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

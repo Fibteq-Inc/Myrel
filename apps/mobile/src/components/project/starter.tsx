@@ -13,6 +13,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Check, ChevronDown, ChevronRight, Clock, LayoutTemplate, type LucideIcon, Search } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { appPage } from "../../lib/app-page";
 import { runnersQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { makeStyles, radius, useColors } from "../../theme";
@@ -152,7 +153,7 @@ function StepRow({ step }: { step: StarterStep }) {
       {guide && !step.done && (
         <Pressable
           accessibilityRole="link"
-          onPress={() => void WebBrowser.openBrowserAsync(DOCS_URL + guide)}
+          onPress={() => void WebBrowser.openBrowserAsync(appPage(DOCS_URL + guide))}
           style={({ pressed }) => [styles.how, pressed && { backgroundColor: colors.hover }]}
         >
           <Text style={styles.howText}>{t("starter.how")}</Text>

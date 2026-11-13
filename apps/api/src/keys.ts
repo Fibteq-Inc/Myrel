@@ -48,9 +48,18 @@ export async function projectProvider(env: Env, projectId: string, fetchImpl?: t
 }
 
 /** The model and key run_task hands to a coding harness, chosen the same way as the agents'. */
-export async function projectTaskModel(env: Env, projectId: string): Promise<ReturnType<typeof taskModel>> {
+export async function projectTaskModel(env: Env, projectId: string, opts: { check?: boolean } = {}): Promise<ReturnType<typeof taskModel>> {
   const override = await projectOverride(env, projectId);
-  return override.ok ? taskModel(env, override.value) : override;
+  return override.ok ? taskModel(opts.check ? checkTaskEnv(env) : env, override.value) : override;
+}
+
+/**
+ * A visual check's evaluator in the cloud runs with CHECK_MODEL when the server sets one (a model
+ * that reads screenshots; CHECK_IMAGES says so when its name does not), else like any cloud turn.
+ * Like RUNNER_MODEL it is a model of the server's provider: a project on another one keeps its own.
+ */
+export function checkTaskEnv<E extends { RUNNER_MODEL?: string; RUNNER_IMAGES?: string; CHECK_MODEL?: string; CHECK_IMAGES?: string }>(env: E): E {
+  return env.CHECK_MODEL ? { ...env, RUNNER_MODEL: env.CHECK_MODEL, RUNNER_IMAGES: env.CHECK_IMAGES ?? "" } : env;
 }
 
 async function projectOverride(

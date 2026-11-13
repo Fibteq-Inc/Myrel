@@ -10,6 +10,8 @@ import type {
   ApiKey,
   CatalogCategory,
   CatalogPage,
+  CheckModels,
+  VisualCheckAction,
   Connector,
   ConnectSuggestionInput,
   ConnectSuggestionResult,
@@ -18,6 +20,7 @@ import type {
   CreateSkillInput,
   CreateInviteInput,
   CreateProjectInput,
+  CreateReportInput,
   Instructions,
   GiftOffer,
   GithubRepo,
@@ -36,6 +39,8 @@ import type {
   Project,
   ProjectFile,
   ProjectRepo,
+  ProjectIssueDetail,
+  ProjectRepoIssues,
   ProjectRole,
   ProjectSettings,
   ProjectWorkspace,
@@ -275,6 +280,20 @@ export class ApiClient {
     await this.request(`${projectPath(projectId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
+  /** Reports a message or an artifact of the project to the server's admins. */
+  async report(projectId: string, input: CreateReportInput) {
+    await this.request(`${projectPath(projectId)}/reports`, { method: "POST", body: input });
+  }
+
+  /** Blocks a member for yourself: their messages are hidden from you in every project you share. */
+  async blockMember(projectId: string, userId: string) {
+    await this.request(`${projectPath(projectId)}/blocks/${encodeURIComponent(userId)}`, { method: "PUT", body: {} });
+  }
+
+  async unblockMember(projectId: string, userId: string) {
+    await this.request(`${projectPath(projectId)}/blocks/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  }
+
   async listProjectInvites(projectId: string) {
     return (await this.request<{ invites: Invite[] }>(`${projectPath(projectId)}/invites`)).invites;
   }
@@ -302,6 +321,11 @@ export class ApiClient {
   /** Reports one of the app's own errors to the server (see createErrorReporter). */
   async reportClientError(input: ClientErrorInput) {
     await this.request("/api/account/client-errors", { method: "POST", body: input });
+  }
+
+  /** The CLIs that may judge the visual checks of this person's projects that list none (CheckModels); replaces the list. */
+  async setCheckModels(checkModels: CheckModels) {
+    return (await this.request<{ checkModels: CheckModels }>("/api/account/check-models", { method: "PUT", body: { checkModels } })).checkModels;
   }
 
   /** Marks a one-time tip seen for this account, on every device. */
@@ -434,6 +458,17 @@ export class ApiClient {
     return this.request<ConnectSuggestionResult>(`${this.suggestionPath(projectId, threadId, suggestionId)}/connect`, { method: "POST", body: input });
   }
 
+  /**
+   * A person's answer to a visual check's card: "accept" the round as it is, or make its screenshots
+   * the approved "baseline" later checks compare against.
+   */
+  async visualCheckAction(projectId: string, threadId: string, checkId: string, action: VisualCheckAction) {
+    await this.request(`${projectPath(projectId)}/threads/${encodeURIComponent(threadId)}/visual-checks/${encodeURIComponent(checkId)}/${action}`, {
+      method: "POST",
+      body: {},
+    });
+  }
+
   /** Not now: the card closes and the agent does not offer these connectors again in this thread. */
   async dismissSuggestion(projectId: string, threadId: string, suggestionId: string) {
     await this.request(`${this.suggestionPath(projectId, threadId, suggestionId)}/dismiss`, { method: "POST", body: {} });
@@ -538,6 +573,17 @@ export class ApiClient {
 
   async listProjectRepos(projectId: string) {
     return (await this.request<{ repos: ProjectRepo[] }>(`/api/projects/${encodeURIComponent(projectId)}/repos`)).repos;
+  }
+
+  /** Each connected repository's issues, open ones unless `state` says otherwise. */
+  async listProjectIssues(projectId: string, state: "open" | "closed" | "all" = "open") {
+    return (await this.request<{ repos: ProjectRepoIssues[] }>(`/api/projects/${encodeURIComponent(projectId)}/issues?state=${state}`)).repos;
+  }
+
+  /** One issue of a connected repository (owner/name) with a page of its comments. */
+  async getProjectIssue(projectId: string, repo: string, number: number, page = 1) {
+    const path = repo.split("/").map(encodeURIComponent).join("/");
+    return (await this.request<{ issue: ProjectIssueDetail }>(`/api/projects/${encodeURIComponent(projectId)}/issues/${path}/${number}?page=${page}`)).issue;
   }
 
   async addProjectRepo(projectId: string, input: AddProjectRepoInput) {

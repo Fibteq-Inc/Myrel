@@ -14,23 +14,39 @@ import { Button, errorMessage, Input } from "../lib/ui";
 
 export const Route = createFileRoute("/login")({
   // ?signup and ?forgot open those forms (the apps send people here for both); ?reset=done says a new password is set.
-  validateSearch: (search: Record<string, unknown>): { signup?: boolean; forgot?: boolean; reset?: "done" } => ({
+  // ?app marks a page opened from the desktop or mobile app: see LoginPage.
+  validateSearch: (search: Record<string, unknown>): { signup?: boolean; forgot?: boolean; reset?: "done"; app?: boolean } => ({
     ...("signup" in search && { signup: true }),
     ...("forgot" in search && { forgot: true }),
     ...(search.reset === "done" && { reset: "done" as const }),
+    ...("app" in search && { app: true }),
   }),
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, search }) => {
     // A desktop/mobile app with no server chosen yet has nothing to ask for a session.
     if (canChooseServer && server === "") return;
+    // A page an app opened never leads into the web app, even with a session in this browser.
+    if (search.app) return;
     if (await context.queryClient.ensureQueryData(sessionQuery)) throw redirect({ to: "/" });
   },
   component: LoginPage,
 });
 
+/**
+ * Sign-in, sign-up and the password reset request. The apps send people here (?app) to sign up or
+ * reset a password when the server's Turnstile check only passes on its own pages; such a visit
+ * stays out of the web app, where Plan and billing sells through Stripe (App Store guideline
+ * 3.1.1): it offers no web sign-in, and a finished sign-up signs this browser out again and only
+ * says to go back to the app.
+ */
 function LoginPage() {
   const t = useT();
   const search = Route.useSearch();
-  const [mode, setMode] = useState<"signin" | "signup" | "forgot">(search.signup ? "signup" : search.forgot ? "forgot" : "signin");
+  const fromApp = search.app === true;
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">(
+    search.forgot ? "forgot" : search.signup || fromApp ? "signup" : "signin",
+  );
+  // The address of a sign-up an app opened, once it is done.
+  const [appReady, setAppReady] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaReset, setCaptchaReset] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +79,12 @@ function LoginPage() {
           acceptTerms: form.get("acceptTerms") === "on",
           captchaToken: captchaToken ?? undefined,
         });
+        if (fromApp) {
+          // The person signs in in the app; this browser keeps no session that could open the web app.
+          await api.signOut().catch(() => {});
+          setAppReady(email);
+          return;
+        }
       }
       else await api.signIn({ email, password });
       // Refetch now: the app layout reads the cached session, and invalidating alone keeps the old null.
@@ -85,8 +107,11 @@ function LoginPage() {
           <ServerPicker />
         </div>
       )}
-      {(!canChooseServer || server !== "") && mode === "forgot" && <ForgotForm onBack={() => setMode("signin")} />}
-      {(!canChooseServer || server !== "") && mode !== "forgot" && (
+      {appReady !== null && <AppReady email={appReady} verify={info?.auth.emailVerification === true} />}
+      {(!canChooseServer || server !== "") && appReady === null && mode === "forgot" && (
+        <ForgotForm onBack={fromApp ? null : () => setMode("signin")} />
+      )}
+      {(!canChooseServer || server !== "") && appReady === null && mode !== "forgot" && (
         <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4">
           {search.reset === "done" && mode === "signin" && <p className="text-sm text-muted">{t("login.resetDone")}</p>}
           <h1 className="text-2xl font-semibold">{mode === "signin" ? t("login.signInTitle") : t("login.signUpTitle")}</h1>
@@ -127,7 +152,7 @@ function LoginPage() {
           {signUpInBrowser ? (
             <div className="space-y-2 text-center text-sm text-muted">
               <p>{t("login.signUpInBrowser")}</p>
-              <a href={`${server}/login?signup`} target="_blank" rel="noreferrer" className="text-fg underline">
+              <a href={`${server}/login?signup&app`} target="_blank" rel="noreferrer" className="text-fg underline">
                 {t("login.openSignUp")}
               </a>
             </div>
@@ -141,7 +166,9 @@ function LoginPage() {
               {t("login.forgot")}
             </button>
           )}
-          {signUpAllowed ? (
+          {fromApp && signUpAllowed ? (
+            <p className="text-center text-sm text-subtle">{t("login.signInInApp")}</p>
+          ) : signUpAllowed ? (
             <button
               type="button"
               className="w-full text-sm text-subtle hover:underline"
@@ -154,10 +181,23 @@ function LoginPage() {
           )}
         </form>
       )}
-      {/* Inside the desktop and mobile apps the person already has one. */}
-      {!canChooseServer && <GetTheApps />}
+      {/* Inside the desktop and mobile apps, or on a page one of them opened, the person already has one. */}
+      {!canChooseServer && !fromApp && <GetTheApps />}
       <LanguageSelect />
     </main>
+  );
+}
+
+/** What a sign-up an app opened ends on: no way on into the web app, only back to the app. */
+function AppReady({ email, verify }: { email: string; verify: boolean }) {
+  const t = useT();
+  return (
+    <div role="status" className="w-full max-w-sm space-y-3 text-center">
+      <h1 className="text-2xl font-semibold">{t("login.appReadyTitle")}</h1>
+      <p className="text-sm text-muted">{t("login.appReadyHint")}</p>
+      {/* A server that verifies addresses sent the link on sign-up. */}
+      {verify && <p className="text-sm text-muted">{t("login.appReadyVerify", { email })}</p>}
+    </div>
   );
 }
 
@@ -202,7 +242,7 @@ function AppLink({ href, icon, label, hint }: { href: string; icon: ReactNode; l
  * Asks for a link to set a new password. The page it leads to is on the server's own site, so the
  * apps send people there (where the Turnstile check passes, too).
  */
-function ForgotForm({ onBack }: { onBack: () => void }) {
+function ForgotForm({ onBack }: { onBack: (() => void) | null }) {
   const t = useT();
   const { data: info } = useQuery(serverInfoQuery);
   const captcha = info?.auth.captcha ?? null;
@@ -238,7 +278,7 @@ function ForgotForm({ onBack }: { onBack: () => void }) {
       {canChooseServer ? (
         <div className="space-y-2 text-center text-sm text-muted">
           <p>{t("login.forgotHint")}</p>
-          <a href={`${server}/login?forgot`} target="_blank" rel="noreferrer" className="text-fg underline">
+          <a href={`${server}/login?forgot&app`} target="_blank" rel="noreferrer" className="text-fg underline">
             {t("login.forgotInBrowser")}
           </a>
         </div>
@@ -255,9 +295,14 @@ function ForgotForm({ onBack }: { onBack: () => void }) {
           </Button>
         </>
       )}
-      <button type="button" className="w-full text-sm text-subtle hover:underline" onClick={onBack}>
-        {t("login.toSignIn")}
-      </button>
+      {/* Opened from an app (onBack null), the person signs in there. */}
+      {onBack ? (
+        <button type="button" className="w-full text-sm text-subtle hover:underline" onClick={onBack}>
+          {t("login.toSignIn")}
+        </button>
+      ) : (
+        <p className="text-center text-sm text-subtle">{t("login.signInInApp")}</p>
+      )}
     </form>
   );
 }

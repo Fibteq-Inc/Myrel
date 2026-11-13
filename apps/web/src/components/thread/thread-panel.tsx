@@ -10,9 +10,9 @@ import {
   threadUsage,
 } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { decisionPicks, lastPromptSize, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
+import { decisionState, lastPromptSize, parsePlanUpdate, planChecklist, waitsForAgent } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ChartColumn, CircleCheck, GitPullRequest, Maximize2, MessageSquareText, Minimize2, RotateCcw, X } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, projectSettingsQuery } from "../../lib/api";
@@ -22,7 +22,6 @@ import { ArtifactCards, ThreadOutputs } from "../artifacts";
 import {
   ChatSkeleton,
   Composer,
-  decisionAnswers,
   EarlierMessages,
   mentionedPullRequests,
   MessageView,
@@ -232,6 +231,21 @@ export function ThreadPanel({
             <div className="ml-1.5 flex min-w-0 flex-1 flex-col leading-tight">
               <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
               <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                {/* A visual check's evaluator says which thread's work it checks, and leads back to it. */}
+                {thread.parentId && state.threads[thread.parentId] && (
+                  <>
+                    <Link
+                      to="/projects/$projectId/threads/$threadId"
+                      params={{ projectId: project.id, threadId: thread.parentId }}
+                      className="truncate text-link hover:underline"
+                    >
+                      {t("visualCheck.checksThread", { title: state.threads[thread.parentId]!.title })}
+                    </Link>
+                    <span aria-hidden="true" className="text-edge-strong">
+                      ·
+                    </span>
+                  </>
+                )}
                 <span className={cn("truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
                 {usage && usage.tokens > 0 && (
                   <>
@@ -377,10 +391,12 @@ function Conversation({
     hasEarlier: held.hasEarlier,
     load: () => loadConversation(thread.id, messages[0]?.seq),
   });
-  const answers = decisionAnswers(messages);
-  // A tap on a card is shown on the card itself, not again as a bubble.
-  const picks = decisionPicks(messages);
-  const choose = useCallback((label: string) => send(label, threadId), [send, threadId]);
+  // Each card has its own answer; a tap on a card is shown on the card itself, not again as a bubble.
+  const { answers, picks } = decisionState(messages);
+  const choose = useCallback(
+    (messageId: string, card: number, label: string) => send(label, threadId, [], [], { messageId, card }),
+    [send, threadId],
+  );
   // Each pull request shows under the message that links it; one no message linked yet shows at the end.
   const pullRequests = threadPullRequests(state, thread.id);
   const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
@@ -466,7 +482,7 @@ function Conversation({
                   me={me}
                   names={names}
                   reactions={state.reactions[m.id]}
-                  decision={{ answer: answers.get(m.id), onChoose: choose }}
+                  decision={{ answers: answers.get(m.id), onChoose: (label, card) => choose(m.id, card, label) }}
                   onEdit={(body) => emit({ type: "message.edit", messageId: m.id, body })}
                   onInterrupt={m.id === waiting?.id ? () => api.interruptThread(project.id, thread.id) : undefined}
                 >
@@ -510,7 +526,7 @@ function Conversation({
               thread={thread}
               prompt={lastPromptSize(messages)}
               onRunner={(runnerId) => emit({ type: "thread.runner", threadId: thread.id, runnerId })}
-              onCli={(cli) => emit({ type: "thread.cli", threadId: thread.id, cli })}
+              onCli={(cli, account) => emit({ type: "thread.cli", threadId: thread.id, cli, ...(account && { account }) })}
               onModel={(pick) => emit({ type: "thread.model", threadId: thread.id, ...pick })}
             />
           }

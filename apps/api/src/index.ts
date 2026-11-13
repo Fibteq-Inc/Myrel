@@ -1,4 +1,4 @@
-import { API_VERSION, type ServerInfo, ThreadId } from "@myrel/protocol";
+import { API_VERSION, ProjectId, type ServerInfo, ThreadId } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -23,10 +23,12 @@ import { usageRoutes } from "./routes/usage";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
+import { blockRoutes, reportRoutes } from "./routes/moderation";
 import { accountConnectorRoutes, connectorCatalogRoutes, connectorOAuthRoutes, projectConnectorRoutes } from "./routes/connectors";
 import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
+import { visualCheckRoutes } from "./routes/visual-checks";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { sshRoutes } from "./routes/ssh";
 import { streamSkillBundle } from "./skills/store";
@@ -85,6 +87,20 @@ const app = new Hono<AppEnv>()
     if (!result.ok) return c.json({ error: "unauthorized" }, 401);
     return result.answer === null ? c.body(null, 202) : c.json(result.answer);
   })
+  // MCP endpoint of the coordinator while it works with a member's CLI (ProjectSettings.coordinator): the
+  // bearer token is the one the project gave that coordinator turn, which opens only its tools.
+  .on(["GET", "DELETE"], "/coordinator-mcp/:projectId", (c) => c.body(null, 405))
+  .post("/coordinator-mcp/:projectId", async (c) => {
+    const token = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const projectId = ProjectId.safeParse(c.req.param("projectId"));
+    if (!token || !projectId.success) return c.json({ error: "unauthorized" }, 401);
+    const body: unknown = await c.req.json().catch(() => undefined);
+    if (body === undefined) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
+    const project = await getAgentByName(c.env.PROJECT_AGENT, projectId.data);
+    const result = await project.coordinatorMcp(token, body);
+    if (!result.ok) return c.json({ error: "unauthorized" }, 401);
+    return result.answer === null ? c.body(null, 202) : c.json(result.answer);
+  })
   // A remote connector (MCP server) of the thread's agent, through Myrel: the turn's token in, the
   // connector's own credentials added here. Streams the server's answer (JSON or SSE) back as is.
   .on(["GET", "POST", "DELETE"], "/agent-mcp/:threadId/c/:name", async (c) => {
@@ -99,7 +115,8 @@ const app = new Hono<AppEnv>()
       return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message } }, 502);
     }
     if (!target.ok) return c.json({ error: target.error }, target.error === "unauthorized" ? 401 : 404);
-    return proxyMcp(c.req.raw, target);
+    // A tool's answer is outside text: the thread is marked before it reaches the agent (agents/external.ts).
+    return proxyMcp(c.req.raw, target, fetch, () => thread.markExternal(`connector:${target.title}`));
   })
   // The model of a cloud turn's harness, through Myrel: the turn's token in, the project's key added
   // here, and each call's cost counted on the turn (see proxyModel).
@@ -161,8 +178,11 @@ const app = new Hono<AppEnv>()
   .route("/projects/:id/connectors", projectConnectorRoutes)
   .route("/projects/:id/skills", projectSkillRoutes)
   .route("/projects/:id/ssh", sshRoutes)
+  .route("/projects/:id/reports", reportRoutes)
+  .route("/projects/:id/blocks", blockRoutes)
   .route("/projects/:id/personal", personalInProjectRoutes)
   .route("/projects/:id/threads/:threadId/connector-suggestions", connectorSuggestionRoutes)
+  .route("/projects/:id/threads/:threadId/visual-checks", visualCheckRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)

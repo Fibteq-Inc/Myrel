@@ -1,4 +1,6 @@
-import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
@@ -81,7 +83,7 @@ describe("CLI output parsing", () => {
     expect(ADAPTERS.codex.args({ access: "edit", resume: "s-2" }).slice(-3)).toEqual(["resume", "s-2", "-"]);
   });
 
-  it("runs Claude Code in auto mode with auto access, asking Myrel about the rest; other CLIs stay at edit", () => {
+  it("runs Claude Code in auto mode and keeps Codex's auto sandbox at workspace-write", () => {
     const args = ADAPTERS.claude.args({ access: "auto", asks: true });
     expect(args).toEqual(expect.arrayContaining(["--permission-mode", "auto", "--permission-prompt-tool", "mcp__myrel__approve_access"]));
     expect(ADAPTERS.codex.args({ access: "auto" })).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));
@@ -281,7 +283,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
     const claude = await ADAPTERS.claude.agent({ ...mcp(), asks: true, access: "full" });
     const allowed = claude.args[claude.args.indexOf("--allowedTools") + 1];
     expect(allowed).toBe("mcp__myrel,Bash,WebFetch,WebSearch");
-    expect(claude.args[claude.args.indexOf("--disallowedTools") + 1]).toBe("Bash(gh pr create:*)");
+    expect(claude.args[claude.args.indexOf("--disallowedTools") + 1]).toBe("Bash(gh pr create:*),Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue close:*),Bash(gh issue reopen:*),Bash(gh issue delete:*)");
     const settings = JSON.parse(await readFile(claude.args[claude.args.indexOf("--settings") + 1]!, "utf8"));
     expect(settings.permissions.ask).toEqual(["Bash(ssh:*)", "Bash(scp:*)", "Bash(sftp:*)", "Bash(rsync:*)"]);
     expect(settings.permissions.deny).toEqual([
@@ -308,7 +310,7 @@ describe.skipIf(process.platform === "win32")("as the thread's agent", () => {
       "--allowedTools",
       "mcp__myrel,mcp__linear,mcp__db",
       "--disallowedTools",
-      "Bash(gh pr create:*),Bash(ssh:*),Bash(scp:*),Bash(sftp:*),Bash(rsync:*)",
+      "Bash(gh pr create:*),Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue close:*),Bash(gh issue reopen:*),Bash(gh issue delete:*),Bash(ssh:*),Bash(scp:*),Bash(sftp:*),Bash(rsync:*)",
     ]);
     const config = JSON.parse(await readFile(claude.args[1]!, "utf8"));
     expect(config.mcpServers.linear).toEqual({ type: "http", url: connectors[0]!.url, headers: { Authorization: `Bearer ${"t".repeat(32)}` } });
@@ -393,7 +395,7 @@ sleep 30`);
     const done = runner.start({ type: "task.start", taskId, threadId, folder, cli: "claude", prompt: "x" });
     // The session is saved once the CLI names it, before the run ends.
     for (let i = 0; i < 200 && !(await new SessionStore().get(threadId, "claude")); i++) await new Promise((r) => setTimeout(r, 10));
-    expect(await new SessionStore().get(threadId, "claude")).toEqual({ id: "sess-7", task: taskId });
+    expect(await new SessionStore().get(threadId, "claude")).toEqual({ id: "sess-7", task: taskId, cwd: await realpath(folder) });
     expect(runner.stopAll()).toEqual([taskId]);
     await done;
     expect(frames.some((f) => f.type === "task.done")).toBe(false);
@@ -426,7 +428,11 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s in %s
     expect(frames.at(-1)).toMatchObject({ type: "task.done", ok: true });
     expect((frames.at(-1) as { result: string }).result).toMatch(/^fix the bug in .*proj$/);
     // The thread's next task resumes the same CLI session.
-    expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "claude")).toEqual({ id: "sess-42", task: "task_01JTEST0000000000000000000" });
+    expect(await new SessionStore().get("thr_01JTEST0000000000000000000", "claude")).toEqual({
+      id: "sess-42",
+      task: "task_01JTEST0000000000000000000",
+      cwd: await realpath(folder),
+    });
   });
 
   /** Starts an agent turn that may continue the session of turn `after`. */
@@ -470,6 +476,61 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"new / %s
     expect(await agentTurn(folder, "task_01JTEST0000000000000000001")).toMatchObject({ ok: true, result: "new / whole thread" });
   });
 
+  /** An agent turn against a local stand-in for Myrel whose MCP endpoint answers `status`; the frames it sent. */
+  async function unreachableTurn(status: number) {
+    const server = createServer((_req, res) => res.writeHead(status).end());
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const folder = join(home, "proj");
+    await mkdir(folder, { recursive: true });
+    const config: RunnerConfig = { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, folders: [{ path: folder, name: "proj" }], access: "edit" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore(), mcpRetryMs: 10 });
+    runner.setSender((f) => frames.push(f));
+    try {
+      await runner.start({
+        type: "task.start",
+        taskId: "task_01JTEST0000000000000000002",
+        threadId: "thr_01JTEST0000000000000000000",
+        folder,
+        cli: "claude",
+        prompt: "answer the person",
+        agent: { mcpPath: "/api/agent-mcp/thr_01JTEST0000000000000000000", token: "t".repeat(32) },
+      });
+    } finally {
+      server.close();
+    }
+    return frames;
+  }
+
+  /** A Claude Code that starts without Myrel's tools (as it does when they answer too slowly) for its first `failing` runs. */
+  const withoutMyrel = (failing: number) => `read prompt
+n=$(cat "${join(home, "runs")}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${join(home, "runs")}"
+if [ $n -le ${failing} ]; then
+  echo '{"type":"system","subtype":"init","session_id":"sess-down","mcp_servers":[{"name":"myrel","status":"failed"}]}'
+  sleep 30
+fi
+echo '{"type":"system","subtype":"init","session_id":"sess-up","mcp_servers":[{"name":"myrel","status":"connected"}]}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"answered"}'`;
+
+  it("starts Claude Code again, before it does anything, when it started without Myrel's tools", async () => {
+    await fakeClaude(withoutMyrel(1));
+    const frames = await unreachableTurn(200);
+    expect(frames.at(-1)).toMatchObject({ type: "task.done", ok: true, result: expect.stringMatching(/^answered/) });
+    expect(await readFile(join(home, "runs"), "utf8")).toBe("2\n");
+    // The run that was stopped left no session for the next turn to continue.
+    expect((await new SessionStore().get("thr_01JTEST0000000000000000000", "claude"))?.id).toBe("sess-up");
+  });
+
+  it("fails the turn saying why when Claude Code cannot reach Myrel's tools twice", async () => {
+    await fakeClaude(withoutMyrel(5));
+    const frames = await unreachableTurn(401);
+    const done = frames.at(-1) as { type: string; ok: boolean; result: string };
+    expect(done).toMatchObject({ type: "task.done", ok: false });
+    expect(done.result).toMatch(/^claude could not connect to Myrel's tools twice \(its MCP server: failed; Myrel answers HTTP 401\)/);
+    expect(await readFile(join(home, "runs"), "utf8")).toBe("2\n");
+    expect(frames.some((f) => f.type === "task.progress")).toBe(false);
+  });
+
   it("connects the CLI to the thread's MCP endpoint when it runs as the thread's agent", async () => {
     // Prints the --mcp-config file it was given (which the runner deletes afterwards) as the result.
     await fakeClaude(
@@ -505,6 +566,93 @@ echo "args: $*" >&2`,
         },
       },
     });
+  });
+
+  /** Starts a coordinator turn of `cli` in `folder` (shared) on a computer with full access. */
+  async function coordinatorTurn(folder: string, cli: "claude" | "codex" = "claude") {
+    const config: RunnerConfig = { server: "https://myrel.test/", folders: [{ path: folder, name: "proj" }], access: "full" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    await runner.start({
+      type: "task.start",
+      taskId: "task_01JTEST000000000000000000C",
+      threadId: "thr_01JTEST000000000000000000C",
+      folder,
+      cli,
+      prompt: "route the new message",
+      model: { model: "opus", effort: "low" },
+      agent: { mcpPath: "/api/coordinator-mcp/prj_01JTEST000000000000000000C", token: "t".repeat(32) },
+      coordinator: { system: "You only route." },
+    });
+    return frames.at(-1) as { ok: boolean; result: string };
+  }
+
+  it("runs a coordinator turn without the CLI's tools, in an empty folder of its own, keeping no session", async () => {
+    const args = join(home, "args.txt");
+    const where = join(home, "where.txt");
+    await fakeClaude(`case "$1" in
+--version) echo "9.0.0-coordinator (Claude Code)"; exit 0 ;;
+--help) echo '  --tools <tools...>  Use "" to disable all tools'; echo '  --permission-mode <mode>  (choices: "dontAsk", "plan")'; exit 0 ;;
+esac
+read prompt
+for a in "$@"; do printf '%s\n' "$a"; done > "${args}"
+sys=""; cfg=""; prev=""; for a in "$@"; do [ "$prev" = "--system-prompt-file" ] && sys="$a"; [ "$prev" = "--mcp-config" ] && cfg="$a"; prev="$a"; done
+{ pwd; ls -A; cat "$sys"; echo; cat "$cfg"; } > "${where}"
+echo '{"type":"system","subtype":"init","session_id":"sess-c"}'
+printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$prompt"`);
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const done = await coordinatorTurn(folder);
+    expect(done).toMatchObject({ ok: true, result: "route the new message" });
+
+    const argv = (await readFile(args, "utf8")).split("\n").slice(0, -1);
+    const after = (flag: string) => argv[argv.indexOf(flag) + 1];
+    // None of its own tools, whatever the computer's access level; anything not allowed is refused.
+    expect(argv).toContain("--tools");
+    expect(after("--tools")).toBe("");
+    expect(after("--permission-mode")).toBe("dontAsk");
+    expect(after("--allowedTools")).toBe("mcp__myrel");
+    expect(argv).toEqual(expect.arrayContaining(["--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands"]));
+    expect(argv).not.toContain("--add-dir");
+    expect(argv).not.toContain("bypassPermissions");
+    expect(after("--model")).toBe("opus");
+    expect(after("--effort")).toBe("low");
+
+    // An empty folder of its own, not the project's; the system prompt and the coordinator's endpoint.
+    // Its working folder lists nothing (`ls -A` printed no line), then come the system prompt and the config.
+    const [cwd, system, config] = (await readFile(where, "utf8")).split("\n");
+    expect(cwd).not.toBe(await realpath(folder));
+    expect(cwd).toContain("myrel-coordinator-");
+    expect(system).toBe("You only route.");
+    expect(JSON.parse(config!)).toEqual({
+      mcpServers: {
+        myrel: {
+          type: "http",
+          url: "https://myrel.test/api/coordinator-mcp/prj_01JTEST000000000000000000C",
+          headers: { Authorization: `Bearer ${"t".repeat(32)}` },
+          alwaysLoad: true,
+        },
+      },
+    });
+    // Its folder (and the token in it) goes once the run ends, and no session waits to be continued.
+    const gone = async () => !(await stat(join(cwd!, "..")).catch(() => null));
+    for (let i = 0; i < 100 && !(await gone()); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(await gone()).toBe(true);
+    expect(await new SessionStore().get("thr_01JTEST000000000000000000C", "claude")).toBeUndefined();
+  });
+
+  it("refuses a coordinator turn for a CLI that cannot run without its own tools", async () => {
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    expect(await coordinatorTurn(folder, "codex")).toMatchObject({ ok: false, result: expect.stringContaining("cannot work as the coordinator") });
+    // A Claude Code too old to switch its tools off.
+    await fakeClaude(`case "$1" in
+--version) echo "1.0.0-old (Claude Code)"; exit 0 ;;
+--help) echo '  --permission-mode <mode>  (choices: "plan")'; exit 0 ;;
+esac
+echo '{"type":"result","subtype":"success","is_error":false,"result":"ran anyway"}'`);
+    expect(await coordinatorTurn(folder)).toMatchObject({ ok: false, result: expect.stringContaining("too old to work as the coordinator") });
   });
 
   it("gives the agent the project's other shared folders and reports where it works", async () => {

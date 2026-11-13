@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { CliModelSettings } from "../../../../../components/project-settings/cli-models";
+import { CoordinatorSettingsSection } from "../../../../../components/project-settings/coordinator";
 import { ConnectorSettings } from "../../../../../components/project-settings/connectors";
 import { FolderSettings } from "../../../../../components/project-settings/folders";
-import { DeleteProject, GeneralSettings } from "../../../../../components/project-settings/general";
+import { DeleteProject, GeneralSettings, WorktreeSettings } from "../../../../../components/project-settings/general";
 import { GithubSettings } from "../../../../../components/project-settings/github";
 import { InviteSettings, MemberSettings } from "../../../../../components/project-settings/members";
 import { ModelSettings } from "../../../../../components/project-settings/model";
@@ -45,11 +46,17 @@ export default function ProjectSettingsSectionScreen() {
           )}
           {known === "model" && (
             <>
+              <CoordinatorSettingsSection projectId={projectId} canManage={canManage} />
               <ModelSettings projectId={projectId} canManage={canManage} />
               <CliModelSettings projectId={projectId} canManage={canManage} />
             </>
           )}
-          {known === "folders" && <FolderSettings project={p} canManage={canManage} />}
+          {known === "folders" && (
+            <>
+              <FolderSettings project={p} canManage={canManage} />
+              <WorktreeSettings projectId={projectId} canManage={canManage} />
+            </>
+          )}
           {known === "github" && <GithubSettings projectId={projectId} canManage={canManage} />}
           {known === "connectors" && <ConnectorSettings projectId={projectId} canManage={canManage} />}
           {known === "skills" && <SkillSettings projectId={projectId} canManage={canManage} />}

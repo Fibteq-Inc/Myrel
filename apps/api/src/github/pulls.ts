@@ -1,8 +1,9 @@
 import { createDb, schema } from "@myrel/db";
 import type { MergeMethod, MergePullInput, MergePullResult, PullFile, PullFiles, PullMergeState, PullRequest } from "@myrel/protocol";
 import { getAgentByName } from "agents";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { GithubError, githubFetch, installationToken, type RepoPermissions } from "./app";
+import { wrapExternal } from "../agents/external";
 import { type PullCredit, hasAttribution, withAttribution } from "./attribution";
 import { githubAccountOf, listProjectRepos, projectRepoToken } from "./store";
 
@@ -49,6 +50,11 @@ type ApiCheckRun = { name: string; status: string; conclusion: string | null };
 
 /** Check run conclusions that mean the commit is broken. Neutral and skipped ones do not count. */
 const FAILED = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
+/**
+ * Of those, the ones an agent can fix, which wake its thread with what the run said. A cancelled run
+ * was stopped by a person or replaced by newer commits; action_required waits on a person.
+ */
+const BROKEN = new Set(["failure", "timed_out", "startup_failure"]);
 
 /** How long to wait, and how many times, while GitHub works out whether a pull request merges cleanly. */
 export const CONFLICT_RETRY_SEC = 10;
@@ -529,7 +535,7 @@ async function checkState(
   token: string,
   fullName: string,
   sha: string,
-): Promise<{ state: Row["checks"]; failed: string[] }> {
+): Promise<{ state: Row["checks"]; failed: string[]; broken: boolean }> {
   const [runs, status] = await Promise.all([
     githubFetch<{ check_runs: ApiCheckRun[] }>(token, `/repos/${fullName}/commits/${sha}/check-runs?per_page=100`),
     githubFetch<{ state: string; total_count: number; statuses: { context: string; state: string }[] }>(
@@ -543,7 +549,57 @@ async function checkState(
   ];
   const pending = runs.check_runs.some((r) => r.status !== "completed") || status.statuses.some((s) => s.state === "pending");
   const any = runs.check_runs.length > 0 || status.total_count > 0;
-  return { state: failed.length ? "failure" : pending ? "pending" : any ? "success" : null, failed };
+  const broken = runs.check_runs.some((r) => r.status === "completed" && BROKEN.has(r.conclusion ?? ""));
+  return { state: failed.length ? "failure" : pending ? "pending" : any ? "success" : null, failed, broken };
+}
+
+/** A completed check run that failed in a way an agent can fix (BROKEN), as the webhook reports it. */
+type FailedRun = { id: number; name: string; conclusion: string; headSha: string; url?: string; app?: string };
+
+function failedRun(run: NonNullable<PullWebhookPayload["check_run"]>): FailedRun | null {
+  if (run.id === undefined || !run.name || !BROKEN.has(run.conclusion ?? "")) return null;
+  return { id: run.id, name: run.name, conclusion: run.conclusion!, headSha: run.head_sha, url: run.html_url, app: run.app?.slug };
+}
+
+type ApiAnnotation = { path: string; start_line: number | null; annotation_level: string; title: string | null; message: string };
+
+/** At most this many of a failed run's error notes go into the event, each cut to NOTE_CHARS. */
+const MAX_NOTES = 5;
+const NOTE_CHARS = 800;
+
+/**
+ * What a failed check run said, for the agent woken by it: its link, the steps that failed and its
+ * error annotations, the ones on a file first (vitest reports each failing test as one, with the
+ * assertion; setup-node's problem matcher does the same for tsc errors). Annotations need only the
+ * checks: read the app asks for; the steps come from the Actions API, which a private repository
+ * refuses without actions: read, so they are left out there. The notes come from the code under
+ * test, so they reach the agent as repository text (see agents/external.ts).
+ */
+async function failureDetails(token: string, fullName: string, run: FailedRun): Promise<string> {
+  const [notes, job] = await Promise.all([
+    githubFetch<ApiAnnotation[]>(token, `/repos/${fullName}/check-runs/${run.id}/annotations?per_page=50`).catch(() => []),
+    githubFetch<{ steps?: { name: string; conclusion: string | null }[] }>(token, `/repos/${fullName}/actions/jobs/${run.id}`).catch(() => null),
+  ]);
+  const errors = notes.filter((a) => a.annotation_level === "failure");
+  // GitHub puts the generic ones ("Process completed with exit code 1") on .github; they say least.
+  const ordered = [...errors.filter((a) => a.path !== ".github"), ...errors.filter((a) => a.path === ".github")].slice(0, MAX_NOTES);
+  const steps = (job?.steps ?? []).filter((s) => s.conclusion === "failure").map((s) => s.name);
+  const lines = [`Check "${run.name}" ended with ${run.conclusion}${run.url ? `: ${run.url}` : ""}`];
+  if (steps.length) lines.push(`Failed step: ${steps.join(", ")}`);
+  if (!ordered.length) {
+    lines.push("GitHub has no error notes for it; its log at the link above says why.");
+    return lines.join("\n");
+  }
+  const body = ordered
+    .map((a) => {
+      const where = a.path === ".github" ? "" : `${a.path}${a.start_line ? `:${a.start_line}` : ""} `;
+      const message = a.message.length > NOTE_CHARS ? `${a.message.slice(0, NOTE_CHARS)}…` : a.message;
+      return `${where}${a.title ? `${a.title}\n` : ""}${message}`;
+    })
+    .join("\n\n");
+  const extra = errors.length > ordered.length ? ` (${ordered.length} of ${errors.length})` : "";
+  lines.push(`Its error notes${extra}:`, wrapExternal({ source: "github-ci", ref: `${fullName}@${run.headSha.slice(0, 7)}`, trust: "repository" }, body).text);
+  return lines.join("\n");
 }
 
 /**
@@ -593,10 +649,20 @@ type Sender = { login: string; type?: string };
 export type PullWebhookPayload = {
   action?: string;
   sender?: Sender;
-  repository?: { id: number; full_name: string };
+  repository?: { id: number; full_name: string; default_branch?: string };
   installation?: { id: number };
   pull_request?: ApiPull;
-  check_run?: { head_sha: string; pull_requests?: { number: number }[] };
+  check_run?: {
+    id?: number;
+    name?: string;
+    head_sha: string;
+    conclusion?: string | null;
+    html_url?: string;
+    /** head_branch: the branch the commit was pushed to, or a pull request's head branch. */
+    check_suite?: { head_branch?: string | null };
+    app?: { slug?: string };
+    pull_requests?: { number: number }[];
+  };
   review?: { state: string; body: string | null; user: Sender; html_url: string; author_association?: string };
   comment?: { body: string; user: Sender; html_url: string; path?: string; author_association?: string };
   issue?: { number: number; pull_request?: unknown };
@@ -657,14 +723,24 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
 
   if (event === "check_run" && payload.check_run && payload.action === "completed") {
     const sha = payload.check_run.head_sha;
+    const failed = failedRun(payload.check_run);
     const rows = await d.select().from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headSha, sha)));
     for (const row of rows) {
       const { token } = await installationToken(env, row.installationId, { repositoryIds: [row.repoId], permissions: READ });
       const checks = await checkState(token, row.fullName, sha);
-      if (checks.state === row.checks) continue;
-      await save(env, row, { checks: checks.state });
-      if (checks.state === "failure") await wake(env, row, `has failing CI on its latest commit: ${checks.failed.join(", ")}.`);
+      const changed = checks.state !== row.checks;
+      if (changed) await save(env, row, { checks: checks.state });
+      if (row.state !== "open") continue;
+      if (failed) {
+        // Each failed run wakes the thread with what it said, also one failing after another already turned the pull request red.
+        await wake(env, row, `has failing CI on its latest commit.\n${await failureDetails(token, row.fullName, failed)}`);
+      } else if (changed && checks.state === "failure" && !checks.broken) {
+        // Red from something that reports no failed run of its own, such as a commit status.
+        await wake(env, row, `has failing CI on its latest commit: ${checks.failed.join(", ")}.`);
+      }
     }
+    const base = payload.repository?.default_branch;
+    if (failed && base && payload.check_run.check_suite?.head_branch === base) await baseBranchFailed(env, payload, failed, base);
     return;
   }
 
@@ -680,10 +756,12 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
     } else if (payload.action === "submitted" && (state === "approved" || state === "changes_requested")) {
       await save(env, row, { review: state });
       if (state === "changes_requested") {
-        await wake(env, row, `got a review from ${payload.review.user.login} asking for changes:\n${quote(payload.review.body)}`);
+        const q = quote(payload.review.body, "github-pr-review", row, payload.review.user.login);
+        await wake(env, row, `got a review from ${payload.review.user.login} asking for changes:\n${q.text}`, undefined, q.external);
       }
     } else if (payload.action === "submitted" && payload.review.body?.trim()) {
-      await wake(env, row, `got a review comment from ${payload.review.user.login}:\n${quote(payload.review.body)}`);
+      const q = quote(payload.review.body, "github-pr-review", row, payload.review.user.login);
+      await wake(env, row, `got a review comment from ${payload.review.user.login}:\n${q.text}`, undefined, q.external);
     }
     return;
   }
@@ -694,7 +772,72 @@ export async function handlePullEvent(env: PullsEnv, event: string, payload: Pul
     const row = await find(number);
     if (!row) return;
     const where = payload.comment.path ? ` on ${payload.comment.path}` : "";
-    await wake(env, row, `got a comment from ${payload.comment.user.login}${where}:\n${quote(payload.comment.body)}`);
+    const q = quote(payload.comment.body, "github-pr-comment", row, payload.comment.user.login);
+    await wake(env, row, `got a comment from ${payload.comment.user.login}${where}:\n${q.text}`, undefined, q.external);
+  }
+}
+
+/**
+ * CI failed on the default branch, which no thread follows: when the commit is the merge of a pull
+ * request a thread opened, and the same check was not failing on the commit before, that thread is
+ * told, as its merge most likely turned the branch red. A check that was already failing before
+ * tells nobody again (the merge that broke it already did); neither does one no thread's merge made.
+ */
+async function baseBranchFailed(env: PullsEnv, payload: PullWebhookPayload, run: FailedRun, branch: string): Promise<void> {
+  const repo = payload.repository!;
+  const installationId = payload.installation?.id;
+  if (!installationId) return;
+  const d = createDb(env.DB);
+  // Most repositories' CI is none of Myrel's business: only one with a merged pull request a thread followed is looked at.
+  const [followed] = await d
+    .select({ number: pullRequests.number })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.repoId, repo.id), eq(pullRequests.state, "merged")))
+    .limit(1);
+  if (!followed) return;
+  // The commit's own pull requests and parent: contents read, which the app has (threads push with it).
+  const { token } = await installationToken(env, installationId, { repositoryIds: [repo.id], permissions: { ...READ, contents: "read" } });
+  if (run.app === "github-actions" && !(await pushedRun(token, repo.full_name, run))) return;
+  const made = await githubFetch<{ number: number; merged_at: string | null; base: { ref: string } }[]>(
+    token,
+    `/repos/${repo.full_name}/commits/${run.headSha}/pulls`,
+  );
+  const numbers = made.filter((p) => p.merged_at && p.base.ref === branch).map((p) => p.number);
+  if (!numbers.length) return;
+  const rows = await d.select().from(pullRequests).where(and(eq(pullRequests.repoId, repo.id), inArray(pullRequests.number, numbers)));
+  if (!rows.length) return;
+  const commit = await githubFetch<{ parents: { sha: string }[] }>(token, `/repos/${repo.full_name}/git/commits/${run.headSha}`);
+  const parent = commit.parents[0]?.sha;
+  if (parent) {
+    const before = await githubFetch<{ check_runs: ApiCheckRun[] }>(
+      token,
+      `/repos/${repo.full_name}/commits/${parent}/check-runs?check_name=${encodeURIComponent(run.name)}`,
+    );
+    if (before.check_runs.some((r) => r.status === "completed" && BROKEN.has(r.conclusion ?? ""))) return;
+  }
+  const details = await failureDetails(token, repo.full_name, run);
+  for (const row of rows) {
+    await wake(
+      env,
+      row,
+      `was merged, and CI then failed on ${branch} at the commit the merge made (${run.headSha.slice(0, 7)}); this check was not failing on the commit before.\n${details}\nThe pull request is merged, so the fix goes in a new pull request from ${branch}, also when the cause turns out to be a flaky test rather than this change.`,
+    );
+  }
+}
+
+/**
+ * Whether a GitHub Actions run ran because the commit was pushed. Others land on the branch's latest
+ * commit too, without the merge having anything to do with them: pull_request_target runs of other
+ * pull requests (the CLA check) and Dependabot's update jobs. A private repository refuses to say
+ * without the app's actions: read, and then nobody is told.
+ */
+async function pushedRun(token: string, fullName: string, run: FailedRun): Promise<boolean> {
+  try {
+    const job = await githubFetch<{ run_id: number }>(token, `/repos/${fullName}/actions/jobs/${run.id}`);
+    const workflowRun = await githubFetch<{ event: string }>(token, `/repos/${fullName}/actions/runs/${job.run_id}`);
+    return workflowRun.event === "push";
+  } catch {
+    return false;
   }
 }
 
@@ -711,9 +854,15 @@ function trusted(association?: string) {
   return association === "OWNER" || association === "MEMBER" || association === "COLLABORATOR";
 }
 
-function quote(text: string | null) {
+/**
+ * Their words as data (see agents/external.ts), at most 2000 characters. Only members get here, but
+ * text that looks like steering still marks the thread (`external`).
+ */
+function quote(text: string | null, source: string, row: Row, author: string): { text: string; external?: string } {
   const body = (text ?? "").trim().slice(0, 2000);
-  return body ? body.split("\n").map((l) => `> ${l}`).join("\n") : "> (no text)";
+  if (!body) return { text: "(no text)" };
+  const wrapped = wrapExternal({ source, ref: `${row.fullName}#${row.number}`, author, trust: "member" }, body);
+  return { text: wrapped.text, ...(wrapped.taints && { external: `${source}:${row.fullName}#${row.number}` }) };
 }
 
 async function save(env: PullsEnv, row: Row, set: Partial<Row>): Promise<Row> {
@@ -731,9 +880,9 @@ async function broadcast(env: PullsEnv, projectId: string, pr: PullRequest) {
   await project.broadcastPullRequest(pr);
 }
 
-async function wake(env: PullsEnv, row: Row, what: string, settled?: { pr: string; merged: boolean }) {
+async function wake(env: PullsEnv, row: Row, what: string, settled?: { pr: string; merged: boolean }, external?: string) {
   const agent = await getAgentByName(env.THREAD_AGENT, row.threadId);
   const event = `Pull request ${row.fullName}#${row.number} "${row.title}" (${row.url}, branch ${row.headRef}) ${what}`;
-  await agent.wake({ kind: "github", event, ...(settled && { settled }) });
+  await agent.wake({ kind: "github", event, ...(settled && { settled }), ...(external && { external }) });
 }
 

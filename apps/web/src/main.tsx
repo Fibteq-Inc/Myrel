@@ -4,6 +4,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "./lib/api";
+import { markAppTab } from "./lib/app-tab";
 import { reportError } from "./lib/errors";
 import { initialLocale, saveLocale } from "./lib/i18n";
 import { initTheme } from "./lib/theme";
@@ -22,6 +23,8 @@ window.addEventListener("vite:preloadError", () => {
 });
 
 initTheme();
+// Before the router, which may drop ?app from the address on its first redirect.
+markAppTab();
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent", defaultErrorComponent: RouteError });
 

@@ -8,6 +8,7 @@ import { errorMessage } from "../lib/ui";
 import { cn } from "../lib/ui";
 import { ArtifactList, ArtifactViewer, Empty, ViewerBack } from "./artifacts";
 import { ProjectChat } from "./chat/project-chat";
+import { ProjectIssues } from "./project-issues";
 import { ProjectFiles, ProjectKnowledge } from "./project-knowledge";
 import { ProjectThreads } from "./project-threads";
 import { Segmented, Skeleton, UsageDashboard, useUsage } from "./usage-dashboard";
@@ -22,6 +23,8 @@ export function ProjectTabPanel({ me, className = "" }: { me: string; className?
     <main id={PROJECT_TABPANEL} role="tabpanel" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
       {view === "threads" ? (
         <ProjectThreads />
+      ) : view === "issues" ? (
+        <ProjectIssues />
       ) : view === "artifacts" ? (
         <ArtifactsTab />
       ) : view === "files" ? (

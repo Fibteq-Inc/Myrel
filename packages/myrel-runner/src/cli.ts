@@ -2,11 +2,13 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CLI_NAMES } from "@myrel/protocol";
+import { addAccount, claudeAuthStatus, claudeLogin, claudeOwnDir, findAccount, removeAccount, renameAccount } from "./accounts";
 import { readBridgeRun, runBridge } from "./bridge";
 import { detectClis, type MissingCli } from "./clis";
 import { runGitCredential } from "./github";
 import { type Access, configPath, loadConfig, saveConfig, shareFolder, unshareFolder } from "./config";
 import { checkPairing, pair, RESTART_EXIT_CODE, RUNNER_VERSION, startRunner } from "./runner";
+import { fixSandbox, sandboxProblem, sandboxProfile, sandboxState } from "./sandbox";
 import { settingsOf } from "./self-update";
 import { installService, type ServiceInfo, serviceStatus, uninstallService } from "./service";
 import { runShim } from "./ssh-shim";
@@ -39,6 +41,11 @@ Usage:
   myrel-runner settings [access <level> | auto-update on|off | remote on|off]
                                  Show or change the settings (Myrel > Devices can change them too,
                                  unless remote is off)
+  myrel-runner claude [list | add <name> [--dir <folder>] | login <name> | rename <name|default> <new name> | remove <name>]
+                                 Other Claude Code accounts (e.g. a work one next to your own), each signed
+                                 in with Claude Code's own login in a folder of its own; threads choose one
+  myrel-runner sandbox [fix]    Linux: check, or fix once with sudo, the AppArmor restriction on Ubuntu that
+                                 stops Muse Code's and Codex's sandbox ("bwrap: ... Operation not permitted")
   myrel-runner logout           Forget the pairing on this computer
 
 --access sets what the CLI may do without asking: read (look only),
@@ -50,7 +57,9 @@ uses it too.
 In a git repository, each thread works in its own git worktree on its own
 branch (myrel/thr-…), so threads working at the same time never touch each
 other's files. Worktrees live in ~/.myrel-runner/worktrees; ones whose branch
-is merged and that were not used for a day are removed automatically.
+is merged and that were not used for a day are removed automatically. Off
+here, threads share the folder in every project; a project can also have its
+threads work in its folder itself (its Folders tab in Myrel), one at a time.
 --json prints one JSON status object per line instead of messages.
 
 Environment: MYREL_SERVER and MYREL_RUNNER_TOKEN override the saved pairing;
@@ -73,6 +82,7 @@ async function main(argv: string[]) {
       json: { type: "boolean" },
       force: { type: "boolean" },
       now: { type: "boolean" },
+      dir: { type: "string" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -92,7 +102,7 @@ async function main(argv: string[]) {
       });
     // Started by git as the credential helper of a run's GitHub token (see github.ts). Not for people.
     case "git-credential":
-      return runGitCredential(arg, process.stdin, (text) => process.stdout.write(text));
+      return runGitCredential(arg, positionals[2], process.stdin, (text) => process.stdout.write(text));
     case "pair": {
       const server = values.server ?? (await loadConfig()).server;
       if (!arg || !server) throw new Error("Usage: myrel-runner pair <code> --server <url>");
@@ -130,7 +140,26 @@ async function main(argv: string[]) {
       console.log(`Access:  ${config.access}${config.autoUpdate ? " · auto-update on" : ""}`);
       console.log(`Folders: ${config.folders.map((f) => `\n  ${f.path}`).join("") || "none"}`);
       console.log(`CLIs:    ${clis.map((c) => `\n  ${CLI_NAMES[c.id]} ${c.version ?? ""}`).join("") || "none found"}`);
+      if (config.claudeAccounts?.length) {
+        console.log(`Claude Code accounts: \n  ${config.claudeDefaultName ?? "its own login"}${config.claudeAccounts.map((a) => `\n  ${a.name}`).join("")}`);
+      }
       console.log(`Not found: ${missing.map((m) => `\n  ${CLI_NAMES[m.id]}: ${m.reason}`).join("") || "none"}`);
+      const problem = sandboxProblem(await sandboxState());
+      if (problem) console.log(`Sandbox: ${problem}`);
+      return;
+    }
+    case "sandbox": {
+      if (arg === "fix") return fixSandbox();
+      if (arg) throw new Error("Usage: myrel-runner sandbox [fix]");
+      const state = await sandboxState();
+      if (values.json) return console.log(JSON.stringify(state));
+      if (!state.applies) return console.log("This computer does not restrict user namespaces with AppArmor; the CLIs' sandboxes need nothing.");
+      console.log(`Restriction: ${state.restricted ? "on" : "off"} (kernel.apparmor_restrict_unprivileged_userns)`);
+      console.log(`Profile:     ${state.file}`);
+      console.log(`Bubblewrap:  ${state.binaries.map((b) => `\n  ${CLI_NAMES[b.cli]}: ${b.path}${state.blocked.includes(b) ? " (not covered)" : " (covered)"}`).join("") || "none of Muse Code or Codex's own"}`);
+      const problem = sandboxProblem(state);
+      if (problem) console.log(`\n${problem}`);
+      if (state.blocked.length) console.log(`\n\`myrel-runner sandbox fix\` installs this profile with sudo:\n\n${sandboxProfile(state.binaries)}`);
       return;
     }
     case "start": {
@@ -245,6 +274,8 @@ async function main(argv: string[]) {
       console.log(`Usage:       ${stats ? "CPU, memory and disk are shown in Myrel > Devices" : "off: not sent to Myrel"}`);
       return;
     }
+    case "claude":
+      return claudeAccounts(positionals.slice(1), values);
     case "logout": {
       const config = await loadConfig();
       delete config.token;
@@ -255,6 +286,67 @@ async function main(argv: string[]) {
     }
     default:
       throw new Error(`Unknown command "${command}". Run myrel-runner --help.`);
+  }
+}
+
+const CLAUDE_USAGE =
+  'Usage: myrel-runner claude [list | add <name> [--dir <folder>] | login <name> | rename <name|default> <new name> | remove <name>]';
+
+/** `myrel-runner claude …`: the other Claude Code logins threads can run with (see accounts.ts). */
+async function claudeAccounts([action = "list", ref, name]: string[], values: { dir?: string; json?: boolean }) {
+  const config = await loadConfig();
+  switch (action) {
+    case "list": {
+      const own = { id: null, name: config.claudeDefaultName ?? null, dir: claudeOwnDir() };
+      const all = [own, ...(config.claudeAccounts ?? [])];
+      const states = await Promise.all(all.map((a) => claudeAuthStatus(a.id ? a.dir : undefined)));
+      if (values.json) return console.log(JSON.stringify(all.map((a, i) => ({ ...a, auth: states[i] }))));
+      for (const [i, a] of all.entries()) {
+        const s = states[i];
+        const auth = !s ? "could not ask Claude Code" : s.loggedIn ? `signed in${s.subscriptionType ? ` (${s.subscriptionType})` : ""}` : "not signed in";
+        console.log(`${a.name ?? "Claude Code's own login"}${a.id ? ` [${a.id}]` : " (default)"}: ${auth}\n  ${a.dir}`);
+      }
+      if (!config.claudeAccounts?.length) console.log('\nAdd another account with: myrel-runner claude add "Work"');
+      return;
+    }
+    case "add": {
+      if (!ref) throw new Error(CLAUDE_USAGE);
+      const account = await addAccount(config, ref, values.dir);
+      if (!(await claudeAuthStatus(account.dir))?.loggedIn) {
+        console.log(`Signing in to Claude Code for "${account.name}". Use the account you want threads to run with.`);
+        await claudeLogin(account.dir);
+        if (!(await claudeAuthStatus(account.dir))?.loggedIn) {
+          throw new Error(`Not added: Claude Code did not finish signing in. Run \`myrel-runner claude add "${account.name}"\` again.`);
+        }
+      }
+      await saveConfig(config);
+      console.log(`Added "${account.name}" (${account.dir}). Threads in Myrel can now choose Claude Code · ${account.name}.`);
+      if (!config.claudeDefaultName) console.log('Name your own login too, e.g.: myrel-runner claude rename default "Personal"');
+      return;
+    }
+    case "login": {
+      const account = ref ? findAccount(config, ref) : undefined;
+      if (!account) throw new Error(ref ? `No Claude Code account "${ref}". See myrel-runner claude list.` : CLAUDE_USAGE);
+      process.exitCode = await claudeLogin(account.dir);
+      return;
+    }
+    case "rename": {
+      if (!ref || !name) throw new Error(CLAUDE_USAGE);
+      if (!renameAccount(config, ref, name)) throw new Error(`No Claude Code account "${ref}". See myrel-runner claude list.`);
+      await saveConfig(config);
+      console.log(`Renamed it to "${name.trim()}".`);
+      return;
+    }
+    case "remove": {
+      const account = ref ? removeAccount(config, ref) : undefined;
+      if (!account) throw new Error(ref ? `No Claude Code account "${ref}". See myrel-runner claude list.` : CLAUDE_USAGE);
+      await saveConfig(config);
+      console.log(`Removed "${account.name}": threads that chose it run with Claude Code's own login from their next turn.`);
+      console.log(`Its login is still in ${account.dir}; delete that folder to remove it from this computer too.`);
+      return;
+    }
+    default:
+      throw new Error(CLAUDE_USAGE);
   }
 }
 

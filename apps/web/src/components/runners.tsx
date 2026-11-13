@@ -1,6 +1,6 @@
 import type { Translate } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CLI_NAMES, type CliLimitWindow, type Runner, type RunnerCli, type RunnerPairingCode, type RunnerStats } from "@myrel/protocol";
+import { CLI_NAMES, type CliLimitWindow, cliLogins, type Runner, type RunnerCli, type RunnerPairingCode, type RunnerStats, VISUAL_CHECK_DEPS_COMMAND } from "@myrel/protocol";
 import { Check, Copy, Laptop, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useFormat } from "../lib/format";
@@ -45,6 +45,7 @@ export function CliChips({ runner }: { runner: Runner }) {
         <span key={c.id} className="rounded-md border border-edge bg-panel px-1.5 py-0.5 text-[11px] text-muted" title={c.version ?? undefined}>
           {CLI_NAMES[c.id]}
           {cliVersion(c) && <span className="ml-1 text-subtle">{cliVersion(c)}</span>}
+          {!!c.accounts?.length && <span className="ml-1 text-subtle">· {t("runners.accounts", { count: c.accounts.length + 1 })}</span>}
         </span>
       ))}
     </span>
@@ -67,26 +68,36 @@ const LIMITED_CLIS = new Set<RunnerCli["id"]>(["claude", "codex"]);
 
 /**
  * The subscription limits of the computer's CLIs, as each CLI last reported them: Claude Code
- * during runs from Myrel, Codex whenever it is used.
+ * during runs from Myrel, Codex whenever it is used. A CLI with several logins on the computer
+ * (`myrel-runner claude add`) shows each login's own.
  */
 export function CliLimitsList({ runner }: { runner: Runner }) {
   const t = useT();
   const format = useFormat();
-  const clis = runner.clis.filter((c) => LIMITED_CLIS.has(c.id));
-  if (clis.length === 0) return null;
+  const rows = runner.clis
+    .filter((c) => LIMITED_CLIS.has(c.id))
+    .flatMap((c) => {
+      const logins = cliLogins(c);
+      return logins.map((l) => ({
+        key: `${c.id}@${l.account ?? ""}`,
+        name: logins.length > 1 ? `${CLI_NAMES[c.id]} · ${l.name ?? t("cliPicker.ownLogin")}` : CLI_NAMES[c.id],
+        limits: l.limits,
+      }));
+    });
+  if (rows.length === 0) return null;
   return (
     <div className="flex flex-col gap-2.5 border-t border-line pt-3">
       <h3 className="text-xs text-subtle">{t("runners.limitsTitle")}</h3>
-      {clis.map((c) => {
+      {rows.map((c) => {
         const windows = (c.limits?.windows ?? []).filter(isKnown);
         return (
-          <div key={c.id} className="flex flex-col gap-1.5">
+          <div key={c.key} className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 text-[13px]">
-              <span className="font-medium">{CLI_NAMES[c.id]}</span>
-              {c.limits?.status === "limited" && <span className="text-xs text-bad">{t("runners.limitReached")}</span>}
-              {c.limits?.status === "warning" && <span className="text-xs text-warn">{t("runners.limitWarning")}</span>}
+              <span className="min-w-0 truncate font-medium">{c.name}</span>
+              {c.limits?.status === "limited" && <span className="flex-none text-xs text-bad">{t("runners.limitReached")}</span>}
+              {c.limits?.status === "warning" && <span className="flex-none text-xs text-warn">{t("runners.limitWarning")}</span>}
               {c.limits && (
-                <span className="ml-auto text-[11px] text-subtle" title={format.dateTime(c.limits.at)}>
+                <span className="ml-auto flex-none text-[11px] text-subtle" title={format.dateTime(c.limits.at)}>
                   {t("runners.limitsUpdated", { time: format.relative(c.limits.at) })}
                 </span>
               )}
@@ -232,6 +243,21 @@ function LimitBar({ window: w, label }: { window: CliLimitWindow; label: string 
 }
 
 /** A shell command with a copy button. */
+/**
+ * A computer whose runner said a visual check's browser cannot start there (Linux without
+ * Chromium's system libraries): the one command its owner runs, with sudo, once.
+ */
+export function BrowserNotice({ runner }: { runner: Runner }) {
+  const t = useT();
+  if (runner.browser?.status !== "missing-libs") return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-warn-line bg-warn-soft px-3 py-2.5 text-[13px] text-body">
+      <p>{t("devices.browserMissing")}</p>
+      <Command>{VISUAL_CHECK_DEPS_COMMAND}</Command>
+    </div>
+  );
+}
+
 export function Command({ children }: { children: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);

@@ -35,4 +35,20 @@ describe("handleMcp", () => {
     ]);
     expect(batch).toEqual([{ jsonrpc: "2.0", id: 5, result: {} }]);
   });
+
+  it("builds tools that take queries only for a message that lists or calls them, once per batch", async () => {
+    let built = 0;
+    const tools = async () => (built++, [echo]);
+    // Connecting stays quick: Claude Code starts without a server that answers initialize slowly.
+    await handleMcp(tools, info, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+    await handleMcp(tools, info, { jsonrpc: "2.0", id: 2, method: "ping" });
+    await handleMcp(tools, info, { jsonrpc: "2.0", id: 3, method: "server/discover" });
+    expect(built).toBe(0);
+    const batch = await handleMcp(tools, info, [
+      { jsonrpc: "2.0", id: 4, method: "tools/list" },
+      { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "echo", arguments: { text: "hi" } } },
+    ]);
+    expect(built).toBe(1);
+    expect(batch).toMatchObject([{ id: 4, result: { tools: [{ name: "echo" }] } }, { id: 5, result: { content: [{ text: "hi" }] } }]);
+  });
 });

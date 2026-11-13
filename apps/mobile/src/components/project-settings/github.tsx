@@ -7,6 +7,7 @@ import { ExternalLink, FolderGit2, GitBranch, Lock, Plus, Search, Trash2 } from 
 import { useEffect, useState } from "react";
 import { Alert, AppState, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { appPage } from "../../lib/app-page";
 import { useSession } from "../../lib/session";
 import { makeStyles, radius, useColors } from "../../theme";
 import { Notice, Section } from "../settings-section";
@@ -45,7 +46,7 @@ export function GithubSettings({ projectId, canManage }: { projectId: string; ca
   }, [queryClient, server]);
 
   const openWeb = async () => {
-    await WebBrowser.openBrowserAsync(`${server}/settings/projects/${encodeURIComponent(projectId)}?tab=github`);
+    await WebBrowser.openBrowserAsync(appPage(`${server}/settings/projects/${encodeURIComponent(projectId)}?tab=github`));
     void queryClient.invalidateQueries({ queryKey: ["github", server] });
     void queryClient.invalidateQueries({ queryKey: reposKey });
   };

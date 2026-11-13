@@ -99,6 +99,28 @@ automatically, with its branch. `myrel-runner worktrees` lists them, `worktrees 
 `worktrees remove <path or branch>` removes one, and `worktrees off` makes threads work in the folder itself again.
 Read-only tasks (`--access read`) always run in the folder itself.
 
+### More than one Claude Code account
+
+A thread can run with another Claude Code login than your own, e.g. a work account next to your personal one.
+Each login lives in a config folder of its own, which Claude Code takes from `CLAUDE_CONFIG_DIR`
+([its own way](https://code.claude.com/docs/en/authentication) to sign in with several accounts):
+
+```sh
+myrel-runner claude add "Work"                # a new folder, ~/.myrel-runner/claude/work, then Claude Code's own sign-in
+myrel-runner claude add "Work" --dir ~/.claude-work   # or a folder you already signed in with
+myrel-runner claude rename default "Personal"  # name your own login (~/.claude) too
+myrel-runner claude list                       # each login, its folder and whether it is signed in
+myrel-runner claude login "Work"               # sign in again, e.g. after its login expired
+myrel-runner claude remove "Work"              # forget it; its folder (and login) stays until you delete it
+```
+
+The sign-in is Claude Code's own `claude auth login`: the login stays in that folder, and neither the runner nor
+Myrel ever reads or keeps it. The runner only tells Myrel each account's name, and its usage limits as Claude Code
+reports them in a turn with it. A thread that chose an account runs Claude Code with its folder; its sessions are
+kept apart from your own login's, so a thread that switches accounts starts a new session (with the thread's
+history). A new folder has none of your `~/.claude` settings, hooks or plugins. Use accounts that are all yours:
+Claude's consumer terms do not allow sharing a login with someone else. Needs runner 0.34.0 or newer.
+
 ### What the CLI may do
 
 `myrel-runner start --access <level>`, or for the background runner `myrel-runner service install --access <level>` or
@@ -112,15 +134,20 @@ Read-only tasks (`--access read`) always run in the folder itself.
 | `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` | `--yolo` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
-the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode. For Codex
-and Antigravity CLI `auto` is the same as `edit` (Antigravity's own auto mode needs its terminal sandbox and is
-missing on business accounts).
+the ones it would ask about come to you as a card in the thread. Your Claude account must have auto mode. Codex uses
+**Approve for me** (`approvalsReviewer: "auto_review"`): its reviewer evaluates sandbox-boundary approvals while
+the main agent stays in `workspace-write`. This requires a Codex app server with auto-review support (verified with
+Codex 0.166.0); if it does not enable the reviewer, the task stops with an update instruction. `MYREL_CODEX_EXEC=1`
+and older versions without an app server cannot run Codex auto access; choose `edit` to use exec instead.
+For Antigravity CLI `auto` is the same as `edit` (its own auto mode needs its terminal sandbox and is missing on
+business accounts).
 
 Codex runs as its app server (`codex app-server`, one process per turn) where the installed Codex has one, and as
 `codex exec --json` otherwise. The sandbox is the same either way (the table above). As a thread's agent with `edit`
 or `auto`, the app server runs with approval policy `on-request`: a step its sandbox does not allow (a command that
-needs the network such as `git push`, a file outside the folders) comes to you as the same card Claude Code's
-questions use, and the step waits for your answer. With `read` and `full`, and with `codex exec`, nothing is asked:
+needs the network such as `git push`, a file outside the folders) is reviewed by Codex with `auto`, or comes to you
+as a card with `edit`. Switching from `auto` to `edit` restores manual approval even when resuming a session.
+With `read` and `full`, and with `codex exec`, nothing is asked:
 such a step fails and the run goes on. Stopping a turn from Myrel interrupts it the way Codex's own Stop does, so the
 session is whole for the next turn. A message you write in the thread while it works goes into the running turn at
 once (`turn/steer`, runner 0.23.0 or later), instead of with its next call to one of Myrel's tools. Set `MYREL_CODEX_EXEC=1` in the runner's environment to keep `codex exec`.
@@ -143,11 +170,13 @@ and Myrel's tools, and a run that still stops says which permission stopped it. 
 commands, or allow single ones under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (e.g.
 `command(git)`).
 
-OpenCode has no sandbox for commands either, so below `full` its bash tool is denied: OpenCode then does not
+OpenCode has no sandbox for commands either, so below `full` its command tool is denied: OpenCode then does not
 offer it at all, and the run goes on with files and Myrel's tools. Anything else that would ask (for example a
-permission you set to `ask` yourself) is declined and the run goes on too
-(`experimental.continue_loop_on_deny`). With `full`, `--auto` approves what would ask, but rules you set to `deny`
-still hold.
+permission you set to `ask` yourself) is declined; on OpenCode 1 the run goes on too
+(`experimental.continue_loop_on_deny`). OpenCode 2 dropped that flag and allows folders outside the project by
+default, so there the runner writes OpenCode 2's native permission rules instead: below `full`, folders outside
+the project's stay closed except the ones the run was given. With `full`, `--auto` approves what would ask, but
+rules you set to `deny` still hold.
 
 Hermes Agent runs as an ACP server (`hermes acp`), whose session takes an edit mode: `default` (asks before
 edits) with `read`, `accept_edits` with `edit` and `auto`, `dont_ask` with `full`. What it asks permission for
@@ -166,6 +195,19 @@ and commands reach the network through its proxy. `--trust-workspace` loads the 
 that run only. With `read` its write and shell tools are taken away (its `:read-only` profile would wait forever on
 a command's approval). `full` is `--yolo`: no approval, no sandbox. Muse Code has no `--add-dir`, so below `full` it
 writes only in the project's main folder.
+
+Every `muse exec` writes a temp folder with a new random name into its instructions, ahead of the conversation, so
+the first model call of a resumed turn misses the provider's prompt cache and reads the whole session again (about
+2.5 minutes at 350k tokens). The runner passes `--context-compaction-soft-threshold 0.15`, so Muse Code summarizes
+the session from about 150k tokens instead of 750k and that first call stays under a minute.
+
+On Ubuntu 23.10 and later, Codex's and Muse Code's sandboxes can fail every command with `bwrap: loopback: Failed
+RTM_NEWADDR: Operation not permitted`. Ubuntu's AppArmor gives programs without a profile no capabilities in a new user
+namespace (`kernel.apparmor_restrict_unprivileged_userns = 1`) and exempts only `/usr/bin/bwrap`, while both CLIs
+bring their own bubblewrap. `myrel-runner status` and the runner's log say so, and their runs are told to stop
+retrying commands. `myrel-runner sandbox` shows what it found; `myrel-runner sandbox fix`, run as yourself, installs
+`/etc/apparmor.d/myrel-runner-<you>` with sudo: a profile that lets only those binaries (by a pattern that still
+matches after they update) make user namespaces, while the rest of the computer keeps the restriction.
 
 Kimi Code runs as an ACP server (`kimi acp`) like Hermes Agent, whose session takes a permission mode: `plan` with
 `read` (no edits but its own plan file), `default` with `edit` and `auto` (reads and edits inside the folder's git
@@ -243,7 +285,9 @@ OpenCode takes a whole config for one run in `OPENCODE_CONFIG_CONTENT`, so nothi
 `~/.config/opencode`: the run's servers, connectors, permission rules and skills folder (`skills.paths`) go there,
 merged over your own config, and the token stays in `MYREL_MCP_TOKEN`. Your model and provider logins are your own.
 opencode 2 runs `opencode run` through its background service, which would ignore that config, so the runner adds
-`--standalone` when `opencode --version` says 2 or later. Connectors' tools show up as `<connector>_<tool>`.
+`--standalone` when `opencode --version` says 2 or later, and writes that config in OpenCode 2's native shape
+(servers under `mcp.servers` with Code Mode off, so the run's tools stay tools of their own, and ordered
+`permissions` rules). Connectors' tools show up as `<connector>_<tool>`.
 
 Hermes Agent's `hermes chat` runs every turn in a shared background gateway that takes MCP servers only from
 `~/.hermes/config.yaml`, so the runner uses its ACP server instead (`hermes acp`, which needs

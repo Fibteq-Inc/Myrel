@@ -47,6 +47,11 @@ export type ParseState = {
   appServer?: AppServerTurn;
   /** Claude Code's streaming input of this run (see CliAdapter.streamInput). */
   claudeStream?: ClaudeStreamTurn;
+  /**
+   * How Claude Code found Myrel's MCP server when it started without it ("failed", "needs-auth"):
+   * without Myrel's tools its first step fails (approve_access not found), so the run is stopped.
+   */
+  mcpDown?: string;
 };
 
 /**
@@ -91,7 +96,7 @@ export type CliAdapter = {
    * installed version has one (see hasAppServer). `asks`: steps the sandbox does not allow can be put
    * to the person, so the app server may ask instead of failing them.
    */
-  appServer?(opts: { access: Access; dirs: string[]; asks: boolean }): Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config">;
+  appServer?(opts: { access: Access; dirs: string[]; asks: boolean }): Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "approvalsReviewer" | "config">;
   /**
    * For Claude Code: the prompt goes in as streaming input on a stdin that stays open (see
    * claude-stream.ts), so new messages can go in mid-turn, when the installed version takes it
@@ -104,7 +109,18 @@ export type CliAdapter = {
   models?(): Promise<CliModel[] | undefined>;
   /** The flags that run this model and effort, both already checked with safeModelArg. */
   modelArgs?(model: TaskModel): string[];
+  /**
+   * For a CLI that can work as the project's coordinator (task.start's `coordinator`): its whole command
+   * line for one turn, before the model flags, with none of its built-in tools, only Myrel's
+   * coordinator server, `system` instead of its own system prompt and no session kept. `dir` is a
+   * private folder for config files, deleted after the run. Null when the installed version cannot run
+   * without its tools; a CLI without it never works as the coordinator.
+   */
+  coordinator?(opts: CoordinatorRun): Promise<{ args: string[]; env?: Record<string, string> } | null>;
 };
+
+/** What a coordinator turn's CLI connects to (see CliAdapter.coordinator). */
+export type CoordinatorRun = { url: string; token: string; dir: string; system: string };
 
 /**
  * Whether a model id or effort from the server may go on the command line. Windows runs the CLI
@@ -225,6 +241,8 @@ export type AgentMcp = {
 
 /** Claude Code's permission prompt tool on Myrel's MCP server. */
 export const APPROVE_TOOL = "mcp__myrel__approve_access";
+/** An MCP server's statuses in Claude Code's init event that mean it started without that server ("pending" may still connect). */
+const MCP_DOWN = new Set(["failed", "needs-auth"]);
 
 /** How long Claude Code waits on one Myrel tool call: the person may take a few minutes to answer. */
 const ASK_TIMEOUT_MS = 15 * 60 * 1000;
@@ -252,6 +270,9 @@ async function privateFile(dir: string, name: string, content: unknown): Promise
 }
 
 /** Commands that open a connection to another computer over SSH. */
+/** gh commands that change an issue: Myrel's tools do that, with their card. Reading stays allowed. */
+const GH_ISSUE_WRITES = ["create", "comment", "edit", "close", "reopen", "delete"].map((c) => `Bash(gh issue ${c}:*)`);
+
 const SSH_COMMANDS = ["ssh", "scp", "sftp", "rsync"].map((c) => `Bash(${c}:*)`);
 /** The person's SSH keys and the ones Myrel keeps for its SSH servers. */
 const SSH_KEY_READS = ["~/.ssh/**", "~/.myrel-runner/ssh/**"].flatMap((p) => [`Read(${p})`, `Edit(${p})`]);
@@ -298,7 +319,7 @@ const claude: CliAdapter = {
     return {
       // Strict: only the servers above. With --mcp-config, `claude -p` waits for every MCP server the
       // person set up for themselves too before its first model call, up to 30s for one that hangs.
-      // Pull requests go through Myrel's open_pull_request tool (the GitHub App), never the person's gh.
+      // Pull requests and issues go through Myrel's tools (the GitHub App), never the person's gh.
       args: [
         "--mcp-config",
         config,
@@ -306,7 +327,7 @@ const claude: CliAdapter = {
         "--allowedTools",
         allowed.join(","),
         "--disallowedTools",
-        ["Bash(gh pr create:*)", ...(asks ? [] : SSH_COMMANDS)].join(","),
+        ["Bash(gh pr create:*)", ...GH_ISSUE_WRITES, ...(asks ? [] : SSH_COMMANDS)].join(","),
         "--settings",
         settings,
         ...skillArgs,
@@ -320,12 +341,54 @@ const claude: CliAdapter = {
     };
   },
   streamInput: true,
+  async coordinator({ url, token, dir, system }) {
+    if (!(await hasToolsSwitch("claude"))) return null;
+    const config = await privateFile(dir, "mcp.json", {
+      mcpServers: { [MYREL_MCP_SERVER]: { type: "http", url, headers: { Authorization: `Bearer ${token}` }, alwaysLoad: true } },
+    });
+    // A file, not the command line: Windows runs the CLI through a shell, whose command line is short.
+    const prompt = join(dir, "system.md");
+    await writeFile(prompt, system, { mode: 0o600 });
+    return {
+      args: [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        // No built-in tool at all (no commands, files, web or subagents), whatever the computer's access level.
+        "--tools",
+        // Windows: through the shell, an empty argument needs its quotes or it is dropped.
+        process.platform === "win32" ? '""' : "",
+        // Anything not allowed below is refused, never asked about: nobody could answer.
+        "--permission-mode",
+        "dontAsk",
+        "--mcp-config",
+        config,
+        "--strict-mcp-config",
+        "--allowedTools",
+        `mcp__${MYREL_MCP_SERVER}`,
+        "--system-prompt-file",
+        quotePath(prompt),
+        "--disable-slash-commands",
+        "--no-session-persistence",
+      ],
+      env: {
+        ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+        ...(!process.env.MCP_TIMEOUT && { MCP_TIMEOUT: String(MCP_START_TIMEOUT_MS) }),
+      },
+    };
+  },
   line(line, state) {
     const event = parseJson(line);
     if (!event) return;
     state.claudeStream?.receive(event);
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.type === "system" && typeof event.model === "string") state.model = event.model;
+    // Claude Code does not wait for a slow MCP server (5 s per request) and starts without it.
+    if (event.type === "system" && event.subtype === "init" && Array.isArray(event.mcp_servers)) {
+      const myrel = (event.mcp_servers as Array<{ name?: unknown; status?: unknown }>).find((s) => s?.name === MYREL_MCP_SERVER);
+      if (typeof myrel?.status === "string" && MCP_DOWN.has(myrel.status)) state.mcpDown = myrel.status;
+    }
     if (event.type === "rate_limit_event") state.limits = claudeLimits(event.rate_limit_info, state.limits);
     // A subagent's messages name the Agent tool use that started it.
     const parent = typeof event.parent_tool_use_id === "string" && event.parent_tool_use_id ? event.parent_tool_use_id : undefined;
@@ -382,7 +445,7 @@ const claude: CliAdapter = {
   modelArgs: ({ model, effort }) => [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])],
 };
 
-/** Codex's sandbox for each access level: auto stays in the workspace like edit, asking about the rest where it can. */
+/** Auto keeps edit's sandbox; its app server uses Codex's reviewer for boundary approvals. */
 const CODEX_SANDBOX = { read: "read-only", edit: "workspace-write", auto: "workspace-write", full: "danger-full-access" } as const;
 
 const codex: CliAdapter = {
@@ -431,13 +494,14 @@ const codex: CliAdapter = {
     if (access && access !== "read") args.push("-c", 'apps._default.default_tools_approval_mode="approve"');
     return { args, env: { [TOKEN_VAR]: token } };
   },
-  // The sandbox is as with exec; below full access, a step it does not allow is asked about in the
-  // thread instead of failing. Full access has no sandbox, so nothing to ask.
+  // Auto uses Approve for me inside edit's sandbox. Explicitly reset the reviewer for other levels,
+  // including resumed sessions, so switching back to edit restores the person's approval prompts.
   // The other folders go in the session's config, not on the command line, where a shell could split them.
   appServer: ({ access, dirs, asks }) => ({
     ...(dirs.length && { config: { "sandbox_workspace_write.writable_roots": dirs } }),
     sandbox: CODEX_SANDBOX[access],
-    approvalPolicy: asks && (access === "edit" || access === "auto") ? "on-request" : "never",
+    approvalPolicy: access === "auto" || (asks && access === "edit") ? "on-request" : "never",
+    approvalsReviewer: access === "auto" ? "auto_review" : "user",
   }),
   line(line, state) {
     if (state.appServer) return state.appServer.receive(line);
@@ -579,6 +643,7 @@ const opencode: CliAdapter = {
   ],
   // Servers, permissions and skills for one run, in the environment: nothing goes into the person's config.
   async agent({ url, token, connectors = [], skills, access = "edit", dirs = [] }) {
+    const version = await cliVersion("opencode");
     const auth = { Authorization: `Bearer {env:${TOKEN_VAR}}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "remote", url, headers: auth, oauth: false } };
     for (const c of connectors) {
@@ -587,21 +652,26 @@ const opencode: CliAdapter = {
           ? { type: "remote", url: c.url, headers: auth, oauth: false }
           : { type: "local", command: [c.command, ...c.args], environment: c.env };
     }
-    // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
-    const permission: Record<string, unknown> = { ...OPENCODE_ACCESS[access] };
-    for (const name of Object.keys(servers)) permission[`${name}_*`] = "allow";
     const folders = [...dirs, ...(skills ? [skills.dir] : [])];
-    if (folders.length) permission.external_directory = Object.fromEntries(folders.flatMap((d) => [[d, "allow"], [join(d, "*"), "allow"]]));
-    const config = {
-      mcp: servers,
-      permission,
-      ...(skills && { skills: { paths: [skills.dir] } }),
-      // Headless, a step that would ask is declined; by default that also ends the run with no answer.
-      experimental: { continue_loop_on_deny: true },
-    };
+    let config: Record<string, unknown>;
+    if (opencodeMajor(version) >= 2) {
+      config = opencodeV2Config(servers, access, folders, skills?.dir);
+    } else {
+      // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
+      const permission: Record<string, unknown> = { ...OPENCODE_ACCESS[access] };
+      for (const name of Object.keys(servers)) permission[`${name}_*`] = "allow";
+      if (folders.length) permission.external_directory = Object.fromEntries(folders.flatMap((d) => [[d, "allow"], [join(d, "*"), "allow"]]));
+      config = {
+        mcp: servers,
+        permission,
+        ...(skills && { skills: { paths: [skills.dir] } }),
+        // Headless, a step that would ask is declined; by default that also ends the run with no answer.
+        experimental: { continue_loop_on_deny: true },
+      };
+    }
     return {
       // opencode 2 runs through its background service otherwise, which ignores the run's config.
-      args: opencodeServerArgs(await cliVersion("opencode")),
+      args: opencodeServerArgs(version),
       env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config), [TOKEN_VAR]: token },
     };
   },
@@ -639,9 +709,41 @@ const opencode: CliAdapter = {
 };
 
 /** `opencode --version` prints "1.19.4"; opencode 2 prints "opencode v2.0.28": the first number is the major. */
+export function opencodeMajor(version: string | null): number {
+  return Number(/\d+/.exec(version ?? "")?.[0] ?? 0);
+}
+
 export function opencodeServerArgs(version: string | null): string[] {
-  const major = Number(/\d+/.exec(version ?? "")?.[0] ?? 0);
-  return major >= 2 ? ["--standalone"] : [];
+  return opencodeMajor(version) >= 2 ? ["--standalone"] : [];
+}
+
+/**
+ * The same run in opencode 2's native config shape. Servers sit under `mcp.servers` with Code Mode
+ * off, so the run's tools stay tools of their own instead of calls inside one `execute` script, and
+ * skills are one array. Permissions are ordered rules where the last match wins; its `bash` action
+ * is `shell` there. opencode 2 ignores `continue_loop_on_deny` and allows folders outside the
+ * project by default, so below full access outside folders are denied first and the run's own
+ * folders allowed after; full access keeps --auto's reach, which never overrides a deny.
+ */
+function opencodeV2Config(servers: Record<string, unknown>, access: Access, folders: string[], skillsDir?: string): Record<string, unknown> {
+  const permissions: Array<{ action: string; resource: string; effect: string }> = [];
+  if (access !== "full") permissions.push({ action: "external_directory", resource: "*", effect: "deny" });
+  for (const dir of folders) {
+    permissions.push({ action: "external_directory", resource: dir, effect: "allow" });
+    permissions.push({ action: "external_directory", resource: join(dir, "*"), effect: "allow" });
+  }
+  const accessRules = OPENCODE_ACCESS[access];
+  permissions.push({ action: "edit", resource: "*", effect: accessRules.edit! });
+  permissions.push({ action: "shell", resource: "*", effect: accessRules.bash! });
+  // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
+  for (const name of Object.keys(servers)) permissions.push({ action: `${name}_*`, resource: "*", effect: "allow" });
+  const native: Record<string, unknown> = {};
+  for (const [name, server] of Object.entries(servers)) native[name] = { ...(server as Record<string, unknown>), codemode: false };
+  return {
+    mcp: { servers: native },
+    permissions,
+    ...(skillsDir && { skills: [skillsDir] }),
+  };
 }
 
 /**
@@ -821,6 +923,15 @@ const MUSE_ACCESS: Record<Access, string[]> = {
   full: ["--yolo"],
 };
 
+/**
+ * Muse Code puts a temp folder with a new random name into its instructions on every start, ahead of the
+ * conversation, so a resumed turn's first model call finds none of the session in the provider's prompt
+ * cache and reads all of it again: about 2.5 minutes at 350k tokens. Its own compaction waits until 75%
+ * of a 1M window; summarizing from 15% (about 150k tokens) keeps that first call under a minute. Soft
+ * compaction runs in the background during a turn and takes effect on the next one.
+ */
+const MUSE_COMPACTION = ["--context-compaction-soft-threshold", "0.15"];
+
 /** Env var that carries the Authorization header for Muse Code, which takes a secret only as a whole `${VAR}`. */
 const MUSE_AUTH_VAR = "MYREL_MCP_AUTH";
 
@@ -832,6 +943,7 @@ const muse: CliAdapter = {
   args: ({ access, resume, extra = [], promptFile }) => [
     "exec",
     "--json",
+    ...MUSE_COMPACTION,
     ...MUSE_ACCESS[access],
     ...(resume ? ["--session-id", resume] : []),
     ...extra,
@@ -1056,6 +1168,24 @@ export async function hasStreamInput(bin: string): Promise<boolean> {
   if (!known) {
     known = output(bin, ["--help"], 10_000).then((help) => !!help?.includes("--replay-user-messages"));
     streamInputs.set(version, known);
+  }
+  return known;
+}
+
+/** Whether each Claude Code version can run with none of its tools, by version. */
+const toolSwitches = new Map<string, Promise<boolean>>();
+
+/**
+ * Whether this computer's Claude Code can run with none of its built-in tools and refuse whatever
+ * was not allowed (`--tools ""`, permission mode dontAsk), asked once per version.
+ */
+export async function hasToolsSwitch(bin: string): Promise<boolean> {
+  const version = await cliVersion(bin);
+  if (!version) return false;
+  let known = toolSwitches.get(version);
+  if (!known) {
+    known = output(bin, ["--help"], 10_000).then((help) => !!help?.includes("--tools <") && help.includes("dontAsk"));
+    toolSwitches.set(version, known);
   }
   return known;
 }

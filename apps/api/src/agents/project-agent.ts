@@ -1,6 +1,8 @@
 import { reportError } from "../errors";
 import { createDb, schema } from "@myrel/db";
 import {
+  CLI_NAMES,
+  type CliUsage,
   type Attachment,
   type Artifact,
   type ArtifactVersion,
@@ -11,6 +13,8 @@ import {
   ClientEvent,
   type CreateRoutineInput,
   createId,
+  type DecisionPick,
+  decisionsIn,
   type MarkMemoryInput,
   MEMORY_INDEX,
   MemoryUpkeepMode,
@@ -22,6 +26,8 @@ import {
   nextCronRun,
   normalizeFilePath,
   isPlanMessage,
+  parseVisualCheck,
+  VISUAL_CHECK_LANG,
   type NotificationKind,
   type PullRequest,
   type Reaction,
@@ -38,6 +44,10 @@ import {
   type ThreadRunner,
   type ThreadModel,
   type ThreadCloseReason,
+  checklistStep,
+  type LiveThread,
+  type ThreadNeeds,
+  threadWaitsOnPerson,
   type ThreadStatus,
   type ThreadSummary,
   summarizeThread,
@@ -47,7 +57,7 @@ import { Agent, type Connection, type ConnectionContext, getAgentByName } from "
 import { and, eq } from "drizzle-orm";
 import { canUseCoordinator } from "../extensions";
 import { projectProvider } from "../keys";
-import { runLoop } from "../llm";
+import { handleMcp, type ProviderResult, runLoop, type Tool } from "../llm";
 import { ArtifactError, ArtifactStore, type PublishInput } from "./artifact-store";
 import { listPullRequests } from "../github/pulls";
 import { deliverNotification, excerpt } from "../notifications/deliver";
@@ -64,6 +74,8 @@ import {
 } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
 import { meteredForTurn, TurnMeter } from "../usage";
+import { CliMeter, type CoordinatorTarget, coordinatorTarget } from "../coordinator-cli";
+import { hashAgentToken, newAgentToken, sameHash } from "./harness-agent";
 import {
   UPKEEP_KEYS,
   UPKEEP_THREADS,
@@ -73,7 +85,8 @@ import {
   upkeepDue,
   upkeepNotice,
 } from "./memory-upkeep";
-import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SEEN_EMOJI, SYSTEM_ID, THREAD_AGENT_ID } from "./names";
+import { COORDINATOR_ID, MEMORY_UPKEEP_ID, ROUTINE_ID, SEEN_EMOJI, SYSTEM_ID, THREAD_AGENT_ID, VISUAL_CHECK_ID } from "./names";
+import type { VisualCheckRole } from "../checks/loop";
 import { answerLine, relayLine } from "./relay-line";
 import { workspaceClis } from "../runners";
 import { type RoutineHost, routineTools } from "./routine-tools";
@@ -102,6 +115,8 @@ type MessageRow = {
   relay: string | null;
   /** JSON array of CliId, or null. */
   clis: string | null;
+  /** JSON DecisionPick, or null. */
+  pick: string | null;
   /** When its author last changed the text, or null. */
   edited_at: string | null;
   created_at: string;
@@ -114,6 +129,7 @@ type ThreadRow = {
   title: string;
   status: ThreadStatus;
   status_text: string | null;
+  needs: ThreadNeeds | null;
   resolved: number;
   close_reason: ThreadCloseReason | null;
   duplicate_of: string | null;
@@ -125,6 +141,8 @@ type ThreadRow = {
   /** JSON ThreadRunner, or null. */
   runner: string | null;
   seen_seq: number | null;
+  /** The thread it checks (Thread.parentId), or null. */
+  parent_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -153,10 +171,11 @@ export type NewMessage = Pick<Message, "threadId" | "authorKind" | "authorId" | 
   stats?: MessageStats;
   relay?: MessageRelay;
   clis?: string[];
+  pick?: DecisionPick;
 };
 
 export type ThreadPatch = Partial<
-  Pick<Thread, "title" | "status" | "statusText" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "runner" | "model" | "seenSeq">
+  Pick<Thread, "title" | "status" | "statusText" | "needs" | "resolved" | "closeReason" | "duplicateOf" | "label" | "cli" | "runner" | "model" | "seenSeq">
 >;
 
 /** What a thread agent reads at the start of each turn. */
@@ -175,12 +194,29 @@ export type CoordinatorRequestKind = "permission" | "routing" | "handoff";
 
 /** The thread agents' choice cards one coordinator turn took, and which of them it answered or passed on. */
 type TurnQuestions = { open: Map<string, { threadId: string }>; settled: Set<string> };
+/** What counts a coordinator turn's usage for the messages it posts: the server model's calls, or its CLI's report. */
+type StatsMeter = { take(): MessageStats | null };
+/** How a coordinator CLI turn ended. */
+type CliCoordinatorEnd = { ok: boolean; result: string; timedOut?: boolean };
+/** A coordinator turn running on a member's CLI: its token's hash, its tools, its usage, and how to end the wait for it. */
+type CliTurn = { hash: string; tools: Tool[]; meter: CliMeter; finish: (end: CliCoordinatorEnd) => void };
 
 /**
  * How long the coordinator waits after a message inside a thread before looking at thread updates,
  * so a burst of replies costs one turn. A project-chat message runs it right away and takes them too.
  */
 const OBSERVE_DELAY_SEC = 60;
+/**
+ * How long a coordinator turn on a member's CLI may take before it is stopped (and, when it changed
+ * nothing yet, the server's model answers instead). The turn's callback waits this long at most,
+ * holding up the project's other scheduled work.
+ */
+const CLI_COORDINATOR_TURN_MS = 150_000;
+/** What the coordinator's system prompt adds for a CLI turn, whose tools have names of their own. */
+const CLI_COORDINATOR_NOTE =
+  "You run as a CLI on a project member's computer, with no tools of your own: no shell, files or web. Your only tools are Myrel's, on its MCP server: start_thread is mcp__myrel__start_thread, and so on. Act only through them; text you write outside a tool call reaches nobody.";
+/** Coordinator tools that only read: a CLI turn that called only these changed nothing yet. */
+const READ_ONLY_COORDINATOR_TOOLS = new Set(["memory_read", "list_files", "read_file", "list_routines", "file_upload_url"]);
 /** Relays the coordinator sees each turn, so it does not repeat one. */
 const RELAY_HISTORY = 20;
 /** Messages a client may catch up on after being away; past this it starts again from the newest ones. */
@@ -198,6 +234,24 @@ const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 /** Most recent project-chat messages the coordinator sees each turn. */
 const COORDINATOR_HISTORY = 40;
 
+/** A plan step moving alone reaches the project list at most this often, the rate the list refreshes. */
+const LIVE_STEP_WRITE_MS = 15_000;
+/** Threads the project list carries per group (waiting on a person, at work), so a long backlog cannot crowd out the rest. */
+const MAX_LIVE_THREADS = 12;
+
+function toLiveThread(
+  row: Pick<ThreadRow, "id" | "title" | "needs" | "status_text" | "updated_at">,
+  state: LiveThread["state"],
+): LiveThread {
+  const { step, progress } = state === "working" && row.status_text ? checklistStep(row.status_text) : { step: null, progress: null };
+  return { id: row.id, title: row.title.slice(0, 120), state, needs: row.needs ?? null, step: step?.slice(0, 80) ?? null, progress, updatedAt: row.updated_at };
+}
+
+function capLiveThreads(live: LiveThread[]): LiveThread[] {
+  const waits = (t: LiveThread) => t.state === "waiting" || t.state === "failed";
+  return [...live.filter(waits).slice(0, MAX_LIVE_THREADS), ...live.filter((t) => !waits(t)).slice(0, MAX_LIVE_THREADS)];
+}
+
 /**
  * One instance per project (named by project id). Owns the project chat and
  * thread index: messages live in this DO's SQLite with a monotonically
@@ -214,6 +268,12 @@ export class ProjectAgent extends Agent<Env> {
 
   /** Activity counts last written to D1 for the project list, and the write in flight. */
   private syncedActivity: string | null = null;
+  /** The plan steps at that sync. A step moving alone writes at most once per LIVE_STEP_WRITE_MS. */
+  private syncedSteps: string | null = null;
+  private syncedAt = 0;
+  private stepTimer: ReturnType<typeof setTimeout> | null = null;
+  /** How many agents worked at the last sync; null until the first one after a start, which tells nothing about work. */
+  private syncedWorking: number | null = null;
   private activityWrite: Promise<void> = Promise.resolve();
 
   /**
@@ -221,6 +281,8 @@ export class ProjectAgent extends Agent<Env> {
    * with the object (a deploy, an eviction) leaves its rows for the queue's retry to take again.
    */
   private coordinatorTaken = 0;
+  /** The coordinator's CLI turns running now, by task id (see cliCoordinatorTurn). Memory only: they live as long as the turn's callback. */
+  private readonly cliTurns = new Map<string, CliTurn>();
   /** Threads the running coordinator turn started or sent work to, to tell an idle goal wake. In memory only. */
   private coordinatorWork = 0;
 
@@ -253,6 +315,8 @@ export class ProjectAgent extends Agent<Env> {
     if (!columns.some((c) => c.name === "clis")) this.sql`ALTER TABLE messages ADD COLUMN clis TEXT`;
     // Added with people editing their messages.
     if (!columns.some((c) => c.name === "edited_at")) this.sql`ALTER TABLE messages ADD COLUMN edited_at TEXT`;
+    // Added with picks that name the decision card they answer.
+    if (!columns.some((c) => c.name === "pick")) this.sql`ALTER TABLE messages ADD COLUMN pick TEXT`;
     // A thread's messages, for its summary and (later) for paging a thread from its newest message.
     this.sql`CREATE INDEX IF NOT EXISTS messages_thread ON messages (thread_id, seq)`;
     this.sql`CREATE TABLE IF NOT EXISTS threads (
@@ -282,6 +346,10 @@ export class ProjectAgent extends Agent<Env> {
     if (!threadColumns.some((c) => c.name === "seen_seq")) this.sql`ALTER TABLE threads ADD COLUMN seen_seq INTEGER`;
     // Added with projects on several computers.
     if (!threadColumns.some((c) => c.name === "runner")) this.sql`ALTER TABLE threads ADD COLUMN runner TEXT`;
+    // Added with telling threads waiting on a person from ones that only delivered something.
+    if (!threadColumns.some((c) => c.name === "needs")) this.sql`ALTER TABLE threads ADD COLUMN needs TEXT`;
+    // Added with visual checks: an evaluator thread shows under the thread it checks.
+    if (!threadColumns.some((c) => c.name === "parent_id")) this.sql`ALTER TABLE threads ADD COLUMN parent_id TEXT`;
     this.sql`CREATE TABLE IF NOT EXISTS reactions (
       message_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
@@ -391,6 +459,8 @@ export class ProjectAgent extends Agent<Env> {
         }
         // Only a new ask carries CLIs, and only ones installed on the sender's own computer.
         const clis = !event.threadId && event.clis?.length ? await this.offeredClis(userId, event.clis) : [];
+        const question = event.pick ? this.pickedQuestion(event.pick, event.threadId, event.body) : null;
+        const pick = event.pick && question !== null ? { messageId: event.pick.messageId, card: event.pick.card, question } : undefined;
         const message = this.sendMessage({
           threadId: event.threadId,
           authorKind: "user",
@@ -398,6 +468,7 @@ export class ProjectAgent extends Agent<Env> {
           body: event.body,
           attachments,
           ...(clis.length && { clis }),
+          ...(pick && { pick }),
         });
         if (event.clientId) {
           send(connection, { type: "message.ack", clientId: event.clientId, messageId: message.id, seq: message.seq });
@@ -419,10 +490,12 @@ export class ProjectAgent extends Agent<Env> {
           await this.closeThread(event.threadId, { reason: event.reason, by: "person" });
           return;
         }
+        const resolving = event.resolved && !this.getThread(event.threadId)!.resolved;
         this.updateThread(event.threadId, {
           resolved: event.resolved,
           status: event.resolved ? "done" : "review_ready",
         });
+        if (resolving) await this.recordResolved(event.threadId);
         return;
       }
       case "thread.cli": {
@@ -440,7 +513,7 @@ export class ProjectAgent extends Agent<Env> {
             message: "This thread cannot run with that CLI: in the cloud it takes OpenCode, Claude Code or Codex; on the project's computer only its owner picks, among the CLIs installed there.",
           });
         }
-        this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null } });
+        this.updateThread(thread.id, { cli: { id: cli, options: [cli], by: "person", reason: null, ...(event.account && { account: event.account }) } });
         return;
       }
       case "thread.runner": {
@@ -553,10 +626,11 @@ export class ProjectAgent extends Agent<Env> {
     const stored = attachments.length ? JSON.stringify(attachments) : null;
     const artifacts = input.artifacts?.length ? input.artifacts : undefined;
     const [row] = this.sql<{ seq: number }>`
-      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, clis, created_at)
+      INSERT INTO messages (id, thread_id, author_kind, author_id, body, attachments, artifacts, stats, relay, clis, pick, created_at)
       VALUES (${id}, ${input.threadId}, ${input.authorKind}, ${input.authorId}, ${input.body}, ${stored},
         ${artifacts ? JSON.stringify(artifacts) : null}, ${input.stats ? JSON.stringify(input.stats) : null},
-        ${input.relay ? JSON.stringify(input.relay) : null}, ${input.clis?.length ? JSON.stringify(input.clis) : null}, ${createdAt})
+        ${input.relay ? JSON.stringify(input.relay) : null}, ${input.clis?.length ? JSON.stringify(input.clis) : null},
+        ${input.pick ? JSON.stringify(input.pick) : null}, ${createdAt})
       RETURNING seq`;
     const { artifacts: _, ...rest } = input;
     const message: Message = {
@@ -591,7 +665,15 @@ export class ProjectAgent extends Agent<Env> {
     const threadId = message.threadId!;
     const reopened = !!this.getThread(threadId)?.resolved;
     if (reopened) this.updateThread(threadId, { resolved: false, status: "working" });
-    await this.wakeThread(threadId, { kind: "message", messageId: message.id, body: message.body, authorId: userId, seq: message.seq, reopened });
+    await this.wakeThread(threadId, {
+      kind: "message",
+      messageId: message.id,
+      body: message.body,
+      authorId: userId,
+      seq: message.seq,
+      reopened,
+      ...(message.pick && { pick: message.pick }),
+    });
   }
 
   /** Messages with seq > afterSeq, oldest first. Callable over RPC. */
@@ -640,6 +722,18 @@ export class ProjectAgent extends Agent<Env> {
   getMessage(id: string): Message | null {
     const [row] = this.sql<MessageRow>`SELECT * FROM messages WHERE id = ${id}`;
     return row ? this.toMessage(row) : null;
+  }
+
+  /**
+   * The question of the card a person's tap names, when it is a card of an agent message in the same
+   * conversation and `label` is one of its options; otherwise null, and the tap is sent as a plain message.
+   */
+  private pickedQuestion(pick: DecisionPick, threadId: string | null, label: string): string | null {
+    const target = this.getMessage(pick.messageId);
+    if (!target || target.authorKind !== "agent" || target.threadId !== threadId) return null;
+    const card = decisionsIn(target.body)[pick.card];
+    const key = label.trim().toLocaleLowerCase();
+    return card?.options.some((o) => o.label.trim().toLocaleLowerCase() === key) ? card.question : null;
   }
 
   /** Replaces a message's body and tells every client. Callable over RPC. */
@@ -789,10 +883,11 @@ export class ProjectAgent extends Agent<Env> {
     id = createId("thread"),
     cli: ThreadCli | null = null,
     runner: ThreadRunner | null = null,
+    parentId: string | null = null,
   ): Thread {
     const now = new Date().toISOString();
-    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, runner, created_at, updated_at)
-      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${runner ? JSON.stringify(runner) : null}, ${now}, ${now})`;
+    this.sql`INSERT INTO threads (id, root_message_id, ack_message_id, title, status, status_text, resolved, label, cli, runner, parent_id, created_at, updated_at)
+      VALUES (${id}, ${rootMessageId}, ${ackMessageId}, ${title}, ${"working"}, ${null}, 0, ${null}, ${cli ? JSON.stringify(cli) : null}, ${runner ? JSON.stringify(runner) : null}, ${parentId}, ${now}, ${now})`;
     const thread = this.getThread(id)!;
     this.emit({ type: "thread.updated", thread });
     this.syncActivity();
@@ -817,7 +912,9 @@ export class ProjectAgent extends Agent<Env> {
       next.closeReason = null;
       next.duplicateOf = null;
     }
-    this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText},
+    // Back at work or finished, the thread no longer waits on anyone.
+    if (next.status === "working" || next.resolved) next.needs = null;
+    this.sql`UPDATE threads SET title = ${next.title}, status = ${next.status}, status_text = ${next.statusText}, needs = ${next.needs},
       resolved = ${next.resolved ? 1 : 0}, close_reason = ${next.closeReason}, duplicate_of = ${next.duplicateOf},
       label = ${next.label}, cli = ${next.cli ? JSON.stringify(next.cli) : null}, runner = ${next.runner ? JSON.stringify(next.runner) : null},
       model = ${next.model ? JSON.stringify(next.model) : null}, seen_seq = ${next.seenSeq}, updated_at = ${next.updatedAt} WHERE id = ${id}`;
@@ -868,7 +965,17 @@ export class ProjectAgent extends Agent<Env> {
     })!;
     this.setActivity(thread.id, false);
     if (input.note) this.sendMessage({ threadId: thread.id, authorKind: "system", authorId: SYSTEM_ID, body: input.note });
+    // A thread the coordinator stops mid-work had nothing to report, so it stays out of people's recent news.
+    if (!thread.resolved && (input.by === "person" || thread.status !== "working")) await this.recordResolved(thread.id);
     return closed;
+  }
+
+  /**
+   * A thread closed by hand has no closing turn, so its last notification would keep saying it replied,
+   * and home's recent updates read the latest one. Nobody needs telling, so this adds only a quiet record.
+   */
+  private recordResolved(threadId: string): Promise<void> {
+    return this.notifyThread(threadId, "done", "", { quiet: true });
   }
 
   /** What a thread made that closing it could hide from people: pull requests, artifacts, routines, their own messages. */
@@ -948,7 +1055,7 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** A thread's turn ended in a way people should hear about. Callable over RPC. */
-  async notifyThread(threadId: string, kind: NotificationKind, text: string): Promise<void> {
+  async notifyThread(threadId: string, kind: NotificationKind, text: string, options?: { quiet?: boolean }): Promise<void> {
     const thread = this.getThread(threadId);
     if (!thread) return;
     try {
@@ -963,6 +1070,7 @@ export class ProjectAgent extends Agent<Env> {
         body: excerpt(text),
         path: `/projects/${this.name}/threads/${threadId}`,
         origin,
+        quiet: options?.quiet,
       });
     } catch (err) {
       this.ctx.waitUntil(reportError(this.env, "agent", "notification", err));
@@ -1001,24 +1109,48 @@ export class ProjectAgent extends Agent<Env> {
   /**
    * Copies how many agents are working and how many threads wait on a person into the project's D1 row,
    * so the project list can show it without waking every project. Only writes when the counts change.
+   * An agent starting or stopping also marks the project's latest activity, which orders the list.
    */
   private syncActivity(): void {
     const working = new Set<string>();
     for (const threadId of this.active.keys()) working.add(threadId ?? "coordinator");
     let waiting = 0;
-    for (const row of this.sql<{ id: string; status: ThreadStatus }>`
-      SELECT id, status FROM threads WHERE resolved = 0 AND status IN ('working', 'blocked')`) {
+    const live: LiveThread[] = [];
+    for (const row of this.sql<Pick<ThreadRow, "id" | "title" | "status" | "needs" | "status_text" | "updated_at" | "parent_id">>`
+      SELECT id, title, status, needs, status_text, updated_at, parent_id FROM threads WHERE resolved = 0 ORDER BY created_at`) {
       if (row.status === "working") working.add(row.id);
-      else waiting++;
+      const waits = threadWaitsOnPerson({ ...row, resolved: false });
+      if (waits) waiting++;
+      const state = waits ? (row.status === "failed" ? "failed" : "waiting") : this.active.has(row.id) ? "working" : row.status === "working" ? "queued" : null;
+      // A visual check's evaluator shows under the thread it checks, not as work of its own on the home page.
+      if (state && !row.parent_id) live.push(toLiveThread(row, state));
     }
-    const counts = { activeCount: working.size, waitingCount: waiting };
-    const key = `${counts.activeCount}/${counts.waitingCount}`;
-    if (key === this.syncedActivity) return;
+    const activeCount = working.size;
+    const counts = { activeCount, waitingCount: waiting };
+    const rows = capLiveThreads(live);
+    const key = `${activeCount}/${waiting}/${JSON.stringify(rows.map((r) => [r.id, r.title, r.state, r.needs]))}`;
+    const steps = JSON.stringify(rows.map((r) => [r.step, r.progress]));
+    if (key === this.syncedActivity) {
+      if (steps === this.syncedSteps) return;
+      const wait = this.syncedAt + LIVE_STEP_WRITE_MS - Date.now();
+      if (wait > 0) {
+        this.stepTimer ??= setTimeout(() => {
+          this.stepTimer = null;
+          this.syncActivity();
+        }, wait);
+        return;
+      }
+    }
     this.syncedActivity = key;
+    this.syncedSteps = steps;
+    this.syncedAt = Date.now();
+    const changed = this.syncedWorking !== null && this.syncedWorking !== activeCount;
+    this.syncedWorking = activeCount;
+    const values = { ...counts, liveThreads: JSON.stringify(rows), ...(changed && { lastActivityAt: new Date() }) };
     // Chained so an older count never lands after a newer one.
     this.activityWrite = this.activityWrite.then(async () => {
       try {
-        await createDb(this.env.DB).update(schema.projects).set(counts).where(eq(schema.projects.id, this.name));
+        await createDb(this.env.DB).update(schema.projects).set(values).where(eq(schema.projects.id, this.name));
       } catch (err) {
         console.error("project activity sync failed", err);
         if (this.syncedActivity === key) this.syncedActivity = null;
@@ -1253,7 +1385,8 @@ export class ProjectAgent extends Agent<Env> {
    * notes and attachment-only messages carry nothing to relay.
    */
   private observable(m: Message): m is Message & { threadId: string } {
-    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body)) return false;
+    // A visual check's card is Myrel's bookkeeping; the round's evaluator thread is what others may care about.
+    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body) || parseVisualCheck(m.body)) return false;
     if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
     return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
   }
@@ -1306,7 +1439,11 @@ export class ProjectAgent extends Agent<Env> {
         .filter((m) => m.threadId !== thread.id && named(m))
         .slice(-MENTION_LIMIT)
         .map((m) => ({ threadId: m.threadId!, note: m.relay!.note, createdAt: m.createdAt }));
-      return { thread, last: last ?? null, mentions };
+      // Its last visual check round's card, so the coordinator knows whether the look was verified.
+      const [card] = this.sql<{ body: string }>`
+        SELECT body FROM messages WHERE thread_id = ${thread.id} AND body LIKE ${`\`\`\`${VISUAL_CHECK_LANG}%`}
+        ORDER BY seq DESC LIMIT 1`;
+      return { thread, last: last ?? null, mentions, check: card ? parseVisualCheck(card.body) : null };
     });
   }
 
@@ -1462,10 +1599,16 @@ export class ProjectAgent extends Agent<Env> {
       this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: allowed.reason });
       return;
     }
-    const llm = await projectProvider(this.env, this.name);
-    if (!llm.ok) {
-      this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
-      return;
+    // On a member's computer when the project says so and it can run now; else the server's model.
+    const cli = await coordinatorTarget(this.env, this.name).catch((err: unknown) => ({ ok: false as const, reason: String(err) }));
+    if (cli && !cli.ok) console.warn("coordinator works with the server's model this turn:", cli.reason);
+    let llm: ProviderResult | null = null;
+    if (!cli?.ok) {
+      llm = await projectProvider(this.env, this.name);
+      if (!llm.ok) {
+        this.sendMessage({ threadId: null, authorKind: "system", authorId: SYSTEM_ID, body: llm.reason });
+        return;
+      }
     }
 
     const goalWake = this.takeGoalWake(inbox);
@@ -1476,7 +1619,6 @@ export class ProjectAgent extends Agent<Env> {
       const chat = this.sql<MessageRow>`
         SELECT * FROM (SELECT * FROM messages WHERE thread_id IS NULL ORDER BY seq DESC LIMIT ${COORDINATOR_HISTORY})
         ORDER BY seq`.map((r) => this.toMessage(r));
-      const meter = new TurnMeter(llm.provider.model);
       const reacted = new Set<string>();
       const threadUpdates = inbox.flatMap((item) => {
         if (item.kind !== "thread") return [];
@@ -1491,42 +1633,53 @@ export class ProjectAgent extends Agent<Env> {
       const computerClis = choosing ? ((await workspaceClis(this.env, this.name))?.clis ?? []) : undefined;
       // The offer a thread on the coordinator's own post inherits: the newest new ask's.
       const askClis = chat.filter((m) => fresh.has(m.id) && m.authorKind === "user" && (m.clis?.length ?? 0) > 0).at(-1)?.clis ?? [];
-      await runLoop({
-        provider: meteredForTurn(
-          llm.provider,
-          this.env,
-          { projectId: this.name, threadId: null, userId: this.turnRequester(inbox), agent: "coordinator" },
-          meter,
-        ),
-        system: COORDINATOR_SYSTEM,
-        prompt: coordinatorPrompt({
-          projectName,
-          names,
-          chat,
-          threads: this.listThreads(),
-          routines: this.listRoutines(),
-          goal: this.getGoal(),
-          goalWake,
-          inbox,
-          threadUpdates,
-          finished: this.finishedThreads(inbox),
-          relays: this.recentRelays(),
-          knowledge: this.knowledge.snapshot(),
-          now: new Date(),
-          defaultTimezone: this.defaultTimezone(),
-          computerClis,
-        }),
-        tools: [
-          ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox), askClis), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
-            onlyThreadUpdates,
-          }),
-          ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
-          ...(onlyThreadUpdates ? [] : goalTools(this.goalHost((body) => this.coordinatorPost(body, meter)))),
-        ],
-        maxSteps: 8,
-        // One key per project: its turns share the system prompt, tools and most of the prompt.
-        cacheKey: this.name,
+      const prompt = coordinatorPrompt({
+        projectName,
+        names,
+        chat,
+        threads: this.listThreads(),
+        routines: this.listRoutines(),
+        goal: this.getGoal(),
+        goalWake,
+        inbox,
+        threadUpdates,
+        finished: this.finishedThreads(inbox),
+        relays: this.recentRelays(),
+        knowledge: this.knowledge.snapshot(),
+        now: new Date(),
+        defaultTimezone: this.defaultTimezone(),
+        computerClis,
       });
+      // The same tools either way; each way of working counts its own usage for the messages it posts.
+      const tools = (meter: StatsMeter) => [
+        ...coordinatorTools(this.coordinatorHost(meter, this.followUpFor(inbox), questions, reacted, this.startedFor(inbox), askClis), this.knowledgeHost({ kind: "agent", id: COORDINATOR_ID }), {
+          onlyThreadUpdates,
+        }),
+        ...(onlyThreadUpdates ? [] : routineTools(this.routineHost(null))),
+        ...(onlyThreadUpdates ? [] : goalTools(this.goalHost((body) => this.coordinatorPost(body, meter)))),
+      ];
+      // Something to answer, which a turn that called no tool at all has surely missed (its CLI never reached Myrel).
+      const expectsTools = !onlyThreadUpdates;
+      const handled = cli?.ok ? await this.cliCoordinatorTurn(cli.target, prompt, tools, expectsTools) : false;
+      if (!handled) {
+        llm ??= await projectProvider(this.env, this.name);
+        if (!llm.ok) throw new Error(llm.reason);
+        const meter = new TurnMeter(llm.provider.model);
+        await runLoop({
+          provider: meteredForTurn(
+            llm.provider,
+            this.env,
+            { projectId: this.name, threadId: null, userId: this.turnRequester(inbox), agent: "coordinator" },
+            meter,
+          ),
+          system: COORDINATOR_SYSTEM,
+          prompt,
+          tools: tools(meter),
+          maxSteps: 8,
+          // One key per project: its turns share the system prompt, tools and most of the prompt.
+          cacheKey: this.name,
+        });
+      }
       // People always see that an edit was seen, even when the model skipped the reaction.
       for (const item of inbox) {
         if (item.kind === "edited" && !reacted.has(item.messageId) && this.getMessage(item.messageId)) {
@@ -1546,6 +1699,108 @@ export class ProjectAgent extends Agent<Env> {
       this.settleGoal(goalWake);
       this.setActivity(null, false);
     }
+  }
+
+  /**
+   * One coordinator turn with the CLI on a member's computer (ProjectSettings.coordinator): the runner
+   * starts it without its own tools, with only these tools on the coordinator's MCP endpoint, and this
+   * waits for it to end. True when the CLI handled the turn; false when it could not start or stopped
+   * before it changed anything, so the server's model handles the same turn instead. A CLI that changed
+   * something (posted, started a thread) and then failed is not repeated: people hear that it stopped.
+   *
+   * It waits inside the queue's callback on purpose: the turn's tools keep what it did in memory (the
+   * questions it settled, the posts it made), and the callback keeps the object in memory until it ends.
+   */
+  private async cliCoordinatorTurn(
+    target: CoordinatorTarget,
+    prompt: string,
+    tools: (meter: StatsMeter) => Tool[],
+    expectsTools: boolean,
+  ): Promise<boolean> {
+    const meter = new CliMeter(target.cli, target.workspace.runnerName);
+    const { token, hash } = await newAgentToken();
+    const taskId = createId("task");
+    let calls = 0;
+    let acted = false;
+    const wrapped = tools(meter).map(
+      (t): Tool => ({
+        ...t,
+        run: async (input) => {
+          calls++;
+          const out = await t.run(input);
+          if (!READ_ONLY_COORDINATOR_TOOLS.has(t.name)) acted = true;
+          return out;
+        },
+      }),
+    );
+    let finish: (end: CliCoordinatorEnd) => void = () => {};
+    const ended = new Promise<CliCoordinatorEnd>((resolve) => (finish = resolve));
+    this.cliTurns.set(taskId, { hash, tools: wrapped, meter, finish });
+    const runner = await getAgentByName(this.env.RUNNER_AGENT, target.workspace.runnerId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const started = await runner.startTask({
+        taskId,
+        projectId: this.name,
+        // Required by the protocol; the runner keeps no worktree or session for a coordinator turn.
+        threadId: createId("thread"),
+        folder: target.workspace.path,
+        cli: target.cli,
+        prompt,
+        agent: { mcpPath: `/api/coordinator-mcp/${this.name}`, token },
+        coordinator: { system: `${COORDINATOR_SYSTEM}\n\n${CLI_COORDINATOR_NOTE}` },
+        ...(target.model && { model: target.model }),
+        ...(target.account && { account: target.account }),
+      });
+      if (!started.ok) {
+        console.warn("the coordinator's CLI could not start:", started.reason);
+        return false;
+      }
+      const timeout = new Promise<CliCoordinatorEnd>((resolve) => {
+        timer = setTimeout(() => resolve({ ok: false, result: "It took too long.", timedOut: true }), CLI_COORDINATOR_TURN_MS);
+      });
+      const end = await Promise.race([ended, timeout]);
+      if (end.timedOut) await runner.cancelTask(taskId).catch(() => {});
+      if (end.ok && (calls > 0 || !expectsTools)) return true;
+      if (!acted) {
+        console.warn("the coordinator's CLI ended without handling the turn:", end.result.slice(0, 300));
+        return false;
+      }
+      const name = CLI_NAMES[target.cli];
+      const reason = end.result.trim().split("\n")[0]?.slice(0, 300) || "no reason given";
+      this.sendMessage({
+        threadId: null,
+        authorKind: "system",
+        authorId: SYSTEM_ID,
+        body: `The coordinator's ${name} on ${target.workspace.runnerName} stopped before it finished: ${reason}`,
+      });
+      return true;
+    } finally {
+      clearTimeout(timer);
+      this.cliTurns.delete(taskId);
+    }
+  }
+
+  /**
+   * One MCP message from the coordinator's CLI (POST /api/coordinator-mcp/:projectId). Only a running
+   * CLI turn's token opens it, and only for that turn's tools. Callable over RPC.
+   */
+  async coordinatorMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
+    const hash = await hashAgentToken(token);
+    for (const turn of this.cliTurns.values()) {
+      if (sameHash(turn.hash, hash)) return { ok: true, answer: await handleMcp(turn.tools, { name: "myrel", version: "1" }, body) };
+    }
+    return { ok: false };
+  }
+
+  /** The usage a coordinator CLI turn reported so far, from its runner. Callable over RPC. */
+  coordinatorCliUsage(taskId: string, usage: CliUsage): void {
+    this.cliTurns.get(taskId)?.meter.update(usage);
+  }
+
+  /** A coordinator CLI turn ended on its computer (or its runner restarted). Callable over RPC. */
+  coordinatorTaskDone(taskId: string, end: { ok: boolean; result: string }): void {
+    this.cliTurns.get(taskId)?.finish(end);
   }
 
   /** The person whose message this coordinator turn answers, for usage attribution. */
@@ -1614,7 +1869,7 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** A coordinator message in the project chat, carrying the turn's usage so far. */
-  private coordinatorPost(body: string, meter?: TurnMeter, relay?: MessageRelay): Message {
+  private coordinatorPost(body: string, meter?: StatsMeter, relay?: MessageRelay): Message {
     return this.sendMessage({
       threadId: null,
       authorKind: "agent",
@@ -1626,7 +1881,7 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   private coordinatorHost(
-    meter?: TurnMeter,
+    meter?: StatsMeter,
     /** Who a follow-up this turn forwards is for (see followUpFor); undefined when nobody asked for it. */
     forwardedFor?: string | null,
     questions: TurnQuestions = { open: new Map(), settled: new Set() },
@@ -1707,6 +1962,7 @@ export class ProjectAgent extends Agent<Env> {
         await this.wakeThread(threadId, {
           kind: "coordinator",
           note: `The coordinator answered your question "${taken.question}" from what the project already settles: ${answer} (source: ${source}). Carry on with it; people see the answer in the thread and can still change it there.`,
+          answered: questionId,
         });
       },
       askPerson: async (questionId, note) => {
@@ -1886,6 +2142,32 @@ export class ProjectAgent extends Agent<Env> {
   }
 
   /** Opens the upkeep thread under a project-chat line, the way the coordinator opens one for an ask. */
+  /**
+   * Opens a visual check's evaluator thread (see checks/loop.ts) the way memory upkeep opens its
+   * thread: a line in the project chat, the thread under it with its CLI and computer, the brief,
+   * and its first turn, working for the person the checked thread works for. Callable over RPC.
+   */
+  async startVisualCheck(input: {
+    notice: string;
+    title: string;
+    brief: string;
+    cli: ThreadCli | null;
+    runner: ThreadRunner | null;
+    /** The model and effort the evaluator runs with (from the evaluator setting); null: the CLI's own. */
+    model: ThreadModel | null;
+    actor: string | null;
+    check: VisualCheckRole;
+  }): Promise<Thread> {
+    const root = this.sendMessage({ threadId: null, authorKind: "system", authorId: VISUAL_CHECK_ID, body: input.notice });
+    const created = this.createThread(root.id, input.title, null, createId("thread"), input.cli, input.runner, input.check.coderThreadId);
+    const thread = input.model ? (this.updateThread(created.id, { model: input.model }) ?? created) : created;
+    const relay: MessageRelay = { kind: "brief", threadId: thread.id, note: input.brief };
+    this.sendMessage({ threadId: thread.id, authorKind: "agent", authorId: COORDINATOR_ID, body: relayLine("brief", input.brief), relay });
+    const agent = await getAgentByName(this.env.THREAD_AGENT, thread.id);
+    await agent.start({ projectId: this.name, threadId: thread.id, brief: input.brief, actor: input.actor, check: input.check });
+    return thread;
+  }
+
   private async startUpkeep(actor: string | null, manual: boolean): Promise<Thread> {
     const threadsSince = Number(this.knowledge.getSetting(UPKEEP_KEYS.threadsSince) ?? 0);
     const notes = this.knowledge.listMemory().filter((m) => m.name !== MEMORY_INDEX).length;
@@ -1998,6 +2280,7 @@ export class ProjectAgent extends Agent<Env> {
       ...(r.stats && { stats: JSON.parse(r.stats) as MessageStats }),
       ...(r.relay && { relay: JSON.parse(r.relay) as MessageRelay }),
       ...(r.clis && { clis: JSON.parse(r.clis) as string[] }),
+      ...(r.pick && { pick: JSON.parse(r.pick) as DecisionPick }),
       seq: r.seq,
       createdAt: r.created_at,
       ...(r.edited_at && { editedAt: r.edited_at }),
@@ -2013,6 +2296,7 @@ export class ProjectAgent extends Agent<Env> {
       title: r.title,
       status: r.status,
       statusText: r.status_text,
+      needs: r.needs ?? null,
       resolved: r.resolved === 1,
       closeReason: r.close_reason ?? null,
       duplicateOf: r.duplicate_of ?? null,
@@ -2021,6 +2305,7 @@ export class ProjectAgent extends Agent<Env> {
       runner: r.runner ? (JSON.parse(r.runner) as ThreadRunner) : null,
       model: r.model ? (JSON.parse(r.model) as ThreadModel) : null,
       seenSeq: r.seen_seq ?? null,
+      parentId: r.parent_id ?? null,
       summary: this.threadSummary(r.id),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -2069,19 +2354,31 @@ function nextRun(schedule: RoutineSchedule, lastRunAt: string | null): Date | nu
 export type ThreadWake =
   /** body, authorId, seq: a person's message, which may answer a question the running turn waits on. */
   /** edited: a person changed an earlier message's text; it shows as new in the agent's next turn. */
-  | { kind: "message"; messageId: string; body?: string; authorId?: string; seq?: number; reopened?: boolean; edited?: boolean }
+  | {
+      kind: "message";
+      messageId: string;
+      body?: string;
+      authorId?: string;
+      seq?: number;
+      reopened?: boolean;
+      edited?: boolean;
+      /** The decision card the message is a tap on, if it is one. */
+      pick?: DecisionPick;
+    }
   /**
    * forwardedFor: set when the note forwards a person's ask from the project chat: who asked (see
    * ProjectAgent.forwardedFor), or null when that is not one known person.
    */
-  | { kind: "coordinator"; note: string; reopened?: boolean; forwardedFor?: string | null }
+  /** answered: the note answers the agent's question with this id (answer_question). */
+  | { kind: "coordinator"; note: string; reopened?: boolean; forwardedFor?: string | null; answered?: string }
   /** actor: the person the routine works for (its author); none for one an agent made for its thread. */
   | { kind: "routine"; name: string; prompt: string; actor?: string; reopened?: boolean }
   /**
    * Something happened on a pull request the thread opened (github/pulls.ts). settled: it was merged
    * or closed, which needs no turn of its own unless the thread's plan still has work.
    */
-  | { kind: "github"; event: string; settled?: { pr: string; merged: boolean } };
+  /** external: the event quotes text that marks the thread (see external.ts), named by where it came from. */
+  | { kind: "github"; event: string; settled?: { pr: string; merged: boolean }; external?: string };
 
 function send(connection: Connection, event: ServerEvent) {
   connection.send(JSON.stringify(event));

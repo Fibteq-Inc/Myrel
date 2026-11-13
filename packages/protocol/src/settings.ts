@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProjectColor, ProjectIcon, ProjectRole } from "./models";
-import { CliId } from "./runner";
+import { CliAccountId, CliId, RunnerId } from "./runner";
 
 /** Model providers a server can call. Each has its own key format and default model. */
 export const ProviderId = z.enum(["fireworks", "anthropic", "openai"]);
@@ -51,16 +51,84 @@ export type TaskTarget = z.infer<typeof TaskTarget>;
 export const CloudCli = z.enum(["opencode", "claude", "codex"]);
 export type CloudCli = z.infer<typeof CloudCli>;
 
-/** A project's default model and effort for one CLI; null: the CLI's own default. */
+/**
+ * A project's default model and effort for one CLI; null: the CLI's own default. `account`: the login
+ * the project's threads run it with (RunnerCli.accounts' id) on a computer that has it; null or
+ * absent: the CLI's own. Absent in an update: the saved one stays.
+ */
 export const CliModelDefault = z.object({
   model: z.string().trim().min(1).max(200).nullable(),
   effort: z.string().trim().min(1).max(20).nullable(),
+  account: CliAccountId.nullable().optional(),
 });
 export type CliModelDefault = z.infer<typeof CliModelDefault>;
+
 
 /** Defaults per CLI for the project's threads on a computer, keyed by CliId. */
 export const CliModelDefaults = z.partialRecord(CliId, CliModelDefault);
 export type CliModelDefaults = z.infer<typeof CliModelDefaults>;
+
+/**
+ * The CLIs that may judge visual checks (ProjectSettings.visualCheck), each with the model, effort
+ * and login to judge with (null parts: the CLI's own). For a round Myrel picks one the computer runs,
+ * preferring one other than the CLI that made the change and one not at its usage limit; with none
+ * listed, any other CLI. A project's list wins over the person's own (Me.checkModels).
+ */
+export const CheckModels = CliModelDefaults;
+export type CheckModels = CliModelDefaults;
+
+/**
+ * The CLIs a project's coordinator can run with (ProjectSettings.coordinator): only ones that can run
+ * with none of their built-in tools for one run, since every member's message then starts one on a
+ * person's computer. Claude Code can (`--tools ""`); Codex cannot yet, its commands come from many
+ * separate features and it loads the person's own MCP servers.
+ */
+export const COORDINATOR_CLIS = ["claude"] as const satisfies readonly CliId[];
+export const CoordinatorCli = z.enum(COORDINATOR_CLIS);
+export type CoordinatorCli = z.infer<typeof CoordinatorCli>;
+
+/**
+ * How a project's coordinator works. model: with the server's model (ProjectSettings.provider and
+ * model), as always. cli: with a CLI on the computer of the person who turned it on, in a session of
+ * its own each turn and with only Myrel's coordinator tools; the server's model answers whenever it
+ * cannot (the computer offline, the CLI failing or at its limit).
+ */
+export const CoordinatorSettings = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("model") }),
+  z.object({
+    mode: z.literal("cli"),
+    runnerId: RunnerId,
+    /** The computer's name, for the members who do not own it. */
+    computer: z.string(),
+    /** Whose computer it is: the person who turned it on, who alone changes it. */
+    by: z.string(),
+    cli: CliId,
+    /** From the CLI's own list (RunnerCli.models); null: the CLI's own default. */
+    model: z.string().nullable(),
+    effort: z.string().nullable(),
+    /**
+     * The login it runs the CLI with (RunnerCli.accounts' id); null: the CLI's own. One the computer no
+     * longer has runs the CLI's own too. Older servers never send it.
+     */
+    account: CliAccountId.nullable().catch(null).default(null),
+  }),
+]);
+export type CoordinatorSettings = z.infer<typeof CoordinatorSettings>;
+
+/** Turns the coordinator's CLI on (on one of your own computers with the project's folder) or off. */
+export const CoordinatorInput = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("model") }),
+  z.object({
+    mode: z.literal("cli"),
+    runnerId: RunnerId,
+    cli: CoordinatorCli,
+    model: z.string().trim().min(1).max(200).nullable(),
+    effort: z.string().trim().min(1).max(20).nullable(),
+    /** One of the computer's logins of the CLI; null: its own. Absent: the saved one stays while the computer and CLI do. */
+    account: CliAccountId.nullable().optional(),
+  }),
+]);
+export type CoordinatorInput = z.infer<typeof CoordinatorInput>;
 
 export const ProjectSettings = z.object({
   name: z.string(),
@@ -75,6 +143,24 @@ export const ProjectSettings = z.object({
   cloudCli: CloudCli.default("opencode"),
   /** Older servers never send it. */
   cliModels: CliModelDefaults.default({}),
+  /**
+   * Work that changes what people see gets a visual check before its pull request: a separate
+   * evaluator thread takes screenshots and judges them (see apps/api/skills/visual-check). Off by default.
+   * Older servers never send it.
+   */
+  visualCheck: z.boolean().default(false),
+  /** The CLIs that may judge its visual checks; empty: the person's own list, else any other CLI. Older servers never send it. */
+  checkModels: CheckModels.default({}),
+  /**
+   * In a git repository, each thread works on the person's computer in its own worktree and branch, so
+   * threads never change each other's files. Off: threads work in the project's folder itself (a game whose
+   * editor watches it, say), one turn at a time on each computer while the others wait. On by default; a
+   * computer whose own setting is off (RunnerSettings.worktrees) shares the folder either way, without the
+   * queue. Cloud turns always work in their own sandbox. Older servers never send it.
+   */
+  worktrees: z.boolean().default(true),
+  /** How the coordinator works; older servers never send it. One the app cannot read counts as the server's model. */
+  coordinator: CoordinatorSettings.catch({ mode: "model" }).default({ mode: "model" }),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -89,6 +175,11 @@ export const UpdateProjectSettingsInput = z.object({
   cloudCli: CloudCli.optional(),
   /** Replaces the defaults of the CLIs it names; a CLI with both null goes back to its own default. */
   cliModels: CliModelDefaults.optional(),
+  visualCheck: z.boolean().optional(),
+  /** Replaces the whole list. */
+  checkModels: CheckModels.optional(),
+  worktrees: z.boolean().optional(),
+  coordinator: CoordinatorInput.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;
 
@@ -135,8 +226,13 @@ export const Me = z.object({
   onboarded: z.boolean().optional(),
   /** The one-time tips the person has seen or closed; older servers do not send it (the apps then show no tips). */
   tips: z.array(z.string()).optional(),
+  /** The CLIs that may judge the visual checks of the person's projects that list none (see CheckModels); older servers do not send it. */
+  checkModels: CheckModels.optional(),
 });
 export type Me = z.infer<typeof Me>;
+
+export const SetCheckModelsInput = z.object({ checkModels: CheckModels });
+export type SetCheckModelsInput = z.infer<typeof SetCheckModelsInput>;
 
 /** Server settings admins change at runtime. */
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });

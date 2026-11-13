@@ -8,6 +8,7 @@ import { BookMarked, ChevronRight, ExternalLink, FileText, GitBranch, Pencil, Re
 import { type ReactNode, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { appPage } from "../../lib/app-page";
 import { dataUrlBase64 } from "../../lib/files";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
@@ -525,7 +526,7 @@ function PersonalSkills({ projectId }: { projectId: string }) {
       ) : skills.length === 0 ? (
         <View style={{ gap: 4 }}>
           <Text style={styles.sub}>{t("personalInProject.noSkills")}</Text>
-          <Pressable accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(`${server}/settings/skills`)} style={styles.link}>
+          <Pressable accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(appPage(`${server}/settings/skills`))} style={styles.link}>
             <ExternalLink size={13} color={colors.accent} />
             <Text style={[styles.sub, { color: colors.accent }]}>{t("personalInProject.addInSettings")}</Text>
           </Pressable>

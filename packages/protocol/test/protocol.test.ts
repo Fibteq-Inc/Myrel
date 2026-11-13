@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ClientEvent,
+  decisionIndex,
   decisionPicks,
   decisionsIn,
+  decisionState,
+  withoutDecisions,
   CreateConnectorInput,
   CreateRoutineInput,
   CronExpression,
@@ -232,6 +235,82 @@ describe("decision picks", () => {
     ];
     expect([...decisionPicks(messages)]).toEqual(["b"]);
     expect(decisionsIn(`${card}\n\n${card}`)).toHaveLength(2);
+  });
+});
+
+describe("decision answers", () => {
+  const ask = (question: string, labels: string[]) => formatDecision({ question, options: labels.map((label) => ({ label })) });
+  const color = ask("Color?", ["Blue", "Red"]);
+  const size = ask("Size?", ["Small", "Large"]);
+  const ship = ask("Ship it?", ["Yes", "No"]);
+  const cards = [
+    { id: "msg_1", authorKind: "agent", body: color },
+    { id: "msg_2", authorKind: "agent", body: size },
+    { id: "msg_3", authorKind: "agent", body: ship },
+  ];
+
+  it("gives a tap on one of several cards to that card alone", () => {
+    const { answers, picks } = decisionState([...cards, { id: "u1", authorKind: "user", body: "Large", pick: { messageId: "msg_2", card: 0 } }]);
+    expect(answers.get("msg_1")).toEqual([undefined]);
+    expect(answers.get("msg_2")).toEqual(["Large"]);
+    expect(answers.get("msg_3")).toEqual([undefined]);
+    expect([...picks]).toEqual(["u1"]);
+  });
+
+  it("answers each card in turn, and a second tap on an answered card changes nothing", () => {
+    const { answers, picks } = decisionState([
+      ...cards,
+      { id: "u1", authorKind: "user", body: "No", pick: { messageId: "msg_3", card: 0 } },
+      { id: "u2", authorKind: "user", body: "Blue", pick: { messageId: "msg_1", card: 0 } },
+      { id: "u3", authorKind: "user", body: "Yes", pick: { messageId: "msg_3", card: 0 } },
+    ]);
+    expect([answers.get("msg_1"), answers.get("msg_2"), answers.get("msg_3")]).toEqual([["Blue"], [undefined], ["No"]]);
+    expect([...picks]).toEqual(["u1", "u2", "u3"]);
+  });
+
+  it("matches a tap from a client without picks to the oldest open card with that option", () => {
+    const yesNo = ask("Deploy?", ["Yes", "No"]);
+    const { answers, picks } = decisionState([
+      ...cards,
+      { id: "msg_4", authorKind: "agent", body: yesNo },
+      { id: "u1", authorKind: "user", body: "red" },
+      { id: "u2", authorKind: "user", body: "Yes" },
+    ]);
+    expect([answers.get("msg_1"), answers.get("msg_2"), answers.get("msg_3"), answers.get("msg_4")]).toEqual([
+      ["red"],
+      [undefined],
+      ["Yes"],
+      [undefined],
+    ]);
+    expect([...picks]).toEqual(["u1", "u2"]);
+  });
+
+  it("closes the open cards on a message of the person's own, naming it as the answer only for a single card", () => {
+    const several = decisionState([...cards, { id: "u1", authorKind: "user", body: "Let's talk first" }]);
+    expect([several.answers.get("msg_1"), several.answers.get("msg_3")]).toEqual([[null], [null]]);
+    expect(several.picks.size).toBe(0);
+    const single = decisionState([cards[0]!, { id: "u1", authorKind: "user", body: "Green" }, cards[1]!]);
+    expect([single.answers.get("msg_1"), single.answers.get("msg_2")]).toEqual([["Green"], [undefined]]);
+  });
+
+  it("keeps the cards of one message apart, and finds which block a card is", () => {
+    const body = `Two questions.\n\n${color}\n\n${size}`;
+    const { answers } = decisionState([
+      { id: "msg_1", authorKind: "agent", body },
+      { id: "u1", authorKind: "user", body: "Small", pick: { messageId: "msg_1", card: 1 } },
+    ]);
+    expect(answers.get("msg_1")).toEqual([undefined, "Small"]);
+    expect(decisionIndex(body, decisionsIn(size)[0]!)).toBe(1);
+    expect(decisionIndex(body, decisionsIn(ship)[0]!)).toBe(-1);
+    // The text around them, for clients that draw questions asked together as one card.
+    expect(withoutDecisions(body)).toBe("Two questions.");
+    expect(withoutDecisions(`${color}\n\n${size}`)).toBe("");
+    expect(withoutDecisions("```decision\nnot json\n```")).toBe("```decision\nnot json\n```");
+  });
+
+  it("shows a tap whose card is not loaded as a bubble", () => {
+    const { picks } = decisionState([{ id: "u1", authorKind: "user", body: "Blue", pick: { messageId: "msg_9", card: 0 } }]);
+    expect(picks.size).toBe(0);
   });
 });
 

@@ -5,12 +5,24 @@ import {
   type Attachment,
   type ArtifactRef,
   CLI_NAMES,
+  CLOUD_RUNNER,
+  resolveAccount,
   CloudCli,
   type CliUsage,
   type ConnectorOffer,
   type ConnectorSuggestion,
   createId,
+  decisionsIn,
+  decisionState,
   formatConnectorSuggestion,
+  formatDecision,
+  formatVisualCheck,
+  parseVisualCheck,
+  VISUAL_CHECK_BASELINE,
+  VISUAL_CHECK_DEPS_COMMAND,
+  VISUAL_CHECK_ROUNDS,
+  type VisualCheckAction,
+  type VisualCheckCard,
   formatPlan,
   formatPlanUpdate,
   type PlanUpdate,
@@ -26,6 +38,7 @@ import {
   type TerminalLine,
   type ThreadModel,
   destructiveCommand,
+  type ThreadRunner,
 } from "@myrel/protocol";
 import {
   emptyProgress,
@@ -45,9 +58,45 @@ import { z } from "zod";
 import { type ConnectorRow, readSecrets, refreshStaleTools, remoteTarget, type TurnConnector, turnConnectors } from "../connectors/store";
 import { findOffers, knownConnectors, searchOffers, signInOffer } from "../connectors/suggest";
 import { type GivenSkill, type TurnSkill, turnSkills } from "../skills/store";
+import { BUILTIN_ID_PREFIX, type BuiltinSkillName } from "../skills/builtin";
+import { checkModels, visualCheckOn } from "../checks/visual";
+import {
+  checkFolder,
+  checkNotice,
+  checkTitle,
+  type EvaluatorChoice,
+  type EvaluatorRequest,
+  evaluatorBrief,
+  judgedCard,
+  resolveEvaluator,
+  resultNote,
+  roundsDone,
+  VISUAL_CHECK_TIMEOUT_SEC,
+  type VisualCheckRole,
+  type VisualCheckState,
+  visualCheckTools,
+} from "../checks/loop";
+import { type ChangeRisk, changeRisk, uncheckedNote } from "../checks/risk";
+import { CheckReport, CheckVerdict, judgeCheck } from "../checks/verdict";
 import { canUseSandbox } from "../extensions";
 import { revokeInstallationToken } from "../github/app";
 import { listRepoFiles, readRepoFile } from "../github/files";
+import {
+  type IssueComment,
+  type IssueUpdate,
+  type NewIssue,
+  type PullLink,
+  checkIssueWrite,
+  checkNewIssues,
+  isConnectedRepo,
+  UnconnectedRepoError,
+  commentOnIssue,
+  linkPullRequest,
+  listRepoIssues,
+  openRepoIssues,
+  readRepoIssue,
+  updateIssue,
+} from "../github/issues";
 import type { PullCredit } from "../github/attribution";
 import {
   CONFLICT_RETRY_SEC,
@@ -57,13 +106,14 @@ import {
   deletePullBranch,
   listPullRequests,
   openPullRequest,
+  pullFiles,
   trackPullRequest,
 } from "../github/pulls";
-import { connectRepoByName, githubLogin, listProjectRepos } from "../github/store";
+import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
 import { projectTaskModel } from "../keys";
 import { handleMcp, type Tool, tool } from "../llm";
-import { getWorkspace, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
-import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubToken, sandboxBackend, type TaskPlace, taskPlace } from "../sandbox/backend";
+import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
+import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
 import { projectCliModels, resolveTaskModel } from "../task-model";
@@ -95,17 +145,37 @@ import {
   describeCommand,
   describeRequest,
   insideAny,
+  opensIssue,
   opensPullRequest,
+  USE_OPEN_ISSUES,
   USE_OPEN_PULL_REQUEST,
 } from "./folder-access";
 import { answeredSshMessage, sshAnswer, sshMessage, sshToolOutput } from "./ssh-access";
 import { matchSshHost, projectSshHostRows, recordSshAudit, type SshHostRow, sshTarget } from "../ssh/store";
-import { type Author, knowledgeTools, signFileLink } from "./knowledge";
+import { type Author, fileKey, knowledgeTools, signFileLink } from "./knowledge";
 import { suggestionTools } from "./connector-suggestions";
 import { composeStatus, hasChanges, mergePlanUpdates, type Plan, planChanges } from "./plan";
 import { decideResume, gaveUpMessage, interruptedReason, type ResumeState, type ResumeWhere, resumeNote, resumingMessage } from "./auto-resume";
 import { SEEN_EMOJI, THREAD_AGENT_ID, SYSTEM_ID } from "./names";
 import type { ThreadWake } from "./project-agent";
+import {
+  approvalAnswer,
+  approvalMessage,
+  approvalResultMessage,
+  type ExternalApproval,
+  GUARDED_TOOLS,
+  ISSUE_WRITE_TOOLS,
+  type IssueCardReason,
+  cardClosedMessage,
+  cardOccupiedResult,
+  cardStillOpen,
+  cardWaitsResult,
+  issueCardReason,
+  unconnectedRepoFailure,
+  MAX_THREAD_ISSUES,
+  markedMessage,
+  wrapExternal,
+} from "./external";
 import { type BranchRequest, branchAnswer, branchBlockText, branchRequestMessage, branchResultMessage } from "./branch-request";
 import { type RepoRequest, repoAnswer, repoConnectedMessage, repoFailureMessage, repoRequestMessage } from "./repo-request";
 import { routineTools } from "./routine-tools";
@@ -134,6 +204,8 @@ export type ThreadStart = {
    * author, or the person behind the coordinator turn that opened it on its own message.
    */
   actor?: string | null;
+  /** Set for a visual check's evaluator thread: what it checks for which thread (see checks/loop.ts). */
+  check?: VisualCheckRole;
 };
 
 /** A connector card the agent posted, and the message that shows it. */
@@ -177,7 +249,8 @@ type PendingNews = {
   /** The coordinator's notes taken, by id: unseen ones up to the first that waits for a turn of its own. */
   noteIds: number[];
 };
-type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean; promptSize?: PromptSize };
+/** shared: the CLI worked in the project's folder itself, which it held on its computer (RunnerAgent.claimFolder). */
+type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean; promptSize?: PromptSize; shared?: boolean };
 
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
 type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
@@ -238,7 +311,21 @@ const QUESTION_TIMEOUT_SEC = 120;
 const COORDINATOR_STOP_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** A choice card the agent asked that waits on the coordinator: answered there, or passed on to people. */
-type PendingQuestion = { id: string; card: string; question: string };
+type PendingQuestion = {
+  id: string;
+  /** Its decision block. Saved before questions could be asked together: the whole card message, with its context. */
+  card: string;
+  question: string;
+  /** Absent: still with the coordinator. person: passed on (note: the coordinator's line for the person). */
+  to?: "person" | "answered";
+  note?: string;
+};
+
+/**
+ * The questions the agent asked in one ask_decision call. The coordinator settles each on its own;
+ * once it settled every one, the ones it passed on reach the person together in one card.
+ */
+type QuestionSet = { context?: string; questions: PendingQuestion[] };
 
 type LogRow = { stream: TerminalLine["stream"]; text: string; at: number | null; ms: number | null; tool: number | null; agent: string | null };
 
@@ -260,6 +347,11 @@ const WATCHDOG_GRACE_SEC = 300;
 const SANDBOX_CHECK_SEC = 60;
 /** How often a turn waiting for the person's computer to reconnect looks again (see waitForComputer). */
 const RECONNECT_RETRY_SEC = 5;
+/**
+ * How often a turn waiting for another thread's turn in the project's shared folder looks again, should
+ * the wake when that turn ends not come (RunnerAgent.releaseFolder).
+ */
+const FOLDER_RETRY_SEC = 60;
 /** Why a cloud turn ended when its sandbox lost it. */
 const SANDBOX_LOST = "The sandbox stopped while working, most likely because a new version of Myrel was deployed. Send your message again to continue.";
 
@@ -342,6 +434,7 @@ export class ThreadAgent extends Agent<Env> {
     this.setMeta("thread_id", input.threadId);
     this.setMeta("brief", input.brief);
     if (input.actor) this.setMeta("start_actor", input.actor);
+    if (input.check) this.setMeta("visual_check_role", JSON.stringify(input.check));
     await this.markDirty();
   }
 
@@ -359,10 +452,18 @@ export class ThreadAgent extends Agent<Env> {
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerRepoRequest(reason))) return;
     // A tap on the branch card deletes it (or keeps it) without a turn.
     if (reason.kind === "message" && reason.body !== undefined && (await this.answerBranchRequest(reason))) return;
+    // A tap on a card for a guarded call (memory, routine, new issues) makes the change (or not) without a turn.
+    if (reason.kind === "message" && reason.body !== undefined && (await this.answerExternalApproval(reason))) return;
+    // One answer of several the person gives in turn waits for the others.
+    if (reason.kind === "message" && reason.pick && !reason.edited && (await this.cardsStillOpen(reason.pick.messageId))) return;
+    if (reason.kind === "github" && reason.external) await this.markExternal(reason.external);
     if (reason.kind === "coordinator") {
       const forwarded = reason.forwardedFor !== undefined;
       this.sql`INSERT INTO notes (body, created_at, forwarded, actor)
         VALUES (${reason.note}, ${new Date().toISOString()}, ${forwarded ? 1 : 0}, ${reason.forwardedFor ?? null})`;
+      // The coordinator's answer to one of several questions: the agent reads it with the rest, once
+      // every one is settled (and the person answered the ones passed on to them).
+      if (reason.answered && (await this.settleQuestions()) !== "answered") return;
     }
     if (reason.kind === "github" && reason.settled && this.getMeta("thread_id") && !this.runningTask() && !this.planHasWork()) {
       // A merge or close with nothing left to do: said here and settled without starting the agent.
@@ -427,52 +528,101 @@ export class ThreadAgent extends Agent<Env> {
     await project.notifyThread(threadId, "done", body);
   }
 
-  /** The choice card waiting on the coordinator, taken off the wait when its id matches. */
-  private takeQuestion(id: string): PendingQuestion | null {
+  /** The questions waiting on the coordinator (see QuestionSet), or null when none do. */
+  private questionSet(): QuestionSet | null {
     const raw = this.getMeta("pending_question");
-    const q = raw ? (JSON.parse(raw) as PendingQuestion) : null;
-    if (q?.id !== id) return null;
-    this.deleteMeta("pending_question");
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as QuestionSet | PendingQuestion;
+    // Saved before questions could be asked together: one question, its card holding the context.
+    return "questions" in saved ? saved : { questions: [saved] };
+  }
+
+  /** Settles one question still with the coordinator; null when its id is not one, or it is settled already. */
+  private takeQuestion(id: string, to: "person" | "answered", note?: string): PendingQuestion | null {
+    const set = this.questionSet();
+    const q = set?.questions.find((x) => x.id === id);
+    if (!set || !q || q.to) return null;
+    q.to = to;
+    if (note?.trim()) q.note = note.trim();
+    // Answered by the coordinator, every one: nothing waits any more (the notes wake the agent).
+    if (set.questions.every((x) => x.to === "answered")) this.deleteMeta("pending_question");
+    else this.setMeta("pending_question", JSON.stringify(set));
     return q;
   }
 
   /**
-   * The coordinator answered the agent's choice card itself, so the card never reaches people.
-   * Returns the question, or null when the card was already answered or passed on. Callable over RPC.
+   * Once the coordinator settled every question asked together, the ones it passed on go to the
+   * person in one card (its lines above them). "waiting": some are still with the coordinator.
+   * "person": the card is in the thread, and the person's answers wake the agent. "answered": the
+   * coordinator answered every one, so its notes wake the agent.
+   */
+  private async settleQuestions(): Promise<"waiting" | "person" | "answered"> {
+    const set = this.questionSet();
+    if (!set) return "answered";
+    if (set.questions.some((q) => !q.to)) return "waiting";
+    this.deleteMeta("pending_question");
+    const passed = set.questions.filter((q) => q.to === "person");
+    if (!passed.length) return "answered";
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const notes = [...new Set(passed.flatMap((q) => (q.note ? [q.note] : [])))];
+    const body = [...notes, set.context, ...passed.map((q) => q.card)].filter(Boolean).join("\n\n");
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    const question = passed[0]!.question;
+    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
+    if (this.runningTask() && turn) {
+      // A turn still running says it when it ends, so the thread does not read "working" over the card.
+      this.setMeta("agent_turn", JSON.stringify({ ...turn, needs: louder("decision", turn.needs), lastReply: question }));
+    } else {
+      await project.updateThread(threadId, { status: "review_ready", needs: "decision" });
+      await project.notifyThread(threadId, "decision", question);
+    }
+    return "person";
+  }
+
+  /**
+   * The coordinator answered one of the agent's choice cards itself, so it never reaches people.
+   * Returns the question, or null when it was already answered or passed on. Its note (wake with
+   * `answered`) wakes the agent once every question asked with it is settled. Callable over RPC.
    */
   async answeredQuestion(id: string): Promise<{ question: string } | null> {
-    const q = this.takeQuestion(id);
+    const q = this.takeQuestion(id, "answered");
     return q && { question: q.question };
   }
 
   /**
    * The choice card goes to people after all: the coordinator passed it on (with an optional line of
-   * what it knows), its turn failed, or it took too long. Returns false when the card was already
+   * what it knows), its turn failed, or it took too long. It reaches them with the other questions
+   * asked together, once the coordinator settled those too. Returns false when it was already
    * answered or passed on. Callable over RPC.
    */
   async escalateQuestion(id: string, note?: string): Promise<boolean> {
-    const q = this.takeQuestion(id);
-    if (!q) return false;
-    const { projectId, threadId } = this.ids();
-    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
-    const body = note?.trim() ? `${note.trim()}\n\n${q.card}` : q.card;
-    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
-    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
-    const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
-    if (this.runningTask() && turn) {
-      // A turn still running says it when it ends, so the thread does not read "working" over the card.
-      this.setMeta("agent_turn", JSON.stringify({ ...turn, needs: louder("decision", turn.needs), lastReply: q.question }));
-    } else {
-      await project.updateThread(threadId, { status: "review_ready" });
-      await project.notifyThread(threadId, "decision", q.question);
-    }
+    if (!this.takeQuestion(id, "person", note)) return false;
+    await this.settleQuestions();
     return true;
   }
 
-  /** Schedule callback: a choice card still waiting on the coordinator goes to the person. */
+  /** Schedule callback: the questions asked with this one that still wait on the coordinator go to the person. */
   async questionTimeout(payload: { id: string }): Promise<void> {
     if (this.getMeta("closed")) return;
-    await this.escalateQuestion(payload.id);
+    const set = this.questionSet();
+    if (!set?.questions.some((q) => q.id === payload.id)) return;
+    for (const q of set.questions) if (!q.to) this.takeQuestion(q.id, "person");
+    await this.settleQuestions();
+  }
+
+  /**
+   * Questions asked together are answered one by one: a tap on one of a message's cards waits while
+   * others in it are still open, so the agent hears every answer in one turn.
+   */
+  private async cardsStillOpen(messageId: string): Promise<boolean> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const card = await project.getMessage(messageId);
+    if (!card || card.threadId !== threadId || decisionsIn(card.body).length < 2) return false;
+    const { messages } = await project.threadMessagesAfter(threadId, card.seq);
+    return !!decisionState([card, ...messages]).answers.get(card.id)?.some((a) => a === undefined);
   }
 
   /**
@@ -548,6 +698,21 @@ export class ThreadAgent extends Agent<Env> {
         `myrel-runner on "${place.workspace.runnerName}" is too old to work this thread. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
       );
     }
+    // A project whose threads work in its folder itself (its setting): one turn at a time on the computer,
+    // the others wait for it. A thread checking another's work (a visual check's evaluator) keeps a worktree.
+    const shared = place.kind === "local" && !ctx.thread.parentId && !(await projectWorktrees(this.env, projectId));
+    if (place.kind === "local" && shared) {
+      if (!(await runnerHasFeature(this.env, place.workspace.runnerId, "shared-folder"))) {
+        return this.cannotWork(
+          `This project's threads work in its folder itself, which myrel-runner on "${place.workspace.runnerName}" cannot do yet. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
+        );
+      }
+      const claim = await (await getAgentByName(this.env.RUNNER_AGENT, place.workspace.runnerId)).claimFolder(projectId, threadId);
+      if (!claim.ok) {
+        const lastBody = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.body ?? "";
+        return this.waitForFolder(claim.busy, (this.getMeta("language") ?? "").startsWith("tr") || /[çğıöşüÇĞİÖŞÜ]/.test(lastBody));
+      }
+    }
 
     const noteRows = this.sql<NoteRow>`SELECT * FROM notes WHERE id <= ${noteCut} ORDER BY id`;
     const notes: CoordinatorNote[] = noteRows.map((n) => ({ body: n.body, createdAt: n.created_at, isNew: n.seen === 0 }));
@@ -611,7 +776,9 @@ export class ThreadAgent extends Agent<Env> {
       attachments: [ctx.root, ...ctx.messages].flatMap((m) => m.attachments ?? []),
       threadModel: ctx.thread.model,
       threadCli: ctx.thread.cli?.id ?? null,
+      threadAccount: ctx.thread.cli?.account ?? null,
       threadRunner: ctx.thread.runner?.id ?? null,
+      shared,
     });
   }
 
@@ -650,6 +817,54 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
+   * Another thread's turn works in the project's shared folder on the computer: this turn waits for it,
+   * with a line saying so, and starts when that turn ends (folderFree), or at the next look.
+   */
+  private async waitForFolder(busyThreadId: string, tr: boolean) {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const title = (await project.getThread(busyThreadId))?.title;
+    const label = tr
+      ? title ? `Sırada: "${title}" bu klasörde çalışıyor` : "Sırada: başka bir thread bu klasörde çalışıyor"
+      : title ? `Queued: "${title}" is working in this folder` : "Queued: another thread is working in this folder";
+    await project.setActivity(threadId, true, label.slice(0, 200));
+    this.setMeta("dirty", "1");
+    if (this.getMeta("folder_wait") === "1") return;
+    this.setMeta("folder_wait", "1");
+    await this.schedule(FOLDER_RETRY_SEC, "folderRetry");
+  }
+
+  /** Schedule callback: another look at the shared folder this thread's turn waits for. */
+  async folderRetry(): Promise<void> {
+    if (this.getMeta("folder_wait") !== "1") return;
+    this.deleteMeta("folder_wait");
+    await this.queue("threadTurn", null);
+  }
+
+  /**
+   * The shared folder this thread's turn waited for is free (RunnerAgent.releaseFolder): true when the
+   * turn still wants it and starts now; false when it no longer waits (stopped, closed, already working).
+   * Callable over RPC by the RunnerAgent.
+   */
+  async folderFree(): Promise<boolean> {
+    if (this.getMeta("folder_wait") !== "1" || this.getMeta("dirty") !== "1" || this.getMeta("closed") === "1" || this.runningTask()) return false;
+    this.deleteMeta("folder_wait");
+    await this.queue("threadTurn", null);
+    return true;
+  }
+
+  /** Whether `taskId` is this thread's running task, for a RunnerAgent that thinks it still runs. Callable over RPC. */
+  runsTask(taskId: string): boolean {
+    return this.runningTask()?.id === taskId;
+  }
+
+  /** This turn no longer holds the project's shared folder on `runnerId`: the next waiting thread may start. */
+  private async releaseFolder(runnerId: string): Promise<void> {
+    const { projectId, threadId } = this.ids();
+    await (await getAgentByName(this.env.RUNNER_AGENT, runnerId)).releaseFolder(projectId, threadId).catch((err) => console.warn("releasing the shared folder failed", err));
+  }
+
+  /**
    * Hands this turn to the thread's agent, connected to this thread's MCP endpoint with a token that
    * lives as long as the turn: the person's CLI on their computer, or OpenCode in the thread's sandbox.
    */
@@ -674,6 +889,10 @@ export class ThreadAgent extends Agent<Env> {
     threadRunner?: string | null;
     /** The CLI picked for the thread, if any: in the cloud, one of CloudCli replaces the project's. */
     threadCli: string | null;
+    /** The login picked for the thread's CLI, if any (see resolveAccount). */
+    threadAccount?: string | null;
+    /** The CLI works in the project's folder itself, which this turn holds on the computer (see waitForFolder). */
+    shared?: boolean;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -691,10 +910,11 @@ export class ThreadAgent extends Agent<Env> {
             computer: place.workspace.runnerName,
             asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
             github: !!github,
+            ...(input.shared && { shared: true }),
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     const taskId = createId("task");
-    if (github) this.githubTokens.set(taskId, [github.token]);
+    if (github) this.githubTokens.set(taskId, taskGithubTokens(github));
     // The turn a resumed CLI session last saw; the runner resumes with the short prompt only after it.
     const previousTask = this.getMeta("agent_last_task");
     this.setMeta("agent_last_task", taskId);
@@ -777,14 +997,26 @@ export class ThreadAgent extends Agent<Env> {
           ...(resume && { resume }),
         };
         const installed = (await workspaceClis(this.env, projectId, { runnerId: workspace.runnerId }))?.clis.find((c) => c.id === workspace.cli);
-        const model = resolveTaskModel(workspace.cli, input.threadModel, await projectCliModels(this.env, projectId), installed);
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github });
+        const defaults = await projectCliModels(this.env, projectId);
+        const model = resolveTaskModel(workspace.cli, input.threadModel, defaults, installed);
+        // The thread's login for the CLI, else the project's; one the computer lost runs the CLI's own.
+        const login = resolveAccount({ thread: input.threadAccount, project: defaults[workspace.cli]?.account }, installed);
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account, shared: input.shared });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
         const run = { ...spec, title: CLI_NAMES[workspace.cli] };
-        await this.launch(stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName }), backend.id, () => backend.start(run, {}), language);
+        await this.launch(
+          stored(run, { harness: workspace.cli, runnerId: workspace.runnerId, computer: workspace.runnerName, ...(input.shared && { shared: true }) }),
+          backend.id,
+          () => backend.start(run, {}),
+          language,
+        );
         await this.taskEvents(taskId, LOCAL_PHASES);
+        if (login.missing) {
+          const text = `${CLI_NAMES[workspace.cli]} has no account "${login.missing}" on ${workspace.runnerName} anymore, so this turn runs with its own login there. Pick another account for this thread from its message box if you like.`;
+          await this.taskEvents(taskId, [{ type: "log", stream: "system", text }]);
+        }
         // Its CLI session and uncommitted work are on this computer now: later turns stay here.
         if (input.threadRunner !== workspace.runnerId) await project.updateThread(threadId, { runner: { id: workspace.runnerId, by: "auto", reason: null } });
         if (github && this.runningTask()?.id === taskId) await this.schedule(GITHUB_RENEW_SEC, "renewGithub", { taskId, requester: input.requester });
@@ -795,7 +1027,7 @@ export class ThreadAgent extends Agent<Env> {
         if (!allowed.ok) throw new Error(allowed.reason);
         const origin = await project.publicOrigin();
         if (!origin) throw new Error("This server does not know its own address yet, so the sandbox cannot reach it. Its admin needs to set BETTER_AUTH_URL.");
-        const model = await projectTaskModel(this.env, projectId);
+        const model = await projectTaskModel(this.env, projectId, { check: !!this.visualCheckRole() });
         if (!model.ok) throw new Error(model.reason);
         // The model is reached through Myrel (see modelCaller), so no key, the server's or a member's
         // own, ever enters the sandbox, and an OpenAI-compatible call's cost is counted.
@@ -825,11 +1057,11 @@ export class ThreadAgent extends Agent<Env> {
         // The sandbox's disk does not outlive it; the thread's workspace keeps the work outside the
         // repositories between turns (the repositories' own work goes to GitHub, see saveRepos).
         const [github, files, workspace] = await Promise.all([
-          projectGithubToken(this.env, projectId, spec.timeoutSec),
+          projectGithubSecrets(this.env, projectId, spec.timeoutSec),
           this.attachmentLinks(origin, input.attachments),
           threadWorkspace(this.env, threadId, spec.timeoutSec + WATCHDOG_GRACE_SEC),
         ]);
-        if (github) secrets.GITHUB_TOKEN = github;
+        Object.assign(secrets, github);
         if (files.length) secrets.MYREL_FILES = JSON.stringify(files);
         const backend = sandboxBackend(this.env, threadId, input.requester ?? "");
         const unavailable = backend.unavailable(spec);
@@ -855,6 +1087,7 @@ export class ThreadAgent extends Agent<Env> {
       // Once recorded, launch() finished the run as failed and finishAgentTurn reported it.
       if (!this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${taskId}`[0]) {
         await this.revokeGithub(taskId);
+        if (place.kind === "local" && input.shared) await this.releaseFolder(place.workspace.runnerId);
         this.deleteMeta("agent_token");
         this.deleteMeta("agent_turn");
         this.deleteMeta("agent_connectors");
@@ -900,6 +1133,8 @@ export class ThreadAgent extends Agent<Env> {
     if (!row) return;
     this.sql`UPDATE tasks SET reported = 1 WHERE id = ${taskId}`;
     await this.revokeGithub(taskId);
+    const ran = JSON.parse(row.spec) as StoredSpec;
+    if (ran.shared && ran.runnerId) await this.releaseFolder(ran.runnerId);
     const turn = JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null;
     this.deleteMeta("agent_token");
     this.deleteMeta("agent_turn");
@@ -1014,6 +1249,13 @@ export class ThreadAgent extends Agent<Env> {
       await project.setMessageStats(last.id, this.runStats(row, last.from).stats);
     }
     const resolved = turn?.resolved ?? false;
+    // An evaluator that finishes without handing in its check would leave the thread that asked waiting.
+    const role = this.visualCheckRole();
+    if (resolved && role && !role.submitted) {
+      await this.handInVisualCheck(role, this.notCheckedCard(role, "The evaluator thread finished without handing in a result.")).catch((err) =>
+        console.error("visual check hand-in", err),
+      );
+    }
     // Read right before the update: a choice card the coordinator passed on meanwhile is the person's now.
     const asked = (turn?.asked ?? false) || (!!turn?.questioned && !!this.getMeta("pending_question"));
     const failed = row.status === "failed" && !replied;
@@ -1021,6 +1263,8 @@ export class ThreadAgent extends Agent<Env> {
       // A question to the coordinator is answered by the coordinator, so the thread is not waiting on a
       // person, unless something it asked or showed people this turn is.
       status: resolved ? "done" : asked && !turn?.needs ? "working" : failed ? "failed" : "review_ready",
+      // An artifact or a repository card waits on people even when the reply did not say so.
+      needs: failed ? null : (turn?.needs ?? (this.getMeta("repo_request") ? "blocked" : turn?.published ? "review" : null)),
       resolved,
     });
     const kind = failed ? "failed" : resolved ? "done" : ((turn?.needs === "review" ? "ready" : turn?.needs) ?? ((replied || lastText) && !asked ? "ready" : null));
@@ -1036,7 +1280,8 @@ export class ThreadAgent extends Agent<Env> {
   async agentMcp(token: string, body: unknown): Promise<{ ok: false } | { ok: true; answer: object | null }> {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false };
-    const answer = await handleMcp(await this.agentToolset(), { name: "myrel", version: "1" }, body);
+    // Built only for a message that needs the tools: connecting (initialize) must stay quick.
+    const answer = await handleMcp(() => this.agentToolset(), { name: "myrel", version: "1" }, body);
     return { ok: true, answer };
   }
 
@@ -1099,13 +1344,18 @@ export class ThreadAgent extends Agent<Env> {
   private async turnSkills(place: Exclude<TaskPlace, { kind: "error" | "wait" }>, requester: string | null): Promise<TurnSkill[]> {
     const { projectId } = this.ids();
     if (place.kind === "local" && !(await runnerHasFeature(this.env, place.workspace.runnerId, "skills"))) return [];
-    const skills = await turnSkills(this.env, { projectId, userId: requester }).catch((err) => {
+    const builtins: BuiltinSkillName[] = (await visualCheckOn(this.env, projectId).catch(() => false)) ? ["visual-check"] : [];
+    const skills = await turnSkills(this.env, { projectId, userId: requester, builtins }).catch((err) => {
       console.error("skills", err);
       return [];
     });
     // On someone's computer a project skill comes tamed (see tameSkillMd): its author may not be them.
+    // Myrel's own built-in skills are not anyone's.
     const tame = place.kind === "local";
-    this.setMeta("agent_skills", JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name, tame: tame && s.project }))));
+    this.setMeta(
+      "agent_skills",
+      JSON.stringify(skills.map((s) => ({ id: s.id, name: s.name, tame: tame && s.project && !s.id.startsWith(BUILTIN_ID_PREFIX) }))),
+    );
     return skills;
   }
 
@@ -1129,14 +1379,16 @@ export class ThreadAgent extends Agent<Env> {
     token: string,
     name: string,
   ): Promise<
-    { ok: true; url: string; headers: Record<string, string> } | { ok: false; error: "unauthorized" | "not_found" } | { ok: false; error: "signed_out"; title: string }
+    | { ok: true; url: string; headers: Record<string, string>; title: string }
+    | { ok: false; error: "unauthorized" | "not_found" }
+    | { ok: false; error: "signed_out"; title: string }
   > {
     const hash = this.getMeta("agent_token");
     if (!hash || !this.runningTask() || !sameHash(hash, await hashAgentToken(token))) return { ok: false, error: "unauthorized" };
     const given = JSON.parse(this.getMeta("agent_connectors") ?? "[]") as { id: string; name: string; transport: string }[];
     const connector = given.find((c) => c.name === name && c.transport === "http");
     const target = connector ? await remoteTarget(this.env, connector.id) : null;
-    if (target) return { ok: true, ...target };
+    if (target) return { ok: true, ...target, title: name };
     // Its sign-in ended during the turn: the person gets a card to sign in again, the agent a reason.
     const [row] = connector ? await createDb(this.env.DB).select().from(schema.connectors).where(eq(schema.connectors.id, connector.id)) : [];
     if (row?.enabled && row.auth === "oauth" && row.status === "needs_auth") {
@@ -1177,6 +1429,8 @@ export class ThreadAgent extends Agent<Env> {
         if (!outside.length) {
           // Pull requests go through Myrel's GitHub App, which credits the person and follows them.
           if (opensPullRequest(input)) return denyAnswer(USE_OPEN_PULL_REQUEST);
+          // Issues too, or the person's own gh would go around the tool's card.
+          if (opensIssue(input)) return denyAnswer(USE_OPEN_ISSUES);
           if (this.getMeta("access_commands")) return allowAnswer(input);
           const command = describeCommand(tool_name, input);
           const answer = await this.askAccess(command, command, "command");
@@ -1375,6 +1629,349 @@ export class ThreadAgent extends Agent<Env> {
 
   private repoRequest(): RepoRequest | null {
     return JSON.parse(this.getMeta("repo_request") ?? "null") as RepoRequest | null;
+  }
+
+  // ---- Visual check (see checks/loop.ts) ----------------------------------
+
+  /** The round this thread asked for last, if any. */
+  private visualCheck(): VisualCheckState | null {
+    return JSON.parse(this.getMeta("visual_check") ?? "null") as VisualCheckState | null;
+  }
+
+  /** What this thread checks, when it is a visual check's evaluator. */
+  private visualCheckRole(): VisualCheckRole | null {
+    return JSON.parse(this.getMeta("visual_check_role") ?? "null") as VisualCheckRole | null;
+  }
+
+  private notCheckedCard(role: VisualCheckRole, note: string): VisualCheckCard {
+    return {
+      id: role.checkId,
+      round: role.round,
+      status: "not_checked",
+      evaluatorThreadId: this.ids().threadId,
+      folder: role.folder,
+      branch: role.branch,
+      blocking: [],
+      acceptance: [],
+      sheets: [],
+      diffs: [],
+      note,
+    };
+  }
+
+  /**
+   * request_visual_check: starts the next round. The evaluator runs on the computer this thread runs
+   * on (its branch and the browser are there), with another CLI when the computer has one.
+   */
+  private async requestVisualCheck(input: { branch: string; repo?: string; what: string; evaluator?: EvaluatorRequest }): Promise<string> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const current = this.visualCheck();
+    if (current?.status === "running") return `Round ${current.round} of the visual check is still running; its result will wake you. End your turn.`;
+    const done = roundsDone(current);
+    if (current && done >= VISUAL_CHECK_ROUNDS && !(await this.personWroteSince(current.resultSeq ?? 0))) {
+      return `${VISUAL_CHECK_ROUNDS} rounds are done. Ask the person with ask_decision whether to accept the work as it is, run one more round, or change the brief; another round can start once they have answered.`;
+    }
+    const row = this.runningTask();
+    const spec = row ? (JSON.parse(row.spec) as StoredSpec) : null;
+    // The evaluator works where this thread does: on its computer, or in the cloud.
+    const cloud = row?.backend === "sandbox";
+    if (!row || !spec || (!cloud && !spec.runnerId)) {
+      return "Not started: ask for a visual check while you work (in a turn), on the computer or in the cloud where the change is.";
+    }
+    const thread = await project.getThread(threadId);
+    if (!thread) throw new Error("This thread is gone.");
+    const tr = (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language === "tr";
+    const id = current?.id ?? createId("check");
+    const round = done + 1;
+    const folder = checkFolder(id, round);
+    const card: VisualCheckCard = { id, round, status: "running", evaluatorThreadId: null, folder, branch: input.branch, blocking: [], acceptance: [], sheets: [], diffs: [] };
+    const post = async (body: VisualCheckCard) => {
+      const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatVisualCheck(body) });
+      if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+      return m;
+    };
+    // A computer whose runner said its browser cannot start is told now, not after an evaluator's
+    // turn, and on a card, so people see the command wherever they read the thread.
+    const browser = cloud ? undefined : await runnerBrowser(this.env, spec.runnerId!).catch(() => undefined);
+    if (browser?.status === "missing-libs") {
+      const missing = (browser.missing ?? []).slice(0, 5).join(", ");
+      const note = tr
+        ? `Başlamadı: bu bilgisayarda kontrolün tarayıcısının ihtiyaç duyduğu sistem kütüphaneleri eksik (${missing}). Bilgisayarın sahibi aşağıdaki komutu bir kez çalıştırsın; runner yeniden başlayınca kontrol yeniden istenebilir.`
+        : `Not started: this computer lacks the system libraries the check's browser needs (${missing}). The computer's owner runs the command below once; once the runner restarts the check can be asked for again.`;
+      const m = await post({ ...card, status: "not_checked", note, command: VISUAL_CHECK_DEPS_COMMAND });
+      this.setMeta("visual_check", JSON.stringify({ id, round, status: "not_checked", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch, unstarted: true } satisfies VisualCheckState));
+      return `Not started: this computer lacks the system libraries the check's browser needs (${missing}); a card in this thread shows the person the command to run (${VISUAL_CHECK_DEPS_COMMAND}). Tell them in one line, carry on without the check, and ask for it again once they have run it.`;
+    }
+    const requester = this.getMeta("requester") || null;
+    let choice: EvaluatorChoice;
+    let runner: ThreadRunner;
+    if (cloud) {
+      // In the cloud every CLI reaches the same model through Myrel (CHECK_MODEL when the server
+      // sets one): the CLI asked for, else this thread's, else the project's cloud CLI.
+      const asked = CloudCli.safeParse(input.evaluator?.cli);
+      const own = CloudCli.safeParse(thread.cli?.id);
+      const cli = asked.success ? asked.data : own.success ? own.data : await projectCloudCli(this.env, projectId);
+      choice = { cli, model: null, account: null, source: asked.success ? "request" : "cloud" };
+      runner = { id: CLOUD_RUNNER, by: "auto", reason: null };
+    } else {
+      const workspace = await workspaceClis(this.env, projectId, { runnerId: spec.runnerId! });
+      const othersAllowed = await runnerHasFeature(this.env, spec.runnerId!, "agent-clis");
+      // The one asked for this check, else the project's choice, else the person's own, else another
+      // CLI than this one (see resolveEvaluator).
+      choice = resolveEvaluator({
+        ...(input.evaluator && { once: input.evaluator }),
+        ...(await checkModels(this.env, projectId, requester)),
+        clis: workspace?.clis ?? [],
+        coderCli: spec.harness,
+        othersAllowed,
+      });
+      runner = { id: spec.runnerId!, by: "auto", reason: null };
+    }
+    const cli = choice.cli;
+    // The branch's pull request, so the evaluator knows its CI result.
+    const open = (await listPullRequests(this.env.DB, projectId, threadId).catch(() => [])).find((p) => p.branch === input.branch && p.state !== "closed");
+    const pr = open ? { url: open.url, checks: open.checks } : null;
+    const m = await post(card);
+    const reason =
+      choice.source === "cloud"
+        ? tr
+          ? "Görsel kontrol: iş gibi bulutta"
+          : "Visual check: in the cloud, like the work"
+        : choice.source === "request"
+        ? tr
+          ? "Görsel kontrol: bu kontrol için istenen"
+          : "Visual check: asked for this check"
+        : choice.source === "project"
+          ? tr
+            ? "Görsel kontrol: projenin değerlendirici ayarı"
+            : "Visual check: the project's evaluator setting"
+          : choice.source === "account"
+            ? tr
+              ? "Görsel kontrol: kişinin değerlendirici ayarı"
+              : "Visual check: the person's evaluator setting"
+            : cli === spec.harness
+              ? tr
+                ? "Görsel kontrol: bu bilgisayarda başka bir CLI yok"
+                : "Visual check: no other CLI on this computer"
+              : tr
+                ? "Görsel kontrol: işi yapandan farklı bir CLI"
+                : "Visual check: another CLI than the one that made the change";
+    const cliLabel = CLI_NAMES[cli as keyof typeof CLI_NAMES] ?? cli;
+    const runsAs = cloud
+      ? `${cliLabel} in the cloud`
+      : choice.model
+        ? `${cliLabel} (${[choice.model.model && `model ${choice.model.model}`, choice.model.effort && `effort ${choice.model.effort}`].filter(Boolean).join(", ")})`
+        : `${cliLabel} with its default model`;
+    const state: VisualCheckState = { id, round, status: "running", evaluatorThreadId: null, messageId: m.id, folder, branch: input.branch };
+    this.setMeta("visual_check", JSON.stringify(state));
+    try {
+      const evaluator = await project.startVisualCheck({
+        notice: checkNotice(thread.title, round),
+        title: checkTitle(thread.title, round),
+        brief: evaluatorBrief({ checkId: id, round, coderTitle: thread.title, repo: input.repo ?? null, branch: input.branch, what: input.what, folder, runsAs, pr }),
+        cli: { id: cli, options: [cli], by: "coordinator", reason, ...(choice.account && { account: choice.account }) },
+        runner,
+        model: choice.model,
+        actor: requester,
+        check: { checkId: id, round, coderThreadId: threadId, folder, branch: input.branch },
+      });
+      this.setMeta("visual_check", JSON.stringify({ ...state, evaluatorThreadId: evaluator.id }));
+      await project.editMessage(m.id, formatVisualCheck({ ...card, evaluatorThreadId: evaluator.id }));
+    } catch (err) {
+      const note = `The evaluator thread could not start: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600);
+      this.setMeta("visual_check", JSON.stringify({ ...state, status: "not_checked", unstarted: true } satisfies VisualCheckState));
+      await project.editMessage(m.id, formatVisualCheck({ ...card, status: "not_checked", note }));
+      return `Not started. ${note}`;
+    }
+    await this.schedule(VISUAL_CHECK_TIMEOUT_SEC, "visualCheckTimeout", { id, round });
+    const skipped = choice.skipped ? ` (Not as set: ${choice.skipped}.)` : "";
+    return `Round ${round} started: an evaluator thread with ${runsAs} checks branch ${input.branch}, and its card is in this thread.${skipped} Its result wakes you. The pull request does not have to wait for it: open it now if you would anyway, then end your turn.`;
+  }
+
+  /**
+   * What resolve says when this thread's open or merged pull requests change what people see and
+   * no visual check ran on the work (see checks/risk.ts); null when they do not, or when the agent
+   * was already told about these pull requests and resolves anyway.
+   */
+  private async uncheckedChange(): Promise<string | null> {
+    const { projectId, threadId } = this.ids();
+    const prs = (await listPullRequests(this.env.DB, projectId, threadId)).filter((p) => p.state !== "closed").slice(0, 5);
+    if (!prs.length) return null;
+    const key = prs.map((p) => `${p.repo}#${p.number}`).sort().join(" ");
+    if (this.getMeta("check_reminded") === key) return null;
+    const read: { pr: string; risk: ChangeRisk }[] = [];
+    for (const pr of prs) {
+      const files = await pullFiles(this.env, projectId, threadId, pr.repo, pr.number);
+      if (files) read.push({ pr: `${pr.repo}#${pr.number}`, risk: changeRisk(files.files.map((f) => f.path)) });
+    }
+    const note = uncheckedNote(read);
+    if (note) this.setMeta("check_reminded", key);
+    return note;
+  }
+
+  /** A person wrote in this thread after the given message. */
+  private async personWroteSince(seq: number): Promise<boolean> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const ctx = await project.getThreadContext(threadId);
+    return !!ctx?.messages.some((m) => m.authorKind === "user" && m.seq > seq);
+  }
+
+  /** submit_visual_check: judges the evaluator's verdict with the rules, then hands the round back. */
+  private async submitVisualCheck(role: VisualCheckRole, input: { checkId: string; couldNotCheck?: string }): Promise<string> {
+    if (input.checkId !== role.checkId) return `That is not this thread's check: its id is ${role.checkId}.`;
+    if (role.submitted) return "This round is already handed in. Tell people the verdict and resolve this thread.";
+    if (input.couldNotCheck) {
+      const delivered = await this.handInVisualCheck(role, this.notCheckedCard(role, input.couldNotCheck));
+      return delivered
+        ? "Handed in as not checked. Tell people why in one or two sentences (with any command they need to run) and resolve this thread."
+        : "The thread that asked no longer waits for this round. Tell people and resolve this thread.";
+    }
+    const project = await getAgentByName(this.env.PROJECT_AGENT, this.ids().projectId);
+    const files = await project.listFiles(`${role.folder}/`);
+    const names = new Set(files.map((f) => f.path.slice(role.folder.length + 1)));
+    const readJson = async (name: string): Promise<unknown | string> => {
+      if (!names.has(name)) return `${name} is not in ${role.folder}/: upload it there (file_upload_url) and call submit_visual_check again.`;
+      const { text } = await project.readFileText(`${role.folder}/${name}`);
+      try {
+        return JSON.parse(text ?? "");
+      } catch {
+        return `${name} in ${role.folder}/ is not valid JSON.`;
+      }
+    };
+    const rawReport = await readJson("report.json");
+    if (typeof rawReport === "string") return rawReport;
+    const rawVerdict = await readJson("verdict.json");
+    if (typeof rawVerdict === "string") return rawVerdict;
+    const report = CheckReport.safeParse(rawReport);
+    if (!report.success) return `report.json is not the one capture.mjs writes: ${report.error.issues[0]?.message ?? "invalid"}. Upload the file capture.mjs wrote.`;
+    const verdict = CheckVerdict.safeParse(rawVerdict);
+    if (!verdict.success) {
+      const issue = verdict.error.issues[0];
+      return `verdict.json does not match the format in rubric.md: ${issue?.path.join(".") || "(top)"}: ${issue?.message ?? "invalid"}. Fix it, upload it again and resubmit.`;
+    }
+    const judged = await judgeCheck(report.data, verdict.data, async (path) => names.has(path));
+    if (!judged.ok) return `Not handed in yet. Fix these, upload again and resubmit:\n${judged.problems.map((p) => `- ${p}`).join("\n")}`;
+    const sheets = [...names].filter((n) => n.endsWith(".sheet.png")).map((n) => `${role.folder}/${n}`);
+    const diffs = [...names].filter((n) => n.endsWith(".diff.png")).map((n) => `${role.folder}/${n}`);
+    const card = judgedCard(this.notCheckedCard(role, ""), judged.check, { folder: role.folder, sheets, diffs, has: (n) => names.has(n) });
+    delete card.note;
+    if (judged.check.notes.length) card.note = judged.check.notes.join(" ").slice(0, 600);
+    const delivered = await this.handInVisualCheck(role, card);
+    if (!delivered) return "The thread that asked no longer waits for this round (it timed out or moved on). Tell people the verdict and resolve this thread.";
+    return `Handed in: ${card.status}${judged.check.notes.length ? ` (${judged.check.notes.join(" ")})` : ""}. Myrel showed it in the thread that asked and woke it. Tell people the verdict in one or two sentences and resolve this thread.`;
+  }
+
+  /** Gives a round's result to the thread that asked, once. */
+  private async handInVisualCheck(role: VisualCheckRole, card: VisualCheckCard): Promise<boolean> {
+    this.setMeta("visual_check_role", JSON.stringify({ ...role, submitted: true }));
+    // Its row under the checked thread shows the verdict.
+    const { projectId, threadId } = this.ids();
+    await (await getAgentByName(this.env.PROJECT_AGENT, projectId)).updateThread(threadId, { label: `check:${card.status}` });
+    const coder = await getAgentByName(this.env.THREAD_AGENT, role.coderThreadId);
+    return coder.visualCheckResult({ checkId: role.checkId, card });
+  }
+
+  /** visual_check_links: an upload link for the round's folder and a link to the approved screenshots. */
+  private async visualCheckLinks(role: VisualCheckRole, checkId: string): Promise<string> {
+    if (checkId !== role.checkId) return `That is not this thread's check: its id is ${role.checkId}.`;
+    const { projectId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const origin = await project.publicOrigin();
+    if (!origin) return "Myrel does not know its own address yet, so it cannot make links. Upload the files one by one with file_upload_url.";
+    const minutes = VISUAL_CHECK_TIMEOUT_SEC / 60 + 30;
+    const upload = await signFileLink(this.env, origin, { projectId, path: role.folder, mode: "put-folder", by: THREAD_AGENT_ID }, Date.now(), minutes);
+    const baseline = `${await signFileLink(this.env, origin, { projectId, path: VISUAL_CHECK_BASELINE, mode: "get-folder", by: THREAD_AGENT_ID }, Date.now(), minutes)}&list=1`;
+    const approved = (await project.listFiles(`${VISUAL_CHECK_BASELINE}/`)).filter((f) => f.path.startsWith(`${VISUAL_CHECK_BASELINE}/`)).length;
+    return [
+      approved
+        ? `Approved screenshots (${approved}): node <skill>/scripts/baseline.mjs "${baseline}" <out>-baseline, then capture with --baseline <out>-baseline. Unchanged screens need no new look; judge the changed and new ones.`
+        : "No screenshots are approved yet: every screen counts as new, so capture without --baseline.",
+      `Upload the results once verdict.mjs has run: node <skill>/scripts/upload.mjs <out> "${upload}"`,
+      "Keep these links out of your replies.",
+    ].join("\n");
+  }
+
+  /**
+   * A person's answer to a round's card: accept it as it is (the thread carries on without fixing its
+   * findings), or make its screenshots the approved ones later checks compare against. Returns why it
+   * cannot be done, or null. Callable over RPC.
+   */
+  async visualCheckAction(input: { checkId: string; action: VisualCheckAction; by: { id: string; name: string } }): Promise<string | null> {
+    const state = this.visualCheck();
+    if (!state || state.id !== input.checkId) return "This check is no longer this thread's latest.";
+    if (state.status === "running") return "The round is still running.";
+    const { projectId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const message = await project.getMessage(state.messageId);
+    const card = message ? parseVisualCheck(message.body) : null;
+    if (!card) return "The card is gone.";
+    if (input.action === "accept") {
+      if (state.status === "passed") return "The round passed; there is nothing to accept.";
+      if (card.acceptedBy) return null;
+      await project.editMessage(state.messageId, formatVisualCheck({ ...card, acceptedBy: input.by.name }));
+      await this.wake({
+        kind: "coordinator",
+        note: `${input.by.name} accepted visual check round ${state.round} as it is: its findings need no fixing. Carry on with the work (open or keep the pull request) and do not ask for another round for them.`,
+      });
+      return null;
+    }
+    if (!this.env.FILES) return "Files are not set up on this server.";
+    // The round's own screenshots, not its contact sheets, marked copies or diffs.
+    const shots = (await project.listFiles(`${state.folder}/`)).filter(
+      (f) => /^[^/]+\.png$/.test(f.path.slice(state.folder.length + 1)) && !/\.(sheet|diff)\.png$/.test(f.path),
+    );
+    if (!shots.length) return "This round has no screenshots to approve.";
+    for (const f of shots) {
+      const object = await this.env.FILES.get(fileKey(projectId, f.path));
+      if (!object) continue;
+      const path = `${VISUAL_CHECK_BASELINE}/${f.path.slice(state.folder.length + 1)}`;
+      await this.env.FILES.put(fileKey(projectId, path), await object.arrayBuffer(), { httpMetadata: { contentType: "image/png" } });
+      await project.recordFile({ path, size: object.size, contentType: "image/png" }, { kind: "user", id: input.by.id });
+    }
+    await project.editMessage(state.messageId, formatVisualCheck({ ...card, baselineBy: input.by.name }));
+    return null;
+  }
+
+  /**
+   * A round's result, from its evaluator (or the timeout): the card shows it, and the thread wakes
+   * with what to do. False when this thread no longer waits for that round. Callable over RPC.
+   */
+  async visualCheckResult(input: { checkId: string; card: VisualCheckCard }): Promise<boolean> {
+    const state = this.visualCheck();
+    if (!state || state.id !== input.checkId || state.round !== input.card.round || state.status !== "running") return false;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const card: VisualCheckCard = { ...input.card, evaluatorThreadId: input.card.evaluatorThreadId ?? state.evaluatorThreadId };
+    await project.editMessage(state.messageId, formatVisualCheck(card));
+    const ctx = await project.getThreadContext(threadId);
+    const lastSeq = ctx?.messages.at(-1)?.seq ?? 0;
+    this.setMeta("visual_check", JSON.stringify({ ...state, status: card.status, resultSeq: lastSeq } satisfies VisualCheckState));
+    await this.wake({ kind: "coordinator", note: resultNote(card) });
+    return true;
+  }
+
+  /** A round that never came back is reported as not checked, so the thread is not held up for good. */
+  async visualCheckTimeout(payload: { id: string; round: number }): Promise<void> {
+    const state = this.visualCheck();
+    if (!state || state.id !== payload.id || state.round !== payload.round || state.status !== "running") return;
+    await this.visualCheckResult({
+      checkId: state.id,
+      card: {
+        id: state.id,
+        round: state.round,
+        status: "not_checked",
+        evaluatorThreadId: state.evaluatorThreadId,
+        folder: state.folder,
+        branch: state.branch,
+        blocking: [],
+        acceptance: [],
+        sheets: [],
+        diffs: [],
+        note: `The evaluator did not hand in a result within ${VISUAL_CHECK_TIMEOUT_SEC / 60} minutes.`,
+      },
+    });
   }
 
   /**
@@ -1618,7 +2215,136 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /** Myrel's thread tools for the agent, acting on this thread and recording what the turn did. */
-  private async agentToolset(): Promise<Tool[]> {
+  /** Where the thread read untrusted or suspicious text, oldest first; empty for a thread that did not. */
+  private externalSources(): string[] {
+    return JSON.parse(this.getMeta("external_seen") ?? "[]") as string[];
+  }
+
+  /**
+   * Marks the thread as having read text from outside the project (see external.ts): from then on
+   * memory and routine changes go to a person on a card. Said once in the thread. Callable over RPC.
+   */
+  async markExternal(source: string): Promise<void> {
+    const seen = this.externalSources();
+    if (seen.includes(source)) return;
+    this.setMeta("external_seen", JSON.stringify([...seen, source].slice(-20)));
+    if (seen.length || !this.getMeta("thread_id")) return;
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const m = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: markedMessage(source, this.language()) });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+  }
+
+  /** The issues this thread opened, by repository and title (see openRepoIssues). */
+  private openedIssues(): Record<string, string> {
+    return JSON.parse(this.getMeta("opened_issues") ?? "{}") as Record<string, string>;
+  }
+
+  private language(): string {
+    return (JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn | null)?.language ?? this.getMeta("language") ?? "en";
+  }
+
+  /**
+   * A guarded tool's call in a marked thread: put to a person on a card instead of run. Myrel runs it
+   * once they allow it (answerExternalApproval), so the agent does not call it again.
+   */
+  private async askExternalApproval(name: string, input: Record<string, unknown>, reason: IssueCardReason | null = null): Promise<string> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const open = JSON.parse(this.getMeta("external_approval") ?? "null") as ExternalApproval | null;
+    if (open) {
+      // Only a card people can still answer holds up another: one nobody can tap anymore (a person
+      // wrote after it, in a way that did not reach answerExternalApproval) is closed here.
+      const shown = await project.getMessage(open.messageId);
+      const later = shown ? (await project.threadMessagesAfter(threadId, shown.seq)).messages : [];
+      if (cardStillOpen(shown, later)) return cardOccupiedResult(open, name, input);
+      await this.closeExternalCard(open);
+    }
+    const body = approvalMessage(name, input, this.externalSources(), this.language(), reason === "not_connected");
+    const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body });
+    if (m.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1) this.setMeta("last_seen_seq", String(m.seq));
+    this.setMeta("external_approval", JSON.stringify({ tool: name, input, requester: this.getMeta("requester") || null, messageId: m.id } satisfies ExternalApproval));
+    await project.notifyThread(threadId, "decision", body.split("\n")[0]!);
+    return cardWaitsResult(reason ?? (this.externalSources().length ? "marked" : null));
+  }
+
+  /** Takes a card off the record that people can no longer answer, and says so in the thread. */
+  private async closeExternalCard(request: ExternalApproval): Promise<void> {
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    this.deleteMeta("external_approval");
+    await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body: cardClosedMessage(request.tool, request.input, this.language()) });
+  }
+
+  /**
+   * A person answered the card for a guarded call. "Allow" from the person the thread
+   * works for, or a project owner or admin, runs the call as the agent made it; anyone else's tap is
+   * refused. Neither needs a turn. Returns true when it was an answer.
+   */
+  private async answerExternalApproval(reason: Extract<ThreadWake, { kind: "message" }>): Promise<boolean> {
+    const request = JSON.parse(this.getMeta("external_approval") ?? "null") as ExternalApproval | null;
+    if (!request) return false;
+    // A tap on another card answers that card alone; this one stays open on screen.
+    if (reason.pick && reason.pick.messageId !== request.messageId) return false;
+    const answer = approvalAnswer(reason.body ?? "");
+    // Clients show a card as answered from a message in the person's own words after it, so nobody
+    // can tap it from here on. Keeping it on record would hold up every later card with none on
+    // screen. The message itself carries on to the agent as usual.
+    if (!answer) {
+      await this.closeExternalCard(request);
+      return false;
+    }
+    const { projectId, threadId } = this.ids();
+    const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
+    const language = this.language();
+    let body: string;
+    this.deleteMeta("external_approval");
+    if (!(await this.mayAnswerFor(reason.authorId, request.requester))) {
+      body = approvalResultMessage({ forbidden: true }, language);
+    } else {
+      // Clients compact the decision itself after an answer. Keep the original message so the
+      // reason and exact change remain available after either answer.
+      if (answer === "deny") {
+        body = language === "tr" ? "Değişiklik yapılmadı." : "Nothing was changed.";
+      } else {
+        const t = (await this.agentToolset({ guarded: false, approver: reason.authorId })).find((x) => x.name === request.tool);
+        try {
+          if (!t) throw new Error("the tool is not available any more");
+          const out = await t.run(t.input.parse(request.input));
+          body = approvalResultMessage({ tool: request.tool, input: request.input, done: true, output: typeof out === "string" ? out : out.output }, language);
+        } catch (err) {
+          let failed = err instanceof Error ? err.message : String(err);
+          if (err instanceof UnconnectedRepoError) {
+            const back = `/projects/${projectId}/threads/${threadId}`;
+            failed = unconnectedRepoFailure(err.repo, err.reason, `${(await project.publicOrigin()) ?? ""}/api/github/connect?returnTo=${encodeURIComponent(back)}`, language);
+          }
+          body = approvalResultMessage({ tool: request.tool, input: request.input, failed }, language);
+        }
+      }
+    }
+    const line = await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body });
+    // Neither the answer nor the line after it is news for the next turn, unless someone wrote in between.
+    if (reason.seq !== undefined && reason.seq === Number(this.getMeta("last_seen_seq") ?? 0) + 1 && line.seq <= reason.seq + 1) {
+      this.setMeta("last_seen_seq", String(line.seq));
+      await project.updateThread(threadId, { seenSeq: line.seq });
+    }
+    return true;
+  }
+
+  /** Whether `userId` may answer for this thread: the person it works for, or a project owner or admin. */
+  private async mayAnswerFor(userId: string | undefined, requester: string | null): Promise<boolean> {
+    if (!userId) return false;
+    if (userId === requester) return true;
+    const [row] = await createDb(this.env.DB)
+      .select({ role: schema.projectMembers.role })
+      .from(schema.projectMembers)
+      .where(and(eq(schema.projectMembers.projectId, this.ids().projectId), eq(schema.projectMembers.userId, userId)))
+      .limit(1);
+    return row?.role === "owner" || row?.role === "admin";
+  }
+
+  private async agentToolset(opts: { guarded?: boolean; approver?: string } = {}): Promise<Tool[]> {
+    const guarded = opts.guarded ?? true;
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const turn = () => JSON.parse(this.getMeta("agent_turn") ?? "null") as AgentTurn;
@@ -1627,6 +2353,13 @@ export class ThreadAgent extends Agent<Env> {
     // which makes it this agent's (opened with gh, say); an older one may not be this thread's.
     const track = (url: string, credit?: PullCredit) => trackPullRequest(this.env, projectId, threadId, url, credit);
     const local = this.runningTask()?.backend === "local";
+    // An evaluator thread hands in its check; any other thread of a project with the check on asks for one.
+    const role = this.visualCheckRole();
+    // Side by side: each is a query, and every tools/list and call waits for them.
+    const [checksOn, ssh] = await Promise.all([
+      !role && visualCheckOn(this.env, projectId).catch(() => false),
+      local ? this.sshRunTool() : null,
+    ]);
     const reply = async (text: string, needs?: ReplyNeeds, files?: string[]): Promise<Message> => {
       // Checked before anything is sent, so a wrong path fails the call and the agent can fix it.
       const attachments = files?.length ? await project.attachmentsFor(files) : [];
@@ -1658,26 +2391,34 @@ export class ThreadAgent extends Agent<Env> {
       for (const url of urls) await track(url, credit).catch((err) => console.warn("tracking pull request failed", url, err));
       return m;
     };
+    // What the thread wrote on GitHub's issues: it spots a repeat after a restart and counts towards the limit.
+    const issueWrites = {
+      get: (key: string) => this.openedIssues()[key],
+      add: (key: string, url: string) => this.setMeta("opened_issues", JSON.stringify({ ...this.openedIssues(), [key]: url })),
+    };
     const tools: Tool[] = [
       ...threadTools({
         reply,
-        askDecision: async ({ decision, context, askPerson }) => {
-          const card = decisionCard(decision, context);
-          // One card waits on the coordinator at a time; another one goes straight to the person.
+        askDecision: async ({ decisions, context, askPerson }) => {
+          // One ask waits on the coordinator at a time; another one goes straight to the person.
           if (askPerson || this.getMeta("pending_question")) {
-            await reply(card, "decision");
+            await reply(decisionCard(decisions, context), "decision");
             return "person";
           }
-          const id = createId("question");
-          this.setMeta("pending_question", JSON.stringify({ id, card, question: decision.question } satisfies PendingQuestion));
+          // Each question is the coordinator's to settle on its own; the person gets the rest together.
+          const questions = decisions.map((d) => ({ id: createId("question"), card: formatDecision(d), question: d.question }));
+          this.setMeta("pending_question", JSON.stringify({ context, questions } satisfies QuestionSet));
           save({ questioned: true });
-          // Whatever happens to the coordinator's turn, the card reaches the person in the end.
-          await this.schedule(QUESTION_TIMEOUT_SEC, "questionTimeout", { id });
-          try {
-            await project.askCoordinator(threadId, { questionId: id, question: renderQuestion(decision, context) });
-          } catch (err) {
-            console.warn("asking the coordinator failed; asking the person", err);
-            await this.escalateQuestion(id);
+          // Whatever happens to the coordinator's turn, the cards reach the person in the end.
+          await this.schedule(QUESTION_TIMEOUT_SEC, "questionTimeout", { id: questions[0]!.id });
+          for (const [i, q] of questions.entries()) {
+            const together = questions.length > 1 ? `\n  (Question ${i + 1} of ${questions.length} the agent asked together; settle each on its own.)` : "";
+            try {
+              await project.askCoordinator(threadId, { questionId: q.id, question: renderQuestion(decisions[i]!, context) + together });
+            } catch (err) {
+              console.warn("asking the coordinator failed; asking the person", err);
+              await this.escalateQuestion(q.id);
+            }
           }
           return "coordinator";
         },
@@ -1709,6 +2450,17 @@ export class ThreadAgent extends Agent<Env> {
         // and their answer wakes it, instead of reading as finished.
         resolve: async () => {
           const t = turn();
+          if (this.visualCheck()?.status === "running") {
+            return "Not resolved: a visual check of this work is running, and its result will wake you. End your turn without resolving.";
+          }
+          // Work whose pull requests change what people see, with no check run on it: asked once.
+          if (checksOn && !this.visualCheck()) {
+            const unchecked = await this.uncheckedChange().catch((err) => {
+              console.warn("visual check reminder", err);
+              return null;
+            });
+            if (unchecked) return unchecked;
+          }
           if (t.needs || t.published || t.questioned) {
             return "Not resolved: this turn asked the person something or presented work for their feedback, so the thread waits on their answer. End your turn without resolving; it shows as waiting for them.";
           }
@@ -1717,6 +2469,25 @@ export class ThreadAgent extends Agent<Env> {
         },
         listRepoFiles: (repo, path, ref) => listRepoFiles(this.env, projectId, repo, path, ref),
         readRepoFile: (repo, path, ref) => readRepoFile(this.env, projectId, repo, path, ref),
+        // Issue text from outside the repository's people marks the thread before it reaches the agent.
+        listRepoIssues: async (repo, opts) => {
+          const read = await listRepoIssues(this.env, projectId, repo, opts);
+          if (read.external) await this.markExternal(read.external);
+          return read.text;
+        },
+        readRepoIssue: async (repo, number, page) => {
+          const read = await readRepoIssue(this.env, projectId, repo, number, page);
+          if (read.external) await this.markExternal(read.external);
+          return read.text;
+        },
+        openIssues: async (repo, issues) => openRepoIssues(this.env, projectId, repo, issues, await this.pullCredit(), issueWrites, opts.approver ?? null),
+        commentOnIssue: async (input) => commentOnIssue(this.env, projectId, input, await this.pullCredit(), issueWrites),
+        updateIssue: async (input) => {
+          const out = await updateIssue(this.env, projectId, input, await this.pullCredit());
+          issueWrites.add(`update\n${input.repo}#${input.number}\n${Date.now()}`, out);
+          return out;
+        },
+        linkPullRequest: (input) => linkPullRequest(this.env, projectId, input),
         trackPullRequest: async (url) => {
           const pr = await track(url, await this.pullCredit());
           if (!pr) throw new Error("That is not a pull request on a repository connected to this project.");
@@ -1754,6 +2525,11 @@ export class ThreadAgent extends Agent<Env> {
           return `${done} A card asks the person whether to delete its branch ${branch.branch}; Myrel deletes it if they say so, without you. Do not ask again.`;
         },
       }),
+      ...visualCheckTools({
+        request: role ? undefined : checksOn ? (input) => this.requestVisualCheck(input) : undefined,
+        submit: role ? (input) => this.submitVisualCheck(role, input) : undefined,
+        links: role ? (id) => this.visualCheckLinks(role, id) : undefined,
+      }),
       ...suggestionTools({
         search: (q) => searchOffers(this.env, q),
         find: (ids) => findOffers(this.env, ids),
@@ -1789,9 +2565,74 @@ export class ThreadAgent extends Agent<Env> {
         threadId,
       }),
     ];
+    // A call a person allowed runs as made, without delivering news to a turn (there may be none).
+    if (!guarded) return tools;
+    // In a thread that read outside text, memory and routine changes wait for a person's card; files
+    // people uploaded (often from outside) come back as data.
+    const checked = tools.map((t): Tool => {
+      // A connected repository, a turn that works for a person, nothing read from outside: opened
+      // like a pull request. Otherwise a card; see issueCardReason.
+      if (t.name === "open_issues") {
+        return {
+          ...t,
+          run: async (input) => {
+            const { repo, issues } = input as { repo: string; issues: NewIssue[] };
+            checkNewIssues(issues);
+            const requester = this.getMeta("requester") || null;
+            const connected = await isConnectedRepo(this.env, projectId, repo);
+            // No card for what could not be done after all. A stale sign-in cannot tell yet: the card's answer does.
+            if (!connected && requester) {
+              const found = await findUserRepo(this.env, requester, repo);
+              if (!found.ok && found.reason === "not_installed") throw new UnconnectedRepoError(repo, found.reason);
+            }
+            const card = issueCardReason({
+              connected,
+              marked: this.externalSources().length > 0,
+              requester,
+              overLimit: Object.keys(this.openedIssues()).length + issues.length > MAX_THREAD_ISSUES,
+            });
+            return card ? this.askExternalApproval(t.name, input as Record<string, unknown>, card) : t.run(input);
+          },
+        };
+      }
+      // The same for the writes on existing issues, and a card too when it changes what an outsider wrote.
+      if (ISSUE_WRITE_TOOLS.has(t.name)) {
+        return {
+          ...t,
+          run: async (input) => {
+            const outsider = await checkIssueWrite(this.env, projectId, t.name as "comment_on_issue" | "update_issue" | "link_pull_request", input as IssueComment | IssueUpdate | PullLink);
+            const card = issueCardReason({
+              connected: true, // checkIssueWrite refused any other.
+              marked: this.externalSources().length > 0,
+              requester: this.getMeta("requester") || null,
+              overLimit: Object.keys(this.openedIssues()).length >= MAX_THREAD_ISSUES,
+              outsider,
+            });
+            return card ? this.askExternalApproval(t.name, input as Record<string, unknown>, card) : t.run(input);
+          },
+        };
+      }
+      if (GUARDED_TOOLS.has(t.name)) {
+        return { ...t, run: async (input) => (this.externalSources().length ? this.askExternalApproval(t.name, input as Record<string, unknown>) : t.run(input)) };
+      }
+      if (t.name === "read_file") {
+        return {
+          ...t,
+          run: async (input) => {
+            const out = await t.run(input);
+            const path = String((input as { path?: unknown }).path ?? "").replace(/^\/+/, "");
+            if (typeof out !== "string" || !path.startsWith("uploads/") || out.includes(" is a binary file (")) return out;
+            const wrapped = wrapExternal({ source: "project-upload", ref: path, trust: "member" }, out);
+            if (wrapped.taints) await this.markExternal(`project-upload:${path}`);
+            return wrapped.text;
+          },
+        };
+      }
+      return t;
+    });
     // What people wrote since the turn started reaches it with its next call to Myrel, without stopping it.
     // The folder-approval tool is left out: the CLI reads its answer as JSON.
-    const delivering = tools.map(
+    const delivering = checked.map(
       (t): Tool => ({
         ...t,
         run: async (input) => {
@@ -1803,7 +2644,6 @@ export class ThreadAgent extends Agent<Env> {
         },
       }),
     );
-    const ssh = local ? await this.sshRunTool() : null;
     return [...(local ? [this.approveAccessTool()] : []), ...(ssh ? [ssh] : []), ...delivering];
   }
 
@@ -2186,6 +3026,7 @@ export class ThreadAgent extends Agent<Env> {
     this.deleteMeta("resume_pending");
     this.deleteMeta("auto_resume");
     this.deleteMeta("reconnect_wait");
+    this.deleteMeta("folder_wait");
     const row = this.runningTask();
     if (!row) {
       const { projectId, threadId } = this.ids();
@@ -2321,9 +3162,9 @@ export class ThreadAgent extends Agent<Env> {
     if (!github) return;
     const runner = await getAgentByName(this.env.RUNNER_AGENT, runnerId);
     const sent = await runner.renewGithub(row.id, github);
-    if (!sent.ok) return void (await revokeInstallationToken(github.token).catch(() => {}));
+    if (!sent.ok) return void (await Promise.all(taskGithubTokens(github).map((t) => revokeInstallationToken(t).catch(() => {}))));
     // The last one stays valid until the turn ends or it expires, so a push already under way finishes.
-    this.githubTokens.set(row.id, [...(this.githubTokens.get(row.id) ?? []), github.token]);
+    this.githubTokens.set(row.id, [...(this.githubTokens.get(row.id) ?? []), ...taskGithubTokens(github)]);
     await this.schedule(GITHUB_RENEW_SEC, "renewGithub", payload);
   }
 

@@ -83,6 +83,54 @@ export function effortsFor(models: CliModel[], model: string | null): string[] {
   return taking.reduce<string[]>((all, m, i) => (i === 0 ? [...m.efforts] : all.filter((e) => m.efforts.includes(e))), []);
 }
 
+/**
+ * A login of a CLI the person added on the computer besides the CLI's own (`myrel-runner claude add
+ * <name>`), e.g. a work account next to a personal one. Only its name and id leave the computer; the
+ * login itself stays in its own config folder there (Claude Code's CLAUDE_CONFIG_DIR).
+ */
+export const CliAccountId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
+export type CliAccountId = z.infer<typeof CliAccountId>;
+
+/**
+ * A thread's pick of the CLI's own login even where the project's default is another one. Never an
+ * account's id (the runner makes "default-2" of that name), never sent to a runner.
+ */
+export const OWN_ACCOUNT = "default";
+
+export const CliAccount = z.object({
+  id: CliAccountId,
+  name: z.string().min(1).max(80),
+  /** This login's limits, as the CLI last reported them in a run with it. */
+  limits: CliLimits.optional().catch(undefined),
+});
+export type CliAccount = z.infer<typeof CliAccount>;
+
+/**
+ * One login a thread can run a CLI with: `account` null for the CLI's own, with `name` the one the
+ * person gave it (or null); limits are that login's.
+ */
+export type CliLogin = { account: CliAccountId | null; name: string | null; limits?: CliLimits };
+
+/** A CLI's logins, its own first; just its own when it has no other (feature "cli-accounts"). */
+export function cliLogins(cli: Pick<RunnerCli, "limits" | "accounts" | "defaultAccount">): CliLogin[] {
+  const own: CliLogin = { account: null, name: cli.accounts?.length ? (cli.defaultAccount ?? null) : null, ...(cli.limits && { limits: cli.limits }) };
+  return [own, ...(cli.accounts ?? []).map((a) => ({ account: a.id, name: a.name, ...(a.limits && { limits: a.limits }) }))];
+}
+
+/**
+ * The login a turn runs `cli` with: the thread's pick, else the project's default for the CLI, when
+ * the computer still has it; else the CLI's own (undefined). `missing`: the account asked for that the
+ * computer no longer has, so the turn can say it falls back.
+ */
+export function resolveAccount(
+  wanted: { thread?: string | null; project?: string | null },
+  installed: Pick<RunnerCli, "accounts"> | undefined,
+): { account?: CliAccountId; missing?: string } {
+  const id = wanted.thread ?? wanted.project ?? null;
+  if (!id || id === OWN_ACCOUNT) return {};
+  return installed?.accounts?.some((a) => a.id === id) ? { account: id } : { missing: id };
+}
+
 /** A CLI the runner found installed on the computer. */
 export const RunnerCli = z.object({
   id: CliId,
@@ -94,6 +142,13 @@ export const RunnerCli = z.object({
    * Absent when the CLI lists none or could not be asked: then nothing is offered and it runs with its own default.
    */
   models: z.array(CliModel).max(100).optional().catch(undefined),
+  /**
+   * The CLI's other logins on the computer (feature "cli-accounts"; Claude Code only so far): each runs
+   * with the same version and models, but has limits of its own. `limits` above stay the CLI's own login's.
+   */
+  accounts: z.array(CliAccount).max(10).optional().catch(undefined),
+  /** The name the person gave the CLI's own login when it has other accounts too, e.g. "Personal". */
+  defaultAccount: z.string().min(1).max(80).optional().catch(undefined),
 });
 export type RunnerCli = z.infer<typeof RunnerCli>;
 
@@ -111,6 +166,7 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * "settings": reports its settings in hello and changes them when asked ("settings.set").
  * "update": updates itself to a newer version when asked ("runner.update"), if it can (`updates`).
  * "models": lists each CLI's models (RunnerCli.models) and runs the one in task.start's `model`.
+ * "git-tokens": also takes the tokens of the project's other GitHub App installations (`github.more`).
  * "git-token": lends git the turn's GitHub token (task.start's `github`, renewed by "task.github")
  * for the project's repositories on github.com, without writing it anywhere.
  * "github-token": the same in runner 0.21.0 only, which takes tokens of up to 255 characters and so
@@ -123,6 +179,12 @@ export type RunnerCli = z.infer<typeof RunnerCli>;
  * ("ssh.keygen", "ssh.keys", "ssh.hostkeys", "ssh.test", "ssh.run", "ssh.forget"); its agent runs put
  * an `ssh` on PATH that goes through Myrel's ssh_run tool instead.
  * "stats": measures how busy the computer is and sends it with each "ping" (RunnerStats).
+ * "cli-accounts": lists a CLI's other logins (RunnerCli.accounts) and runs the one in task.start's `account`.
+ * "shared-folder": runs a task in the shared folder itself when task.start's `worktree` is false (a project
+ * whose threads work in its folder, ProjectSettings.worktrees), and leaves the thread's worktrees out of
+ * "file.read" when its `worktrees` is false.
+ * "coordinator": runs task.start's `coordinator` turns (ProjectSettings.coordinator): the CLI with none of
+ * its built-in tools, in an empty folder of its own, with only Myrel's coordinator tools.
  */
 export const RunnerFeature = z.enum([
   "folders",
@@ -138,10 +200,14 @@ export const RunnerFeature = z.enum([
   "models",
   "github-token",
   "git-token",
+  "git-tokens",
   "steer",
   "steer-claude",
   "ssh",
   "stats",
+  "cli-accounts",
+  "shared-folder",
+  "coordinator",
 ]);
 
 /**
@@ -164,7 +230,7 @@ export type RunnerFeature = z.infer<typeof RunnerFeature>;
 
 /**
  * What the CLI may do without asking. read: look only. edit: change files in the folders. auto: Claude
- * Code's auto mode (it runs the steps it judges safe and asks about the rest; edit for other CLIs).
+ * Code's auto mode or Codex's Approve for me (edit for other CLIs).
  * full: also run any command.
  */
 export const RunnerAccess = z.enum(["read", "edit", "auto", "full"]);
@@ -211,6 +277,20 @@ export const RunnerUpdateState = z.object({
 export type RunnerUpdateState = z.infer<typeof RunnerUpdateState>;
 
 /** What the runner last told the server about the computer. */
+/**
+ * Whether a visual check's headless browser can start on the computer (feature-free: older runners
+ * never say). missing-libs: Linux lacks Chromium's system libraries, which one command run with sudo
+ * installs (VISUAL_CHECK_DEPS_COMMAND).
+ */
+export const RunnerBrowser = z.object({
+  status: z.enum(["ok", "missing-libs", "unknown"]),
+  missing: z.array(z.string().max(80)).max(30).optional(),
+});
+export type RunnerBrowser = z.infer<typeof RunnerBrowser>;
+
+/** What installs Chromium's system libraries for visual checks on Linux, once, with sudo. */
+export const VISUAL_CHECK_DEPS_COMMAND = "sudo npx playwright@1.64.1 install-deps chromium";
+
 export const RunnerInfo = z.object({
   version: z.string().max(50),
   hostname: z.string().max(255),
@@ -229,7 +309,7 @@ export const RunnerInfo = z.object({
   /** Unknown features from newer runners are dropped, not refused. */
   features: z
     .array(z.string().max(50))
-    .max(20)
+    .max(40)
     .default([])
     .transform((all) => all.filter((f): f is RunnerFeature => RunnerFeature.safeParse(f).success)),
   // Older runners never send these; a malformed one is dropped, not the whole hello.
@@ -237,6 +317,7 @@ export const RunnerInfo = z.object({
   updates: RunnerUpdates.optional().catch(undefined),
   /** An update in progress, or one that did not work out lately. */
   update: RunnerUpdateState.optional().catch(undefined),
+  browser: RunnerBrowser.optional().catch(undefined),
 });
 export type RunnerInfo = z.infer<typeof RunnerInfo>;
 
@@ -331,11 +412,18 @@ export type TaskModel = z.infer<typeof TaskModel>;
  * when the computer's own git login does not answer first. `repos` (owner/name) are the ones it
  * covers; their SSH addresses are sent over HTTPS for the turn.
  */
-export const TaskGithub = z.object({
+const TaskGithubToken = z.object({
   // GitHub's installation tokens are about 520 characters since its 2026 format (ghs_<app id>_<JWT>).
   token: z.string().min(20).max(4096),
   expiresAt: Timestamp,
   repos: z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/).max(200)).max(100),
+});
+export const TaskGithub = TaskGithubToken.extend({
+  /**
+   * A token reaches one GitHub App installation, so the project's repositories of any other have
+   * their own here (feature "git-tokens").
+   */
+  more: z.array(TaskGithubToken).max(20).optional(),
 });
 export type TaskGithub = z.infer<typeof TaskGithub>;
 
@@ -418,8 +506,18 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     prompt: z.string().min(1).max(MAX_TASK_TEXT),
     /** The model and effort to run with (feature "models"); absent: the CLI's own default. */
     model: TaskModel.optional(),
+    /**
+     * Which of the CLI's logins runs the turn (feature "cli-accounts"): one of RunnerCli.accounts.
+     * Absent: the CLI's own. The runner fails a task naming one it no longer has.
+     */
+    account: CliAccountId.optional(),
     /** The project's other folders the CLI may also work in; each must be shared too (feature "project-folders"). */
     folders: z.array(z.string().min(1).max(1024)).max(50).optional(),
+    /**
+     * false: the CLI works in `folder` itself, never in a worktree of it (feature "shared-folder"), as the
+     * project's setting says (ProjectSettings.worktrees). Absent: the runner's own setting decides.
+     */
+    worktree: z.boolean().optional(),
     /**
      * Present when the CLI runs as the thread's agent instead of doing one task for it: the
      * runner connects the CLI to the thread's MCP endpoint (server origin + mcpPath) with this
@@ -446,6 +544,16 @@ export const ServerToRunner = z.discriminatedUnion("type", [
       .optional(),
     /** The turn's GitHub token (feature "git-token"); older runners ignore it. */
     github: TaskGithub.optional(),
+    /**
+     * Present when the CLI works as the project's coordinator for one turn (feature "coordinator",
+     * ProjectSettings.coordinator), with `agent` naming the coordinator's MCP endpoint: `system`
+     * replaces the CLI's own system prompt. Every member's message starts such a turn on this computer,
+     * so the CLI gets none of its built-in tools whatever the computer's access level, works in an
+     * empty folder of its own (`folder` only shows the project is shared here), keeps no session and
+     * takes no connectors, skills, GitHub token or other folders. `threadId` is a fresh id the runner
+     * does nothing with. A CLI that cannot run like that fails the task.
+     */
+    coordinator: z.object({ system: z.string().min(1).max(MAX_TASK_TEXT) }).optional(),
   }),
   /** A new GitHub token for a running task, before its last one expires (feature "git-token"). */
   z.object({ type: z.literal("task.github"), taskId: TaskId, github: TaskGithub }),
@@ -465,7 +573,8 @@ export const ServerToRunner = z.discriminatedUnion("type", [
   /**
    * Read one file, e.g. one an agent's message links to (feature "files"). Answered with "file".
    * `path` is absolute or relative to `folders`, the project's folders; the runner reads it only
-   * inside those (each shared) or the thread's worktree of them.
+   * inside those (each shared) or the thread's worktree of them. `worktrees` false (feature
+   * "shared-folder"): the project's threads work in its folders, so a worktree left from before is not looked in.
    */
   z.object({
     type: z.literal("file.read"),
@@ -473,6 +582,7 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     path: z.string().min(1).max(4096),
     folders: z.array(z.string().min(1).max(1024)).min(1).max(51),
     threadId: ThreadId.optional(),
+    worktrees: z.boolean().optional(),
   }),
   /** Change some of the runner's settings (feature "settings"). Answered with "settings". */
   z.object({ type: z.literal("settings.set"), requestId: RunnerRequestId, settings: RunnerSettingsInput }),

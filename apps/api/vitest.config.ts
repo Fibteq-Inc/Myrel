@@ -39,6 +39,9 @@ export default defineConfig(async () => {
             // The provider's default model, whatever the deployment pins in wrangler.jsonc.
             LLM_MODEL: "",
             RUNNER_MODEL: "",
+            // A visual check's evaluator in the cloud (test/visual-check-cloud.test.ts).
+            CHECK_MODEL: "accounts/fireworks/models/check-vision",
+            CHECK_IMAGES: "true",
             SIGNUP_ENABLED: "true",
             // GitHub calls are answered by test/fake-github.ts.
             GITHUB_APP_ID: "1234",

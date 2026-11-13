@@ -44,6 +44,131 @@ describe("project activity", () => {
     await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
   });
 
+  it("counts a thread as waiting only when a person has to act", async () => {
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "T" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Waiting" }) });
+    const { project } = (await res.json()) as { project: Project };
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "do it" });
+    const thread = await agent.createThread(root.id, "First");
+
+    await agent.updateThread(thread.id, { status: "review_ready" });
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 0 }));
+
+    await agent.updateThread(thread.id, { status: "review_ready", needs: "decision" });
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
+
+    // Back at work, what it asked is settled.
+    expect((await agent.updateThread(thread.id, { status: "working" }))?.needs).toBeNull();
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 1, waiting: 0 }));
+
+    await agent.updateThread(thread.id, { status: "failed" });
+    await vi.waitFor(async () => expect(await activity(token, project.id)).toEqual({ working: 0, waiting: 1 }));
+  });
+
+  it("lists threads at work and waiting on a person, without the coordinator", async () => {
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "T" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Live" }) });
+    const { project } = (await res.json()) as { project: Project };
+    const live = async () => {
+      const { projects } = (await (await api("/api/projects", { token })).json()) as { projects: Project[] };
+      return projects.find((p) => p.id === project.id)?.live;
+    };
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const rootA = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "a" });
+    const a = await agent.createThread(rootA.id, "First");
+    const rootB = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "b" });
+    const b = await agent.createThread(rootB.id, "Second");
+    const rootC = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "c" });
+    const c = await agent.createThread(rootC.id, "Third");
+
+    await agent.setActivity(null, true);
+    await agent.setActivity(a.id, true);
+    await agent.updateThread(a.id, { statusText: "Plan\n✓ Read\n✱ Write\n○ Ship" });
+    await agent.updateThread(b.id, { status: "review_ready", needs: "decision" });
+    await agent.updateThread(c.id, { status: "review_ready" });
+    await vi.waitFor(async () => {
+      expect((await live())?.map((l) => [l.title, l.state, l.needs])).toEqual([
+        ["Second", "waiting", "decision"],
+        ["First", "working", null],
+      ]);
+    });
+
+    await agent.setActivity(a.id, false);
+    await agent.setActivity(null, false);
+    await agent.updateThread(c.id, { status: "done", resolved: true });
+    await agent.updateThread(b.id, { status: "done", resolved: true });
+    await vi.waitFor(async () => expect((await live())?.map((l) => [l.title, l.state])).toEqual([["First", "queued"]]));
+  });
+
+  it("writes a plan step moving alone at most once in a while", async () => {
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "T" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Steps" }) });
+    const { project } = (await res.json()) as { project: Project };
+    const first = async () => {
+      const { projects } = (await (await api("/api/projects", { token })).json()) as { projects: Project[] };
+      return projects.find((p) => p.id === project.id)?.live?.[0];
+    };
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const root = await agent.sendMessage({ threadId: null, authorKind: "user", authorId: "x", body: "a" });
+    const thread = await agent.createThread(root.id, "First");
+    await agent.updateThread(thread.id, { statusText: "Plan\n✱ One\n○ Two" });
+    await agent.setActivity(thread.id, true);
+    await vi.waitFor(async () => expect((await first())?.state).toBe("working"));
+    expect(await first()).toMatchObject({ step: "One", progress: "0/2" });
+
+    await agent.updateThread(thread.id, { statusText: "Plan\n✓ One\n✱ Two" });
+    // Too soon to write again; a change in state goes through at once and carries the new step.
+    expect((await first())?.step).toBe("One");
+    await agent.setActivity(null, true);
+    await agent.updateThread(thread.id, { title: "Renamed" });
+    await vi.waitFor(async () => expect(await first()).toMatchObject({ title: "Renamed", step: "Two", progress: "1/2" }));
+  });
+
+  it("marks the latest activity when an agent starts or stops, not on anything else", async () => {
+    const signUp = await api("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify({ email: `u${crypto.randomUUID()}@example.com`, password: "correct-horse-battery", name: "T" }),
+    });
+    const token = signUp.headers.get("set-auth-token")!;
+    const res = await api("/api/projects", { method: "POST", token, body: JSON.stringify({ name: "Latest" }) });
+    const { project } = (await res.json()) as { project: Project };
+    const latest = async () => {
+      const { projects } = (await (await api("/api/projects", { token })).json()) as { projects: Project[] };
+      return projects.find((p) => p.id === project.id);
+    };
+
+    const agent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    await agent.setActivity(null, false);
+    expect((await latest())?.lastActivityAt).toBe(project.createdAt);
+
+    await agent.setActivity(null, true);
+    await vi.waitFor(async () => expect((await latest())?.activity?.working).toBe(1));
+    const started = (await latest())?.lastActivityAt ?? "";
+    expect(started > project.createdAt).toBe(true);
+
+    // A new label on the same work is not a new activity.
+    await agent.setActivity(null, true, "Reading");
+    expect((await latest())?.lastActivityAt).toBe(started);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await agent.setActivity(null, false);
+    await vi.waitFor(async () => expect((await latest())?.activity?.working).toBe(0));
+    expect(((await latest())?.lastActivityAt ?? "") > started).toBe(true);
+  });
+
   it("shows this month's and all-time model cost on the project list", async () => {
     const signUp = await api("/api/auth/sign-up/email", {
       method: "POST",

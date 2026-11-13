@@ -6,6 +6,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MyrelMark, Button, errorMessage, Input } from "../components/ui";
+import { appPage } from "../lib/app-page";
 import { useSession } from "../lib/session";
 import { makeStyles, useColors } from "../theme";
 
@@ -189,11 +190,11 @@ function SignInForm() {
               </Pressable>
               <Text style={[styles.hint, { flex: 1 }]}>
                 {t("login.accept.before")}
-                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.terms)}>
+                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(appPage(legal.terms))}>
                   {t("legal.terms")}
                 </Text>
                 {t("login.accept.and")}
-                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(legal.privacy)}>
+                <Text style={styles.termsLink} onPress={() => void WebBrowser.openBrowserAsync(appPage(legal.privacy))}>
                   {t("legal.privacy")}
                 </Text>
                 {t("login.accept.after")}
@@ -206,7 +207,16 @@ function SignInForm() {
       {signUpInBrowser ? (
         <>
           <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.signUpInBrowser")}</Text>
-          <Button onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?signup`)}>{t("login.openSignUp")}</Button>
+          <Button
+            onPress={() => {
+              // ?app: the page ends on "go back to the app" instead of going on into the web app, and
+              // the person comes back to this form to sign in.
+              void WebBrowser.openBrowserAsync(`${session.server}/login?signup&app`);
+              setMode("signin");
+            }}
+          >
+            {t("login.openSignUp")}
+          </Button>
         </>
       ) : (
         <Button onPress={submit} pending={pending} disabled={!email || password.length < 8 || (legal != null && !accepted)}>
@@ -215,7 +225,7 @@ function SignInForm() {
       )}
       {mode === "signin" && session.info?.auth.passwordReset && (
         // The page that sets a new password is on the server's own site.
-        <Pressable onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?forgot`)} accessibilityRole="link">
+        <Pressable onPress={() => void WebBrowser.openBrowserAsync(`${session.server}/login?forgot&app`)} accessibilityRole="link">
           <Text style={[styles.hint, { textAlign: "center" }]}>{t("login.forgot")}</Text>
         </Pressable>
       )}
