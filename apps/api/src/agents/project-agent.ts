@@ -9,6 +9,7 @@ import {
   type AuthorKind,
   type CliId,
   CloudCli,
+  ResearchSummary,
   TaskTarget,
   ClientEvent,
   type CreateRoutineInput,
@@ -26,6 +27,7 @@ import {
   nextCronRun,
   normalizeFilePath,
   isPlanMessage,
+  parseResearch,
   parseVisualCheck,
   VISUAL_CHECK_LANG,
   type NotificationKind,
@@ -373,6 +375,13 @@ export class ProjectAgent extends Agent<Env> {
       wakes INTEGER NOT NULL DEFAULT 0,
       threads INTEGER NOT NULL DEFAULT 0,
       idle INTEGER NOT NULL DEFAULT 0
+    )`;
+    // Researches by Claude its threads ran (research/thread.ts): the project's research list.
+    this.sql`CREATE TABLE IF NOT EXISTS researches (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      data TEXT NOT NULL
     )`;
     // Notes the coordinator passed from one thread to another.
     this.sql`CREATE TABLE IF NOT EXISTS coordinator_relays (
@@ -899,6 +908,28 @@ export class ProjectAgent extends Agent<Env> {
     return row ? this.toThread(row) : null;
   }
 
+  /** A thread's research as it stands now, kept for the project's list. Callable over RPC. */
+  recordResearch(research: Omit<ResearchSummary, "threadTitle">): void {
+    this.sql`INSERT INTO researches (id, thread_id, started_at, data)
+      VALUES (${research.id}, ${research.threadId}, ${research.startedAt}, ${JSON.stringify(research)})
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data`;
+  }
+
+  /** One research of the list, or null. */
+  getResearch(id: string): ResearchSummary | null {
+    return this.listResearch().find((r) => r.id === id) ?? null;
+  }
+
+  /** The project's researches, newest first, each with its thread's title. */
+  listResearch(): ResearchSummary[] {
+    const titles = new Map(this.sql<{ id: string; title: string }>`SELECT id, title FROM threads`.map((t) => [t.id, t.title]));
+    return this.sql<{ data: string }>`SELECT data FROM researches ORDER BY started_at DESC LIMIT 200`.flatMap((row) => {
+      const parsed = ResearchSummary.safeParse({ threadTitle: "", ...(JSON.parse(row.data) as object) });
+      if (!parsed.success) return [];
+      return [{ ...parsed.data, threadTitle: titles.get(parsed.data.threadId) ?? "" }];
+    });
+  }
+
   listThreads(): Thread[] {
     return this.sql<ThreadRow>`SELECT * FROM threads ORDER BY created_at`.map((r) => this.toThread(r));
   }
@@ -1386,7 +1417,7 @@ export class ProjectAgent extends Agent<Env> {
    */
   private observable(m: Message): m is Message & { threadId: string } {
     // A visual check's card is Myrel's bookkeeping; the round's evaluator thread is what others may care about.
-    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body) || parseVisualCheck(m.body)) return false;
+    if (!m.threadId || !m.body.trim() || isPlanMessage(m.body) || parseVisualCheck(m.body) || parseResearch(m.body)) return false;
     if (m.authorKind !== "user" && !(m.authorKind === "agent" && m.authorId === THREAD_AGENT_ID)) return false;
     return this.listThreads().some((t) => !t.resolved && t.id !== m.threadId);
   }

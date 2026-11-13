@@ -11,6 +11,8 @@ import type {
   CatalogCategory,
   CatalogPage,
   CheckModels,
+  ResearchAction,
+  ResearchSummary,
   VisualCheckAction,
   Connector,
   ConnectSuggestionInput,
@@ -965,6 +967,18 @@ export class ApiClient {
   async clearWorkspace(projectId: string, runnerId?: string) {
     const runner = runnerId ? `?runner=${encodeURIComponent(runnerId)}` : "";
     await this.request(`/api/projects/${encodeURIComponent(projectId)}/workspace${runner}`, { method: "DELETE" });
+  }
+
+  // --- research ---
+
+  /** The project's researches by Claude, newest first. */
+  async listResearch(projectId: string) {
+    return (await this.request<{ research: ResearchSummary[] }>(`${projectPath(projectId)}/research`)).research;
+  }
+
+  /** Stop on a research's card: it ends with what it wrote so far. */
+  async researchAction(projectId: string, researchId: string, action: ResearchAction) {
+    await this.request(`${projectPath(projectId)}/research/${encodeURIComponent(researchId)}/${action}`, { method: "POST", body: {} });
   }
 
   // --- artifacts ---

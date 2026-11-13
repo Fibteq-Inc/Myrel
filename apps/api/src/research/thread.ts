@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { createId, type Message } from "@myrel/protocol";
+import { createId, formatResearch, type Message, type ResearchStep } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
 import { wrapExternal } from "../agents/external";
@@ -17,6 +17,7 @@ import {
   raiseBudget,
   researchClient,
   researchError,
+  researchActivity,
   researchProgress,
   researchReport,
   startResearch,
@@ -28,7 +29,6 @@ import {
   RESEARCH_MAX_RUN_SEC,
   RESEARCH_POLL_FIRST_SEC,
   RESEARCH_POLL_SEC,
-  type ResearchLine,
   type ResearchRequest,
   type ResearchState,
   researchAskMessage,
@@ -41,7 +41,9 @@ import {
   researchPath,
   researchStartAnswer,
   researchStartFailedMessage,
-  researchStatusLine,
+  RESEARCH_CARD_STEPS,
+  reportSummary,
+  researchCard,
   stepCents,
   usd,
 } from "./research";
@@ -169,13 +171,10 @@ async function begin(host: ResearchHost, state: ResearchState, approver: string)
     spentCents: 0,
     startedAt: new Date().toISOString(),
   };
-  const m = await project.sendMessage({
-    threadId,
-    authorKind: "system",
-    authorId: SYSTEM_ID,
-    body: researchStatusLine(running, { kind: "running", spentCents: 0 }, language),
-  });
-  host.setMeta("research", JSON.stringify({ ...running, statusMessageId: m.id } satisfies ResearchState));
+  const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: formatResearch(researchCard(running)) });
+  const started: ResearchState = { ...running, cardMessageId: m.id };
+  host.setMeta("research", JSON.stringify(started));
+  await record(host, started);
   await host.schedule(RESEARCH_POLL_FIRST_SEC, { id: state.id });
   return null;
 }
@@ -197,7 +196,7 @@ async function raise(host: ResearchHost, state: ResearchState): Promise<string |
   }
   const running: ResearchState = { ...state, status: "running", budgetCents, budgetMessageId: undefined };
   host.setMeta("research", JSON.stringify(running));
-  await editLine(host, running, { kind: "running", spentCents: state.spentCents ?? 0 });
+  await showCard(host, running);
   await host.schedule(RESEARCH_POLL_FIRST_SEC, { id: state.id });
   return null;
 }
@@ -211,10 +210,62 @@ async function clientFor(host: ResearchHost, state: ResearchState): Promise<Rese
   return secret ? researchClient(secret) : null;
 }
 
-async function editLine(host: ResearchHost, state: ResearchState, line: ResearchLine): Promise<void> {
-  if (!state.statusMessageId) return;
-  const project = await getAgentByName(host.env.PROJECT_AGENT, host.ids().projectId);
-  await project.editMessage(state.statusMessageId, researchStatusLine(state, line, host.language())).catch((err) => console.warn("research line not edited", err));
+type CardEnd = Parameters<typeof researchCard>[1];
+
+/** The research's card in the thread, and its row in the project's list, as it stands now. */
+async function showCard(host: ResearchHost, state: ResearchState, end?: CardEnd): Promise<void> {
+  if (state.cardMessageId) {
+    const project = await getAgentByName(host.env.PROJECT_AGENT, host.ids().projectId);
+    await project.editMessage(state.cardMessageId, formatResearch(researchCard(state, end))).catch((err) => console.warn("research card not edited", err));
+  }
+  await record(host, state, end);
+}
+
+async function record(host: ResearchHost, state: ResearchState, end?: CardEnd): Promise<void> {
+  const { projectId, threadId } = host.ids();
+  const card = researchCard(state, end);
+  const project = await getAgentByName(host.env.PROJECT_AGENT, projectId);
+  await project
+    .recordResearch({
+      id: card.id,
+      threadId,
+      title: card.title,
+      status: card.status,
+      ...(card.partial && { partial: card.partial }),
+      spentCents: card.spentCents,
+      budgetCents: card.budgetCents,
+      ...(card.approverName && { approverName: card.approverName }),
+      startedAt: card.startedAt,
+      ...(card.endedAt && { endedAt: card.endedAt }),
+      ...(card.report && { report: card.report }),
+    })
+    .catch((err) => console.warn("research not recorded", err));
+}
+
+/** The searches and reads since the last look, folded into the state; null when there were none. */
+async function withActivity(client: ResearchClient, state: ResearchState): Promise<ResearchState | null> {
+  if (!state.sessionId) return null;
+  const steps = await researchActivity(client, state.sessionId, state.activityAt).catch((err) => {
+    console.warn("research activity", err);
+    return [];
+  });
+  const seen = new Set(state.seenIds ?? []);
+  const fresh = steps.filter((s) => !seen.has(s.id));
+  if (!fresh.length) return null;
+  const last = fresh[fresh.length - 1]!;
+  const newest: ResearchStep[] = fresh
+    .slice(-RESEARCH_CARD_STEPS)
+    .reverse()
+    .map((s) => ({ kind: s.kind, text: s.text }));
+  return {
+    ...state,
+    searches: (state.searches ?? 0) + fresh.filter((s) => s.kind === "search").length,
+    pages: (state.pages ?? 0) + fresh.filter((s) => s.kind === "read").length,
+    steps: [...newest, ...(state.steps ?? [])].slice(0, RESEARCH_CARD_STEPS),
+    activityAt: last.at,
+    // Ids at the newest time come again next look (created_at[gte]); older ones never do.
+    seenIds: [...(state.seenIds ?? []), ...fresh.map((s) => s.id)].slice(-50),
+  };
 }
 
 /** Scheduled while a research runs: its spend on the status line, and its end. */
@@ -244,31 +295,35 @@ export async function pollResearch(host: ResearchHost, payload: { id: string }):
   const ranSec = state.startedAt ? (now - Date.parse(state.startedAt)) / 1000 : 0;
   if (progress.phase === "running" || progress.phase === "waiting") {
     if (progress.phase === "waiting") await denyWaiting(client, state.sessionId, progress.waitingOn ?? []).catch((err) => console.warn("research deny", err));
-    let next = state;
+    let next = (await withActivity(client, state)) ?? state;
     if (ranSec > RESEARCH_MAX_RUN_SEC && !state.interruptedAt) {
       await interruptResearch(client, state.sessionId).catch((err) => console.warn("research interrupt", err));
       next = { ...next, interruptedAt: new Date(now).toISOString() };
     }
-    if (progress.spentCents !== state.spentCents) {
-      next = { ...next, spentCents: progress.spentCents };
-      await editLine(host, next, { kind: "running", spentCents: progress.spentCents });
+    if (progress.spentCents !== state.spentCents) next = { ...next, spentCents: progress.spentCents };
+    if (next !== state) {
+      // A person may have stopped it while this look was under way.
+      const latest = readResearch(host);
+      if (latest?.stoppedBy) next = { ...next, stoppedBy: latest.stoppedBy, interruptedAt: latest.interruptedAt };
+      host.setMeta("research", JSON.stringify(next));
+      await showCard(host, next);
     }
-    if (next !== state) host.setMeta("research", JSON.stringify(next));
     await host.schedule(nextPollSec(state.startedAt, now), { id: state.id });
     return;
   }
-  const current = { ...state, spentCents: progress.spentCents };
+  const current: ResearchState = { ...((await withActivity(client, state)) ?? state), spentCents: progress.spentCents };
   if (progress.phase === "budget") {
     const { projectId, threadId } = host.ids();
     const project = await getAgentByName(host.env.PROJECT_AGENT, projectId);
-    await editLine(host, current, { kind: "budget", spentCents: progress.spentCents });
+    const paused: ResearchState = { ...current, status: "budget" };
+    await showCard(host, paused);
     const m = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: researchBudgetMessage(current, host.language()) });
-    host.setMeta("research", JSON.stringify({ ...current, status: "budget", budgetMessageId: m.id } satisfies ResearchState));
+    host.setMeta("research", JSON.stringify({ ...paused, budgetMessageId: m.id } satisfies ResearchState));
     await project.updateThread(threadId, { needs: "decision" }).catch((err) => console.warn("research needs", err));
     return;
   }
   if (progress.phase === "done") {
-    await endResearch(host, current, { phase: state.interruptedAt ? "time" : "done", client });
+    await endResearch(host, current, { phase: state.stoppedBy ? "stopped" : state.interruptedAt ? "time" : "done", client });
     return;
   }
   await endResearch(host, current, { phase: "failed", reason: progress.detail ?? "failed", client });
@@ -281,7 +336,7 @@ export async function pollResearch(host: ResearchHost, payload: { id: string }):
 async function endResearch(
   host: ResearchHost,
   state: ResearchState,
-  end: { phase: "done" | "time" | "budget" | "failed"; reason?: string; client?: ResearchClient },
+  end: { phase: "done" | "time" | "budget" | "stopped" | "failed"; reason?: string; client?: ResearchClient },
 ): Promise<void> {
   host.deleteMeta("research");
   const language = host.language();
@@ -300,6 +355,10 @@ async function endResearch(
         ? tr
           ? "Araştırma süre sınırında durduruldu; rapor eksik olabilir."
           : "The research was stopped at the time limit; the report may be incomplete."
+        : end.phase === "stopped"
+          ? tr
+            ? `Araştırmayı ${state.stoppedBy ?? "bir kişi"} durdurdu; rapor eksik olabilir.`
+            : `${state.stoppedBy ?? "Someone"} stopped the research; the report may be incomplete.`
         : end.phase === "failed"
           ? tr
             ? `Araştırma bitmedi (${end.reason ?? "bilinmiyor"}); bu, gelen son metin.`
@@ -311,11 +370,20 @@ async function endResearch(
     path = researchPath(state.title, at, language);
     await project.writeFileText(path, researchFile(state, report, { spentCents, model: RESEARCH_MODEL, at, partial }, language), BY);
   }
-  const line: ResearchLine =
+  const endedAt = new Date().toISOString();
+  await showCard(
+    host,
+    { ...state, status: "running" },
     end.phase === "failed" || !path
-      ? { kind: "failed", spentCents, reason: end.reason ?? (tr ? "rapor gelmedi" : "no report came"), ...(path && { path }) }
-      : { kind: "done", spentCents, path, ...(end.phase !== "done" && { partial: end.phase }) };
-  await editLine(host, state, line);
+      ? { status: "failed", endedAt, note: end.reason ?? (tr ? "rapor gelmedi" : "no report came"), ...(path && { report: path }) }
+      : {
+          status: "done",
+          endedAt,
+          report: path,
+          ...(report && { summary: reportSummary(report) }),
+          ...(end.phase !== "done" && { partial: end.phase }),
+        },
+  );
   let wrapped: string | null = null;
   if (report && path) {
     const w = wrapExternal({ source: "claude-research", ref: path, trust: "untrusted" }, noteReport(report, path));
@@ -323,7 +391,44 @@ async function endResearch(
     wrapped = w.text;
   }
   await host.wake(
-    researchNote(state, { spentCents, path, wrapped, reason: end.reason, ...(end.phase !== "done" && end.phase !== "failed" && { partial: end.phase === "budget" ? "at its budget" : "at the time limit" }) }),
+    researchNote(state, {
+      spentCents,
+      path,
+      wrapped,
+      reason: end.reason,
+      ...(end.phase !== "done" &&
+        end.phase !== "failed" && { partial: end.phase === "budget" ? "at its budget" : end.phase === "time" ? "at the time limit" : `${state.stoppedBy ?? "a person"} stopped it` }),
+    }),
   );
 }
 
+
+/**
+ * A person pressed Stop on the research's card. The person who approved it, the one the thread
+ * works for, or a project owner or admin may stop it: a running research is interrupted and ends
+ * with what it wrote so far; one paused at its budget ends at once. Returns why not, or null.
+ */
+export async function stopResearch(
+  host: ResearchHost,
+  input: { researchId: string; by: { id: string; name: string; admin: boolean } },
+): Promise<string | null> {
+  const state = readResearch(host);
+  if (!state || state.id !== input.researchId || state.status === "asking") return "This research is not running.";
+  const allowed = input.by.admin || input.by.id === state.approver || input.by.id === host.getMeta("requester");
+  if (!allowed) return "Only the person who approved the research, the person the thread works for, or a project owner or admin can stop it.";
+  if (state.stoppedBy) return null;
+  const stopped: ResearchState = { ...state, stoppedBy: input.by.name };
+  if (state.status === "budget") {
+    await endResearch(host, stopped, { phase: "stopped" });
+    return null;
+  }
+  const client = await clientFor(host, state);
+  if (client && state.sessionId) {
+    await interruptResearch(client, state.sessionId).catch((err) => console.warn("research stop", err));
+  }
+  host.setMeta("research", JSON.stringify({ ...stopped, interruptedAt: new Date().toISOString() } satisfies ResearchState));
+  await showCard(host, stopped);
+  // The interrupted turn goes idle within seconds; look then instead of at the next regular look.
+  await host.schedule(5, { id: state.id });
+  return null;
+}

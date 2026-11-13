@@ -112,7 +112,7 @@ import {
 import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "../github/store";
 import { memberHasKey, projectTaskModel } from "../keys";
 import { type ResearchState, researchTools } from "../research/research";
-import { answerResearch, pollResearch, type ResearchHost, readResearch, requestResearch } from "../research/thread";
+import { answerResearch, pollResearch, type ResearchHost, readResearch, requestResearch, stopResearch } from "../research/thread";
 import { handleMcp, type Tool, tool } from "../llm";
 import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
@@ -2002,9 +2002,14 @@ export class ThreadAgent extends Agent<Env> {
     };
   }
 
-  /** Scheduled while a research runs: its spend on the status line, and its end. */
+  /** Scheduled while a research runs: its card, and its end. */
   async researchPoll(payload: { id: string }): Promise<void> {
     await pollResearch(this.researchHost(), payload);
+  }
+
+  /** Stop on a research's card (see stopResearch). Returns why not, or null. Callable over RPC. */
+  async researchStop(input: { researchId: string; by: { id: string; name: string; admin: boolean } }): Promise<string | null> {
+    return stopResearch(this.researchHost(), input);
   }
 
   /**

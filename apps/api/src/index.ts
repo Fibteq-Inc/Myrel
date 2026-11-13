@@ -29,6 +29,7 @@ import { syncCatalog } from "./connectors/catalog";
 import { personalInProjectRoutes } from "./routes/personal-in-project";
 import { connectorSuggestionRoutes } from "./routes/connector-suggestions";
 import { visualCheckRoutes } from "./routes/visual-checks";
+import { researchRoutes } from "./routes/research";
 import { accountSkillRoutes, projectSkillRoutes } from "./routes/skills";
 import { sshRoutes } from "./routes/ssh";
 import { streamSkillBundle } from "./skills/store";
@@ -183,6 +184,7 @@ const app = new Hono<AppEnv>()
   .route("/projects/:id/personal", personalInProjectRoutes)
   .route("/projects/:id/threads/:threadId/connector-suggestions", connectorSuggestionRoutes)
   .route("/projects/:id/threads/:threadId/visual-checks", visualCheckRoutes)
+  .route("/projects/:id/research", researchRoutes)
   .route("/projects", projectRoutes)
   // Shares the /projects base, whose auth middleware (in projectRoutes) also covers these routes.
   .route("/projects", knowledgeRoutes)
