@@ -153,6 +153,33 @@ export async function researchProgress(client: ResearchClient, sessionId: string
   }
 }
 
+/** A web search (its query) or a page the researcher read (its address). */
+export type ResearchActivityStep = { id: string; kind: "search" | "read"; text: string; at: string };
+
+/**
+ * The researcher's searches and page reads since `since` (the time of the last one seen), oldest
+ * first. Events at exactly `since` come again; the caller skips the ids it already counted.
+ */
+export async function researchActivity(client: ResearchClient, sessionId: string, since?: string): Promise<ResearchActivityStep[]> {
+  const page = await client.beta.sessions.events.list(sessionId, {
+    order: "asc",
+    types: ["agent.tool_use"],
+    limit: 100,
+    ...(since && { "created_at[gte]": since }),
+  });
+  const steps: ResearchActivityStep[] = [];
+  for (const event of page.data) {
+    if (event.type !== "agent.tool_use") continue;
+    const input = (event.input ?? {}) as Record<string, unknown>;
+    if (event.name === "web_search" && typeof input.query === "string") {
+      steps.push({ id: event.id, kind: "search", text: input.query.slice(0, 400), at: event.processed_at });
+    } else if (event.name === "web_fetch" && typeof input.url === "string") {
+      steps.push({ id: event.id, kind: "read", text: input.url.slice(0, 400), at: event.processed_at });
+    }
+  }
+  return steps;
+}
+
 /** The agent's latest message: its report when it finished, the furthest it got otherwise. */
 export async function researchReport(client: ResearchClient, sessionId: string): Promise<string | null> {
   const page = await client.beta.sessions.events.list(sessionId, { order: "desc", types: ["agent.message"], limit: 5 });

@@ -5,6 +5,7 @@ import {
   DECISION_LANG,
   type Message,
   parseConnectorSuggestion,
+  parseResearch,
   parseVisualCheck,
   type Reaction,
 } from "@myrel/protocol";
@@ -24,6 +25,7 @@ import { MessageStatsLine } from "./message-stats";
 import { QueuedLine } from "./queued-line";
 import { RelayNote } from "./relay-note";
 import { StopButton } from "./stop-button";
+import { ResearchCard } from "./research-card";
 import { VisualCheckCard } from "./visual-check-card";
 import { CliMark, RelativeTime, Spinner, useRelativeTime } from "./ui";
 
@@ -100,6 +102,7 @@ export function MessageView({
   if (message.authorKind === "agent") {
     const suggestion = message.threadId ? parseConnectorSuggestion(message.body) : null;
     const check = message.threadId && !suggestion ? parseVisualCheck(message.body) : null;
+    const research = message.threadId && !suggestion && !check ? parseResearch(message.body) : null;
     return (
       <View style={styles.agent}>
         {/* In a thread, the mark of the CLI that wrote it. */}
@@ -109,6 +112,8 @@ export function MessageView({
             <ConnectorSuggestionCard suggestion={suggestion} projectId={message.projectId} threadId={message.threadId!} />
           ) : check ? (
             <VisualCheckCard card={check} projectId={message.projectId} threadId={message.threadId!} />
+          ) : research ? (
+            <ResearchCard card={research} projectId={message.projectId} />
           ) : (
             !!message.body && (
               <Pressable

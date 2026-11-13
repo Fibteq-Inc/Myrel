@@ -17,9 +17,11 @@ export type ProjectSearch = {
   v?: number;
   /** Memory or instructions, in the knowledge tab. */
   section?: KnowledgeSection;
+  /** The threads tab's second view: the project's researches. */
+  list?: "research";
 };
 
-export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section"] as const;
+export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section", "list"] as const;
 
 const VIEWS = ["threads", "issues", "artifacts", "files", "knowledge", "usage"];
 const SECTIONS = ["memory", "instructions"];
@@ -34,12 +36,13 @@ export function validateProjectSearch(s: Record<string, unknown>): ProjectSearch
     ...(typeof s.item === "string" && { item: s.item }),
     ...(Number.isInteger(v) && v > 0 && { v }),
     ...(section && view === "knowledge" && { section }),
+    ...(s.list === "research" && view === "threads" && { list: "research" as const }),
   };
 }
 
 /** Search params that open a tab, clearing what the previous tab showed. */
 export function viewSearch(view: ProjectView, rest: Omit<ProjectSearch, "view"> = {}) {
-  return { view: view === "chat" ? undefined : view, item: undefined, v: undefined, section: undefined, ...rest };
+  return { view: view === "chat" ? undefined : view, item: undefined, v: undefined, section: undefined, list: undefined, ...rest };
 }
 
 /** The open tab, and a way to switch tabs without closing the open thread. */

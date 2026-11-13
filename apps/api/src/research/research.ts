@@ -1,4 +1,4 @@
-import { type DecisionInput, formatDecision } from "@myrel/protocol";
+import { type DecisionInput, formatDecision, type ResearchCard, type ResearchStep } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
 
@@ -31,9 +31,9 @@ export type ResearchState = {
   question: string;
   budgetCents: number;
   status: "asking" | "running" | "budget";
-  /** The start card, and once started the status line and (at the cap) the budget card. */
+  /** The start card, and once started the research card and (at the cap) the budget card. */
   askMessageId: string;
-  statusMessageId?: string;
+  cardMessageId?: string;
   budgetMessageId?: string;
   /** Who approved it and whose key pays. */
   approver?: string;
@@ -43,7 +43,58 @@ export type ResearchState = {
   spentCents?: number;
   startedAt?: string;
   interruptedAt?: string;
+  /** Searches and pages read so far, the newest steps, and the last one seen (see researchActivity). */
+  searches?: number;
+  pages?: number;
+  steps?: ResearchStep[];
+  activityAt?: string;
+  seenIds?: string[];
+  /** A person stopped it (the card's Stop): their name. */
+  stoppedBy?: string;
 };
+
+/** How many steps the card shows. */
+export const RESEARCH_CARD_STEPS = 4;
+
+/** The card for a research in its current state. */
+export function researchCard(
+  r: ResearchState,
+  end?: { status: "done" | "failed"; partial?: "budget" | "time" | "stopped"; report?: string; summary?: string; note?: string; endedAt: string },
+): ResearchCard {
+  return {
+    id: r.id,
+    title: r.title,
+    status: end?.status ?? (r.status === "budget" ? "budget" : "running"),
+    ...(end?.partial && { partial: end.partial }),
+    spentCents: Math.max(0, Math.round(r.spentCents ?? 0)),
+    budgetCents: r.budgetCents,
+    searches: r.searches ?? 0,
+    pages: r.pages ?? 0,
+    steps: (r.steps ?? []).slice(0, RESEARCH_CARD_STEPS),
+    startedAt: r.startedAt ?? new Date().toISOString(),
+    ...(end && { endedAt: end.endedAt }),
+    model: RESEARCH_CARD_MODEL,
+    ...(r.approverName && { approverName: r.approverName.slice(0, 120) }),
+    ...(r.stoppedBy && { stoppedBy: r.stoppedBy.slice(0, 120) }),
+    ...(end?.report && { report: end.report }),
+    ...(end?.summary && { summary: end.summary }),
+    ...(end?.note && { note: end.note.slice(0, 600) }),
+  };
+}
+
+/** The model the card names (managed.ts runs it). */
+export const RESEARCH_CARD_MODEL = "Claude Opus 5.5";
+
+/** The report's short answer for the card: its first paragraph of prose, at most 600 characters. */
+export function reportSummary(report: string): string | undefined {
+  const paragraphs = report
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p && !p.startsWith("#") && !p.startsWith("|") && !p.startsWith("---"));
+  const first = paragraphs[0]?.replace(/\s+/g, " ");
+  if (!first) return undefined;
+  return first.length <= 600 ? first : `${first.slice(0, 597).replace(/\s+\S*$/, "")}…`;
+}
 
 type Lang = "en" | "tr";
 function lang(language: string): Lang {
@@ -153,45 +204,6 @@ export function researchBudgetAnswer(body: string, budgetCents: number): BudgetA
   const step = stepCents(budgetCents);
   const total = budgetCents + step;
   return matchLabel(body, [BUDGET.en(usd(step, "en"), usd(total, "en")), BUDGET.tr(usd(step, "tr"), usd(total, "tr"))]);
-}
-
-export type ResearchLine =
-  | { kind: "running"; spentCents: number }
-  | { kind: "budget"; spentCents: number }
-  | { kind: "done"; spentCents: number; path: string; partial?: "budget" | "time" }
-  | { kind: "failed"; spentCents: number; reason: string; path?: string };
-
-/** The thread's status line for a research, edited as it goes. */
-export function researchStatusLine(r: Pick<ResearchState, "title" | "budgetCents" | "approverName">, line: ResearchLine, language: string): string {
-  const tr = lang(language) === "tr";
-  const spent = `${usd(line.spentCents, language)} / ${usd(r.budgetCents, language)}`;
-  const who = r.approverName ? (tr ? ` · ${r.approverName} onayladı` : ` · approved by ${r.approverName}`) : "";
-  const link = (path: string) => `[${path}](${path})`;
-  switch (line.kind) {
-    case "running":
-      return tr ? `Claude araştırıyor: **${r.title}** · harcanan ${spent}${who}` : `Claude is researching: **${r.title}** · spent ${spent}${who}`;
-    case "budget":
-      return tr ? `Araştırma bütçede durdu: **${r.title}** · harcanan ${spent}${who}` : `The research paused at its budget: **${r.title}** · spent ${spent}${who}`;
-    case "done": {
-      const partial =
-        line.partial === "budget"
-          ? tr
-            ? " (bütçede bitirildi, eksik olabilir)"
-            : " (finished at its budget, may be incomplete)"
-          : line.partial === "time"
-            ? tr
-              ? " (süre sınırında durduruldu, eksik olabilir)"
-              : " (stopped at the time limit, may be incomplete)"
-            : "";
-      return tr
-        ? `Araştırma bitti${partial}: **${r.title}** · ${usd(line.spentCents, language)} · rapor: ${link(line.path)}`
-        : `Research finished${partial}: **${r.title}** · ${usd(line.spentCents, language)} · report: ${link(line.path)}`;
-    }
-    case "failed":
-      return tr
-        ? `Araştırma bitmedi: **${r.title}** · ${usd(line.spentCents, language)} · ${line.reason}${line.path ? ` · gelen kısım: ${link(line.path)}` : ""}`
-        : `The research did not finish: **${r.title}** · ${usd(line.spentCents, language)} · ${line.reason}${line.path ? ` · what came: ${link(line.path)}` : ""}`;
-  }
 }
 
 /** Lines for answers that start nothing. */

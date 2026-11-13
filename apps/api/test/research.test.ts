@@ -1,4 +1,4 @@
-import type { Message } from "@myrel/protocol";
+import { type Message, parseResearch, type ResearchSummary } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
@@ -21,6 +21,9 @@ const fakeClaude = {
     budget: string;
     report: string | null;
     metadata: Record<string, string>;
+    /** The researcher's searches and reads so far, as agent.tool_use events. */
+    tools: { id: string; name: string; input: Record<string, string>; at: string }[];
+    interrupted: boolean;
   },
 };
 
@@ -50,7 +53,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname === "/v1/sessions" && method === "POST") {
     const budget = (body!.budget as { max_list_cost: { amount: string } }).max_list_cost.amount;
-    fakeClaude.session = { id: "sesn_1", status: "running", stop: "end_turn", spent: "0", budget, report: null, metadata: body!.metadata as Record<string, string> };
+    fakeClaude.session = { id: "sesn_1", status: "running", stop: "end_turn", spent: "0", budget, report: null, metadata: body!.metadata as Record<string, string>, tools: [], interrupted: false };
     return Response.json({ id: "sesn_1", status: "running" });
   }
   const s = fakeClaude.session!;
@@ -63,6 +66,18 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const types = url.searchParams.getAll("types[]").concat(url.searchParams.getAll("types"));
     if (types.includes("session.status_idle")) {
       return page([{ id: "sevt_idle", type: "session.status_idle", processed_at: "", stop_reason: { type: s.stop }, stop_details: null }]);
+    }
+    if (method === "POST") {
+      if (JSON.stringify(body).includes("user.interrupt")) s.interrupted = true;
+      return Response.json({ data: [] });
+    }
+    if (types.includes("agent.tool_use")) {
+      const since = url.searchParams.get("created_at[gte]") ?? "";
+      return page(
+        s.tools
+          .filter((t) => t.at >= since)
+          .map((t) => ({ id: t.id, type: "agent.tool_use", name: t.name, input: t.input, processed_at: t.at })),
+      );
     }
     if (types.includes("agent.message")) {
       return page(s.report ? [{ id: "sevt_msg", type: "agent.message", processed_at: "", content: [{ type: "text", text: s.report }] }] : []);
@@ -162,9 +177,33 @@ describe("research", () => {
     const agentMade = fakeClaude.requests.find((r) => r.method === "POST" && r.path === "/v1/agents")!;
     expect(JSON.stringify(agentMade.body!.tools)).toContain('"web_search"');
     expect(prompts).toHaveLength(1);
-    const line = await until(async () => (await messages(thread.id)).find((m) => m.authorKind === "system" && m.body.startsWith("Claude araştırıyor")), "the status line");
-    expect(line.body).toContain("0,00 USD / 10,00 USD");
+    const line = await until(async () => (await messages(thread.id)).find((m) => m.authorKind === "agent" && parseResearch(m.body)), "the research card");
+    const researchCard = async () => parseResearch((await messages(thread.id)).find((m) => m.id === line.id)!.body)!;
+    expect(await researchCard()).toMatchObject({ status: "running", spentCents: 0, budgetCents: 1000, approverName: "İsmail", steps: [] });
     const researchId = fakeClaude.session!.metadata.myrel_research!;
+
+    // Its searches and reads show on the card, newest first, and in the project's list.
+    fakeClaude.session!.spent = "320";
+    fakeClaude.session!.tools.push(
+      { id: "sevt_t1", name: "web_search", input: { query: "Slack fiyatı 2026" }, at: "2026-11-13T10:00:01Z" },
+      { id: "sevt_t2", name: "web_fetch", input: { url: "https://slack.com/pricing" }, at: "2026-11-13T10:00:02Z" },
+    );
+    await threadAgent.researchPoll({ id: researchId });
+    fakeClaude.session!.tools.push({ id: "sevt_t3", name: "web_search", input: { query: "Teams Essentials fiyatı" }, at: "2026-11-13T10:00:03Z" });
+    await threadAgent.researchPoll({ id: researchId });
+    expect(await researchCard()).toMatchObject({
+      status: "running",
+      spentCents: 320,
+      searches: 2,
+      pages: 1,
+      steps: [
+        { kind: "search", text: "Teams Essentials fiyatı" },
+        { kind: "read", text: "https://slack.com/pricing" },
+        { kind: "search", text: "Slack fiyatı 2026" },
+      ],
+    });
+    const list = (await (await api(`/api/projects/${project.id}/research`, { token })).json()) as { research: ResearchSummary[] };
+    expect(list.research).toMatchObject([{ id: researchId, threadId: thread.id, threadTitle: "Fiyatlar", status: "running", spentCents: 320 }]);
 
     // It reaches its budget: a card asks whether to go on, and the approver adds as much again.
     fakeClaude.session!.status = "idle";
@@ -185,13 +224,58 @@ describe("research", () => {
     await until(() => prompts.length === 2, "the turn with the report");
     expect(prompts[1]).toContain('source="claude-research"');
     expect(prompts[1]).toContain("Slack ve Teams ücretli");
-    const done = await until(async () => (await messages(thread.id)).find((m) => m.id === line.id && m.body.startsWith("Araştırma bitti")), "the line edited");
-    const path = done.body.match(/\]\(([^)]+\.md)\)/)![1]!;
+    const done = await until(async () => ((await researchCard()).status === "done" ? researchCard() : null), "the card at its end");
+    expect(done).toMatchObject({ spentCents: 1450, budgetCents: 2000, summary: "Slack ve Teams ücretli; [kaynak](https://example.com/pricing)." });
+    expect(done.partial).toBeUndefined();
+    const path = done.report!;
     expect(path).toMatch(/^arastirmalar\/\d{4}-\d\d-\d\d-rakip-fiyatlari\.md$/);
-    expect(done.body).toContain("14,50 USD");
+    const after = (await (await api(`/api/projects/${project.id}/research`, { token })).json()) as { research: ResearchSummary[] };
+    expect(after.research[0]).toMatchObject({ status: "done", report: path, spentCents: 1450 });
     const file = await projectAgent.readFileText(path);
     expect(file.text).toContain("Slack ve Teams ücretli");
     expect(file.text).toContain("> Türkiye'de ekip sohbet");
+    close();
+  });
+
+  it("stops on the card's Stop with what it wrote so far", { timeout: 60_000 }, async () => {
+    const token = await signUp();
+    await addAnthropicKey(token);
+    const prompts: string[] = [];
+    const { project, close } = await agentProject(token, async (turn, index) => {
+      prompts.push(turn.prompt);
+      if (index === 0) {
+        await turn.call("start_research", { title: "Kısa deneme", question: "Cloudflare Durable Objects alarm sınırlarını özetle, resmi kaynaklarla." });
+      }
+    });
+    const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const messages = async (threadId: string) => (await projectAgent.getMessagesAfter(0, 500)).messages.filter((m: Message) => m.threadId === threadId);
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me, body: "Alarm sınırlarını araştırır mısın?" });
+    const thread = await projectAgent.createThread(root.id, "Alarmlar");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Research alarm limits." });
+    await until(async () => (await messages(thread.id)).some((m) => m.body.includes("```decision")), "the start card");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status !== "working", "the turn to end");
+    const tap = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: me, body: "Araştırmayı başlat" });
+    await threadAgent.wake({ kind: "message", messageId: tap.id, body: tap.body, authorId: me, seq: tap.seq });
+    const line = await until(async () => (await messages(thread.id)).find((m) => parseResearch(m.body)), "the research card");
+    const researchId = parseResearch(line.body)!.id;
+
+    const stop = await api(`/api/projects/${project.id}/research/${researchId}/stop`, { method: "POST", token, body: "{}" });
+    expect(stop.status).toBe(204);
+    expect(fakeClaude.session!.interrupted).toBe(true);
+    fakeClaude.session!.status = "idle";
+    fakeClaude.session!.stop = "end_turn";
+    fakeClaude.session!.spent = "85";
+    fakeClaude.session!.report = "## Kısa cevap\n\nEksik bir özet.";
+    await threadAgent.researchPoll({ id: researchId });
+    const done = await until(async () => {
+      const c = parseResearch((await messages(thread.id)).find((m) => m.id === line.id)!.body);
+      return c?.status === "done" ? c : null;
+    }, "the stopped card");
+    expect(done).toMatchObject({ partial: "stopped", stoppedBy: "İsmail", spentCents: 85, summary: "Eksik bir özet." });
+    await until(() => prompts.length === 2, "the turn with what it had");
+    expect(prompts[1]).toContain("İsmail stopped it");
     close();
   });
 });
