@@ -41,6 +41,7 @@ import {
   researchPath,
   researchStartAnswer,
   researchStartFailedMessage,
+  researchWithdrawnMessage,
   RESEARCH_CARD_STEPS,
   reportSummary,
   researchCard,
@@ -79,13 +80,22 @@ export function readResearch(host: ResearchHost): ResearchState | null {
 /** start_research: the card that asks people first. The research starts when someone taps "Start" (answerResearch). */
 export async function requestResearch(host: ResearchHost, input: ResearchRequest, reply: (text: string, needs?: ReplyNeeds) => Promise<Message>): Promise<string> {
   const open = readResearch(host);
-  if (open?.status === "asking") return `A card already asks people to start the research "${open.title}". End your turn; its report will wake you once it runs.`;
-  if (open) return `The research "${open.title}" is still running; its report will wake you. One research at a time: end your turn.`;
+  if (open && open.status !== "asking") return `The research "${open.title}" is still running; its report will wake you. One research at a time: end your turn.`;
+  // Nothing was spent on a card nobody tapped yet: a new one (another question or budget) takes its place.
+  if (open) await withdrawAsk(host, open);
   const budgetCents = Math.round((input.budgetUsd ?? RESEARCH_DEFAULT_BUDGET_USD) * 100);
-  const draft = { title: input.title.trim(), question: input.question.trim(), budgetCents };
-  const m = await reply(researchAskMessage(draft, input.why ?? "", host.language()), "decision");
+  const why = input.why?.trim() ?? "";
+  const draft = { title: input.title.trim(), question: input.question.trim(), budgetCents, ...(why && { why }) };
+  const m = await reply(researchAskMessage(draft, why, host.language()), "decision");
   host.setMeta("research", JSON.stringify({ id: createId("research"), ...draft, status: "asking", askMessageId: m.id } satisfies ResearchState));
-  return `A card asks people to start the research "${draft.title}" (up to ${usd(budgetCents, "en")}, paid from the own Anthropic key of whoever approves it). End your turn now: once it runs, its report wakes you. If they decline, their answer wakes you.`;
+  return `A card asks people to start the research "${draft.title}" (up to ${usd(budgetCents, "en")}, paid from the own Anthropic key of whoever approves it).${open ? ` It replaces the card for "${open.title}", which nobody had started.` : ""} End your turn now: once it runs, its report wakes you. If they decline or write something else instead, their message wakes you, and you may ask again.`;
+}
+
+/** Takes the start card off the screen (its options go) and the ask off the record, for one that replaces it. */
+async function withdrawAsk(host: ResearchHost, state: ResearchState): Promise<void> {
+  host.deleteMeta("research");
+  const project = await getAgentByName(host.env.PROJECT_AGENT, host.ids().projectId);
+  await project.editMessage(state.askMessageId, researchWithdrawnMessage(state, host.language())).catch((err) => console.warn("research card not withdrawn", err));
 }
 
 /**
@@ -99,7 +109,14 @@ export async function answerResearch(host: ResearchHost, reason: Extract<ThreadW
   const onCard = (id: string | undefined) => !reason.pick || reason.pick.messageId === id;
   const start = state.status === "asking" && onCard(state.askMessageId) ? researchStartAnswer(reason.body ?? "", state.budgetCents) : null;
   const budget = state.status === "budget" && onCard(state.budgetMessageId) ? researchBudgetAnswer(reason.body ?? "", state.budgetCents) : null;
-  if (!start && !budget) return false;
+  if (!start && !budget) {
+    // Clients show the start card as answered once a person writes anything else after it
+    // (decisionState), so nobody can tap it from then on. Keeping the ask on record would refuse
+    // every later start_research with no card on screen. The message goes on to the agent, which
+    // may ask again.
+    if (state.status === "asking" && onCard(state.askMessageId)) host.deleteMeta("research");
+    return false;
+  }
   if (start === "skip") {
     host.deleteMeta("research");
     return false;
@@ -127,10 +144,20 @@ export async function answerResearch(host: ResearchHost, reason: Extract<ThreadW
   } else if (budget === "finish") {
     await endResearch(host, state, { phase: "budget" });
   }
-  const line = body ? await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body }) : null;
-  const seen = line?.seq ?? reason.seq;
-  // Neither the answer nor the line after it is news for the next turn, unless someone wrote in between.
-  if (reason.seq !== undefined && seen !== undefined && reason.seq === Number(host.getMeta("last_seen_seq") ?? 0) + 1 && seen <= reason.seq + 1) {
+  const posted: Message[] = [];
+  if (body) posted.push(await project.sendMessage({ threadId, authorKind: "system", authorId: SYSTEM_ID, body }));
+  // The tap shows the card as answered, so a start that failed gets a fresh card to tap once they
+  // did what the line says.
+  const asking = start === "start" ? readResearch(host) : null;
+  if (body && asking?.status === "asking") {
+    const card = await project.sendMessage({ threadId, authorKind: "agent", authorId: THREAD_AGENT_ID, body: researchAskMessage(asking, asking.why ?? "", language) });
+    posted.push(card);
+    host.setMeta("research", JSON.stringify({ ...asking, askMessageId: card.id } satisfies ResearchState));
+    await project.updateThread(threadId, { needs: "decision" }).catch((err) => console.warn("research needs", err));
+  }
+  const seen = posted.at(-1)?.seq ?? reason.seq;
+  // Neither the answer nor the messages after it are news for the next turn, unless someone wrote in between.
+  if (reason.seq !== undefined && seen !== undefined && reason.seq === Number(host.getMeta("last_seen_seq") ?? 0) + 1 && seen <= reason.seq + posted.length) {
     host.setMeta("last_seen_seq", String(seen));
     await project.updateThread(threadId, { seenSeq: seen });
   }
