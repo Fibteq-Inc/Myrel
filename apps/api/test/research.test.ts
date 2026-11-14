@@ -237,6 +237,62 @@ describe("research", () => {
     close();
   });
 
+  it("lets go of a start card people can no longer tap, replaces an untapped one, and gives a failed start a fresh card", { timeout: 60_000 }, async () => {
+    const token = await signUp();
+    await addAnthropicKey(token);
+    const results: string[] = [];
+    const ask = { title: "Entegratör şartları", question: "GİB özel entegratörü olmanın şartlarını resmî kaynaklarla çıkar." };
+    const { project, close } = await agentProject(token, async (turn, index) => {
+      if (index === 0) results.push((await turn.call("start_research", ask)).text);
+      if (index === 1) {
+        results.push((await turn.call("start_research", { ...ask, budget_usd: 40, why: "Bütçe 40 USD." })).text);
+        results.push((await turn.call("start_research", { ...ask, budget_usd: 30, why: "Bütçe 30 USD." })).text);
+      }
+    });
+    const me = ((await (await api("/api/auth/get-session", { token })).json()) as { user: { id: string } }).user.id;
+    const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
+    const messages = async (threadId: string) => (await projectAgent.getMessagesAfter(0, 500)).messages.filter((m: Message) => m.threadId === threadId);
+    const cards = async (threadId: string) => (await messages(threadId)).filter((m) => m.authorKind === "agent" && m.body.includes("```decision"));
+    const root = await projectAgent.sendMessage({ threadId: null, authorKind: "user", authorId: me, body: "Entegratör şartlarını araştır" });
+    const thread = await projectAgent.createThread(root.id, "Entegratör");
+    const threadAgent = await getAgentByName(env.THREAD_AGENT, thread.id);
+    await threadAgent.start({ projectId: project.id, threadId: thread.id, brief: "Research the integrator rules." });
+    await until(() => results.length === 1, "the first card");
+    await until(async () => (await projectAgent.getThread(thread.id))?.status !== "working", "the first turn to end");
+
+    // Writing something else shows the card as answered on every client, so the ask is let go and the agent may ask again.
+    const typed = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: me, body: "40 USD araştırma bütçesi" });
+    await threadAgent.wake({ kind: "message", messageId: typed.id, body: typed.body, authorId: me, seq: typed.seq });
+    await until(() => results.length === 3, "the second turn's cards");
+    expect(results[1]).toContain("A card asks people");
+    // A second call before anyone tapped replaces the card: the old one loses its options.
+    expect(results[2]).toContain("It replaces the card");
+    // The first card stays as clients show it (answered by the typed message); the 40 USD one was withdrawn.
+    const left = await cards(thread.id);
+    expect(left).toHaveLength(2);
+    const card = left[1];
+    expect(card!.body).toContain("30,00 USD");
+    expect((await messages(thread.id)).filter((m) => m.body.includes("kartı geri çekildi"))).toHaveLength(1);
+    await until(async () => (await projectAgent.getThread(thread.id))?.status !== "working", "the second turn to end");
+
+    // A start that fails (here: nobody known tapped it) says why and puts a fresh card up to tap again.
+    const before = fakeClaude.requests.length;
+    const tap = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: me, body: "Araştırmayı başlat", pick: { messageId: card!.id, card: 0, question: "" } });
+    await threadAgent.wake({ kind: "message", messageId: tap.id, body: tap.body, seq: tap.seq, pick: { messageId: card!.id, card: 0, question: "" } });
+    const fresh = await until(async () => (await cards(thread.id)).find((m) => m.seq > card!.seq), "the fresh card");
+    expect(fresh.body).toContain("30,00 USD");
+    expect(fresh.body).toContain("Bütçe 30 USD.");
+    expect((await messages(thread.id)).some((m) => m.authorKind === "system" && m.body.includes("Araştırma başlamadı"))).toBe(true);
+    expect(fakeClaude.requests.length).toBe(before);
+    // The fresh card starts it.
+    const again = await projectAgent.sendMessage({ threadId: thread.id, authorKind: "user", authorId: me, body: "Araştırmayı başlat", pick: { messageId: fresh.id, card: 0, question: "" } });
+    await threadAgent.wake({ kind: "message", messageId: again.id, body: again.body, authorId: me, seq: again.seq, pick: { messageId: fresh.id, card: 0, question: "" } });
+    await until(() => fakeClaude.requests.some((r, i) => i >= before && r.method === "POST" && r.path === "/v1/sessions"), "the session");
+    const created = fakeClaude.requests.findLast((r) => r.method === "POST" && r.path === "/v1/sessions")!;
+    expect(created.body!.budget).toEqual({ type: "limit", max_list_cost: { amount: "3000", currency: "USD" } });
+    close();
+  });
+
   it("stops on the card's Stop with what it wrote so far", { timeout: 60_000 }, async () => {
     const token = await signUp();
     await addAnthropicKey(token);

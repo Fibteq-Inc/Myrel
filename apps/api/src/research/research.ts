@@ -30,6 +30,8 @@ export type ResearchState = {
   title: string;
   question: string;
   budgetCents: number;
+  /** The agent's line on the start card, kept for a fresh card after a start that failed. */
+  why?: string;
   status: "asking" | "running" | "budget";
   /** The start card, and once started the research card and (at the cap) the budget card. */
   askMessageId: string;
@@ -156,6 +158,13 @@ export function researchAskMessage(r: Pick<ResearchState, "title" | "question" |
       ? `${reason ? `${reason}\n\n` : ""}Claude ile web araştırması: **${r.title}**. Bütçe en fazla ${budget}. Karttaki "Başlat"a dokunan kişinin kendi Anthropic API anahtarıyla (Ayarlar › Anahtarlar) çalışır ve o hesaptan ödenir. Aşağıdaki soru Anthropic'e gönderilir:`
       : `${reason ? `${reason}\n\n` : ""}Web research by Claude: **${r.title}**. Budget up to ${budget}. It runs on the own Anthropic API key (Settings › Keys) of the person who taps "Start", and that account pays. This question is sent to Anthropic:`;
   return `${intro}\n\n${quote(r.question)}\n\n${formatDecision(decision)}`;
+}
+
+/** What is left of a start card nobody tapped once another one replaced it. */
+export function researchWithdrawnMessage(r: Pick<ResearchState, "title">, language: string): string {
+  return lang(language) === "tr"
+    ? `"${r.title.slice(0, 200)}" araştırmasının kartı geri çekildi, araştırma başlamadı. Yerine yeni bir kart açıldı.`
+    : `The card for the research "${r.title.slice(0, 200)}" was withdrawn and nothing started. A new card took its place.`;
 }
 
 /** The card when a run paused at its budget: add as much again, or keep what it has. */
@@ -299,7 +308,7 @@ export function researchTools(host: { start: (input: ResearchRequest) => Promise
   return [
     tool({
       name: "start_research",
-      description: `Have Claude do a deep web research: Anthropic's hosted research agent splits the question, searches and reads sources, and writes a report with citations, within a dollar budget. Use it, on your own judgment or when asked, for questions that need many searches and careful sourcing (comparing products or approaches, current prices, terms or availability, the state of a field); answer quick lookups yourself. It costs real money, paid from the own Anthropic key of the person who approves it, so it puts a card to people first: call it, then end your turn. Once approved, the report is saved to the project files and wakes you with its text. The researcher sees nothing of this project but the question, so write it self-contained (what to find out, why, what matters, any constraints), and leave out secrets and private details. One research at a time per thread.`,
+      description: `Have Claude do a deep web research: Anthropic's hosted research agent splits the question, searches and reads sources, and writes a report with citations, within a dollar budget. When a person asks for research on a topic ("research X", "araştır", "araştırma yap", "deep research", in any language), or the coordinator's brief passes such an ask on, use this tool: do not search the web yourself instead. Also propose it on your own judgment for questions that need many searches and careful sourcing (comparing products or approaches, current prices, terms or availability, the state of a field, rules and regulations). Look things up yourself only for a quick fact, one page or the docs the work at hand needs, or when the person declined the card. A dollar amount the person names with the ask is the research's budget_usd. It costs real money, paid from the own Anthropic key of the person who approves it, so it puts a card to people first: call it, then end your turn. Calling it again before anyone started the card replaces that card (to fix its question or budget). Once approved, the report is saved to the project files and wakes you with its text. The researcher sees nothing of this project but the question, so write it self-contained (what to find out, why, what matters, any constraints), and leave out secrets and private details. One research at a time per thread.`,
       input: z.object({
         title: z.string().min(1).max(120).describe("A few words naming the research, in the person's language."),
         question: z
