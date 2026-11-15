@@ -122,12 +122,14 @@ export function useProject(projectId: string) {
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);
-  /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
+  /** Loads a thread's tasks (the open ones with their terminal output) and the pull requests they opened. */
   const loadTasks = useCallback(
     async (threadId: string) => {
-      const [tasks, pullRequests] = await Promise.all([api.listTasks(projectId, threadId), api.listPullRequests(projectId, threadId)]);
-      dispatch({ type: "tasks", tasks });
-      dispatch({ type: "pullRequests", pullRequests });
+      // Each lands on its own: a slow task list does not hold back the pull requests (and their count).
+      await Promise.all([
+        api.listTasks(projectId, threadId).then((tasks) => dispatch({ type: "tasks", tasks })),
+        api.listPullRequests(projectId, threadId).then((pullRequests) => dispatch({ type: "pullRequests", pullRequests })),
+      ]);
     },
     [projectId],
   );

@@ -67,7 +67,7 @@ function TerminalTab({ projectId, tasks, output }: TaskData) {
         <section key={day} className={`flex flex-col gap-3 ${i > 0 ? "mt-2" : ""}`}>
           <h3 className="text-xs font-medium text-subtle">{dayLabel(t, locale, dayTasks[0]!.createdAt)}</h3>
           {dayTasks.map((task) => (
-            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} latest={task.id === sorted[0]!.id} />
+            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id]} latest={task.id === sorted[0]!.id} />
           ))}
         </section>
       ))}
@@ -112,7 +112,30 @@ function ChangesTab({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: Task; lines: TerminalLine[]; latest: boolean }) {
+const NO_LINES: TerminalLine[] = [];
+
+/**
+ * A task's output fetched the first time it is opened: the task list brings only the open tasks'
+ * output (the running ones and the newest), since a long thread's turns together run to tens of MB.
+ */
+function useTaskLog(projectId: string, task: Task, wanted: boolean): TerminalLine[] | null {
+  const [log, setLog] = useState<TerminalLine[] | null>(null);
+  useEffect(() => {
+    if (!wanted || log) return;
+    let current = true;
+    api.taskLog(projectId, task.threadId, task.id).then(
+      (lines) => current && setLog(lines),
+      () => current && setLog(NO_LINES),
+    );
+    return () => {
+      current = false;
+    };
+  }, [wanted, log, projectId, task.threadId, task.id]);
+  return log;
+}
+
+/** `lines`: the task's output held in the project's state; absent when it was not fetched yet. */
+function TaskRow({ projectId, task, lines: held, latest }: { projectId: string; task: Task; lines?: TerminalLine[]; latest: boolean }) {
   const { t, locale } = useI18n();
   const format = useFormat();
   const running = task.status === "running";
@@ -124,6 +147,8 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
   useEffect(() => {
     if (running) setOpen(true);
   }, [running]);
+  const fetched = useTaskLog(projectId, task, open && !held);
+  const lines = held ?? fetched ?? NO_LINES;
   const started = Date.parse(task.createdAt);
   const total = (task.finishedAt ? Date.parse(task.finishedAt) : now) - started;
   const lastAt = lines.findLast((l) => l.at !== undefined)?.at ?? started;
@@ -215,7 +240,7 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
           </button>
         </p>
       )}
-      {open && <Terminal lines={shown} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
+      {open && <Terminal lines={shown} loading={!held && !fetched} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
       {quietMs > QUIET_MS && <p className="pl-6 text-xs text-muted">{t("tasks.quiet", { time: dur(quietMs) })}</p>}
     </div>
   );
@@ -332,7 +357,7 @@ function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
   return times;
 }
 
-function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
+function Terminal({ lines, loading, end }: { lines: TerminalLine[]; loading: boolean; end: number }) {
   const t = useT();
   const dur = useDuration();
   const times = stepTimes(lines, end);
@@ -353,7 +378,7 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
       }}
       className="flex max-h-[28rem] flex-col overflow-auto rounded-lg border border-line bg-console px-3 py-2 font-mono text-[12px] leading-[1.6] text-body"
     >
-      {lines.length === 0 && <span className="text-subtle">{t("tasks.waiting")}</span>}
+      {lines.length === 0 && <span className="text-subtle">{loading ? `${t("common.loading")}…` : t("tasks.waiting")}</span>}
       {lines.map((l, i) => (
         <TerminalRow key={i} line={l} first={i === 0} time={times[i] === undefined ? undefined : dur(times[i]!)} />
       ))}

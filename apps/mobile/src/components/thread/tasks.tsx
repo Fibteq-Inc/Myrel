@@ -32,6 +32,7 @@ export function TerminalTab({ projectId, tasks, output }: { projectId: string; t
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();
+  const [limit, setLimit] = useState(TASKS_SHOWN);
   if (tasks.length === 0) {
     return (
       <Empty
@@ -43,7 +44,7 @@ export function TerminalTab({ projectId, tasks, output }: { projectId: string; t
   }
   const sorted = newestFirst(tasks);
   const days: { day: string; tasks: Task[] }[] = [];
-  for (const task of sorted) {
+  for (const task of sorted.slice(0, limit)) {
     const day = localDay(task.createdAt);
     if (days.at(-1)?.day === day) days.at(-1)!.tasks.push(task);
     else days.push({ day, tasks: [task] });
@@ -56,11 +57,29 @@ export function TerminalTab({ projectId, tasks, output }: { projectId: string; t
             {dayLabel(t, locale, dayTasks[0]!.createdAt)}
           </Text>
           {dayTasks.map((task) => (
-            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? NO_LINES} latest={task.id === sorted[0]!.id} />
+            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id]} latest={task.id === sorted[0]!.id} />
           ))}
         </View>
       ))}
+      <EarlierTasks hidden={sorted.length - limit} onShow={() => setLimit(limit + TASKS_SHOWN)} />
     </ScrollView>
+  );
+}
+
+/**
+ * How many tasks a tab draws at first, newest first; a long thread has hundreds of turns, and this
+ * is no virtualized list.
+ */
+const TASKS_SHOWN = 30;
+
+function EarlierTasks({ hidden, onShow }: { hidden: number; onShow: () => void }) {
+  const styles = useStyles();
+  const t = useT();
+  if (hidden <= 0) return null;
+  return (
+    <Pressable accessibilityRole="button" onPress={onShow} hitSlop={6} style={styles.earlier}>
+      <Text style={styles.link}>{t("tasks.earlierTasks", { count: Math.min(hidden, TASKS_SHOWN) })}</Text>
+    </Pressable>
   );
 }
 
@@ -69,6 +88,7 @@ export function ChangesTab({ tasks }: { tasks: Task[] }) {
   const colors = useColors();
   const styles = useStyles();
   const t = useT();
+  const [limit, setLimit] = useState(TASKS_SHOWN);
   if (tasks.length === 0) {
     return (
       <Empty
@@ -90,7 +110,7 @@ export function ChangesTab({ tasks }: { tasks: Task[] }) {
   }
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      {[...finished].reverse().map((task) => (
+      {[...finished].reverse().slice(0, limit).map((task) => (
         <View key={task.id} style={styles.card}>
           <View style={styles.head}>
             <StatusIcon status={task.status} />
@@ -106,6 +126,7 @@ export function ChangesTab({ tasks }: { tasks: Task[] }) {
           )}
         </View>
       ))}
+      <EarlierTasks hidden={finished.length - limit} onShow={() => setLimit(limit + TASKS_SHOWN)} />
     </ScrollView>
   );
 }
@@ -129,7 +150,29 @@ function PullRequestLink({ url }: { url: string }) {
 
 const NO_LINES: TerminalLine[] = [];
 
-const TaskRow = memo(function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: Task; lines: TerminalLine[]; latest: boolean }) {
+/**
+ * A task's output fetched the first time it is opened: the task list brings only the open tasks'
+ * output (the running ones and the newest), since a long thread's turns together run to tens of MB.
+ */
+function useTaskLog(projectId: string, task: Task, wanted: boolean): TerminalLine[] | null {
+  const { api } = useSession();
+  const [log, setLog] = useState<TerminalLine[] | null>(null);
+  useEffect(() => {
+    if (!wanted || log) return;
+    let current = true;
+    api.taskLog(projectId, task.threadId, task.id).then(
+      (lines) => current && setLog(lines),
+      () => current && setLog(NO_LINES),
+    );
+    return () => {
+      current = false;
+    };
+  }, [wanted, log, api, projectId, task.threadId, task.id]);
+  return log;
+}
+
+/** `lines`: the task's output held in the project's state; absent when it was not fetched yet. */
+const TaskRow = memo(function TaskRow({ projectId, task, lines: held, latest }: { projectId: string; task: Task; lines?: TerminalLine[]; latest: boolean }) {
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();
@@ -142,6 +185,8 @@ const TaskRow = memo(function TaskRow({ projectId, task, lines, latest }: { proj
   useEffect(() => {
     if (running) setOpen(true);
   }, [running]);
+  const fetched = useTaskLog(projectId, task, open && !held);
+  const lines = held ?? fetched ?? NO_LINES;
   const started = Date.parse(task.createdAt);
   const total = (task.finishedAt ? Date.parse(task.finishedAt) : now) - started;
   const lastAt = lines.findLast((l) => l.at !== undefined)?.at ?? started;
@@ -219,7 +264,7 @@ const TaskRow = memo(function TaskRow({ projectId, task, lines, latest }: { proj
           </Pressable>
         </View>
       )}
-      {open && <Terminal lines={shown} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
+      {open && <Terminal lines={shown} loading={!held && !fetched} end={task.finishedAt ? Date.parse(task.finishedAt) : now} />}
       {quietMs > QUIET_MS && <Text style={styles.note}>{t("tasks.quiet", { time: dur(quietMs) })}</Text>}
     </View>
   );
@@ -263,7 +308,7 @@ function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
  */
 const TERMINAL_LINES = 150;
 
-function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
+function Terminal({ lines, loading, end }: { lines: TerminalLine[]; loading: boolean; end: number }) {
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();
@@ -287,7 +332,9 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
       scrollEventThrottle={100}
       onContentSizeChange={() => pinned.current && scroll.current?.scrollToEnd({ animated: false })}
     >
-      {lines.length === 0 && <Text style={[styles.out, { color: colors.subtle }]}>{t("tasks.waiting")}</Text>}
+      {lines.length === 0 && (
+        <Text style={[styles.out, { color: colors.subtle }]}>{loading ? `${t("common.loading")}…` : t("tasks.waiting")}</Text>
+      )}
       {from > 0 && (
         <Pressable accessibilityRole="button" onPress={() => setLimit(limit + TERMINAL_LINES)} hitSlop={6} style={styles.earlier}>
           <Text style={styles.more}>{t("tasks.earlierLines", { count: Math.min(from, TERMINAL_LINES) })}</Text>

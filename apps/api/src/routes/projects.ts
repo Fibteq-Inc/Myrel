@@ -497,7 +497,15 @@ export const projectRoutes = new Hono<AppEnv>()
     const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
     if (!thread) return c.json({ error: "not_found" }, 404);
     const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
-    return c.json({ tasks: await agent.getTasks() });
+    return c.json({ tasks: await agent.getTaskList() });
+  })
+  // One task's terminal output, fetched when it is opened in the Terminal tab.
+  .get("/:id/threads/:threadId/tasks/:taskId/log", async (c) => {
+    const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
+    if (!thread) return c.json({ error: "not_found" }, 404);
+    const agent = await getAgentByName(c.env.THREAD_AGENT, thread);
+    const log = await agent.getTaskLog(c.req.param("taskId"));
+    return log ? c.json({ log }) : c.json({ error: "not_found" }, 404);
   })
   // Pull requests the thread's tasks opened, with their live state.
   .get("/:id/threads/:threadId/pull-requests", async (c) => {

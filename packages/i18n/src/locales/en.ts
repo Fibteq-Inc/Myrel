@@ -1392,6 +1392,7 @@ export const en = {
   "tasks.subagentStatusFailed": "Failed",
   "tasks.subagentStatusStopped": "Stopped",
   "tasks.subagentFilter": "Showing only {name}'s lines",
+  "tasks.earlierTasks": { one: "Show 1 earlier task", other: "Show {count} earlier tasks" },
   "tasks.earlierLines": { one: "Show 1 earlier line", other: "Show {count} earlier lines" },
   "tasks.showAllLines": "Show all lines",
   "tasks.showMore": "Show more",

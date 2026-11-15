@@ -127,7 +127,8 @@ export function foldPullRequests(prs: PullRequest[]): { shown: PullRequest[]; fo
 export const threadTasks = (s: ProjectState, threadId: string) =>
   Object.values(s.tasks)
     .filter((t) => t.threadId === threadId)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // ISO times sort as plain strings; localeCompare is slow on Android's Hermes and this runs on every live event.
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
 
 export function applyMessage(state: ProjectState, message: Message): ProjectState {
   return applyMessages(state, [message]);
