@@ -77,6 +77,7 @@ export function toPullRequest(row: Row): PullRequest {
     additions: row.additions,
     deletions: row.deletions,
     changedFiles: row.changedFiles,
+    createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -295,9 +296,42 @@ export async function pullFiles(env: PullsEnv, projectId: string, threadId: stri
       patch: fits ? f.patch! : null,
     };
   });
-  const result: PullFiles = { files, truncated: (row.changedFiles ?? 0) > files.length || raw.length === FILES_PAGE * FILES_PAGES };
+  const result: PullFiles = {
+    files,
+    truncated: (row.changedFiles ?? 0) > files.length || raw.length === FILES_PAGE * FILES_PAGES,
+    nextPage: null,
+  };
   await cache.put(key, Response.json(result, { headers: { "cache-control": "max-age=604800" } }));
   return result;
+}
+
+/** A page of files holds at most this many, and stops early once its diffs reach PAGE_PATCHES characters. */
+export const PAGE_FILES = 50;
+export const PAGE_PATCHES = 200_000;
+
+/**
+ * One page (from 1) of a pull request's files, so a phone opening a big one fetches and draws
+ * a screenful at a time. Pages are cut the same way on every call for the same files, so the
+ * cached answer pages consistently. A page past the end is empty.
+ */
+export function pageOfFiles(all: PullFiles, page: number): PullFiles {
+  let start = 0;
+  for (let n = 1; start < all.files.length; n++) {
+    let end = start;
+    let size = 0;
+    while (end < all.files.length && end - start < PAGE_FILES) {
+      const patch = all.files[end]!.patch?.length ?? 0;
+      if (end > start && size + patch > PAGE_PATCHES) break;
+      size += patch;
+      end++;
+    }
+    if (n === page) {
+      const more = end < all.files.length;
+      return { files: all.files.slice(start, end), truncated: !more && all.truncated, nextPage: more ? page + 1 : null };
+    }
+    start = end;
+  }
+  return { files: [], truncated: all.truncated, nextPage: null };
 }
 
 // --- Merging ---

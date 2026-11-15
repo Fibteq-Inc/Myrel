@@ -1,4 +1,4 @@
-import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullFiles, type PullMergeState, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
+import { type GithubRepo, type GithubStatus, type Project, type ProjectRepo, type PullFile, type PullFiles, type PullMergeState, type PullRequest, RUNNER_PROTOCOL_VERSION, type ServerEvent, ServerToRunner } from "@myrel/protocol";
 import { getAgentByName } from "agents";
 import { runInDurableObject, env as testEnv } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -8,7 +8,7 @@ import type { ThreadAgent } from "../src/agents/thread-agent";
 import { listRepoFiles, readRepoFile } from "../src/github/files";
 import { projectGithubSecrets } from "../src/sandbox/backend";
 import { attributionBlock, withAttribution } from "../src/github/attribution";
-import { closePullRequest, deletePullBranch, listPullRequests, openPullRequest, trackPullRequest } from "../src/github/pulls";
+import { closePullRequest, deletePullBranch, listPullRequests, openPullRequest, PAGE_FILES, PAGE_PATCHES, pageOfFiles, trackPullRequest } from "../src/github/pulls";
 import { githubLogin, projectRepoToken } from "../src/github/store";
 import { safeReturnTo, signState, verifyState } from "../src/github/state";
 import { fakeGithub, INSTALLATION_TOKEN, OTHER_INSTALLATION_TOKEN } from "./fake-github";
@@ -79,6 +79,32 @@ describe("github helpers", () => {
     expect(payload.iss).toBe("1234");
     expect(env.GITHUB_APP_PRIVATE_KEY).toContain("BEGIN RSA PRIVATE KEY");
     expect(pemToPkcs8(env.GITHUB_APP_PRIVATE_KEY!).byteLength).toBeGreaterThan(1000);
+  });
+});
+
+describe("pull request file pages", () => {
+  const file = (path: string, patch: number | null): PullFile => ({
+    path,
+    previousPath: null,
+    status: "modified",
+    additions: 1,
+    deletions: 0,
+    patch: patch === null ? null : "+".repeat(patch),
+  });
+
+  it("cuts pages by file count and by diff size, the same way every time", () => {
+    const all: PullFiles = { files: Array.from({ length: PAGE_FILES + 5 }, (_, i) => file(`f${i}`, null)), truncated: true, nextPage: null };
+    expect(pageOfFiles(all, 1)).toMatchObject({ nextPage: 2, truncated: false });
+    expect(pageOfFiles(all, 1).files).toHaveLength(PAGE_FILES);
+    expect(pageOfFiles(all, 2)).toMatchObject({ nextPage: null, truncated: true });
+    expect(pageOfFiles(all, 2).files.map((f) => f.path)).toEqual(["f50", "f51", "f52", "f53", "f54"]);
+
+    // Big diffs end a page early, but a page always holds at least one file.
+    const heavy: PullFiles = { files: [file("a", PAGE_PATCHES - 10), file("b", 20), file("c", PAGE_PATCHES * 2)], truncated: false, nextPage: null };
+    expect(pageOfFiles(heavy, 1).files.map((f) => f.path)).toEqual(["a"]);
+    expect(pageOfFiles(heavy, 2).files.map((f) => f.path)).toEqual(["b"]);
+    expect(pageOfFiles(heavy, 3)).toEqual({ files: [heavy.files[2]], truncated: false, nextPage: null });
+    expect(pageOfFiles(heavy, 4).files).toEqual([]);
   });
 });
 
@@ -730,6 +756,13 @@ describe("pull requests", () => {
     const before = asked();
     expect(((await (await api(path, { token })).json()) as PullFiles).files).toHaveLength(3);
     expect(asked()).toBe(before);
+
+    // Asked in pages, the same files come a page at a time; a page past the end is empty.
+    const first = (await (await api(`${path}&page=1`, { token })).json()) as PullFiles;
+    expect(first).toMatchObject({ nextPage: null, truncated: false });
+    expect(first.files).toHaveLength(3);
+    expect((await (await api(`${path}&page=2`, { token })).json()) as PullFiles).toEqual({ files: [], truncated: false, nextPage: null });
+    expect((await api(`${path}&page=0`, { token })).status).toBe(404);
 
     // Another thread's pull request, or one in another repository, is not found.
     expect((await api(path.replace("repo=acme/app", "repo=acme/docs"), { token })).status).toBe(404);

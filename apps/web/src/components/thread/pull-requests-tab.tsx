@@ -1,8 +1,9 @@
+import { newestPullRequestsFirst, patchPreview, PULL_REQUESTS_PAGE } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { PullFile, PullRequest } from "@myrel/protocol";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ExternalLink, LoaderCircle } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PullRequestMeta, usePullRequestState } from "../chat/pull-request-card";
 import { api } from "../../lib/api";
 import { CodeTokens, lineClass, useCodeLines } from "../../lib/highlight";
@@ -10,29 +11,35 @@ import { cn } from "../../lib/ui";
 import { MergeButton } from "./merge-button";
 
 /**
- * The thread's pull requests and what each changes. On a wide panel the list
- * sits on the left and the picked one's files and diffs on the right; on a
- * narrow one the picked row opens in place.
+ * The thread's pull requests and what each changes, the newest first. On a wide
+ * panel the list sits on the left and the picked one's files and diffs on the
+ * right; on a narrow one the picked row opens in place. A long list, a long file
+ * list and a long diff each show their start and load the rest on a click.
  */
 export function PullRequestsTab({
   projectId,
   threadId,
-  pullRequests,
+  pullRequests: given,
 }: {
   projectId: string;
   threadId: string;
   pullRequests: PullRequest[];
 }) {
   const t = useT();
+  const pullRequests = useMemo(() => newestPullRequestsFirst(given), [given]);
   // The newest open one is picked first, else the newest.
-  const first = [...pullRequests].reverse().find((pr) => pr.state === "open") ?? pullRequests.at(-1);
+  const first = pullRequests.find((pr) => pr.state === "open") ?? pullRequests[0];
   const [picked, setPicked] = useState<string | null>(first?.url ?? null);
+  const [limit, setLimit] = useState(PULL_REQUESTS_PAGE);
   const current = pullRequests.find((pr) => pr.url === picked);
+  // The picked one stays listed even when it is older than the first page.
+  const shown = pullRequests.slice(0, Math.max(limit, current ? pullRequests.indexOf(current) + 1 : 0));
+  const older = pullRequests.length - shown.length;
   return (
     <div className="@container h-full">
       <div className="grid min-h-full @[720px]:h-full @[720px]:grid-cols-[minmax(260px,2fr)_3fr]">
         <ul className="flex min-w-0 flex-col gap-2 p-4 @[720px]:overflow-y-auto">
-          {pullRequests.map((pr) => {
+          {shown.map((pr) => {
             const open = pr.url === picked;
             return (
               <li key={pr.url} className={cn("overflow-hidden rounded-xl border bg-raised", open ? "border-edge @[720px]:border-accent" : "border-card")}>
@@ -45,6 +52,17 @@ export function PullRequestsTab({
               </li>
             );
           })}
+          {older > 0 && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setLimit(shown.length + PULL_REQUESTS_PAGE)}
+                className="w-full rounded-xl border border-dashed border-edge px-3 py-2 text-[13px] text-subtle hover:bg-hover hover:text-fg"
+              >
+                {t("pr.older", { count: Math.min(older, PULL_REQUESTS_PAGE) })}
+              </button>
+            </li>
+          )}
         </ul>
         <section className="hidden min-w-0 border-l border-line @[720px]:block @[720px]:overflow-y-auto">
           {current ? (
@@ -95,11 +113,16 @@ function PullRequestDetail({
 }) {
   const t = useT();
   // A new commit moves updatedAt; the server answers from its cache while the commit stays the same.
-  const { data, isPending, error } = useQuery({
+  // Files come a page at a time, so a huge pull request opens with its first files only.
+  const { data, isPending, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ["pullFiles", projectId, threadId, pr.repo, pr.number, pr.updatedAt],
-    queryFn: () => api.pullRequestFiles(projectId, threadId, pr.repo, pr.number),
+    queryFn: ({ pageParam }) => api.pullRequestFiles(projectId, threadId, pr.repo, pr.number, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (last) => last.nextPage ?? undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
+  const files = data?.pages.flatMap((page) => page.files) ?? [];
+  const truncated = !hasNextPage && !!data?.pages.at(-1)?.truncated;
   return (
     <div className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -132,11 +155,22 @@ function PullRequestDetail({
       ) : (
         <>
           <ul className="flex flex-col overflow-hidden rounded-lg border border-line">
-            {data.files.map((file) => (
+            {files.map((file) => (
               <FileRow key={file.path} file={file} />
             ))}
           </ul>
-          {data.truncated && <p className="text-xs text-subtle">{t("pr.filesTruncated", { count: data.files.length })}</p>}
+          {hasNextPage && (
+            <button
+              type="button"
+              disabled={isFetchingNextPage}
+              onClick={() => void fetchNextPage()}
+              className="flex items-center justify-center gap-2 self-start rounded-lg border border-edge bg-panel px-2.5 py-1 text-xs text-fg hover:bg-hover disabled:opacity-60"
+            >
+              {isFetchingNextPage && <LoaderCircle size={12} className="animate-spin" aria-hidden="true" />}
+              {t("pr.moreFiles")}
+            </button>
+          )}
+          {truncated && <p className="text-xs text-subtle">{t("pr.filesTruncated", { count: files.length })}</p>}
         </>
       )}
     </div>
@@ -173,9 +207,13 @@ function FileRow({ file }: { file: PullFile }) {
   );
 }
 
-/** A file's diff hunks, colored like a diff. */
+/** A file's diff hunks, colored like a diff; a long one shows its start until asked for all of it. */
 function Patch({ patch }: { patch: string }) {
-  const lines = useCodeLines(patch, "diff");
+  const t = useT();
+  const [whole, setWhole] = useState(false);
+  const preview = useMemo(() => patchPreview(patch), [patch]);
+  const text = whole ? patch : preview.text;
+  const lines = useCodeLines(text, "diff");
   return (
     <pre className="overflow-x-auto border-t border-line bg-panel py-1.5 font-mono text-[11.5px] leading-[1.55] text-body">
       {lines ? (
@@ -186,7 +224,16 @@ function Patch({ patch }: { patch: string }) {
           </div>
         ))
       ) : (
-        <div className="px-3">{patch}</div>
+        <div className="px-3">{text}</div>
+      )}
+      {text !== patch && (
+        <button
+          type="button"
+          onClick={() => setWhole(true)}
+          className="sticky left-0 mx-3 mt-1 rounded-md border border-edge bg-raised px-2 py-0.5 font-sans text-xs text-fg hover:bg-hover"
+        >
+          {t("pr.wholeDiff", { count: preview.lines })}
+        </button>
       )}
     </pre>
   );
