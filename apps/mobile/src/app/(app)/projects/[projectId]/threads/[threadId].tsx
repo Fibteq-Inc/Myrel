@@ -1,4 +1,5 @@
 import {
+  compareIso,
   conversationState,
   findMessage,
   threadCli,
@@ -97,7 +98,7 @@ export default function ThreadScreen() {
     const attached = new Set(messages.flatMap((m) => m.artifacts?.map((a) => a.artifactId) ?? []));
     return Object.values(state.artifacts)
       .filter((a) => a.threadId === threadId || attached.has(a.id))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      .sort((a, b) => compareIso(b.updatedAt, a.updatedAt));
   }, [state.artifacts, messages, threadId]);
   // Cloud tasks save their work in the thread's workspace; tasks on a computer work in its own folder.
   const sandbox = tasks.some((task) => task.backend === "sandbox");

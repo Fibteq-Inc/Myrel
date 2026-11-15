@@ -14,6 +14,7 @@ import {
   type Thread,
   type ThreadSummary,
 } from "@myrel/protocol";
+import { compareIso } from "./tasks";
 
 /**
  * Client-side view of a project's live channel. Pure functions so web and
@@ -96,7 +97,7 @@ export const threadPullRequests = (s: ProjectState, threadId: string) =>
  * Ones without a start time (from an older server) keep their order, reversed, after the rest.
  */
 export const newestPullRequestsFirst = (prs: PullRequest[]) =>
-  [...prs].reverse().sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  [...prs].reverse().sort((a, b) => compareIso(b.createdAt ?? "", a.createdAt ?? ""));
 
 /** The PR tab shows this many pull requests at first, and this many more on each "show older". */
 export const PULL_REQUESTS_PAGE = 10;
@@ -119,7 +120,7 @@ export function foldPullRequests(prs: PullRequest[]): { shown: PullRequest[]; fo
   if (prs.length <= 2) return { shown: prs, folded: [] };
   const open = prs.filter((pr) => pr.state === "open");
   const keep = new Set(
-    open.length ? open : [prs.reduce((a, b) => (b.updatedAt.localeCompare(a.updatedAt) >= 0 ? b : a))],
+    open.length ? open : [prs.reduce((a, b) => (compareIso(b.updatedAt, a.updatedAt) >= 0 ? b : a))],
   );
   return { shown: prs.filter((pr) => keep.has(pr)), folded: prs.filter((pr) => !keep.has(pr)) };
 }
@@ -127,8 +128,7 @@ export function foldPullRequests(prs: PullRequest[]): { shown: PullRequest[]; fo
 export const threadTasks = (s: ProjectState, threadId: string) =>
   Object.values(s.tasks)
     .filter((t) => t.threadId === threadId)
-    // ISO times sort as plain strings; localeCompare is slow on Android's Hermes and this runs on every live event.
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    .sort((a, b) => compareIso(a.createdAt, b.createdAt));
 
 export function applyMessage(state: ProjectState, message: Message): ProjectState {
   return applyMessages(state, [message]);
@@ -256,7 +256,7 @@ function addReactions(current: Record<string, Reaction[]>, added: Reaction[]) {
 
 /** The project's artifacts, most recently updated first (the Library). */
 export const artifactList = (s: ProjectState) =>
-  Object.values(s.artifacts).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  Object.values(s.artifacts).sort((a, b) => compareIso(b.updatedAt, a.updatedAt));
 
 const EMPTY: Message[] = [];
 const byThreadCache = new WeakMap<Message[], Map<string | null, Message[]>>();
@@ -331,7 +331,7 @@ export function threadReplyCount(s: ProjectState, threadId: string): number {
  */
 export function threadChildren(s: ProjectState): Map<string, Thread[]> {
   const out = new Map<string, Thread[]>();
-  for (const t of Object.values(s.threads).sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+  for (const t of Object.values(s.threads).sort((a, b) => compareIso(a.createdAt, b.createdAt))) {
     if (!t.parentId) continue;
     out.set(t.parentId, [...(out.get(t.parentId) ?? []), t]);
   }

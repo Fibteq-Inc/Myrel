@@ -1,4 +1,4 @@
-import { threadChildren, threadReplyCount } from "@myrel/client";
+import { compareIso, threadChildren, threadReplyCount } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import type { Thread } from "@myrel/protocol";
 import { type Href, useRouter } from "expo-router";
@@ -27,7 +27,7 @@ export function ThreadsTab() {
   const sections = useMemo(() => {
     const all = Object.values(state.threads)
       .filter((th) => !th.parentId || !state.threads[th.parentId])
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      .sort((a, b) => compareIso(b.updatedAt, a.updatedAt));
     return [
       { key: "open", title: t("threads.open"), data: all.filter((th) => !th.resolved) },
       { key: "resolved", title: t("sidebar.resolved"), data: all.filter((th) => th.resolved) },
