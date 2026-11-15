@@ -2,7 +2,7 @@ import { useT } from "@myrel/i18n/react";
 import { type Artifact, hiddenByBlock, type Message, parsePlanUpdate, planChecklist, type Reaction } from "@myrel/protocol";
 import * as Haptics from "expo-haptics";
 import { ArrowDown } from "lucide-react-native";
-import { type ComponentRef, memo, type ReactNode, type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentRef, memo, type ReactNode, type Ref, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { type DecisionAnswer, type DecisionPick, decisionState } from "../lib/decision";
@@ -100,7 +100,12 @@ export function Conversation({
   // Each card has its own answer; a tap on a card is shown on the card itself, not again as a bubble.
   const { answers, picks } = useDecisions(messages);
   // Inverted list: index 0 sits at the bottom, so the newest message comes first.
-  const data = useMemo(() => (loading ? [] : [...messages].reverse()), [loading, messages]);
+  const all = useMemo(() => (loading ? NO_MESSAGES : [...messages].reverse()), [loading, messages]);
+  // The messages are drawn as a transition React can pause for a tap: opening a long thread drew its
+  // first page in one go, and the screen took no taps (its tabs, say) until that was done. Until the
+  // first draw lands, the placeholder shows.
+  const data = useDeferredValue(all, NO_MESSAGES);
+  const drawing = loading || (data.length === 0 && all.length > 0);
   const list = useRef<FlatList<Message>>(null);
   // A message the person just sent brings them to the newest one even when they had scrolled up.
   const newest = data[0];
@@ -123,7 +128,7 @@ export function Conversation({
   }, []);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const loadEarlier = () => {
-    if (loading || !hasEarlier || loadingEarlier || !onLoadEarlier) return;
+    if (drawing || !hasEarlier || loadingEarlier || !onLoadEarlier) return;
     setLoadingEarlier(true);
     onLoadEarlier()
       .catch(() => {})
@@ -167,6 +172,9 @@ export function Conversation({
             // Draws about four screens of messages around the one in view instead of ten: a thread opens
             // with a page of 60 and each message is markdown, so the default drew the whole page at once.
             windowSize={WINDOW}
+            // Then a few messages at a time, so taps go through between the steps.
+            initialNumToRender={FIRST}
+            maxToRenderPerBatch={BATCH}
             contentContainerStyle={styles.list}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
@@ -180,14 +188,14 @@ export function Conversation({
             onEndReached={loadEarlier}
             onEndReachedThreshold={0.5}
             ListFooterComponent={
-              hasEarlier && !loading ? (
+              hasEarlier && !drawing ? (
                 <View style={styles.earlier}>
                   <ActivityIndicator color={colors.subtle} />
                 </View>
               ) : undefined
             }
             ListEmptyComponent={
-              loading ? (
+              drawing ? (
                 <View style={styles.loading}>
                   <ChatSkeleton />
                 </View>
@@ -346,6 +354,12 @@ const FOLLOW = 80;
 
 /** How many screens of messages the list keeps drawn, the one in view included (FlatList's default is 21). */
 const WINDOW = 9;
+
+/** Messages drawn first (FlatList's default is 10), then per step (default 10): a long agent message is a lot of markdown. */
+const FIRST = 6;
+const BATCH = 3;
+
+const NO_MESSAGES: Message[] = [];
 
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({

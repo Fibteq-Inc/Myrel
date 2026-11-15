@@ -14,7 +14,7 @@ import { Ban, CircleAlert, FileImage, Paperclip, Pencil } from "lucide-react-nat
 import { type ReactNode, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { fileKind } from "../lib/files";
-import { surelyLong } from "../lib/fold";
+import { foldedStart, surelyLong } from "../lib/fold";
 import { formatBytes } from "../lib/format";
 import { makeStyles, radius, useColors, useTheme } from "../theme";
 import { ArtifactCards } from "./artifact-card";
@@ -124,7 +124,7 @@ export function MessageView({
                 onAccessibilityAction={onLongPress}
               >
                 <FoldIfLong body={message.body}>
-                  <MessageMarkdown body={message.body} decision={decision} onLink={onLink} selectable={!onLongPress} />
+                  {(body) => <MessageMarkdown body={body} decision={decision} onLink={onLink} selectable={!onLongPress} />}
                 </FoldIfLong>
               </Pressable>
             )
@@ -277,14 +277,19 @@ function PersonMessage({
  * Agent replies fold later than people's messages, and never when they carry
  * a decision card: the card sits at the end and must stay in reach.
  */
-function FoldIfLong({ body, children }: { body: string; children: ReactNode }) {
-  if (body.includes("```" + DECISION_LANG)) return children;
+/** `children` draws the body it is given: while a surely long message is folded, only its start. */
+function FoldIfLong({ body, children }: { body: string; children: (body: string) => ReactNode }) {
+  if (body.includes("```" + DECISION_LANG)) return children(body);
+  const long = surelyLong(body, FOLD_LINES);
   return (
-    <Collapsible height={MARKDOWN_LINE * 24} long={surelyLong(body, 24)}>
-      {children}
+    <Collapsible height={MARKDOWN_LINE * FOLD_LINES} long={long}>
+      {(folded) => children(folded && long ? foldedStart(body, FOLD_LINES) : body)}
     </Collapsible>
   );
 }
+
+/** Lines an agent message shows before it folds. */
+const FOLD_LINES = 24;
 
 /** Files on a message, as chips that open the file's preview, like the web's. */
 function Attachments({ projectId, attachments }: { projectId: string; attachments?: Attachment[] }) {

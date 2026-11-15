@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { appPage } from "../src/lib/app-page";
 import { chosenOption, decisionState, parseDecision } from "../src/lib/decision";
 import { dataUrlBase64, displayName, fileKind } from "../src/lib/files";
-import { surelyLong } from "../src/lib/fold";
+import { foldedStart, surelyLong } from "../src/lib/fold";
 import { notificationNavigation, notificationPath } from "../src/lib/push-target";
 import { unwrapHref, wrapHref } from "../src/lib/raw-href";
 import { secureKey } from "../src/lib/secure-key";
@@ -111,6 +111,16 @@ describe("surelyLong", () => {
     expect(surelyLong("line\n".repeat(15), 10)).toBe(false);
     expect(surelyLong("line\n".repeat(25), 10)).toBe(true);
     expect(surelyLong("a".repeat(45 * 21), 10)).toBe(true);
+  });
+
+  it("keeps a folded message's start, itself surely long, with an open code block closed", () => {
+    expect(foldedStart("short note", 10)).toBe("short note");
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
+    const start = foldedStart(lines.join("\n"), 10);
+    expect(start).toBe(lines.slice(0, 21).join("\n"));
+    expect(surelyLong(start, 10)).toBe(true);
+    const code = ["intro", "```ts", ...lines, "```", "after"].join("\n");
+    expect(foldedStart(code, 10)).toBe(["intro", "```ts", ...lines.slice(0, 19), "```"].join("\n"));
   });
 });
 

@@ -8,7 +8,8 @@ import { makeStyles } from "../theme";
  * long message does not take over the conversation. Content only a little
  * over the limit (under `slack` times it) stays open: folding away a line or
  * two helps nobody. `long` starts it folded when the caller already knows the
- * content is long, so it does not first show in full and then jump.
+ * content is long, so it does not first show in full and then jump. `children` may be a function of
+ * whether it is folded, to draw only what shows behind the fold.
  */
 export function Collapsible({
   height,
@@ -19,7 +20,7 @@ export function Collapsible({
   height: number;
   slack?: number;
   long?: boolean;
-  children: ReactNode;
+  children: ReactNode | ((folded: boolean) => ReactNode);
 }) {
   const t = useT();
   const styles = useStyles();
@@ -33,7 +34,7 @@ export function Collapsible({
         {/* Only measure unfolded: text laid out inside the clip is cut to its height, so measuring it
             then would unfold the content, measure it long again and fold it, over and over (a flicker). */}
         <View onLayout={(e) => !folded && setMeasuredLong(e.nativeEvent.layout.height > height * slack)}>
-          {children}
+          {typeof children === "function" ? children(folded) : children}
         </View>
       </View>
       {long && (
