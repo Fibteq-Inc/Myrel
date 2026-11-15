@@ -11,7 +11,7 @@ import {
 import { getAgentByName } from "agents";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { type Author, contentTypeFor, fileKey, uploadPath, verifyFileLink } from "../agents/knowledge";
+import { type Author, contentTypeFor, fileKey, signFileLink, uploadPath, verifyFileLink } from "../agents/knowledge";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../middleware";
 import { canStoreFile } from "../extensions";
@@ -119,15 +119,41 @@ export const knowledgeRoutes = new Hono<AppEnv>()
  */
 export const fileLinkRoutes = new Hono<AppEnv>()
   .get("/:projectId", async (c) => {
+    // A folder link lists the folder's files, each with its own get link (a visual check's baseline).
+    if (c.req.query("list") !== undefined) {
+      const link = await checkLink(c, "get-folder");
+      if (!link) return c.json({ error: "invalid_link" }, 403);
+      const project = await getAgentByName(c.env.PROJECT_AGENT, link.projectId);
+      const origin = new URL(c.req.url).origin;
+      const files = (await project.listFiles(`${link.path}/`)).filter((f) => f.path.startsWith(`${link.path}/`)).slice(0, 500);
+      return c.json({
+        files: await Promise.all(
+          files.map(async (f) => ({
+            name: f.path.slice(link.path.length + 1),
+            url: await signFileLink(c.env, origin, { projectId: link.projectId, path: f.path, mode: "get", by: link.by }),
+          })),
+        ),
+      });
+    }
     const link = await checkLink(c, "get");
     return link ? serve(c, link.projectId, link.path) : c.json({ error: "invalid_link" }, 403);
   })
   .put("/:projectId", async (c) => {
+    // A folder link (a visual check's results) takes any file under its folder, named by `name`.
+    if (c.req.query("name") !== undefined) {
+      const link = await checkLink(c, "put-folder");
+      const name = c.req.query("name") ?? "";
+      const path = link ? `${link.path}/${name}` : null;
+      if (!link || !path || name.split("/").length > 2 || name.split("/").some((p) => !p || p === "." || p === "..") || !isValidFilePath(path)) {
+        return c.json({ error: "invalid_link" }, 403);
+      }
+      return store(c, link.projectId, path, { kind: "agent", id: link.by });
+    }
     const link = await checkLink(c, "put");
     return link ? store(c, link.projectId, link.path, { kind: "agent", id: link.by }) : c.json({ error: "invalid_link" }, 403);
   });
 
-async function checkLink(c: Ctx, mode: "get" | "put") {
+async function checkLink(c: Ctx, mode: "get" | "put" | "put-folder" | "get-folder") {
   const projectId = c.req.param("projectId")!;
   const path = queryPath(c);
   const ok =

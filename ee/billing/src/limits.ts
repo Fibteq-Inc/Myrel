@@ -1,6 +1,7 @@
 import type { Extensions, LimitCheck } from "../../../apps/api/src/extensions";
 import { DEFAULT_PRICES, parsePrices, priceFor } from "../../../apps/api/src/llm/pricing";
 import { userVerified } from "../../../apps/api/src/verification";
+import { endBilling } from "./account";
 import {
   activeSandboxes,
   freeBudgetMicros,
@@ -37,7 +38,7 @@ async function unpricedModel(env: Env, projectId: string): Promise<string | null
 export const billingExtensions: Extensions = {
   billing: true,
   // Fibteq's policies, served by the web app (apps/web/public). Change the version with their effective date.
-  legal: { terms: "/terms/", privacy: "/privacy/", version: "2026-10-20" },
+  legal: { terms: "/terms/", privacy: "/privacy/", version: "2026-11-09" },
 
   async canCreateProject(env, userId) {
     const standing = await standingOf(env, userId);
@@ -142,6 +143,9 @@ export const billingExtensions: Extensions = {
     }
     return OK;
   },
+
+  // A deleted account is never charged again: its web subscription is cancelled first.
+  beforeDeleteAccount: endBilling,
 };
 
 /**

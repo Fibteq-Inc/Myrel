@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Broken page</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: #fff; color: #222; }
+  .hero { width: 720px; padding: 24px; background: #eef; }            /* fixed width: scrolls sideways on a phone */
+  .faint { color: #c8c8c8; }                                          /* low contrast */
+  .cta { position: relative; margin: 24px; }
+  .banner { position: absolute; top: 0; left: 0; width: 260px; height: 60px; background: rgba(240, 200, 80, 0.95); }
+  .label { position: absolute; top: 140px; left: 24px; }
+  .label2 { position: absolute; top: 146px; left: 30px; }
+  .tiny { width: 14px; height: 14px; padding: 0; }
+  .box { width: 120px; overflow: hidden; white-space: nowrap; }
+  .bar { overflow: hidden; }                                          /* a toolbar too wide for a phone, its end hidden */
+  .row { display: flex; justify-content: space-between; width: 420px; }
+  .row button { width: 80px; min-height: 44px; }
+</style>
+</head>
+<body>
+<div class="hero"><h1>Wide hero</h1><p class="faint">This text is too faint to read comfortably.</p></div>
+<div class="cta"><button type="button">Buy now</button><div class="banner">Sale!</div></div>
+<span class="label">Overlapping text one</span><span class="label2">Overlapping text two</span>
+<div style="margin-top: 120px"><button class="tiny" type="button" aria-label="Close">x</button></div>
+<div class="box">A label that is far too long for its box</div>
+<div class="bar"><div class="row"><span>Toolbar</span><button type="button">Settings</button></div></div>
+<img src="missing.png" alt="Missing picture" width="80" height="80">
+<button type="button"></button>
+<script>console.error("Something went wrong while loading prices"); setTimeout(() => { throw new Error("prices is undefined"); }, 0);</script>
+</body>
+</html>

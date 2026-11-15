@@ -7,6 +7,8 @@ type ProjectContextValue = ReturnType<typeof useProject> & {
   members: Member[];
   /** Member id → display name. */
   names: Record<string, string>;
+  /** Members the signed-in person blocked: their messages are hidden. */
+  blocked: ReadonlySet<string>;
 };
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -23,7 +25,8 @@ export function ProjectProvider({
 }) {
   const live = useProject(project.id);
   const names = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m.name])), [members]);
-  return <ProjectContext.Provider value={{ ...live, project, members, names }}>{children}</ProjectContext.Provider>;
+  const blocked = useMemo(() => new Set(members.filter((m) => m.blocked).map((m) => m.id)), [members]);
+  return <ProjectContext.Provider value={{ ...live, project, members, names, blocked }}>{children}</ProjectContext.Provider>;
 }
 
 export function useProjectContext() {

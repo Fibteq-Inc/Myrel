@@ -28,4 +28,14 @@ describe("withProjectPinned", () => {
   it("leaves the list alone for an unknown project", () => {
     expect(withProjectPinned(list, "x", true)).toBe(list);
   });
+
+  it("puts an unpinned project where the server would: working first, then latest activity", () => {
+    const rest = [
+      { ...project("working", 1), activity: { working: 2, waiting: 0 }, lastActivityAt: new Date(Date.UTC(2026, 9, 2)).toISOString() },
+      { ...project("recent", 2), lastActivityAt: new Date(Date.UTC(2026, 9, 20)).toISOString() },
+      project("new", 10),
+    ];
+    const old = { ...project("pin", 3, true), lastActivityAt: new Date(Date.UTC(2026, 9, 15)).toISOString() };
+    expect(ids(withProjectPinned([old, ...rest], "pin", false))).toEqual(["working", "recent", "pin", "new"]);
+  });
 });

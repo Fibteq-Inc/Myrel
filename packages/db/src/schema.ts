@@ -29,6 +29,8 @@ export const user = sqliteTable("user", {
   onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
   /** The one-time tips (TipId in @myrel/protocol) the person has seen, as a JSON array; null: none yet. */
   tipsSeen: text("tips_seen", { mode: "json" }).$type<string[]>(),
+  /** The CLIs that may judge the visual checks of this person's projects that list none, JSON CheckModels in @myrel/protocol; null: none. */
+  checkModels: text("check_models"),
   ...timestamps,
 });
 
@@ -122,10 +124,29 @@ export const projects = sqliteTable("projects", {
   taskTarget: text("task_target").notNull().default("auto"),
   /** The CLI cloud turns run with (CloudCli in @myrel/protocol); null = OpenCode. */
   cloudCli: text("cloud_cli"),
+  /** Interface work gets a visual check by a separate evaluator thread before its pull request (off by default). */
+  visualCheck: integer("visual_check", { mode: "boolean" }).notNull().default(false),
+  /** The CLIs that may judge its visual checks, JSON CheckModels in @myrel/protocol; null: the person's own list, else any other CLI. */
+  checkModels: text("check_models"),
+  /**
+   * In a git repository, each thread works on the person's computer in its own worktree and branch (on by
+   * default). Off: threads work in the project's folder itself, one turn at a time per computer.
+   */
+  worktrees: integer("worktrees", { mode: "boolean" }).notNull().default(true),
+  /**
+   * The coordinator works with a CLI on a member's computer: JSON { mode: "cli", runnerId, cli, model,
+   * effort, account, by } (CoordinatorSettings in @myrel/protocol, without the computer's name). null: with the
+   * server's model, as always.
+   */
+  coordinator: text("coordinator"),
   /** Agents working right now (coordinator + threads), kept by ProjectAgent for the project list. */
   activeCount: integer("active_count").notNull().default(0),
   /** Open threads waiting on a person (a decision, approval or blocker), kept by ProjectAgent. */
   waitingCount: integer("waiting_count").notNull().default(0),
+  /** When an agent last started or stopped working here, kept by ProjectAgent; null = nothing since the project was made. */
+  lastActivityAt: integer("last_activity_at", { mode: "timestamp_ms" }),
+  /** Threads at work or waiting on a person, JSON LiveThread[] in @myrel/protocol, kept by ProjectAgent; null until it first syncs. */
+  liveThreads: text("live_threads"),
   ...timestamps,
 });
 
@@ -798,4 +819,59 @@ export const errorGroups = sqliteTable(
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [index("error_groups_last_seen_idx").on(t.lastSeenAt)],
+);
+
+/**
+ * Content a person reported from the apps (a message or an artifact), for the server's admins to
+ * review; each report is also emailed to them. `excerpt` is a copy of what was reported, taken when
+ * it was reported, so a later edit or delete cannot hide it. No foreign keys on the project or the
+ * content: a report outlives them. One report per person and target.
+ */
+export const contentReports = sqliteTable(
+  "content_reports",
+  {
+    /** rep_… */
+    id: text("id").primaryKey(),
+    /** Who reported it; null once their account is gone. */
+    reporterId: text("reporter_id").references(() => user.id, { onDelete: "set null" }),
+    projectId: text("project_id").notNull(),
+    threadId: text("thread_id"),
+    kind: text("kind", { enum: ["message", "artifact"] }).notNull(),
+    /** The message or artifact id. */
+    targetId: text("target_id").notNull(),
+    /** Artifacts: the version reported. */
+    version: integer("version"),
+    /** Messages: "user" (a person, `authorId` their user id), "agent" or "system". Artifacts: "agent". */
+    authorKind: text("author_kind").notNull(),
+    authorId: text("author_id").notNull(),
+    /** ReportReason in @myrel/protocol. */
+    reason: text("reason").notNull(),
+    note: text("note"),
+    /** The reported text, or the artifact's title, cut to 4000 characters. */
+    excerpt: text("excerpt").notNull(),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [
+    index("content_reports_created_idx").on(t.createdAt),
+    uniqueIndex("content_reports_once_idx").on(t.reporterId, t.kind, t.targetId),
+  ],
+);
+
+/**
+ * People a person blocked. The apps hide a blocked person's messages from the one who blocked them,
+ * in every project they share; `projectId` is where it was done, whose owners were told.
+ */
+export const userBlocks = sqliteTable(
+  "user_blocks",
+  {
+    blockerId: text("blocker_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    blockedId: text("blocked_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id"),
+    createdAt: timestamps.createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] })],
 );

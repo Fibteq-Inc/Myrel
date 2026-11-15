@@ -42,7 +42,7 @@ function turn(opts: Partial<AppServerTurnOptions> = {}) {
   const open = (thread = "thr-1") => {
     t.start();
     answer("initialize", { userAgent: "codex" });
-    answer(opts.resume ? "thread/resume" : "thread/start", { thread: { id: thread }, model: "gpt-6" });
+    answer(opts.resume ? "thread/resume" : "thread/start", { thread: { id: thread }, model: "gpt-6", approvalsReviewer: opts.approvalsReviewer ?? "user" });
     answer("turn/start", { turn: { id: "turn-1", status: "inProgress" } });
   };
   return { t, sent, state, feed, answer, open, ended: () => ended };
@@ -70,6 +70,35 @@ describe("Codex app server turn", () => {
     const { sent, open } = turn({ resume: "thr-9" });
     open("thr-9");
     expect(sent[2]).toMatchObject({ method: "thread/resume", params: { threadId: "thr-9", cwd: "/proj" } });
+  });
+
+  it.each([undefined, "thr-9"])("uses Approve for me when starting or resuming auto access (%s)", (resume) => {
+    const options = ADAPTERS.codex.appServer!({ access: "auto", dirs: ["/other"], asks: true });
+    const { sent, open, ended } = turn({ ...options, resume });
+    open();
+    expect(sent[2]).toMatchObject({
+      method: resume ? "thread/resume" : "thread/start",
+      params: { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", config: { "sandbox_workspace_write.writable_roots": ["/other"] } },
+    });
+    expect(sent[3]!.method).toBe("turn/start");
+    expect(ended()).toBe(false);
+  });
+
+  it("restores manual approvals when an auto session resumes with edit access", () => {
+    const options = ADAPTERS.codex.appServer!({ access: "edit", dirs: [], asks: true });
+    const { sent, open } = turn({ ...options, resume: "was-auto" });
+    open();
+    expect(sent[2]).toMatchObject({ method: "thread/resume", params: { approvalPolicy: "on-request", approvalsReviewer: "user" } });
+  });
+
+  it.each([undefined, "user"])("does not start work when Codex ignores auto-review (%s)", (approvalsReviewer) => {
+    const { t, sent, answer, state, ended } = turn({ approvalsReviewer: "auto_review" });
+    t.start();
+    answer("initialize", {});
+    answer("thread/start", { thread: { id: "thr-old" }, approvalsReviewer });
+    expect(sent.some((m) => m.method === "turn/start")).toBe(false);
+    expect(state).toMatchObject({ failed: true, result: expect.stringContaining("Update Codex") });
+    expect(ended()).toBe(true);
   });
 
   it("fails before any output when the session cannot be resumed, so the runner starts a new one", () => {
@@ -217,13 +246,14 @@ describe("Codex app server turn", () => {
 });
 
 describe("Codex as its app server", () => {
-  it("runs the app server's sandbox for each access, asking only where the person can answer", () => {
+  it("keeps auto sandboxed with its reviewer and routes edit approvals to the person", () => {
     const opts = (access: "read" | "edit" | "auto" | "full", asks = true) => ADAPTERS.codex.appServer!({ access, dirs: [], asks });
-    expect(opts("read")).toEqual({ sandbox: "read-only", approvalPolicy: "never" });
-    expect(opts("edit")).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request" });
-    expect(opts("auto")).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request" });
-    expect(opts("edit", false)).toEqual({ sandbox: "workspace-write", approvalPolicy: "never" });
-    expect(opts("full")).toEqual({ sandbox: "danger-full-access", approvalPolicy: "never" });
+    expect(opts("read")).toEqual({ sandbox: "read-only", approvalPolicy: "never", approvalsReviewer: "user" });
+    expect(opts("edit")).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user" });
+    expect(opts("auto")).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review" });
+    expect(opts("auto", false)).toEqual(opts("auto"));
+    expect(opts("edit", false)).toEqual({ sandbox: "workspace-write", approvalPolicy: "never", approvalsReviewer: "user" });
+    expect(opts("full")).toEqual({ sandbox: "danger-full-access", approvalPolicy: "never", approvalsReviewer: "user" });
     // Other folders go in the session config, never through a shell.
     expect(ADAPTERS.codex.appServer!({ access: "edit", dirs: ["/a b"], asks: true }).config).toEqual({ "sandbox_workspace_write.writable_roots": ["/a b"] });
   });
@@ -276,7 +306,7 @@ process.stdin.on("data", (c) => {
   for (const l of lines) {
     const m = JSON.parse(l);
     if (m.method === "initialize") send({ id: m.id, result: {} });
-    if (m.method === "thread/start") send({ id: m.id, result: { thread: { id: "thr-app" }, model: "gpt-6" } });
+    if (m.method === "thread/start") send({ id: m.id, result: { thread: { id: "thr-app" }, model: "gpt-6", approvalsReviewer: m.params.approvalsReviewer } });
     if (m.method === "turn/start") {
       send({ id: m.id, result: { turn: { id: "turn-1" } } });
       send({ method: "item/completed", params: { threadId: "thr-app", item: { type: "agentMessage", text: m.params.input[0].text + " in " + process.cwd() + " (" + JSON.stringify(args) + ")" } } });
@@ -292,9 +322,9 @@ process.stdin.on("end", () => process.exit(0));
     process.env.PATH = `${bin}:/usr/bin:/bin`;
   }
 
-  async function run(folder: string) {
+  async function run(folder: string, access: RunnerConfig["access"] = "edit") {
     const frames: RunnerToServer[] = [];
-    const config: RunnerConfig = { folders: [{ path: folder, name: "proj" }], access: "edit", worktrees: false };
+    const config: RunnerConfig = { folders: [{ path: folder, name: "proj" }], access, worktrees: false };
     const runner = new TaskRunner({ config: () => config, sessions: new SessionStore(), version: "9.9.9" });
     runner.setSender((f) => frames.push(f));
     await runner.start({ type: "task.start", taskId: "task_01JTEST0000000000000000009", threadId: "thr_01JTEST0000000000000000000", folder, cli: "codex", prompt: "fix the bug" });
@@ -314,6 +344,18 @@ process.stdin.on("end", () => process.exit(0));
   it("says a task it has no app server turn for took no message", async () => {
     const runner = new TaskRunner({ config: () => ({ folders: [], access: "edit" }), sessions: new SessionStore() });
     expect(await runner.steer("task_01JTEST0000000000000000009", "hi")).toBe(false);
+  });
+
+  it("runs auto-review without a human approval endpoint, and refuses exec fallback for auto", async () => {
+    await fakeCodex();
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    expect(await run(folder, "auto")).toMatchObject({ ok: true });
+    process.env.MYREL_CODEX_EXEC = "1";
+    expect(await run(folder, "auto")).toMatchObject({ ok: false, result: expect.stringContaining("Approve for me") });
+    delete process.env.MYREL_CODEX_EXEC;
+    await fakeCodex(false);
+    expect(await run(folder, "auto")).toMatchObject({ ok: false, result: expect.stringContaining("Approve for me") });
   });
 
   it("keeps codex exec where Codex has no app server, or when MYREL_CODEX_EXEC=1", async () => {

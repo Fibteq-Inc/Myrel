@@ -6,6 +6,9 @@
 /** An installation token in GitHub's stateless format (ghs_<app id>_<JWT>, about 520 characters). */
 export const INSTALLATION_TOKEN = `ghs_1234567_eyJhbGciOiJSUzI1NiJ9.${"eyJpbnN0YWxsYXRpb24iOjF9".repeat(18)}.${"c2lnbmF0dXJl".repeat(5)}`;
 
+/** The token of the second installation, to tell them apart. */
+export const OTHER_INSTALLATION_TOKEN = `${INSTALLATION_TOKEN}.other`;
+
 export const fakeGithub = {
   installations: [{ id: 42, account: { login: "acme", type: "Organization", avatar_url: "https://avatars.test/acme" } }],
   repos: [
@@ -31,13 +34,32 @@ export const fakeGithub = {
     string,
     { check_runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }
   >,
+  /** A check run's annotations, by check run id. */
+  annotations: {} as Record<number, { path: string; start_line: number | null; annotation_level: string; title: string | null; message: string }[]>,
+  /** GitHub Actions jobs by id (a job's id is its check run's), and the workflow runs they belong to; unlisted ones are refused as on a private repository. */
+  jobs: {} as Record<number, { run_id: number; steps: { name: string; conclusion: string | null }[] }>,
+  workflowRuns: {} as Record<number, { event: string }>,
+  /** The pull requests a commit belongs to (a merge commit: the one merged), by sha. */
+  commitPulls: {} as Record<string, { number: number; merged_at: string | null; base: { ref: string } }[]>,
+  /** A commit's parents, by sha. */
+  parents: {} as Record<string, string[]>,
   requests: [] as { method: string; url: string; body?: unknown; auth?: string }[],
+  /** A second installation ("zeta", with repo 9): off unless a test opens it, as installs are read from `installations`. */
+  otherInstallation: { id: 43, account: { login: "zeta", type: "Organization", avatar_url: "https://avatars.test/zeta" } },
+  otherRepos: [{ id: 9, full_name: "zeta/site", default_branch: "main", private: true, description: null }],
   /** The repositories of installation 42 the signed-in user can reach themselves. */
   userRepos: [7, 8],
   /** Of those, the ones they can push to; the rest they can only read. */
   userPush: [7, 8],
   /** Whether installation 42 accepted the app's workflows permission. */
   workflowsGranted: true,
+  /** Issues by "owner/name", in GitHub's REST shape, each with its `comment_list`. */
+  issues: {} as Record<string, ({ number: number; comment_list?: unknown[] } & Record<string, unknown>)[]>,
+  /** Labels a repository has, and the repositories with issues turned off (open_issues). */
+  labels: {} as Record<string, string[]>,
+  issuesOff: [] as string[],
+  /** Whether installation 42 accepted the app's issues permission. */
+  issuesGranted: true,
 };
 
 const realFetch = globalThis.fetch;
@@ -61,14 +83,27 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       .map((r) => ({ ...r, permissions: { admin: false, maintain: false, push: fakeGithub.userPush.includes(r.id), triage: true, pull: true } }));
     return Response.json({ total_count: repositories.length, repositories });
   }
+  if (url.pathname === "/user/installations/43/repositories") {
+    const repositories = fakeGithub.otherRepos.map((r) => ({ ...r, permissions: { admin: false, maintain: false, push: true, triage: true, pull: true } }));
+    return Response.json({ total_count: repositories.length, repositories });
+  }
   if (url.pathname === "/user/installations") {
     return Response.json({ total_count: fakeGithub.installations.length, installations: fakeGithub.installations });
   }
   const tokenMatch = url.pathname.match(/^\/app\/installations\/(\d+)\/access_tokens$/);
   if (tokenMatch) {
-    if (Number(tokenMatch[1]) !== 42) return new Response("{}", { status: 404 });
+    const installation = Number(tokenMatch[1]);
+    if (installation !== 42 && installation !== 43) return new Response("{}", { status: 404 });
     const ids: number[] | undefined = body?.repository_ids;
+    if (installation === 43) {
+      if (ids?.some((id) => !fakeGithub.otherRepos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
+      const repositories = ids ? fakeGithub.otherRepos.filter((r) => ids.includes(r.id)) : undefined;
+      return Response.json({ token: OTHER_INSTALLATION_TOKEN, expires_at: new Date(Date.now() + 3600_000).toISOString(), repositories });
+    }
     if (ids?.some((id) => !fakeGithub.repos.some((r) => r.id === id))) return new Response("{}", { status: 422 });
+    if (body?.permissions?.issues && !fakeGithub.issuesGranted) {
+      return Response.json({ message: "The permissions requested are not granted to this installation." }, { status: 422 });
+    }
     if (body?.permissions?.workflows && !fakeGithub.workflowsGranted) {
       return Response.json({ message: "The permissions requested are not granted to this installation." }, { status: 422 });
     }
@@ -77,6 +112,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname === "/installation/token" && method === "DELETE") return new Response(null, { status: 204 });
   if (url.pathname === "/installation/repositories") {
+    if (auth === OTHER_INSTALLATION_TOKEN) return Response.json({ total_count: fakeGithub.otherRepos.length, repositories: fakeGithub.otherRepos });
     return Response.json({ total_count: fakeGithub.repos.length, repositories: fakeGithub.repos });
   }
   const pulls = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/pulls$/);
@@ -117,7 +153,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     return Response.json({ name: decodeURIComponent(branch[3]!), protected: b.protected ?? false });
   }
-  if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) return Response.json({}, { status: 201 });
+  const commented = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)\/comments$/);
+  if (method === "POST" && commented) return Response.json({ html_url: `https://github.com/${commented[1]}/issues/${commented[2]}#issuecomment-1` }, { status: 201 });
   if (/^\/repos\/[^/]+\/[^/]+\/(issues\/\d+\/assignees|pulls\/\d+\/requested_reviewers)$/.test(url.pathname)) {
     return Response.json({}, { status: 201 });
   }
@@ -141,11 +178,24 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const ci = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/commits\/([^/]+)\/(check-runs|status)$/);
   if (ci) {
-    const { check_runs, statuses } = fakeGithub.checks[ci[1]!] ?? { check_runs: [], statuses: [] };
+    const { check_runs: all, statuses } = fakeGithub.checks[ci[1]!] ?? { check_runs: [], statuses: [] };
+    const name = url.searchParams.get("check_name");
+    const check_runs = name ? all.filter((r) => r.name === name) : all;
     if (ci[2] === "check-runs") return Response.json({ total_count: check_runs.length, check_runs });
     const state = statuses.some((s) => s.state !== "success") ? "pending" : "success";
     return Response.json({ state, total_count: statuses.length, statuses });
   }
+  const annotations = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/check-runs\/(\d+)\/annotations$/);
+  if (annotations) return Response.json(fakeGithub.annotations[Number(annotations[1])] ?? []);
+  const job = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/actions\/(jobs|runs)\/(\d+)$/);
+  if (job) {
+    const found = (job[1] === "jobs" ? fakeGithub.jobs : fakeGithub.workflowRuns)[Number(job[2])];
+    return found ? Response.json(found) : Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
+  }
+  const commitPulls = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/commits\/([^/]+)\/pulls$/);
+  if (commitPulls) return Response.json(fakeGithub.commitPulls[commitPulls[1]!] ?? []);
+  const gitCommit = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/git\/commits\/([^/]+)$/);
+  if (gitCommit) return Response.json({ sha: gitCommit[1], parents: (fakeGithub.parents[gitCommit[1]!] ?? []).map((sha) => ({ sha })) });
   const contents = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/contents\/?(.*)$/);
   if (contents) {
     const files = fakeGithub.files[contents[1]!] ?? {};
@@ -174,6 +224,45 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (body.sha && body.sha !== p.head.sha) return new Response(JSON.stringify({ message: "Head branch was modified" }), { status: 409 });
     fakeGithub.pulls[key] = { ...p, state: "closed", merged: true };
     return Response.json({ merged: true, sha: "merge-sha" });
+  }
+  const labels = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/labels$/);
+  if (labels && method === "GET") return Response.json((fakeGithub.labels[labels[1]!] ?? []).map((name) => ({ name })));
+  const issues = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+)(\/comments)?)?$/);
+  if (issues && !issues[2] && method === "POST") {
+    if (fakeGithub.issuesOff.includes(issues[1]!)) return Response.json({ message: "Issues are disabled for this repo" }, { status: 410 });
+    const all = (fakeGithub.issues[issues[1]!] ??= []);
+    const number = all.length + 100;
+    const made = {
+      ...(body as Record<string, unknown>),
+      number,
+      state: "open",
+      labels: ((body as { labels?: string[] }).labels ?? []).map((name) => ({ name })),
+      user: { login: "myrel-test[bot]", type: "Bot" },
+      author_association: "NONE",
+      created_at: "2026-11-04T10:00:00Z",
+      updated_at: "2026-11-04T10:00:00Z",
+      html_url: `https://github.com/${issues[1]!}/issues/${number}`,
+    };
+    all.push(made);
+    return Response.json(made, { status: 201 });
+  }
+  if (issues && issues[2] && !issues[3] && method === "PATCH") {
+    const all = fakeGithub.issues[issues[1]!] ?? [];
+    const index = all.findIndex((i) => i.number === Number(issues[2]));
+    if (index < 0) return new Response("{}", { status: 404 });
+    all[index] = { ...all[index]!, ...(body as object), labels: ((body as { labels?: string[] }).labels ?? (all[index]!.labels as unknown[])) as never };
+    return Response.json(all[index]);
+  }
+  if (issues && method === "GET") {
+    const all = fakeGithub.issues[issues[1]!] ?? [];
+    const strip = ({ comment_list: _, ...i }: (typeof all)[number]) => ({ ...i, comments: (_ ?? []).length });
+    if (!issues[2]) return Response.json(all.map(strip));
+    const issue = all.find((i) => i.number === Number(issues[2]));
+    if (!issue) return new Response("{}", { status: 404 });
+    if (!issues[3]) return Response.json(strip(issue));
+    const perPage = Number(url.searchParams.get("per_page") ?? 30);
+    const from = (Number(url.searchParams.get("page") ?? 1) - 1) * perPage;
+    return Response.json((issue.comment_list ?? []).slice(from, from + perPage));
   }
   const repoMatch = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)$/);
   if (repoMatch && method === "GET") {

@@ -5,7 +5,7 @@ import { type Href, useRouter } from "expo-router";
 import { ChevronRight, FileText, FolderOpen } from "lucide-react-native";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { formatBytes } from "../../lib/format";
-import { useProject } from "../../lib/project";
+import { useProjectId } from "../../lib/project";
 import { filesQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { makeStyles, radius, useColors } from "../../theme";
@@ -20,7 +20,7 @@ export function FilesTab() {
   const router = useRouter();
   const relativeTime = useRelativeTime();
   const { api, server } = useSession();
-  const { projectId } = useProject();
+  const projectId = useProjectId();
   const files = useQuery({
     queryKey: filesQueryKey(server, projectId),
     queryFn: () => api.listFiles(projectId),

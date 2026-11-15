@@ -1,6 +1,8 @@
 import { useT } from "@myrel/i18n/react";
 import {
   type CliId,
+  cliLogins,
+  type CheckModels,
   type CliModelDefaults,
   type CloudCli,
   effortsFor,
@@ -15,16 +17,20 @@ import {
 } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, SquareTerminal, Users, X } from "lucide-react";
+import { Ban, BookMarked, Folder, FolderGit2, Plug, Settings2, Sparkles, SquareTerminal, Users, X } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { Connectors } from "./connectors";
 import { PersonalInProject } from "./personal-in-project";
 import { Skills } from "./skills";
 import { SshHosts } from "./ssh-hosts";
 import { GithubRepos } from "./github-repos";
+import { useBlockMember } from "./moderation";
 import { ProjectFolders } from "./project-folders";
 import { ProjectLookPicker } from "./project-badge";
 import { ConfirmDialog } from "./ui/confirm-dialog";
+import { Switch } from "./ui/controls";
+import { EvaluatorPicker } from "./evaluator-picker";
+import { type CoordinatorDraft, CoordinatorSection, coordinatorChange, coordinatorDraft } from "./coordinator-settings";
 import { Badge, Field, List, Notice, Row, Section, Select } from "./settings";
 import {
   api,
@@ -98,7 +104,12 @@ export function ProjectSettings({
         </>
       )}
       {tab === "model" && <ModelForm projectId={projectId} canManage={canManage} />}
-      {tab === "folders" && <ProjectFolders project={project} canManage={canManage} />}
+      {tab === "folders" && (
+        <>
+          <ProjectFolders project={project} canManage={canManage} />
+          <WorktreeSetting projectId={projectId} canManage={canManage} />
+        </>
+      )}
       {tab === "github" && <GithubRepos projectId={projectId} canManage={canManage} githubResult={github} />}
       {tab === "connectors" && (
         <>
@@ -228,6 +239,36 @@ function useSaveSettings(projectId: string) {
   });
 }
 
+/**
+ * Whether the project's threads work in their own worktree on a computer (the default) or in the
+ * project's folder itself, one at a time (ProjectSettings.worktrees). A change saves.
+ */
+function WorktreeSetting({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
+  const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
+  const save = useSaveSettings(projectId);
+  // The project's computer, when it is the viewer's own: an older runner there cannot work in the folder itself.
+  const { data: workspace } = useQuery(workspaceQuery(projectId));
+  const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
+  const on = save.isPending && save.variables.worktrees !== undefined ? save.variables.worktrees : settings.worktrees;
+  return (
+    <Section title={t("projectFolders.copies")}>
+      <label className="flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium">{t("projectFolders.worktrees")}</span>
+          <span className="mt-0.5 block text-xs text-subtle">{t(on ? "projectFolders.worktreesOn" : "projectFolders.worktreesOff")}</span>
+        </span>
+        <Switch checked={on} disabled={!canManage || save.isPending} onChange={(e) => save.mutate({ worktrees: e.target.checked })} />
+      </label>
+      {!on && computer && !computer.features.includes("shared-folder") && (
+        <Notice>{t("projectFolders.worktreesUpdate", { computer: computer.name, command: "npx myrel-runner@latest update" })}</Notice>
+      )}
+      {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
+    </Section>
+  );
+}
+
 function GeneralForm({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const t = useT();
   const { data: settings } = useSuspenseQuery(projectSettingsQuery(projectId));
@@ -236,18 +277,26 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
   const [color, setColor] = useState<ProjectColor | null>(settings.color);
   const [taskTarget, setTaskTarget] = useState<TaskTarget>(settings.taskTarget);
   const [cloudCli, setCloudCli] = useState<CloudCli>(settings.cloudCli);
+  const [visualCheck, setVisualCheck] = useState(settings.visualCheck);
+  const [checkModels, setCheckModels] = useState<CheckModels>(settings.checkModels);
+  // The CLIs of the project's computer, which only its owner's list has.
+  const { data: workspace } = useQuery(workspaceQuery(projectId));
+  const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
   useEffect(() => {
     setName(settings.name);
     setIcon(settings.icon);
     setColor(settings.color);
     setTaskTarget(settings.taskTarget);
     setCloudCli(settings.cloudCli);
+    setVisualCheck(settings.visualCheck);
+    setCheckModels(settings.checkModels);
   }, [settings]);
   const save = useSaveSettings(projectId);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli });
+    if (name.trim()) save.mutate({ name: name.trim(), icon, color, taskTarget, cloudCli, visualCheck, checkModels });
   }
 
   return (
@@ -286,6 +335,23 @@ function GeneralForm({ projectId, canManage }: { projectId: string; canManage: b
         </Field>
       </Section>
 
+      <Section title={t("projectSettings.checks")} description={t("projectSettings.checksDescription")}>
+        <label className="flex items-center gap-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium">{t("projectSettings.visualCheck")}</span>
+            <span className="mt-0.5 block text-xs text-subtle">{t("projectSettings.visualCheckHint")}</span>
+          </span>
+          <Switch checked={visualCheck} disabled={!canManage} onChange={(e) => setVisualCheck(e.target.checked)} />
+        </label>
+        {visualCheck && (
+          <div className="space-y-2">
+            <p className="text-[13px] font-medium">{t("evaluator.title")}</p>
+            <p className="text-xs text-subtle">{t("evaluator.projectHint")}</p>
+            <EvaluatorPicker clis={computer?.clis ?? []} value={checkModels} onChange={setCheckModels} disabled={!canManage} />
+          </div>
+        )}
+      </Section>
+
       {canManage && <SaveBar save={save} disabled={!name.trim()} />}
     </form>
   );
@@ -301,11 +367,13 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
   const [model, setModel] = useState(settings.model ?? "");
   const [keyId, setKeyId] = useState(settings.keyId ?? "");
   const [cliModels, setCliModels] = useState<CliModelDefaults>(settings.cliModels);
+  const [coordinator, setCoordinator] = useState<CoordinatorDraft>(coordinatorDraft(settings.coordinator));
   useEffect(() => {
     setProvider(settings.provider ?? "");
     setModel(settings.model ?? "");
     setKeyId(settings.keyId ?? "");
     setCliModels(settings.cliModels);
+    setCoordinator(coordinatorDraft(settings.coordinator));
   }, [settings]);
   const save = useSaveSettings(projectId);
 
@@ -321,14 +389,25 @@ function ModelForm({ projectId, canManage }: { projectId: string; canManage: boo
     // Every CLI it ever had a default for goes along, so one set back to its own default is cleared.
     const clis = new Set([...Object.keys(settings.cliModels), ...Object.keys(cliModels)] as CliId[]);
     const nextCliModels = Object.fromEntries([...clis].map((c) => [c, cliModels[c] ?? { model: null, effort: null }]));
-    save.mutate({ provider: provider || null, model: model.trim() || null, keyId: keyId || null, cliModels: nextCliModels });
+    const nextCoordinator = coordinatorChange(settings.coordinator, coordinator);
+    save.mutate({
+      provider: provider || null,
+      model: model.trim() || null,
+      keyId: keyId || null,
+      cliModels: nextCliModels,
+      ...(nextCoordinator && { coordinator: nextCoordinator }),
+    });
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-10">
+      <CoordinatorSection projectId={projectId} saved={settings.coordinator} value={coordinator} onChange={setCoordinator} disabled={!canManage} />
+
       <Section
         title={t("projectSettings.model")}
-        description={t("projectSettings.modelDescription")}
+        description={
+          settings.coordinator.mode === "cli" ? `${t("projectSettings.modelDescription")} ${t("coordinator.modelFallback")}` : t("projectSettings.modelDescription")
+        }
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("projectSettings.provider")}>
@@ -428,8 +507,10 @@ function CliModels({
   const set = (cli: CliId, model: string | null, effort: string | null) => {
     // An effort the model does not take would be dropped when it runs: clear it here instead.
     const models = listing.find((c) => c.id === cli)!.models;
-    onChange({ ...value, [cli]: { model, effort: effort && effortsFor(models, model).includes(effort) ? effort : null } });
+    onChange({ ...value, [cli]: { ...value[cli], model, effort: effort && effortsFor(models, model).includes(effort) ? effort : null } });
   };
+  const setAccount = (cli: CliId, account: string | null) =>
+    onChange({ ...value, [cli]: { model: value[cli]?.model ?? null, effort: value[cli]?.effort ?? null, account } });
   return (
     <Section title={t("projectSettings.cliModels")} description={t("projectSettings.cliModelsDescription", { computer: runner.name })}>
       {listing.length === 0 ? (
@@ -453,6 +534,19 @@ function CliModels({
                     ))}
                   </Select>
                 </Field>
+                {!!c.accounts?.length && (
+                  <Field label={t("projectSettings.cliAccount", { cli: cliName(c.id) })} hint={t("projectSettings.cliAccountHint")}>
+                    <Select value={current.account ?? ""} disabled={disabled} onChange={(e) => setAccount(c.id, e.target.value || null)}>
+                      {cliLogins(c).map((l) => (
+                        <option key={l.account ?? ""} value={l.account ?? ""}>
+                          {l.name ?? t("cliPicker.ownLogin")}
+                        </option>
+                      ))}
+                      {/* A default the computer no longer has stays visible until someone changes it. */}
+                      {current.account && !c.accounts.some((a) => a.id === current.account) && <option value={current.account}>{current.account}</option>}
+                    </Select>
+                  </Field>
+                )}
                 <Field label={t("modelPicker.effort")} hint={efforts.length === 0 ? t("modelPicker.noEffort") : undefined}>
                   <Select
                     value={current.effort ?? ""}
@@ -511,6 +605,8 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
     },
   });
 
+  const blocking = useBlockMember(projectId);
+
   const canManage = myRole === "owner" || myRole === "admin";
   const roleOptions: ProjectRole[] = myRole === "owner" ? ["owner", "admin", "member"] : ["admin", "member"];
 
@@ -532,6 +628,7 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium">{m.name}</span>
                   {isMe && <Badge>{t("members.you")}</Badge>}
+                  {m.blocked && <Badge>{t("block.blocked")}</Badge>}
                 </div>
                 {m.email && <div className="truncate text-xs text-subtle">{m.email}</div>}
               </div>
@@ -552,6 +649,28 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
               ) : (
                 <span className="text-[13px] text-subtle">{t(roleKey(m.role))}</span>
               )}
+              {!isMe &&
+                (m.blocked ? (
+                  <GhostButton
+                    type="button"
+                    className="h-8 px-2.5 text-[13px]"
+                    aria-label={t("block.unblockLabel", { name: m.name })}
+                    disabled={blocking.pending}
+                    onClick={() => blocking.unblock(m.id)}
+                  >
+                    {t("block.unblock")}
+                  </GhostButton>
+                ) : (
+                  <IconButton
+                    type="button"
+                    aria-label={t("block.action", { name: m.name })}
+                    title={t("block.action", { name: m.name })}
+                    disabled={blocking.pending}
+                    onClick={() => void blocking.block(m.id, m.name)}
+                  >
+                    <Ban size={15} />
+                  </IconButton>
+                ))}
               {(editable || isMe) && (
                 <IconButton
                   type="button"
@@ -574,7 +693,9 @@ function Members({ projectId, myRole }: { projectId: string; myRole: ProjectRole
           );
         })}
       </List>
-      {(setRole.error || remove.error) && <Notice>{errorMessage(setRole.error ?? remove.error, t)}</Notice>}
+      {(setRole.error || remove.error || blocking.error) && (
+        <Notice>{errorMessage(setRole.error ?? remove.error ?? blocking.error, t)}</Notice>
+      )}
     </Section>
   );
 }

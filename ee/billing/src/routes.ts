@@ -293,13 +293,13 @@ async function customerFor(env: Env & StripeEnv, user: { id: string; email: stri
   return { id: created.id, trialUsed: false };
 }
 
-async function ownTeam(env: Env, userId: string) {
+export async function ownTeam(env: Env, userId: string) {
   const standing = await standingOf(env, userId);
   return standing.plan === "team" && standing.ownerId === userId ? standing.subscription : null;
 }
 
 /** Bills a Team for its owner plus members, never fewer than the minimum seats. */
-async function syncSeats(env: Env & StripeEnv, ownerId: string, subscriptionId: string) {
+export async function syncSeats(env: Env & StripeEnv, ownerId: string, subscriptionId: string) {
   await fitSeats(env, ownerId, await stripe<StripeSubscription>(env, "GET", `/subscriptions/${subscriptionId}`));
 }
 

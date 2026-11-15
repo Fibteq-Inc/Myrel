@@ -162,6 +162,54 @@ describe.skipIf(process.platform === "win32")("opencode as the thread's agent", 
     await fakeOpencode("opencode v2.0.28");
     expect((await opencode.agent(mcp())).args).toEqual(["--standalone"]);
   });
+
+  it("writes opencode 2 its native config: ordered permissions, servers under mcp.servers, no Code Mode", async () => {
+    await fakeOpencode("opencode v2.2.5");
+    const connectors = [
+      { transport: "http" as const, name: "linear", url: "https://myrel.test/api/agent-mcp/thr_1/c/linear" },
+      { transport: "stdio" as const, name: "db", command: "npx", args: ["-y", "pg-mcp"], env: { DATABASE_URL: "postgres://x" } },
+    ];
+    const agent = await opencode.agent({ ...mcp(), connectors, access: "edit", dirs: ["/code/app"], skills: { plugin: "/run/plugin", dir: "/run/plugin/skills" } });
+    expect(agent.args).toEqual(["--standalone"]);
+    expect(agent.env!.OPENCODE_CONFIG_CONTENT).not.toContain("continue_loop_on_deny");
+    const auth = { Authorization: "Bearer {env:MYREL_MCP_TOKEN}" };
+    expect(config(agent)).toEqual({
+      mcp: {
+        servers: {
+          myrel: { type: "remote", url: "https://myrel.test/api/agent-mcp/thr_1", headers: auth, oauth: false, codemode: false },
+          linear: { type: "remote", url: connectors[0]!.url, headers: auth, oauth: false, codemode: false },
+          db: { type: "local", command: ["npx", "-y", "pg-mcp"], environment: { DATABASE_URL: "postgres://x" }, codemode: false },
+        },
+      },
+      // The last matching rule wins: outside folders are closed first, the run's own opened after.
+      permissions: [
+        { action: "external_directory", resource: "*", effect: "deny" },
+        { action: "external_directory", resource: "/code/app", effect: "allow" },
+        { action: "external_directory", resource: "/code/app/*", effect: "allow" },
+        { action: "external_directory", resource: "/run/plugin/skills", effect: "allow" },
+        { action: "external_directory", resource: "/run/plugin/skills/*", effect: "allow" },
+        { action: "edit", resource: "*", effect: "allow" },
+        { action: "shell", resource: "*", effect: "deny" },
+        { action: "myrel_*", resource: "*", effect: "allow" },
+        { action: "linear_*", resource: "*", effect: "allow" },
+        { action: "db_*", resource: "*", effect: "allow" },
+      ],
+      skills: ["/run/plugin/skills"],
+    });
+  });
+
+  it("sets opencode 2's edit and shell rules from the computer's access, and keeps outside folders closed below full", async () => {
+    await fakeOpencode("opencode v2.2.5");
+    const rules = async (access: "read" | "edit" | "auto" | "full") => config(await opencode.agent({ ...mcp(), access })).permissions as Array<{ action: string; effect: string }>;
+    const effect = async (access: "read" | "edit" | "auto" | "full", action: string) => (await rules(access)).find((r) => r.action === action)?.effect;
+    expect(await effect("read", "edit")).toBe("deny");
+    expect(await effect("read", "shell")).toBe("deny");
+    expect(await effect("auto", "shell")).toBe("deny");
+    expect(await effect("full", "shell")).toBe("allow");
+    expect(await effect("edit", "external_directory")).toBe("deny");
+    // Full access keeps --auto's reach outside the project's folders, so no closing rule is written.
+    expect(await effect("full", "external_directory")).toBeUndefined();
+  });
 });
 
 describe.skipIf(process.platform === "win32")("detectClis", () => {

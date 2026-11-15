@@ -132,7 +132,8 @@ describe("connector suggestions", () => {
     const state = new URL(started.authorizeUrl).searchParams.get("state")!;
     const back = await api(`/api/connectors/oauth/callback?code=c1&state=${encodeURIComponent(state)}`, { token: s.token, redirect: "manual" });
     expect(back.status).toBe(302);
-    expect(back.headers.get("location")).toBe(`http://myrel.test/projects/${s.project.id}/threads/${s.thread.id}?connector=ok`);
+    // Answered with a bearer token, as the apps do: the thread page it ends on is marked ?app.
+    expect(back.headers.get("location")).toBe(`http://myrel.test/projects/${s.project.id}/threads/${s.thread.id}?connector=ok&app`);
 
     // The card says so, a line from the person wakes the agent, and its new turn has the connector.
     expect((await s.card())?.suggestion).toMatchObject({ state: "connected", connected: CATALOG_ID });

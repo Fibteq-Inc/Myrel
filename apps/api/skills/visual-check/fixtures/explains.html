@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tasks</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fbfaf7; --fg: #1d1f24; --muted: #555b66; --accent: #2a55c9; --card: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15171b; --fg: #eceef2; --muted: #a9afba; --accent: #8fb0ff; --card: #1e2127; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header, main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .card { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .muted { color: var(--muted); }
+  button { font: inherit; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 0; background: var(--accent); color: var(--bg); }
+</style>
+</head>
+<body>
+<!-- A task list that explains itself in text instead of guiding by design (selftest: explains-ui). -->
+<header><h1>Tasks</h1><button type="button" aria-label="Add task">+</button></header>
+<main>
+  <p class="muted" id="intro">Here you can manage all of your tasks. Click the + button in the top right corner to add a new task.</p>
+  <div class="card onboarding-tip" id="tip">
+    <strong>Getting around</strong>
+    <span class="muted">Every task you make shows up in this list, sorted by its due date, and finished tasks move down to the end of the list.</span>
+  </div>
+  <p class="muted" id="tr">Bu sayfada tüm görevlerinizi görebilirsiniz.</p>
+  <article class="card" id="help-article">
+    <h2>Help</h2>
+    <p>To share a task, click the Share button on its row.</p>
+  </article>
+  <section class="card" id="empty"><h2>No tasks yet</h2><button type="button">Add your first task</button></section>
+</main>
+</body>
+</html>

@@ -74,7 +74,7 @@ describe("hosted billing", () => {
   it("tells clients this server sells plans and which terms sign-up accepts", async () => {
     expect(await (await api("/api/info")).json()).toMatchObject({
       billing: true,
-      legal: { terms: `${BASE}/terms/`, privacy: `${BASE}/privacy/`, version: "2026-10-20" },
+      legal: { terms: `${BASE}/terms/`, privacy: `${BASE}/privacy/`, version: "2026-11-09" },
     });
   });
 
@@ -85,7 +85,7 @@ describe("hosted billing", () => {
     expect(await refused.json()).toMatchObject({ code: "TERMS_NOT_ACCEPTED" });
     const { userId } = await signUp();
     const row = await env.DB.prepare("SELECT terms_accepted_at, terms_version FROM user WHERE id = ?").bind(userId).first();
-    expect(row).toMatchObject({ terms_version: "2026-10-20" });
+    expect(row).toMatchObject({ terms_version: "2026-11-09" });
     expect(row?.terms_accepted_at).toBeGreaterThan(Date.now() - 60_000);
   });
 
@@ -379,11 +379,109 @@ describe("hosted billing", () => {
     const first = await signUp();
     const trial = subscriptionEvent(first.userId, "myrel_pro_monthly", "trialing", { trial_end: Math.floor(Date.now() / 1000) + 7 * 86400 });
     expect((await webhook(trial)).status).toBe(200);
+    // Deleting the account cancels the trial in Stripe.
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      return Response.json({ ...trial.data.object, status: "canceled" });
+    };
     expect((await api("/api/account", { method: "DELETE", token: first.token })).status).toBe(204);
 
     const again = await signUp(first.email.replace("@", "+again@").toUpperCase());
     const summary = (await (await api("/api/billing", { token: again.token })).json()) as BillingSummary;
     expect(summary.trialAvailable).toBe(false);
+  });
+
+  it("cancels a web subscription at once when its account is deleted", async () => {
+    const { token, userId } = await signUp();
+    expect((await webhook(subscriptionEvent(userId, "myrel_pro_monthly"))).status).toBe(200);
+    await env.DB.prepare("INSERT INTO billing_customers (user_id, stripe_customer_id, trial_used, created_at) VALUES (?, ?, 0, ?)")
+      .bind(userId, `cus_${userId}`, Date.now())
+      .run();
+    const sub = (id: string, status: string) => ({ ...subscriptionEvent(userId, "myrel_pro_monthly", status).data.object, id });
+    const calls: { method: string; url: string }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url: decodeURIComponent(url) });
+      // Stripe also knows one whose webhook has not arrived yet, and an old one already cancelled.
+      if (method === "GET") return Response.json({ data: [sub(`sub_${userId}`, "active"), sub("sub_late", "trialing"), sub("sub_old", "canceled")] });
+      return Response.json(sub(url.split("/").pop()!, "canceled"));
+    };
+    expect((await api("/api/account", { method: "DELETE", token })).status).toBe(204);
+    expect(calls[0]).toMatchObject({ method: "GET" });
+    expect(calls[0]!.url).toContain(`customer=cus_${userId}`);
+    expect(calls[0]!.url).toContain("status=all");
+    // Both, in no particular order: sorted alike on both sides, as the user id is random.
+    const byUrl = (a: { url: string }, b: { url: string }) => a.url.localeCompare(b.url);
+    expect(calls.slice(1).sort(byUrl)).toEqual(
+      [
+        { method: "DELETE", url: "https://api.stripe.com/v1/subscriptions/sub_late" },
+        { method: "DELETE", url: `https://api.stripe.com/v1/subscriptions/sub_${userId}` },
+      ].sort(byUrl),
+    );
+    const row = await env.DB.prepare("SELECT status FROM billing_subscriptions WHERE id = ?").bind(`sub_${userId}`).first();
+    expect(row).toEqual({ status: "canceled" });
+  });
+
+  it("keeps the account when Stripe cannot cancel its subscription", async () => {
+    const { token, userId } = await signUp();
+    expect((await webhook(subscriptionEvent(userId, "myrel_pro_monthly"))).status).toBe(200);
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      return Response.json({ error: { message: "Something went wrong." } }, { status: 500 });
+    };
+    const res = await api("/api/account", { method: "DELETE", token });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { message: string }).message).toContain("was not deleted");
+    // Nothing was deleted: the session still works and the plan is still there.
+    expect(((await (await api("/api/billing", { token })).json()) as BillingSummary).plan).toBe("pro");
+  });
+
+  it("takes a deleted account off Teams: a member's seat is dropped, an owner's Team ends", async () => {
+    const owner = await signUp();
+    await webhook(subscriptionEvent(owner.userId, "myrel_team_monthly"));
+    const team = (quantity: number, status = "active") => {
+      const object = subscriptionEvent(owner.userId, "myrel_team_monthly", status).data.object;
+      object.items.data[0]!.quantity = quantity;
+      return object;
+    };
+    let seats = 1;
+    const calls: { method: string; url: string; body: string }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return realFetch(input, init);
+      const method = init?.method ?? "GET";
+      const body = String(init?.body ?? "");
+      calls.push({ method, url, body });
+      if (method === "POST") seats = Number(new URLSearchParams(body).get("items[0][quantity]"));
+      return Response.json(team(seats, method === "DELETE" ? "canceled" : "active"));
+    };
+    const a = await signUp();
+    const b = await signUp();
+    for (const m of [a, b]) {
+      expect((await api("/api/billing/team/members", { method: "POST", token: owner.token, body: JSON.stringify({ email: m.email }) })).status).toBe(204);
+    }
+    expect(seats).toBe(3);
+
+    // A member leaves with their account: the owner pays for one seat fewer.
+    calls.length = 0;
+    expect((await api("/api/account", { method: "DELETE", token: a.token })).status).toBe(204);
+    const fewer = calls.find((c) => c.method === "POST")!;
+    expect(new URLSearchParams(fewer.body).get("items[0][quantity]")).toBe("2");
+    expect(new URLSearchParams(fewer.body).get("proration_behavior")).toBe("none");
+
+    // The owner leaves: the Team is cancelled and its members are free to join another.
+    calls.length = 0;
+    expect((await api("/api/account", { method: "DELETE", token: owner.token })).status).toBe(204);
+    expect(calls).toEqual([{ method: "DELETE", url: `https://api.stripe.com/v1/subscriptions/sub_${owner.userId}`, body: "" }]);
+    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM billing_team_members WHERE owner_id = ? OR user_id IN (?, ?)")
+      .bind(owner.userId, a.userId, b.userId)
+      .first<{ n: number }>();
+    expect(left?.n).toBe(0);
+    expect(((await (await api("/api/billing", { token: b.token })).json()) as BillingSummary).plan).toBe("free");
   });
 
   it("offers a trial only to a verified address", async () => {
@@ -566,6 +664,27 @@ describe("in-app purchases", () => {
     subs[userId] = appStoreMonthly({ expires_date: iso(Date.now() - DAY), unsubscribe_detected_at: iso(Date.now() - 2 * DAY) });
     expect((await api("/api/billing/store/sync", { method: "POST", token })).status).toBe(204);
     expect(((await (await api("/api/billing", { token })).json()) as BillingSummary).plan).toBe("free");
+  });
+
+  it("leaves an App Store subscription to the store when its account is deleted", async () => {
+    const { token, userId } = await signUp();
+    fakeRevenueCat({ [userId]: appStoreMonthly() });
+    expect((await rcWebhook({ type: "INITIAL_PURCHASE", app_user_id: userId })).status).toBe(200);
+    // A Stripe customer from a Checkout opened once and left: still nothing to cancel there.
+    await env.DB.prepare("INSERT INTO billing_customers (user_id, stripe_customer_id, trial_used, created_at) VALUES (?, ?, 0, ?)")
+      .bind(userId, `cus_${userId}`, Date.now())
+      .run();
+    const stripeCalls: { method: string; url: string }[] = [];
+    const revenueCat = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://api.stripe.com/")) return revenueCat(input, init);
+      stripeCalls.push({ method: init?.method ?? "GET", url });
+      return Response.json({ data: [] });
+    }) as typeof fetch;
+    expect((await api("/api/account", { method: "DELETE", token })).status).toBe(204);
+    // Only the customer's subscriptions are read; the store subscription never reaches Stripe.
+    expect(stripeCalls.map((c) => c.method)).toEqual(["GET"]);
   });
 
   it("follows a purchase moved to another account by a restore", async () => {

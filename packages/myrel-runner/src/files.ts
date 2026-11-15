@@ -9,12 +9,14 @@ import { listWorktrees } from "./worktrees";
  * Reads a file an agent's message points to, for the web app to show. Only inside the project's
  * folders (each must be shared on this computer) or this thread's worktrees of them, where the
  * thread's CLI did its work. A relative path is looked up in the worktree first, then the folders.
+ * `worktrees` false: the project's threads work in its folders themselves, so worktrees left from
+ * before are not looked in (their copy of a file is older).
  */
 export async function readProjectFile(
   config: RunnerConfig,
-  input: { path: string; folders: string[]; threadId?: string },
+  input: { path: string; folders: string[]; threadId?: string; worktrees?: boolean },
 ): Promise<RunnerFile> {
-  const roots = await fileRoots(config, input.folders, input.threadId);
+  const roots = await fileRoots(config, input.folders, input.worktrees === false ? undefined : input.threadId);
   if (!roots.length) throw new Error("None of this project's folders is shared on this computer.");
   const wanted = cleanPath(input.path);
   const candidates = isAbsolute(wanted) ? [wanted] : roots.map((root) => resolve(root, wanted));

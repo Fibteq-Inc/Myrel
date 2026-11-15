@@ -39,6 +39,9 @@ export default defineConfig(async () => {
             // The provider's default model, whatever the deployment pins in wrangler.jsonc.
             LLM_MODEL: "",
             RUNNER_MODEL: "",
+            // A visual check's evaluator in the cloud (test/visual-check-cloud.test.ts).
+            CHECK_MODEL: "accounts/fireworks/models/check-vision",
+            CHECK_IMAGES: "true",
             SIGNUP_ENABLED: "true",
             // GitHub calls are answered by test/fake-github.ts.
             GITHUB_APP_ID: "1234",
@@ -57,7 +60,15 @@ export default defineConfig(async () => {
         },
       }),
     ],
-    test: { setupFiles: ["./test/setup.ts"] },
+    test: {
+      setupFiles: ["./test/setup.ts"],
+      // With the file cache on, Vitest hands each new test file every module it already transformed
+      // ("warm modules"), and the Cloudflare pool inlines them all into ONE WebSocket message to
+      // workerd. That message grows with the dependency graph and past workerd's 32 MiB limit the
+      // pool crashes ("Message is too large", 1009) and most test files never run. Off, each
+      // module travels on its own.
+      fsModuleCache: false,
+    },
   };
 });
 

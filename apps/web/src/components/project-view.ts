@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import type { KnowledgeSection } from "./project-knowledge";
 
 /** The tabs across the top of a project. The conversation is the default and has no `view`. */
-export type ProjectView = "chat" | "threads" | "artifacts" | "files" | "knowledge" | "usage";
+export type ProjectView = "chat" | "threads" | "issues" | "artifacts" | "files" | "knowledge" | "usage";
 
 /**
  * The open tab and what it shows, kept in the URL of every project page so an
@@ -11,17 +11,19 @@ export type ProjectView = "chat" | "threads" | "artifacts" | "files" | "knowledg
  */
 export type ProjectSearch = {
   view?: Exclude<ProjectView, "chat">;
-  /** The open artifact (artifacts tab) or file path (files tab). */
+  /** The open artifact (artifacts tab), file path (files tab) or issue, as owner/name#number (issues tab). */
   item?: string;
   /** A pinned artifact version. */
   v?: number;
   /** Memory or instructions, in the knowledge tab. */
   section?: KnowledgeSection;
+  /** The threads tab's second view: the project's researches. */
+  list?: "research";
 };
 
-export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section"] as const;
+export const PROJECT_SEARCH_KEYS = ["view", "item", "v", "section", "list"] as const;
 
-const VIEWS = ["threads", "artifacts", "files", "knowledge", "usage"];
+const VIEWS = ["threads", "issues", "artifacts", "files", "knowledge", "usage"];
 const SECTIONS = ["memory", "instructions"];
 
 export function validateProjectSearch(s: Record<string, unknown>): ProjectSearch {
@@ -34,12 +36,13 @@ export function validateProjectSearch(s: Record<string, unknown>): ProjectSearch
     ...(typeof s.item === "string" && { item: s.item }),
     ...(Number.isInteger(v) && v > 0 && { v }),
     ...(section && view === "knowledge" && { section }),
+    ...(s.list === "research" && view === "threads" && { list: "research" as const }),
   };
 }
 
 /** Search params that open a tab, clearing what the previous tab showed. */
 export function viewSearch(view: ProjectView, rest: Omit<ProjectSearch, "view"> = {}) {
-  return { view: view === "chat" ? undefined : view, item: undefined, v: undefined, section: undefined, ...rest };
+  return { view: view === "chat" ? undefined : view, item: undefined, v: undefined, section: undefined, list: undefined, ...rest };
 }
 
 /** The open tab, and a way to switch tabs without closing the open thread. */

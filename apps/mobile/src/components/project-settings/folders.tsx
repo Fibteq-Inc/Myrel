@@ -7,6 +7,7 @@ import { ArrowUp, Check, ChevronRight, Folder, FolderPlus, House, X } from "luci
 import { type ReactNode, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { appPage } from "../../lib/app-page";
 import { memoryLow, usageSummary } from "../../lib/format";
 import { runnersQueryKey, workspaceQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
@@ -214,7 +215,7 @@ function WorkspaceForm({ project, workspace, onDone }: { project: Project; works
       <View style={{ gap: 10 }}>
         <Text style={styles.body}>{t("localFolder.connectFirst")}</Text>
         {/* Connecting a computer happens on Devices, which the phone app does not have yet. */}
-        <Button onPress={() => void WebBrowser.openBrowserAsync(`${server}/devices`)}>{t("localFolder.connectComputer")}</Button>
+        <Button onPress={() => void WebBrowser.openBrowserAsync(appPage(`${server}/devices`))}>{t("localFolder.connectComputer")}</Button>
         <Button variant="ghost" onPress={onDone}>
           {t("folderPicker.cancel")}
         </Button>

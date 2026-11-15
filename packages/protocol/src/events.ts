@@ -2,9 +2,10 @@ import { z } from "zod";
 import { KnowledgeKind, MAX_ATTACHMENTS } from "./knowledge";
 import { FilePath } from "./paths";
 import { Artifact } from "./artifacts";
+import { DecisionPick } from "./decision";
 import { Routine, RoutineId } from "./routines";
 import { Goal } from "./goal";
-import { CliId, RunnerId } from "./runner";
+import { CliAccountId, CliId, RunnerId } from "./runner";
 import { CLOUD_RUNNER, MAX_MESSAGE_LENGTH, MAX_THREAD_CLIS, Message, PullRequest, Reaction, Task, TaskId, TerminalLine, Thread, ThreadCloseReason, ThreadId } from "./models";
 
 export const SYNC_PAGE_SIZE = 200;
@@ -46,6 +47,11 @@ export const ClientEvent = z.discriminatedUnion("type", [
      * Message.clis). Ignored in a thread and for anyone but the computer's owner.
      */
     clis: z.array(CliId).max(MAX_THREAD_CLIS).optional(),
+    /**
+     * A tap on a decision card: the card the body (the option's label) answers, so it answers only
+     * that card. The server drops it when it names no card in the same conversation with that option.
+     */
+    pick: DecisionPick.optional(),
   }).refine((e) => e.body.length > 0 || e.attachments.length > 0, "Write something or attach a file"),
   /**
    * A person changes the text of their own message. Attachments stay; the text may be empty only when
@@ -63,11 +69,16 @@ export const ClientEvent = z.discriminatedUnion("type", [
     resolved: z.boolean(),
     reason: ThreadCloseReason.optional(),
   }),
-  /** The computer's owner picks the CLI a thread runs with from now on; null: the project folder's again. */
+  /**
+   * The computer's owner picks the CLI a thread runs with from now on; null: the project folder's again.
+   * `account`: one of that CLI's logins on the computer (RunnerCli.accounts' id, or OWN_ACCOUNT for its
+   * own even where the project's default is another); null or absent: the project's default for it.
+   */
   z.object({
     type: z.literal("thread.cli"),
     threadId: ThreadId,
     cli: CliId.nullable(),
+    account: CliAccountId.nullable().optional(),
   }),
   /**
    * The owner of one of the project's computers sets a thread to work there from its next turn, or

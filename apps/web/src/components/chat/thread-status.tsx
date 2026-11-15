@@ -3,12 +3,13 @@ import type { MessageKey, Translate } from "@myrel/i18n";
 import type { Thread, ThreadCloseReason } from "@myrel/protocol";
 import { CircleAlert, CircleCheck, CircleDot, CircleMinus, CirclePause, LoaderCircle } from "lucide-react";
 
-type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed" | "closed";
+type StatusKey = "working" | "blocked" | "review_ready" | "replied" | "done" | "failed" | "closed";
 
 const STATUS: Record<StatusKey, { label: MessageKey; tone: string }> = {
   working: { label: "status.working", tone: "text-subtle" },
-  blocked: { label: "status.blocked", tone: "text-subtle" },
+  blocked: { label: "status.reviewReady", tone: "text-warn" },
   review_ready: { label: "status.reviewReady", tone: "text-warn" },
+  replied: { label: "status.replied", tone: "text-subtle" },
   done: { label: "status.done", tone: "text-subtle" },
   failed: { label: "status.failed", tone: "text-bad" },
   closed: { label: "status.closedCancelled", tone: "text-subtle" },
@@ -22,7 +23,9 @@ const CLOSED: Record<ThreadCloseReason, MessageKey> = {
 };
 
 function statusKey(thread: Thread): StatusKey {
-  return thread.closeReason ? "closed" : thread.resolved ? "done" : thread.status;
+  if (thread.closeReason) return "closed";
+  if (thread.resolved) return "done";
+  return thread.status === "review_ready" && !thread.needs ? "replied" : thread.status;
 }
 
 /** The thread's state in a few words, plus the color class it reads in. */
@@ -61,9 +64,11 @@ export function ThreadStatusIcon({ thread, size = 16 }: { thread: Thread; size?:
     case "working":
       return <LoaderCircle {...props} className="flex-none animate-spin text-accent" />;
     case "blocked":
-      return <CirclePause {...props} className="flex-none text-muted" />;
+      return <CirclePause {...props} className="flex-none text-warn" />;
     case "review_ready":
       return <CircleDot {...props} className="flex-none text-warn" />;
+    case "replied":
+      return <CircleDot {...props} className="flex-none text-subtle" />;
     case "done":
       return <CircleCheck {...props} className="flex-none text-ok" />;
     case "failed":

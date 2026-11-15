@@ -135,6 +135,10 @@ export function createProvider(env: LlmEnv, fetchImpl?: typeof fetch, override: 
  * The model a coding harness should use for run_task: the same provider and
  * key as the agents, with RUNNER_MODEL overriding the model. The key goes to
  * the sandbox as a secret, never into the stored task.
+ *
+ * RUNNER_MODEL and RUNNER_IMAGES describe a model of the server's provider, as LLM_MODEL does, so
+ * they do not carry over to another one: a project on its own Anthropic or OpenAI key runs its
+ * harness on its own model (Fibteq's `auto` is a Fireworks router no other provider knows).
  */
 export function taskModel(
   env: LlmEnv & { RUNNER_MODEL?: string; RUNNER_IMAGES?: string },
@@ -143,8 +147,10 @@ export function taskModel(
   const r = resolveProvider(env, override);
   if (!r.ok) return r;
   const { id, def, apiKey, baseUrl, model } = r.value;
-  const modelId = env.RUNNER_MODEL || model;
-  const images = env.RUNNER_IMAGES === "true" ? true : env.RUNNER_IMAGES === "false" ? false : readsImages(def.kind, modelId);
+  const isServerProvider = id === serverProviderId(env);
+  const modelId = (isServerProvider && env.RUNNER_MODEL) || model;
+  const imagesVar = isServerProvider ? env.RUNNER_IMAGES : undefined;
+  const images = imagesVar === "true" ? true : imagesVar === "false" ? false : readsImages(def.kind, modelId);
   // Only at the provider's own address: a gateway or LLM_BASE_URL in front of it may not pass Messages calls on.
   const messages = def.kind === "openai" && !!def.messagesBaseUrl && baseUrl === def.baseUrl;
   return { ok: true, model: { kind: def.kind, provider: id, id: modelId, baseUrl, images, ...(messages && { messages }) }, apiKey };

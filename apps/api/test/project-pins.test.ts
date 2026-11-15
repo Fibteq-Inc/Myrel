@@ -61,6 +61,31 @@ describe("project pins", () => {
     });
   });
 
+  it("lists the rest with working projects first, then by latest activity", async () => {
+    const me = await signUp();
+    const old = await create(me.token, "Old");
+    const mid = await create(me.token, "Mid");
+    const fresh = await create(me.token, "Fresh");
+    const pinned = await create(me.token, "Pinned");
+    await pin(me.token, pinned.id, true);
+    const set = (id: string, activeCount: number, lastActivityAt: number | null) =>
+      env.DB.prepare("UPDATE projects SET active_count = ?1, last_activity_at = ?2 WHERE id = ?3").bind(activeCount, lastActivityAt, id).run();
+    expect(await list(me.token)).toEqual(["Pinned*", "Fresh", "Mid", "Old"]);
+
+    // The newest activity beats the newest project.
+    await set(old.id, 0, Date.now() + 60_000);
+    expect(await list(me.token)).toEqual(["Pinned*", "Old", "Fresh", "Mid"]);
+
+    // Working goes on top, however long ago it started, but never above a pin.
+    await set(mid.id, 1, Date.now() - 3_600_000);
+    expect(await list(me.token)).toEqual(["Pinned*", "Mid", "Old", "Fresh"]);
+
+    const { projects } = (await (await api("/api/projects", { token: me.token })).json()) as { projects: Project[] };
+    expect(projects.find((p) => p.id === fresh.id)?.lastActivityAt).toBe(fresh.createdAt);
+    await set(mid.id, 0, null);
+    expect(await list(me.token)).toEqual(["Pinned*", "Old", "Fresh", "Mid"]);
+  });
+
   it("refuses projects the person is not in and bad input", async () => {
     const me = await signUp();
     const stranger = await signUp();

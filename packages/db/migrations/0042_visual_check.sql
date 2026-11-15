@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `visual_check` integer DEFAULT false NOT NULL;

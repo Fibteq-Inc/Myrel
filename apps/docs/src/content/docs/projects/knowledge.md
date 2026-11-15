@@ -15,7 +15,9 @@ Rules every task in the project follows, such as the tone to write in, the branc
 
 ## Memory
 
-Notes Myrel keeps across tasks, so you don't explain the same thing twice: decisions you made, how you like things done, facts about the project. Myrel writes and updates these itself; you can read and edit them.
+Notes Myrel keeps across tasks, so you don't explain the same thing twice: decisions you made and why, where the project is heading, how you like things done, facts about the project. Myrel writes and updates these itself; you can read and edit them.
+
+Memory is not a status board. Myrel doesn't write the state of the work there (which pull requests are open or merged, version numbers, what is released), because that goes out of date within days; it looks that up on GitHub and in the thread's **PR** tab instead.
 
 - **MEMORY** is the short index every task reads first.
 - Choose **New** to add a note yourself, with a name, a one-line description and the content.
@@ -33,7 +35,7 @@ Myrel only deletes a note you agreed to remove. When a note changes, its previou
 
 ### Memory upkeep
 
-Notes go out of date as the project moves on. With **Memory upkeep**, Myrel checks them against the project now and then: once a number of threads have finished, and at most once a week, it opens a **Memory upkeep** thread. There it fixes notes that are plainly out of date, marks the ones it can't confirm, and asks you before deleting any.
+Notes go out of date as the project moves on. With **Memory upkeep**, Myrel checks them against the project now and then: once a number of threads have finished, and at most once a week, it opens a **Memory upkeep** thread. There it fixes notes that are plainly out of date, trims status lines that don't belong in memory, marks the ones it can't confirm, and asks you before deleting any.
 
 At the top of the memory list, owners and admins pick how it runs:
 

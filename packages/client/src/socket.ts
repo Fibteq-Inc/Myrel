@@ -1,4 +1,4 @@
-import { type CliId, type ClientEventInput, type Message, ServerEvent } from "@myrel/protocol";
+import { type CliId, type ClientEventInput, type DecisionPick, type Message, ServerEvent } from "@myrel/protocol";
 
 export type SocketStatus = "connecting" | "open" | "closed";
 
@@ -71,7 +71,7 @@ export class ProjectSocket {
 
   sendMessage(
     body: string,
-    opts: { threadId?: string | null; clientId?: string; attachments?: string[]; clis?: CliId[] } = {},
+    opts: { threadId?: string | null; clientId?: string; attachments?: string[]; clis?: CliId[]; pick?: DecisionPick } = {},
   ) {
     this.send({
       type: "message.send",
@@ -80,6 +80,7 @@ export class ProjectSocket {
       clientId: opts.clientId,
       ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts.clis?.length ? { clis: opts.clis } : {}),
+      ...(opts.pick ? { pick: opts.pick } : {}),
     });
   }
 

@@ -57,6 +57,20 @@ describe("the turn's GitHub token for git", () => {
     expect((await fill(vars, "https://github.com/Fibteq-Inc/Myrel.git")).password).toBeUndefined();
   }, 30_000);
 
+  it("answers each repository with the token of its installation, in any case, renewed too", async () => {
+    const git = new GitCredentials();
+    const other = { ...github("ghs_otherInstallationToken0123456789"), repos: ["Zeta/Site"] };
+    const env = await git.lend("task_2", { ...github(), more: [other] });
+    const vars = gitEnv(env[CREDENTIALS_VAR]!, ["Fibteq-Inc/Myrel", "Zeta/Site"], undefined, { command: process.execPath, args: [cli] });
+    expect(await fill(vars, "https://github.com/Fibteq-Inc/Myrel.git")).toMatchObject({ password: TOKEN });
+    expect(await fill(vars, "https://github.com/Zeta/Site.git")).toMatchObject({ password: other.token });
+    expect(await fill(vars, "https://github.com/zeta/site")).toMatchObject({ password: other.token });
+
+    git.renew("task_2", { ...github("ghs_renewedTokenForTheTurn0123456789"), more: [{ ...other, token: "ghs_otherRenewedToken0123456789" }] });
+    expect(await fill(vars, "https://github.com/zeta/site.git")).toMatchObject({ password: "ghs_otherRenewedToken0123456789" });
+    git.end("task_2");
+  }, 30_000);
+
   it("sends the project's SSH addresses over HTTPS, and only those", async () => {
     const vars = gitEnv("http://127.0.0.1:1/x", ["Fibteq-Inc/Myrel"], "'core.askpass=foo'", { command: "myrel-runner", args: [] });
     expect(vars.GIT_CONFIG_PARAMETERS!.startsWith("'core.askpass=foo' ")).toBe(true);

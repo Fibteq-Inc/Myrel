@@ -31,16 +31,23 @@ function plain(text: string): string {
     .slice(0, 80);
 }
 
+/** Who asked and where, as people read it. Null when there is nothing to credit or link. */
+export function creditLine(credit: PullCredit): string | null {
+  if (!credit.name && !credit.threadUrl) return null;
+  const who = credit.name ? `Requested by **${plain(credit.name)}**` : "Opened by Myrel";
+  const link = credit.threadUrl ? ` · [Myrel thread](${credit.threadUrl})` : "";
+  return `_${who}${link}_`;
+}
+
 /** The two lines that open the body. Null when there is nothing to credit or link. */
 export function attributionBlock(credit: PullCredit): string | null {
-  if (!credit.name && !credit.threadUrl) return null;
+  const line = creditLine(credit);
+  if (!line) return null;
   const meta: Record<string, string> = {};
   if (credit.login) meta.github_login = credit.login;
   // The marker is an HTML comment, so a value must not be able to close it.
   const json = JSON.stringify(meta).replace(/--/g, "");
-  const who = credit.name ? `Requested by **${plain(credit.name)}**` : "Opened by Myrel";
-  const link = credit.threadUrl ? ` · [Myrel thread](${credit.threadUrl})` : "";
-  return `${MARKER}: ${json} -->\n_${who}${link}_`;
+  return `${MARKER}: ${json} -->\n${line}`;
 }
 
 /** The body with Myrel's block on top, unless it has one already. */

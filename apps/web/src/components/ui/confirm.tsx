@@ -66,7 +66,8 @@ function ConfirmDialog({ title, body, action, danger, onDone }: ConfirmOptions &
       {...{ closedby: "any" }}
       aria-labelledby="confirm-title"
       aria-describedby={body ? "confirm-body" : undefined}
-      onClose={() => finish(false)}
+      // A close event can arrive after the dialog opened again (React's dev double effects); only a real close cancels.
+      onClose={(e) => !e.currentTarget.open && finish(false)}
       onClick={(e) => e.target === e.currentTarget && finish(false)}
       className="m-auto w-[min(420px,calc(100vw-32px))] rounded-2xl border border-edge bg-menu p-0 text-fg shadow-[0_16px_48px_var(--color-shadow)] backdrop:bg-black/60"
     >

@@ -9,7 +9,10 @@ import {
   type RunnerToServer,
   ServerToRunner,
 } from "@myrel/protocol";
+import { helloAccounts, limitsKey } from "./accounts";
 import { ADAPTERS, detectClis } from "./clis";
+import { detectBrowser } from "./browser";
+import { sandboxProblem, sandboxState } from "./sandbox";
 import { configPath, loadConfig, type RunnerConfig, saveConfig, SessionStore, shareFolder, unshareFolder } from "./config";
 import { readProjectFile } from "./files";
 import { listDirs, shareableFolder } from "./folders";
@@ -23,7 +26,7 @@ import { TaskRunner } from "./tasks";
 import { CONFIRM_MS, Updater } from "./updater";
 import { pruneWorktrees } from "./worktrees";
 
-export const RUNNER_VERSION = "0.29.0";
+export const RUNNER_VERSION = "0.38.1";
 
 /** How often a background runner with auto-update on looks for a newer version. */
 const AUTO_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -112,12 +115,15 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   if (!config.server || !config.token) throw new Error("This computer is not paired yet. Run `myrel-runner pair <code> --server <url>` first.");
 
   const clis = await detectClis();
+  // Whether a visual check's browser can start here, said once at start (installing the libraries needs a restart anyway).
+  const browser = await detectBrowser().catch(() => undefined);
   // The last limits each CLI reported; hello carries them with the CLI's version.
   const limits = await loadLimits();
-  const setLimits = (cli: CliId, next: CliLimits | undefined) => {
-    const prev = limits[cli];
+  const setLimits = (cli: CliId, next: CliLimits | undefined, account?: string) => {
+    const key = limitsKey(cli, account);
+    const prev = limits[key];
     if (!next || (prev && prev.at >= next.at)) return;
-    limits[cli] = next;
+    limits[key] = next;
     void saveLimits(limits).catch(() => {});
     if (JSON.stringify({ ...prev, at: "" }) !== JSON.stringify({ ...next, at: "" })) hello();
   };
@@ -194,7 +200,7 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
       hostname: hostname(),
       platform: platform(),
       folders: config.folders,
-      clis: clis.map((c) => (limits[c.id] ? { ...c, limits: limits[c.id] } : c)),
+      clis: clis.map((c) => ({ ...c, ...(limits[c.id] && { limits: limits[c.id] }), ...helloAccounts(config, c.id, limits) })),
       features: [
         "folders",
         "cancel",
@@ -207,15 +213,20 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
         "settings",
         "models",
         "git-token",
+        "git-tokens",
         "steer",
         "steer-claude",
         "ssh",
+        "cli-accounts",
+        "shared-folder",
+        "coordinator",
         ...(updates === "service" ? (["update"] as const) : []),
         ...(statsOn() ? (["stats"] as const) : []),
       ],
       settings: settingsOf(config),
       updates,
       ...(updater.state() && { update: updater.state() }),
+      ...(browser && { browser }),
       running: tasks.runningIds(),
       interrupted,
       ...(statsOn() && sampler.latest && { stats: sampler.latest }),
@@ -441,6 +452,10 @@ export async function startRunner(opts: StartOptions = {}): Promise<RunnerHandle
   connect();
 
   log(`Sharing ${config.folders.length} folder(s); CLIs found: ${clis.map((c) => c.id).join(", ") || "none"}`);
+  void sandboxState().then((s) => {
+    const problem = sandboxProblem(s);
+    if (problem) log(problem);
+  });
   return { stop, done };
 }
 

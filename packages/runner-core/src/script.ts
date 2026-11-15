@@ -10,7 +10,9 @@ import type { TaskSpec } from "./spec";
  *
  * Inputs come from the environment (`taskEnv` plus secrets) so nothing the
  * person or the model wrote is ever spliced into the script itself.
- * Secrets: GITHUB_TOKEN (clone and push; also read by `gh` as GH_TOKEN),
+ * Secrets: GITHUB_TOKEN (clone and push; also read by `gh` as GH_TOKEN), GITHUB_TOKEN_<n> and
+ * GITHUB_REPOS_<n> (the same for the repositories of another GitHub App installation, which one token
+ * cannot reach; `gh` stays on GITHUB_TOKEN),
  * MYREL_WORKSPACE_TOKEN (the workspace remote), MYREL_MODEL_API_KEY and MYREL_FILES (download links of
  * the thread's attachments). Needs git, jq, curl and, to open pull requests, gh.
  */
@@ -40,6 +42,25 @@ if [ -n "\${GITHUB_TOKEN:-}" ]; then
   git config --global credential.https://github.com.helper '!f() { [ "$1" = get ] || exit 0; p=; h=; while IFS== read -r k v; do case "$k" in protocol) p="$v" ;; host) h="$v" ;; esac; done; [ "$p" = https ] && [ "$h" = github.com ] || exit 0; echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
   export GH_TOKEN="$GITHUB_TOKEN"
 fi
+# The sandbox may have run another turn: its repositories' helpers name tokens of that turn.
+git config --global --name-only --get-regexp '^credential\\.https://github\\.com/.+\\.helper$' 2>/dev/null | sort -u | while read -r key; do
+  git config --global --unset-all "$key"
+done
+# A repository of another installation has its token. The empty helper drops the one set above for it.
+n=1
+while :; do
+  token_var="GITHUB_TOKEN_$n"; repos_var="GITHUB_REPOS_$n"
+  [ -n "\${!token_var:-}" ] || break
+  for repo in \${!repos_var:-}; do
+    for name in "$repo" "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')"; do
+      for url in "https://github.com/$name" "https://github.com/$name.git"; do
+        git config --global --replace-all "credential.$url.helper" ''
+        git config --global --add "credential.$url.helper" "!f() { [ \"\\$1\" = get ] || exit 0; cat >/dev/null; echo username=x-access-token; echo \"password=\\$$token_var\"; }; f"
+      done
+    done
+  done
+  n=$((n + 1))
+done
 # There is no SSH key here: GitHub's SSH addresses go over HTTPS, where the token above works.
 git config --global --replace-all url.https://github.com/.insteadOf git@github.com:
 git config --global --add url.https://github.com/.insteadOf ssh://git@github.com/

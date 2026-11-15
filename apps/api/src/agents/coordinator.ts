@@ -11,6 +11,7 @@ import {
   type ThreadRunner,
   ThreadCloseReason,
   threadLink,
+  type VisualCheckCard,
 } from "@myrel/protocol";
 import { z } from "zod";
 import { type Tool, tool } from "../llm";
@@ -53,7 +54,22 @@ export type FinishedThread = {
   last: Message | null;
   /** Briefs and notes in open threads that name it, newest last. */
   mentions: { threadId: string; note: string; createdAt: string }[];
+  /** Its last visual check round, when it asked for one (ProjectSettings.visualCheck). */
+  check?: VisualCheckCard | null;
 };
+
+/** How a finished thread's last visual check ended, for its entry. */
+export function checkSummary(card: VisualCheckCard): string {
+  const how = {
+    running: "still running",
+    passed: "passed",
+    failed: `needs fixes (${card.blocking.length} finding${card.blocking.length === 1 ? "" : "s"})`,
+    partial: "only the automatic checks ran; the look was not judged",
+    not_checked: `could not check${card.note ? `: ${card.note.slice(0, 160)}` : ""}`,
+  }[card.status];
+  const accepted = card.acceptedBy ? `, accepted as it is by ${card.acceptedBy}` : "";
+  return `round ${card.round} ${how}${accepted}`;
+}
 
 /** A note the coordinator passed from one thread's work to another thread. */
 export type Relay = { fromThreadId: string; toThreadId: string; note: string; createdAt: string };
@@ -124,7 +140,7 @@ export const COORDINATOR_SYSTEM = `You are Myrel, the coordinator of a shared pr
 Your only job is routing. You never research, answer substantive questions, write content or do the work yourself, even when it looks quick. You decide where each message goes, and you keep the project chat calm.
 
 For each new message in the project chat:
-- A new ask (work, research, writing, a question that needs thought): call start_thread on that message. Give it a short title in the person's own words (a few words, not a sentence), a brief for the thread agent (the whole ask in your own words, every part of it: when one message asks for the same work in several places, such as two repositories or two apps, name each of them and never drop one; plus any context from the chat it needs, and the reasonable default you picked where the ask is unclear), a project_ack and an ack.
+- A new ask (work, research, writing, a question that needs thought): call start_thread on that message. Give it a short title in the person's own words (a few words, not a sentence), a brief for the thread agent (the whole ask in your own words, every part of it: when one message asks for the same work in several places, such as two repositories or two apps, name each of them and never drop one; plus any context from the chat it needs, and the reasonable default you picked where the ask is unclear), a project_ack and an ack. When the ask is to research a topic ("research X", "araştır", "araştırma yap"), the brief says to run it with start_research (a research card, paid from a member's own Anthropic key) rather than the agent searching by itself, and passes on any dollar amount the person named as the research's budget.
   - project_ack is the one line the person sees right under their message in the project chat, with the thread card under it. It only says, in a few natural words, that you got it and are starting ("Got it, starting now", "On it"). Word it differently each time, to fit the ask; it does not repeat the request or preview the work.
   - ack is the thread's opening line, saying what is being done first.
   - Do not also call post_message for it; project_ack is that post.
@@ -166,6 +182,8 @@ Keeping threads in step: threads work in parallel, and what one thread starts, d
 Threads finishing: a thread cannot see other threads, so when you tell one to wait for another thread ("write the guide once those threads are done"), you are the one who tells it when that happens. "Threads that just finished" lists every thread resolved since your last turn, also those resolved without a message (a merged pull request, a person closing it), with the briefs and notes that mention it in open threads. For each one, check whether an open thread waits on it or needs its result (a note or brief says so, or its plan or last messages do) and tell that thread with relay_to_thread that the work is finished and what it delivered. Never leave a thread waiting on work that is already done. When nothing waits on it, call no tools for it.
 
 A review finishing is also a handoff checkpoint, even when the implementation thread never said it was waiting. Check whether its findings and report/evidence links were actually delivered to the implementation thread, separately from the earlier review-start notice. If not, relay the available result to the open implementation thread without waiting for a person to ask. If the review only posted a report or named an owner, tell the review thread what is missing from its completion handoff when your current tools allow it; with only thread updates, relay what you have and wait for the review's handoff request for any required reopening. Never infer that the earlier review-start notice already delivered the later findings.
+
+Visual checks: in a project with the visual check on, a finished thread's entry says how its last check ended. Passed, or accepted as it is by a person, means its look was verified. Needs fixes, not judged or could not check, with nobody accepting it, means it was not: say so when you report that work, and while a standing goal runs count it as work left, not delivered (reopen that thread with message_thread for the findings when they are within its scope).
 
 ${KNOWLEDGE_GUIDE}
 You only route, so you can list files but not read or write them; that is thread work. You do write memory when people tell you how they want the project to run (who to involve, what to keep quiet about, decisions). A thread's brief should mention the instructions, memory or files that matter for its work.
@@ -227,9 +245,10 @@ export function coordinatorPrompt(input: {
     ({ thread, message }) =>
       `- Thread [${thread.id}] "${thread.title}" · ${authorLabel(message, input.names)} · ${message.createdAt}\n${indent(clip(message.body, UPDATE_MAX))}`,
   );
-  const finished = (input.finished ?? []).map(({ thread, last, mentions }) =>
+  const finished = (input.finished ?? []).map(({ thread, last, mentions, check }) =>
     [
       `- Thread [${thread.id}] "${thread.title}" finished at ${thread.updatedAt}`,
+      check ? `  Visual check: ${checkSummary(check)}` : "",
       last ? `  Last message (${authorLabel(last, input.names)}):\n${indent(clip(last.body, UPDATE_MAX))}` : "",
       mentions.length
         ? `  Mentioned in open threads:\n${mentions.map((m) => `    - in [${m.threadId}] "${titles.get(m.threadId) ?? ""}" · ${m.createdAt}: ${clip(m.note.replace(/\s+/g, " "), MENTION_MAX)}`).join("\n")}`

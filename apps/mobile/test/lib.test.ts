@@ -1,6 +1,7 @@
 import type { Message } from "@myrel/protocol";
 import { describe, expect, it } from "vitest";
-import { chosenOption, decisionAnswers, parseDecision } from "../src/lib/decision";
+import { appPage } from "../src/lib/app-page";
+import { chosenOption, decisionState, parseDecision } from "../src/lib/decision";
 import { dataUrlBase64, displayName, fileKind } from "../src/lib/files";
 import { surelyLong } from "../src/lib/fold";
 import { notificationNavigation, notificationPath } from "../src/lib/push-target";
@@ -53,9 +54,17 @@ describe("decisions", () => {
       seq,
       createdAt: new Date(seq * 1000).toISOString(),
     });
-    const answers = decisionAnswers([msg("a1", "agent", "q", 1), msg("u1", "user", "Redirect", 2), msg("a2", "agent", "q2", 3)]);
-    expect(answers.get("a1")).toBe("Redirect");
-    expect(answers.has("a2")).toBe(false);
+    const card = "```decision\n" + json + "\n```";
+    const { answers } = decisionState([
+      msg("a1", "agent", card, 1),
+      msg("a2", "agent", card, 2),
+      { ...msg("u1", "user", "Close", 3), pick: { messageId: "a2", card: 0 } },
+      msg("a3", "agent", "no card", 4),
+    ]);
+    // Only the card that was tapped is answered.
+    expect(answers.get("a1")).toEqual([undefined]);
+    expect(answers.get("a2")).toEqual(["Close"]);
+    expect(answers.has("a3")).toBe(false);
   });
 });
 
@@ -129,5 +138,13 @@ describe("files", () => {
   it("takes the payload of a data URL", () => {
     expect(dataUrlBase64("data:image/png;base64,iVBORw0K")).toBe("iVBORw0K");
     expect(dataUrlBase64("nonsense")).toBe("");
+  });
+});
+
+describe("appPage", () => {
+  it("marks a server page ?app, keeping its own query and fragment", () => {
+    expect(appPage("https://myrel.test/devices")).toBe("https://myrel.test/devices?app");
+    expect(appPage("https://myrel.test/settings/projects/p1?tab=github")).toBe("https://myrel.test/settings/projects/p1?tab=github&app");
+    expect(appPage("https://myrel.test/privacy/#en")).toBe("https://myrel.test/privacy/?app#en");
   });
 });

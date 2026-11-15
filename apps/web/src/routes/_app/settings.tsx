@@ -5,6 +5,7 @@ import { BookMarked, ChevronLeft, CreditCard, KeyRound, Mail, Plug, Server, User
 import type { ReactNode } from "react";
 import { ProjectBadge } from "../../components/project-badge";
 import { meQuery, myInvitesQuery, projectsQuery, serverInfoQuery } from "../../lib/api";
+import { openedFromApp } from "../../lib/app-tab";
 import { cn } from "../../lib/ui";
 
 export const Route = createFileRoute("/_app/settings")({
@@ -35,7 +36,8 @@ function SettingsLayout() {
           <NavItem to="/settings" icon={<UserRound size={15} />} exact>
             {t("settings.account")}
           </NavItem>
-          {info?.billing && (
+          {/* A tab an app opened sells nothing: the store apps sell plans in the app. */}
+          {info?.billing && !openedFromApp() && (
             <NavItem to="/settings/billing" icon={<CreditCard size={15} />}>
               {t("settings.billing")}
             </NavItem>

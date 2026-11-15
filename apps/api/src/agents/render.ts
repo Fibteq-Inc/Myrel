@@ -1,4 +1,4 @@
-import { type Message, parseConnectorSuggestion, parsePlanUpdate, planChecklist, type Thread } from "@myrel/protocol";
+import { type Message, parseConnectorSuggestion, parsePlanUpdate, parseResearch, parseVisualCheck, planChecklist, type Thread } from "@myrel/protocol";
 
 /** How a message's author reads in a prompt. */
 export function authorLabel(m: Message, names: Record<string, string>): string {
@@ -26,10 +26,25 @@ export function renderMessage(m: Message, names: Record<string, string>, opts: {
     const what = card.signIn ? `sign-in-again card for ${names}, whose sign-in ended` : `connector card offering ${names}`;
     return `${head}\n${indent(`(${what}: ${state})`)}`;
   }
+  // A visual check's card: its findings reach the thread as a note, so the state is enough here.
+  const check = parseVisualCheck(m.body);
+  if (check) {
+    const by = check.evaluator ? `, judged by ${check.evaluator.cli} / ${check.evaluator.model}` : "";
+    return `${head}\n${indent(`(visual check card: round ${check.round}, ${check.status}${by}${check.summary ? `, result in ${check.summary}` : ""})`)}`;
+  }
+  // A research's card: its report reaches the thread as a note when it ends, so the state is enough here.
+  const research = parseResearch(m.body);
+  if (research) {
+    const end = research.partial ? ` (${research.partial})` : "";
+    const cents = (c: number) => (c / 100).toFixed(2);
+    return `${head}\n${indent(`(research card "${research.title}": ${research.status}${end}, ${cents(research.spentCents)} of ${cents(research.budgetCents)} USD${research.report ? `, report in ${research.report}` : ""})`)}`;
+  }
   // The note itself is in the prompt already (the brief, or the coordinator's notes).
   if (m.relay) return `${head}\n${indent(`${m.body}\n(marker for a coordinator note people can open)`)}`;
   const files = (m.attachments ?? []).map((a) => `📎 attached: ${a.path} (${a.contentType}, ${a.size} bytes)`);
-  return `${head}\n${indent([m.body, ...files].filter(Boolean).join("\n"))}`;
+  // A tap on one of several cards answers that card only, so the prompt names it.
+  const body = m.pick ? `(picked on the card "${m.pick.question ?? ""}" in [${m.pick.messageId}]) ${m.body}` : m.body;
+  return `${head}\n${indent([body, ...files].filter(Boolean).join("\n"))}`;
 }
 
 export function renderThread(t: Thread): string {

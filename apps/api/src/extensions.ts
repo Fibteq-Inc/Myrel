@@ -40,6 +40,11 @@ export type Extensions = {
   canAddSshHost?: (env: Env, userId: string) => Promise<LimitCheck>;
   /** Before a skill is added: a person's own, or a project's. */
   canAddSkill?: (env: Env, owner: { userId: string } | { projectId: string }) => Promise<LimitCheck>;
+  /**
+   * Before a person's account is deleted, with nothing deleted yet: end what the extension bills them
+   * for, such as a subscription. Refused, the account is kept and the reason shown to the person.
+   */
+  beforeDeleteAccount?: (env: Env, userId: string) => Promise<LimitCheck>;
 };
 
 const ALLOWED: LimitCheck = { ok: true };
@@ -92,4 +97,8 @@ export async function canAddSkill(env: Env, owner: { userId: string } | { projec
 
 export async function canStoreFile(env: Env, projectId: string, total: number): Promise<LimitCheck> {
   return current.canStoreFile ? current.canStoreFile(env, projectId, total) : ALLOWED;
+}
+
+export async function beforeDeleteAccount(env: Env, userId: string): Promise<LimitCheck> {
+  return current.beforeDeleteAccount ? current.beforeDeleteAccount(env, userId) : ALLOWED;
 }

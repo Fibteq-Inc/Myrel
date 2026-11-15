@@ -107,4 +107,42 @@ describe.skipIf(process.platform === "win32")("thread worktrees", () => {
     expect(await run({ ...config, worktrees: false })).toBe(`in ${repo} on main`);
     expect(await run({ ...config, access: "read" })).toBe(`in ${repo} on main`);
   });
+
+  it("works in the folder itself when the project says so, without continuing a session from the worktree", async () => {
+    const bin = join(home, "bin");
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "claude"),
+      `#!/bin/sh\nread prompt\nr=""; prev=""; for a in "$@"; do [ "$prev" = "--resume" ] && r="$a"; prev="$a"; done\nprintf '{"type":"system","subtype":"init","session_id":"sess-%s"}\\n' "$$"\nprintf '{"type":"result","subtype":"success","is_error":false,"result":"in %s on %s resuming [%s]"}\\n' "$(pwd)" "$(git branch --show-current)" "$r"\n`,
+    );
+    await chmod(join(bin, "claude"), 0o755);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const config: RunnerConfig = { folders: [{ path: repo, name: "repo" }], access: "edit" };
+    const sessions = new SessionStore();
+    const run = async (worktree?: boolean, taskId = "task_01JTEST0000000000000000000") => {
+      const frames: RunnerToServer[] = [];
+      const runner = new TaskRunner({ config: () => config, sessions });
+      runner.setSender((f) => frames.push(f));
+      await runner.start({ type: "task.start", taskId, threadId: A, folder: repo, cli: "claude", prompt: "x", ...(worktree !== undefined && { worktree }) });
+      return { result: (frames.at(-1) as { result: string }).result, folders: frames.find((f) => f.type === "task.folders") };
+    };
+
+    // A turn in the thread's worktree, saved as an older runner did (without its folder).
+    expect((await run()).result).toContain("on myrel/thr-000000aaaa resuming []");
+    const [w] = await listWorktrees();
+    const saved = (await sessions.get(A, "claude"))!;
+    expect(saved.cwd).toBe(w!.path);
+    await sessions.set(A, "claude", { id: saved.id, task: saved.task });
+
+    // The project now works in its folder: the main checkout, on its own branch, in a new session.
+    const shared = await run(false, "task_01JTEST0000000000000000001");
+    expect(shared.result).toBe(`in ${repo} on main resuming []`);
+    expect(await listWorktrees()).toHaveLength(1);
+    // Its session ran in the folder, so the next turn there continues it.
+    const next = (await sessions.get(A, "claude"))!;
+    expect(next.cwd).toBe(repo);
+    expect((await run(false, "task_01JTEST0000000000000000002")).result).toBe(`in ${repo} on main resuming [${next.id}]`);
+    // Back on: the worktree's turn does not continue the folder's session.
+    expect((await run(true, "task_01JTEST0000000000000000003")).result).toContain(`in ${w!.path} on myrel/thr-000000aaaa resuming []`);
+  });
 });

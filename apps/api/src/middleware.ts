@@ -1,5 +1,6 @@
 import type { InstanceRole } from "@myrel/protocol";
 import { APIError } from "better-auth/api";
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { createAuth } from "./auth";
 import { isListedAdmin } from "./instance";
@@ -48,6 +49,15 @@ async function findSession(env: Env, headers: Headers) {
     if (err instanceof APIError && err.statusCode === 401) return null;
     throw err;
   }
+}
+
+/**
+ * Whether the desktop or mobile app sent the request: they sign in with a bearer token and send no
+ * cookies (packages/client ApiClient, credentials "omit"), while the web app on the server's own
+ * address keeps the session cookie.
+ */
+export function fromApp(c: Context<AppEnv>): boolean {
+  return /^bearer\s/i.test(c.req.header("authorization") ?? "");
 }
 
 /** For server administration routes; runs after requireUser. */

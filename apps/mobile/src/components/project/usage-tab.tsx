@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { formatCost, formatTokens, modelName } from "../../lib/format";
-import { useProject } from "../../lib/project";
+import { useProjectId } from "../../lib/project";
 import { useSession } from "../../lib/session";
 import { makeStyles, radius, useColors } from "../../theme";
 import { errorMessage, Spinner } from "../ui";
@@ -19,7 +19,7 @@ export function UsageTab() {
   const colors = useColors();
   const styles = useStyles();
   const { api, server } = useSession();
-  const { projectId } = useProject();
+  const projectId = useProjectId();
   const [days, setDays] = useState<Range>(30);
   const usage = useQuery({
     queryKey: ["usage", server, projectId, days],

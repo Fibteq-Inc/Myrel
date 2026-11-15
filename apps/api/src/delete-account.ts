@@ -1,6 +1,7 @@
 import { createDb, schema } from "@myrel/db";
 import { getAgentByName } from "agents";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { beforeDeleteAccount, type LimitCheck } from "./extensions";
 import { deleteProject } from "./projects/delete";
 import { deleteOwnerFiles } from "./skills/store";
 
@@ -15,8 +16,13 @@ const SUCCESSION = { owner: 0, admin: 1, member: 2 } as const;
  * runners, memberships, notifications and push devices cascade from the user row. Usage rows
  * stay as the billing ledger but lose the person's id. A last server admin hands the role to the
  * oldest remaining account, so the server is never left without one.
+ *
+ * First a deployment's extension ends what it bills the person for (the hosted service cancels a
+ * web subscription); when it cannot, nothing is deleted and the reason comes back.
  */
-export async function deleteAccount(env: Env, userId: string): Promise<void> {
+export async function deleteAccount(env: Env, userId: string): Promise<LimitCheck> {
+  const ready = await beforeDeleteAccount(env, userId);
+  if (!ready.ok) return ready;
   const db = createDb(env.DB);
   const mine = await db
     .select({ projectId: projectMembers.projectId, role: projectMembers.role })
@@ -78,4 +84,5 @@ export async function deleteAccount(env: Env, userId: string): Promise<void> {
       .disconnectUser(userId)
       .catch((err: unknown) => console.error("account delete: connections", projectId, err));
   }
+  return { ok: true };
 }

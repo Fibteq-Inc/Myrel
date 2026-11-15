@@ -8,7 +8,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { useDraft } from "../lib/drafts";
 import { pickPhotos } from "../lib/pick-photos";
 import { platform } from "../lib/platform";
-import { useProject } from "../lib/project";
+import { useProjectId } from "../lib/project";
 import { filesQueryKey } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { makeStyles, radius, useColors, useTheme } from "../theme";
@@ -53,7 +53,7 @@ export function Composer({
   const colors = useColors();
   const styles = useStyles();
   const { api, server } = useSession();
-  const { projectId } = useProject();
+  const projectId = useProjectId();
   const queryClient = useQueryClient();
   const [body, setBody] = useDraft(draftKey(projectId, threadId));
   const [pending, setPending] = useState<Pending[]>([]);

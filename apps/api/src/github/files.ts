@@ -1,3 +1,4 @@
+import { wrapExternal } from "../agents/external";
 import { type GithubEnv, githubFetch } from "./app";
 import { projectRepoToken } from "./store";
 
@@ -35,7 +36,8 @@ export async function readRepoFile(env: FilesEnv, projectId: string, repo: strin
   const bytes = Uint8Array.from(atob(res.content.replace(/\n/g, "")), (c) => c.charCodeAt(0));
   if (bytes.subarray(0, 8000).includes(0)) return `${res.path} is a binary file (${res.size} bytes).`;
   const text = new TextDecoder().decode(bytes);
-  return text.length > MAX_FILE_CHARS
-    ? `${text.slice(0, MAX_FILE_CHARS)}\n\n[truncated: showing ${MAX_FILE_CHARS} of ${text.length} characters]`
-    : text;
+  const shown =
+    text.length > MAX_FILE_CHARS ? `${text.slice(0, MAX_FILE_CHARS)}\n\n[truncated: showing ${MAX_FILE_CHARS} of ${text.length} characters]` : text;
+  // A repository's files are data, not instructions (see agents/external.ts); they never mark the thread.
+  return wrapExternal({ source: "github-repo-file", ref: `${r.fullName}/${res.path}${ref ? `@${ref}` : ""}`, trust: "repository" }, shown).text;
 }

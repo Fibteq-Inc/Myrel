@@ -141,7 +141,7 @@ export type ConnectResult =
  */
 export async function connectOffer(
   env: Env,
-  input: { userId: string; projectId: string; offer: ConnectorOffer; headers?: Record<string, string>; origin: string; back: SignInReturn },
+  input: { userId: string; projectId: string; offer: ConnectorOffer; headers?: Record<string, string>; origin: string; back: SignInReturn; app?: boolean },
 ): Promise<ConnectResult> {
   const { userId, projectId, offer } = input;
   const blocked = blockedUrl(offer.url);
@@ -196,7 +196,7 @@ export async function connectOffer(
 
   if (row.auth === "oauth" && row.status !== "ok") {
     try {
-      return { ok: true, connected: false, authorizeUrl: await startAuthorization(env, row, input.origin, userId, fetch, input.back) };
+      return { ok: true, connected: false, authorizeUrl: await startAuthorization(env, row, input.origin, userId, fetch, { back: input.back, app: input.app }) };
     } catch (err) {
       // A server without a sign-in may need none at all (catalog entries don't say): try it as it is.
       const open = await checkConnector(env, { ...row, auth: "none" });
@@ -237,7 +237,7 @@ export function signInOffer(row: Pick<ConnectorRow, "id" | "name" | "url">): Con
  */
 export async function signInAgain(
   env: Env,
-  input: { userId: string; projectId: string; manages: boolean; offer: ConnectorOffer; origin: string; back: SignInReturn },
+  input: { userId: string; projectId: string; manages: boolean; offer: ConnectorOffer; origin: string; back: SignInReturn; app?: boolean },
 ): Promise<ConnectResult> {
   const id = input.offer.id.slice(CONNECTOR_OFFER_PREFIX.length);
   const [row] = await createDb(env.DB).select().from(connectors).where(eq(connectors.id, id));
@@ -251,7 +251,7 @@ export async function signInAgain(
   }
   if (row.status === "ok") return { ok: true, connected: true, connectorId: row.id };
   try {
-    return { ok: true, connected: false, authorizeUrl: await startAuthorization(env, row, input.origin, input.userId, fetch, input.back) };
+    return { ok: true, connected: false, authorizeUrl: await startAuthorization(env, row, input.origin, input.userId, fetch, { back: input.back, app: input.app }) };
   } catch (err) {
     return { ok: false, error: "failed", message: err instanceof Error ? err.message : String(err) };
   }

@@ -3,7 +3,7 @@ import { type AgentStart, CLI_NAMES, CLOUD_RUNNER, CliId, CloudCli, type Project
 import { claudeModel, type ModelConfig, type RunnerBackend, type TaskSpec } from "@myrel/runner-core";
 import { getAgentByName } from "agents";
 import { eq } from "drizzle-orm";
-import { freshInstallationToken, GithubError, githubConfigured, installationToken, type RepoPermissions } from "../github/app";
+import { freshInstallationToken, GithubError, githubConfigured, installationRepos, installationToken, type RepoPermissions } from "../github/app";
 import { listProjectRepos, repoWritable } from "../github/store";
 import { getWorkspace, isRunnerReconnecting, listWorkspaces, runnerHasFeature, workspaceClis } from "../runners";
 
@@ -31,9 +31,19 @@ export function sandboxBackend(env: Env, threadId: string, principal = ""): Runn
  */
 export function localBackend(
   env: Env,
-  where: { projectId: string; threadId: string; workspace: ProjectWorkspace; agent?: AgentStart; model?: TaskModel; github?: TaskGithub | null },
+  where: {
+    projectId: string;
+    threadId: string;
+    workspace: ProjectWorkspace;
+    agent?: AgentStart;
+    model?: TaskModel;
+    github?: TaskGithub | null;
+    account?: string;
+    /** The CLI works in the folder itself, one turn of the project at a time (see RunnerAgent.claimFolder). */
+    shared?: boolean;
+  },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent, model, github } = where;
+  const { projectId, threadId, workspace, agent, model, github, account, shared } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -51,6 +61,8 @@ export function localBackend(
         agent,
         model,
         ...(github && { github }),
+        ...(account && { account }),
+        ...(shared && { shared }),
       });
       if (!started.ok) throw new Error(started.reason);
     },
@@ -208,20 +220,27 @@ export async function taskPlace(
   };
 }
 
+/** Repositories one GitHub token can cover: an installation token never reaches past its installation. */
+type GithubScope = { installationId: number; repos: { repoId: number; fullName: string }[] };
+
 /**
- * The repositories a turn's GitHub token covers: the project's connected ones that whoever connected
- * them can push to (see repoWritable), of the first one's installation (nearly always all of them,
- * as one installation token covers one installation). Null without any.
+ * What a turn's GitHub tokens cover: the project's connected repositories that whoever connected them
+ * can push to (see repoWritable), one scope per installation. The installation connected to first
+ * comes first: it is the token `gh` and runners without "git-tokens" get, so connecting another
+ * repository never takes it from the ones already working.
  */
-async function githubScope(env: Env, projectId: string) {
-  if (!githubConfigured(env)) return null;
+async function githubScopes(env: Env, projectId: string): Promise<GithubScope[]> {
+  if (!githubConfigured(env)) return [];
   const all = await listProjectRepos(env.DB, projectId);
   const writable = await Promise.all(all.map((r) => repoWritable(env.DB, projectId, r)));
-  const repos = all.filter((_, i) => writable[i]);
-  const first = repos[0];
-  if (!first) return null;
-  const covered = repos.filter((r) => r.installationId === first.installationId);
-  return { installationId: first.installationId, repositoryIds: covered.map((r) => r.repoId), repos: covered.map((r) => r.fullName) };
+  const repos = all.filter((_, i) => writable[i]).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const scopes = new Map<number, GithubScope>();
+  for (const { installationId, repoId, fullName } of repos) {
+    const scope = scopes.get(installationId) ?? { installationId, repos: [] };
+    scope.repos.push({ repoId, fullName });
+    scopes.set(installationId, scope);
+  }
+  return [...scopes.values()];
 }
 
 /**
@@ -247,26 +266,62 @@ async function mintTurnToken<T>(mint: (permissions: RepoPermissions) => Promise<
 }
 
 /**
- * The token a cloud agent turn gets for the project's connected repositories, so git and gh work
- * in the sandbox without asking. Null without any.
+ * A scope's token, or null when GitHub gives none. GitHub refuses a token for all of a scope's
+ * repositories over one the installation no longer covers (422), for instance when its webhook never
+ * came: the others must not go with it, so that one is left out. A failure stays with its own
+ * installation, for the same reason.
  */
-export async function projectGithubToken(env: Env, projectId: string, runSec: number): Promise<string | null> {
-  const scope = await githubScope(env, projectId);
-  if (!scope) return null;
+async function mintScope<T>(
+  env: Env,
+  projectId: string,
+  scope: GithubScope,
+  mint: (repositoryIds: number[], permissions: RepoPermissions) => Promise<T>,
+): Promise<{ res: T; repos: string[] } | null> {
+  const attempt = (repos: GithubScope["repos"]) => mintTurnToken((permissions) => mint(repos.map((r) => r.repoId), permissions));
   try {
-    const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
-    const { installationId, repositoryIds } = scope;
-    return (await mintTurnToken((permissions) => installationToken(env, installationId, { repositoryIds, permissions }, minValidMs))).token;
+    try {
+      return { res: await attempt(scope.repos), repos: scope.repos.map((r) => r.fullName) };
+    } catch (err) {
+      if (!(err instanceof GithubError && err.status === 422)) throw err;
+      const covered = new Set((await installationRepos(env, scope.installationId)).map((r) => r.id));
+      const left = scope.repos.filter((r) => covered.has(r.repoId));
+      if (!left.length || left.length === scope.repos.length) throw err;
+      return { res: await attempt(left), repos: left.map((r) => r.fullName) };
+    }
   } catch (err) {
-    console.warn("no GitHub token for the project", projectId, err);
+    console.warn("no GitHub token for the project", projectId, scope.installationId, err);
     return null;
   }
 }
 
 /**
- * The same token for a turn on a person's computer (task.start's `github`): the same repositories and
- * permissions, but only for a runner that can keep it out of files (feature "git-token") and only
- * when the computer is the person's the turn works for. A token of its own, revoked when the turn ends.
+ * The secrets a cloud agent turn gets for the project's connected repositories, so git and gh work
+ * in the sandbox without asking: GITHUB_TOKEN for the first installation, GITHUB_TOKEN_<n> and
+ * GITHUB_REPOS_<n> (owner/name, spaces between) for each other one, see taskScript. Empty without any.
+ */
+export async function projectGithubSecrets(env: Env, projectId: string, runSec: number): Promise<Record<string, string>> {
+  const minValidMs = Math.min(runSec * 1000 + 5 * 60_000, 55 * 60_000);
+  const scopes = await githubScopes(env, projectId);
+  const minted = await Promise.all(
+    scopes.map((scope) =>
+      mintScope(env, projectId, scope, (repositoryIds, permissions) => installationToken(env, scope.installationId, { repositoryIds, permissions }, minValidMs)),
+    ),
+  );
+  const [first, ...others] = minted.filter((m) => m !== null);
+  if (!first) return {};
+  const secrets: Record<string, string> = { GITHUB_TOKEN: first.res.token };
+  others.forEach((m, i) => {
+    secrets[`GITHUB_TOKEN_${i + 1}`] = m.res.token;
+    secrets[`GITHUB_REPOS_${i + 1}`] = m.repos.join(" ");
+  });
+  return secrets;
+}
+
+/**
+ * The same tokens for a turn on a person's computer (task.start's `github`): the same repositories and
+ * permissions, but only for a runner that can keep them out of files (feature "git-token") and only
+ * when the computer is the person's the turn works for. Tokens of their own, revoked when the turn
+ * ends. A runner without "git-tokens" gets the first installation's alone.
  */
 export async function localGithubToken(
   env: Env,
@@ -275,16 +330,21 @@ export async function localGithubToken(
   requester: string | null,
 ): Promise<TaskGithub | null> {
   if (!requester || !(await runnerHasFeature(env, runnerId, "git-token")) || !(await ownsComputer(env, runnerId, requester))) return null;
-  const scope = await githubScope(env, projectId);
-  if (!scope) return null;
-  try {
-    const { installationId, repositoryIds, repos } = scope;
-    const res = await mintTurnToken((permissions) => freshInstallationToken(env, installationId, { repositoryIds, permissions }));
-    return { token: res.token, expiresAt: new Date(res.expires_at).toISOString(), repos };
-  } catch (err) {
-    console.warn("no GitHub token for the project", projectId, err);
-    return null;
-  }
+  const scopes = await githubScopes(env, projectId);
+  const several = scopes.length > 1 && (await runnerHasFeature(env, runnerId, "git-tokens"));
+  const minted = await Promise.all(
+    (several ? scopes : scopes.slice(0, 1)).map((scope) =>
+      mintScope(env, projectId, scope, (repositoryIds, permissions) => freshInstallationToken(env, scope.installationId, { repositoryIds, permissions })),
+    ),
+  );
+  const [first, ...others] = minted.filter((m) => m !== null).map(({ res, repos }) => ({ token: res.token, expiresAt: new Date(res.expires_at).toISOString(), repos }));
+  if (!first) return null;
+  return { ...first, ...(others.length && { more: others }) };
+}
+
+/** Every token in a turn's `github`, to revoke them. */
+export function taskGithubTokens(github: TaskGithub): string[] {
+  return [github.token, ...(github.more ?? []).map((g) => g.token)];
 }
 
 /** Whether the paired computer is `userId`'s. */

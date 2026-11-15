@@ -390,9 +390,10 @@ describe("sign-in limit", () => {
         body: JSON.stringify({ email: "nobody@example.com", password: "wrong-password-here" }),
       });
     const statuses: number[] = [];
-    for (let i = 0; i < 12; i++) statuses.push((await attempt()).status);
+    // The limit counts per fixed 60 s window, and the run may cross into a new one: 21 tries overflow one of two.
+    for (let i = 0; i < 21; i++) statuses.push((await attempt()).status);
     expect(statuses.slice(0, 10).every((s) => s === 401)).toBe(true);
-    expect(statuses.at(-1)).toBe(429);
+    expect(statuses).toContain(429);
   });
 });
 

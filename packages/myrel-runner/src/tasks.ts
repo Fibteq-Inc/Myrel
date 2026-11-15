@@ -1,17 +1,19 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { CliId, CliLimits, RunnerToServer, ServerToRunner, TaskGithub } from "@myrel/protocol";
 import { type AcpMcpServer, AcpTurn } from "./acp";
 import { type AppServerAsk, AppServerTurn, type AppServerTurnOptions, approveAccess } from "./app-server";
 import { ClaudeStreamTurn } from "./claude-stream";
+import { accountEnv } from "./accounts";
 import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
-import { childEnv, type RunnerConfig, type SessionStore } from "./config";
+import { childEnv, type RunnerConfig, type SessionStore, type StoredSession } from "./config";
 import { GitCredentials } from "./github";
+import { sandboxed, sandboxNote } from "./sandbox";
 import { downloadSkills, type RunSkills } from "./skills";
 import { installShim } from "./ssh-shim";
-import { threadWorktree, type Worktree } from "./worktrees";
+import { listWorktrees, threadWorktree, type Worktree } from "./worktrees";
 
 type TaskStart = Extract<ServerToRunner, { type: "task.start" }>;
 type Send = (frame: RunnerToServer) => void;
@@ -22,6 +24,8 @@ const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "h
 const MAX_RESULT = 90_000;
 /** At most one progress frame per this many ms. */
 const PROGRESS_EVERY_MS = 1000;
+/** The wait before starting Claude Code once more when it could not connect to Myrel's tools. */
+const MCP_RETRY_MS = 5000;
 
 export type TaskRunnerOptions = {
   config: () => RunnerConfig;
@@ -33,10 +37,12 @@ export type TaskRunnerOptions = {
   /** For tests: replaces child_process.spawn. */
   spawn?: typeof spawn;
   log?: (line: string) => void;
-  /** The subscription limits a CLI reported during or after a run. */
-  onLimits?: (cli: CliId, limits: CliLimits) => void;
+  /** The subscription limits a CLI reported during or after a run, with the login it ran with (task.start's `account`). */
+  onLimits?: (cli: CliId, limits: CliLimits, account?: string) => void;
   /** This runner's version, which it gives the CLIs that ask (Codex's app server). */
   version?: string;
+  /** For tests: the wait before trying again when Claude Code started without Myrel's tools. Default MCP_RETRY_MS. */
+  mcpRetryMs?: number;
 };
 
 /** Runs tasks the server sends, one CLI process per task, in shared folders only. */
@@ -75,10 +81,15 @@ export class TaskRunner {
     const config = this.opts.config();
     const folder = await sharedFolder(config, task.folder);
     if (!folder) return fail(`The folder ${task.folder} is not shared on this computer. Run \`myrel-runner share\` in it.`);
+    // The login the CLI runs with: its own, or another the person added (Claude Code's config folder).
+    const login = accountEnv(config, task.cli, task.account);
+    if ("error" in login) return fail(login.error);
+    if (task.coordinator) return this.startCoordinator(task, task.coordinator.system, login);
 
-    // Read-only tasks change nothing, so they can share the folder.
+    // Read-only tasks change nothing, so they can share the folder. A project whose threads work in its
+    // folder itself (its setting, task.worktree false) shares it too; Myrel then runs one of its turns at a time.
     let isolated: Awaited<ReturnType<typeof threadWorktree>> = null;
-    if (config.worktrees !== false && config.access !== "read") {
+    if (config.worktrees !== false && task.worktree !== false && config.access !== "read") {
       try {
         isolated = await threadWorktree(folder, task.threadId);
       } catch (err) {
@@ -99,13 +110,18 @@ export class TaskRunner {
     }
 
     const adapter = ADAPTERS[task.cli];
+    const appServerAvailable = !!adapter.appServer && (await hasAppServer(adapter.bin));
+    if (task.cli === "codex" && config.access === "auto" && !appServerAvailable) {
+      return fail("Codex auto access needs its app server for Approve for me. Update Codex and unset MYREL_CODEX_EXEC, or choose edit access for codex exec.");
+    }
     // Claude Code asks the person through Myrel before stepping outside those folders.
     const asks = !!task.agent && task.cli === "claude";
-    // A CLI session belongs to the folder it ran in, so a new worktree starts a new one.
-    const session = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli) : undefined;
+    // A CLI session belongs to the folder it ran in, so a new worktree (or the folder itself, after one) starts a new one.
+    const stored = RESUMES.has(task.cli) && !isolated?.created ? await this.opts.sessions.get(task.threadId, task.cli, task.account) : undefined;
+    const session = stored && (await ranIn(stored, cwd, isolated ? null : { folder, threadId: task.threadId })) ? stored : undefined;
     // A session that saw the thread's last turn already holds the thread: it only needs what is new.
     const short = session && task.agent?.resume && session.task === task.agent.resume.after ? task.agent.resume.prompt : undefined;
-    log(`▶ ${adapter.id} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
+    log(`▶ ${adapter.id}${task.account ? `@${task.account}` : ""} in ${cwd}: ${task.prompt.split("\n")[0]!.slice(0, 80)}`);
 
     // As the thread's agent, the CLI reaches the thread's MCP endpoint on this runner's server.
     let agentDir: string | undefined;
@@ -144,7 +160,7 @@ export class TaskRunner {
     // A session that cannot be resumed (deleted, or from another CLI version) fails before any
     // output: the turn then starts a new session with the whole thread.
     // Git clones and pushes the project's repositories with the turn's GitHub token, lent only for this run.
-    let env = task.github ? { ...agent.env, ...(await this.git.lend(task.taskId, task.github)) } : agent.env;
+    let env = { ...login, ...agent.env, ...(task.github && (await this.git.lend(task.taskId, task.github))) };
     // The agent's ssh goes through Myrel's ssh_run (a card, the project's servers, Myrel's keys).
     if (task.agent && agentDir && config.server) {
       const shim = await installShim(agentDir, { url: `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`, token: task.agent.token }).catch((err: unknown) => {
@@ -155,7 +171,7 @@ export class TaskRunner {
     }
     try {
       // Codex runs as its app server where it has one, which can ask the person about a step.
-      const appServer = adapter.appServer && (await hasAppServer(adapter.bin)) ? { ...adapter.appServer({ access: config.access, dirs, asks: !!ask }), ask } : undefined;
+      const appServer = appServerAvailable ? { ...adapter.appServer!({ access: config.access, dirs, asks: !!ask }), ask } : undefined;
       if (appServer) log("  as its app server");
       // Claude Code keeps its stdin open while the turn runs, so new messages can go in mid-turn.
       const stream = !!adapter.streamInput && (await hasStreamInput(adapter.bin));
@@ -167,6 +183,39 @@ export class TaskRunner {
       }
     } finally {
       this.git.end(task.taskId);
+    }
+  }
+
+  /**
+   * One turn of the project's coordinator (task.start's `coordinator`). Every member's message starts
+   * one on this computer, so the CLI gets none of its built-in tools whatever this computer's access
+   * level, an empty folder of its own to work in, and no session, connectors, skills, GitHub token or
+   * other folders: only Myrel's coordinator tools.
+   */
+  private async startCoordinator(task: TaskStart, system: string, login: Record<string, string>): Promise<void> {
+    const fail = (result: string) => this.send({ type: "task.done", taskId: task.taskId, ok: false, result });
+    const config = this.opts.config();
+    const adapter = ADAPTERS[task.cli];
+    if (!task.agent || !config.server) return fail("A coordinator turn needs Myrel's coordinator endpoint.");
+    if (!adapter.coordinator) return fail(`${adapter.bin} cannot work as the coordinator: it cannot run without its own tools.`);
+    // The config files (they hold the turn's token) stay outside the folder the CLI works in.
+    const dir = await mkdtemp(join(tmpdir(), "myrel-coordinator-"));
+    const cleanup = () => rm(dir, { recursive: true, force: true }).catch(() => {});
+    try {
+      const cwd = join(dir, "work");
+      await mkdir(cwd);
+      const url = `${config.server.replace(/\/$/, "")}${task.agent.mcpPath}`;
+      const run = await adapter.coordinator({ url, token: task.agent.token, dir, system });
+      if (!run) {
+        await cleanup();
+        return fail(`This computer's ${adapter.bin} is too old to work as the coordinator, which needs it without its own tools. Update it.`);
+      }
+      (this.opts.log ?? (() => {}))(`▶ ${adapter.id}${task.account ? `@${task.account}` : ""} as the coordinator`);
+      const env = { ...login, ...run.env };
+      await this.attempt(task, { cwd, adapter, agent: { args: [] }, env, dirs: [], asks: false, skills: null, where: "", cleanup, fixed: run.args }, undefined, task.prompt);
+    } catch (err) {
+      await cleanup();
+      fail(`Could not start ${adapter.bin} as the coordinator: ${errorLine(err)}`);
     }
   }
 
@@ -199,9 +248,13 @@ export class TaskRunner {
       where: string;
       cleanup: () => Promise<unknown>;
       /** How to run the CLI as Codex's app server, instead of args(). */
-      appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "config" | "ask">;
+      appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "approvalsReviewer" | "config" | "ask">;
       /** Claude Code's streaming input instead of a prompt on a stdin that ends at once. */
       stream?: boolean;
+      /** A coordinator turn's whole command line (CliAdapter.coordinator), instead of args(): it keeps no session either. */
+      fixed?: string[];
+      /** Set on the run started again because the first could not connect to Myrel's tools (ParseState.mcpDown). */
+      again?: boolean;
     },
     resume: string | undefined,
     prompt: string,
@@ -210,7 +263,10 @@ export class TaskRunner {
     const log = this.opts.log ?? (() => {});
     const { cwd, adapter, agent, dirs, skills, where, cleanup } = run;
     // The prompt lists the skills; only the runner knows where they are on this computer.
-    const text = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
+    const withSkills = skills ? `${prompt}\n\nSkills folder for this run: ${skills.skills}` : prompt;
+    // A sandbox AppArmor blocks fails every command; the agent is told why, and the fix, instead of retrying.
+    const blocked = !run.fixed && sandboxed(adapter.id, config.access) ? await sandboxNote(adapter.id).catch(() => null) : null;
+    const text = blocked ? `${withSkills}\n\n${blocked}` : withSkills;
     const input = adapter.input ? adapter.input(text, config.access) : text;
     // A CLI that reads the prompt only from a file gets a private one, deleted when the run ends.
     const promptDir = adapter.promptFile ? await mkdtemp(join(tmpdir(), "myrel-prompt-")) : undefined;
@@ -218,7 +274,13 @@ export class TaskRunner {
     if (promptFile) await writeFile(promptFile, input, { mode: 0o600 });
     // The app server takes the model in the session; its flags are agent()'s config overrides.
     const extra = [...(run.appServer ? [] : modelFlags(adapter, task.model)), ...agent.args];
-    const args = run.appServer ? ["app-server", ...agent.args] : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile, stream: run.stream });
+    const args = run.fixed
+      ? [...run.fixed, ...modelFlags(adapter, task.model)]
+      : run.appServer
+        ? ["app-server", ...agent.args]
+        : adapter.args({ access: config.access, resume, extra, dirs, asks: run.asks, promptFile, stream: run.stream });
+    // A coordinator turn starts afresh each time: nothing to continue next turn.
+    const keepsSession = !run.fixed && RESUMES.has(task.cli);
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
       env: childEnv(run.env),
@@ -243,10 +305,11 @@ export class TaskRunner {
     let sentUsage = "";
     let sentLimits: CliLimits | undefined;
     let savedSession: string | undefined;
+    let stoppedForMcp = false;
     const reportLimits = (limits: CliLimits | undefined) => {
       if (!limits || limits === sentLimits) return;
       sentLimits = limits;
-      this.opts.onLimits?.(task.cli, limits);
+      this.opts.onLimits?.(task.cli, limits, task.account);
     };
     /** The CLI's usage so far, for the server to show under the agent's replies. */
     const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
@@ -276,12 +339,21 @@ export class TaskRunner {
       const lines = buffered.split("\n");
       buffered = lines.pop()!;
       for (const line of lines) adapter.line(line.trim(), state);
+      // Without Myrel's tools the agent would work unseen and fail at its first step: stopped before it.
+      if (state.mcpDown && task.agent) {
+        if (!stoppedForMcp) {
+          stoppedForMcp = true;
+          child.kill("SIGTERM");
+          setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill("SIGKILL"), 5000).unref();
+        }
+        return;
+      }
       reportLimits(state.limits);
       // Saved as soon as the CLI names it, not only at the end: a run stopped midway (the runner
       // restarting for an update) is then continued in the same session instead of a new one.
-      if (state.sessionId && state.sessionId !== savedSession && RESUMES.has(task.cli)) {
+      if (state.sessionId && state.sessionId !== savedSession && keepsSession) {
         savedSession = state.sessionId;
-        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }).catch(() => {});
+        void this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
       }
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
@@ -353,11 +425,31 @@ export class TaskRunner {
             : `Could not start ${adapter.bin}: ${err.message}`,
         );
       });
+      // Claude Code started without Myrel's tools and was stopped (see ParseState.mcpDown): a server slow
+      // for a moment or a connection that dropped, so it starts once more after a pause, in the same session.
+      let startingAgain = false;
+      const startAgain = async () => {
+        if (startingAgain || done) return;
+        startingAgain = true;
+        clearTimeout(timer);
+        // New messages wait for the next run, which gets them with its first call to Myrel.
+        this.turns.delete(task.taskId);
+        const why = await this.mcpProbe(task);
+        if (run.again) return finish(false, mcpDownMessage(adapter.bin, state.mcpDown!, why));
+        log(`  ${adapter.bin} could not connect to Myrel's tools (${state.mcpDown}${why ? `; ${why}` : ""}); starting it again`);
+        await new Promise((r) => setTimeout(r, this.opts.mcpRetryMs ?? MCP_RETRY_MS));
+        // Stopped from Myrel, or the runner shutting down, meanwhile: finish says which.
+        if (this.cancelled.has(task.taskId) || this.interrupted.has(task.taskId)) return finish(false, "");
+        done = true;
+        resolve(await this.attempt(task, { ...run, again: true }, resume, prompt));
+      };
       // A stopped CLI can leave children holding its output open, so "close" may come late.
       child.on("exit", () => {
         if (this.cancelled.has(task.taskId) || this.interrupted.has(task.taskId)) finish(false, "");
+        else if (stoppedForMcp) void startAgain();
       });
       child.on("close", async (code, signal) => {
+        if (stoppedForMcp) return;
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
         reportLimits(state.limits ?? (await adapter.limits?.(state).catch(() => undefined)));
@@ -378,8 +470,8 @@ export class TaskRunner {
           return resolve(true);
         }
         // The session now holds this turn too, so the next one can continue it with only what is new.
-        if (state.sessionId && RESUMES.has(task.cli)) {
-          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId }).catch(() => {});
+        if (state.sessionId && keepsSession) {
+          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
         }
         const result =
           state.result ??
@@ -417,6 +509,42 @@ export class TaskRunner {
     }
     return ids;
   }
+
+  /** What Myrel's MCP endpoint of a task answers now, for why its CLI could not connect; undefined without one. */
+  private async mcpProbe(task: TaskStart): Promise<string | undefined> {
+    const server = this.opts.config().server;
+    if (!server || !task.agent) return undefined;
+    const started = Date.now();
+    try {
+      const res = await fetch(`${server.replace(/\/$/, "")}${task.agent.mcpPath}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${task.agent.token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+        // What Claude Code waits for before it starts without the server.
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "myrel-runner", version: this.opts.version ?? "0" } },
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      await res.body?.cancel();
+      if (!res.ok) return `Myrel answers HTTP ${res.status}`;
+      return `Myrel answers now, in ${((Date.now() - started) / 1000).toFixed(1)} s`;
+    } catch (err) {
+      const cause = (err as { cause?: { code?: unknown } }).cause?.code;
+      const detail = (err as Error).name === "TimeoutError" ? "no answer in 15 s" : typeof cause === "string" ? cause : errorLine(err);
+      return `${new URL(server).host} cannot be reached from here (${detail})`;
+    }
+  }
+}
+
+/** Why a turn failed when its CLI could not connect to Myrel's tools twice (see ParseState.mcpDown). */
+export function mcpDownMessage(bin: string, status: string, why: string | undefined): string {
+  return [
+    `${bin} could not connect to Myrel's tools twice (its MCP server: ${status}${why ? `; ${why}` : ""}), so it was stopped before doing anything.`,
+    "This is usually Myrel answering too slowly for a moment or this computer's connection dropping: send your message again.",
+  ].join(" ");
 }
 
 /** The shared folder `requested` is (after resolving symlinks), or null. Never trust the server's path alone. */
@@ -427,6 +555,18 @@ export async function sharedFolder(config: RunnerConfig, requested: string): Pro
     if ((await realpath(f.path).catch(() => null)) === real) return real;
   }
   return null;
+}
+
+/**
+ * Whether a stored session ran in `cwd`, so the turn can continue it. One saved before runners kept its
+ * folder: in a worktree it ran there (as before); in the folder itself (`inFolder`), it ran in the thread's
+ * worktree of the folder when there is one, since a worktree was the only reason the folders differed.
+ */
+async function ranIn(session: StoredSession, cwd: string, inFolder: { folder: string; threadId: string } | null): Promise<boolean> {
+  if (session.cwd) return session.cwd === cwd;
+  if (!inFolder) return true;
+  const { folder, threadId } = inFolder;
+  return !(await listWorktrees().catch(() => [])).some((w) => w.threadId === threadId && (folder === w.repo || folder.startsWith(w.repo + sep)));
 }
 
 const errorLine = (err: unknown) =>

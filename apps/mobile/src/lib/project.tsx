@@ -9,7 +9,7 @@ import {
   type ProjectState,
   type SocketStatus,
 } from "@myrel/client";
-import { type CliId, type ClientEventInput, CONVERSATION_PAGE_SIZE, type ConversationPage } from "@myrel/protocol";
+import { type CliId, type ClientEventInput, CONVERSATION_PAGE_SIZE, type ConversationPage, type DecisionPick } from "@myrel/protocol";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppState } from "react-native";
@@ -41,7 +41,7 @@ type ProjectValue = {
   status: SocketStatus;
   /** The first sync has finished: the conversation is drawn whole, from its newest message. */
   ready: boolean;
-  send(body: string, threadId?: string | null, attachments?: string[], clis?: CliId[]): void;
+  send(body: string, threadId?: string | null, attachments?: string[], clis?: CliId[], pick?: DecisionPick): void;
   emit(event: ClientEventInput): void;
   /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
   loadTasks(threadId: string): Promise<void>;
@@ -50,11 +50,23 @@ type ProjectValue = {
 };
 
 const ProjectContext = createContext<ProjectValue | null>(null);
+/**
+ * The open project's id alone. `useProject` changes on every event the socket brings (a tool step,
+ * a terminal line), so parts drawn once per message read the id from here and stay put.
+ */
+const ProjectIdContext = createContext<string | null>(null);
 
 export function useProject() {
   const value = use(ProjectContext);
   if (!value) throw new Error("useProject outside ProjectProvider");
   return value;
+}
+
+/** The open project's id, without re-rendering on each live event as `useProject` does. */
+export function useProjectId(): string {
+  const id = use(ProjectIdContext);
+  if (!id) throw new Error("useProjectId outside ProjectProvider");
+  return id;
 }
 
 /**
@@ -116,8 +128,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
   }, [api, server, projectId, queryClient]);
 
   const send = useCallback(
-    (body: string, threadId: string | null = null, attachments?: string[], clis?: CliId[]) =>
-      socketRef.current?.sendMessage(body, { threadId, attachments, clis }),
+    (body: string, threadId: string | null = null, attachments?: string[], clis?: CliId[], pick?: DecisionPick) =>
+      socketRef.current?.sendMessage(body, { threadId, attachments, clis, pick }),
     [],
   );
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);
@@ -140,5 +152,9 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     () => ({ projectId, state, status, ready, send, emit, loadTasks, loadConversation }),
     [projectId, state, status, ready, send, emit, loadTasks, loadConversation],
   );
-  return <ProjectContext value={value}>{children}</ProjectContext>;
+  return (
+    <ProjectIdContext value={projectId}>
+      <ProjectContext value={value}>{children}</ProjectContext>
+    </ProjectIdContext>
+  );
 }

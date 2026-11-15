@@ -136,12 +136,23 @@ describe("project settings", () => {
       color: null,
       cloudCli: "opencode",
       cliModels: {},
+      visualCheck: false,
+      checkModels: {},
+      worktrees: true,
+      coordinator: { mode: "model" },
     });
     const claude = await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "claude" }));
     expect(claude.settings.cloudCli).toBe("claude");
     expect((await patch(alice.token, { cloudCli: "gemini" })).status).toBe(400);
     expect((await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "opencode" }))).settings.cloudCli).toBe("opencode");
+    // The visual check is off until an owner or admin turns it on.
+    expect((await json<{ settings: ProjectSettings }>(patch(alice.token, { visualCheck: true }))).settings.visualCheck).toBe(true);
+    expect((await patch(alice.token, { visualCheck: "yes" })).status).toBe(400);
+    // Threads work in their own worktrees until an owner or admin has them work in the folder itself.
+    expect((await json<{ settings: ProjectSettings }>(patch(alice.token, { worktrees: false }))).settings.worktrees).toBe(false);
+    expect((await patch(alice.token, { worktrees: "no" })).status).toBe(400);
     const cloud = await json<{ settings: ProjectSettings }>(patch(alice.token, { taskTarget: "cloud" }));
+    expect(cloud.settings.visualCheck).toBe(true);
     expect(cloud.settings.taskTarget).toBe("cloud");
     expect((await patch(alice.token, { taskTarget: "moon" })).status).toBe(400);
 
@@ -335,7 +346,7 @@ describe("sign-up setting", () => {
     expect((await api("/api/admin/settings", { token: user.token })).status).toBe(403);
     await makeAdmin(admin);
     expect(await json(api("/api/account", { token: admin.token }))).toEqual({
-      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [] },
+      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [], checkModels: {} },
     });
 
     const set = (signUpEnabled: boolean) =>

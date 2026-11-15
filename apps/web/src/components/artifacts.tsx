@@ -20,6 +20,7 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { cn, IconButton, useRelativeTime } from "../lib/ui";
+import { ReportArtifactButton } from "./moderation";
 import { useProjectView } from "./project-view";
 import { Select } from "./ui/controls";
 
@@ -118,7 +119,7 @@ export function ArtifactCards({
 // ---- Viewer ----------------------------------------------------------------
 
 /**
- * One artifact: toolbar (version, preview/code, reload, copy link, download,
+ * One artifact: toolbar (version, preview/code, reload, copy link, download, report,
  * open in a new tab) over the sandboxed preview. `leading` sits before the
  * title, e.g. a back button; the caller owns where the version is stored.
  */
@@ -213,6 +214,7 @@ export function ArtifactViewer({
           <IconButton type="button" aria-label={t("artifacts.download")} title={t("artifacts.download")} onClick={download} className="max-sm:hidden">
             <Download size={15} />
           </IconButton>
+          <ReportArtifactButton projectId={projectId} artifactId={artifactId} version={version} />
           {view.data?.url && (
             <a
               href={view.data.url}

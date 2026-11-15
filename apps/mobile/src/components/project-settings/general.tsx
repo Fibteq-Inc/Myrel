@@ -1,15 +1,17 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useT } from "@myrel/i18n/react";
-import { CloudCli, ProjectColor, ProjectIcon, TaskTarget, type UpdateProjectSettingsInput } from "@myrel/protocol";
+import { type CheckModels, CloudCli, ProjectColor, ProjectIcon, TaskTarget, type UpdateProjectSettingsInput } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Href, useRouter } from "expo-router";
 import { Check } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useSession } from "../../lib/session";
 import { makeStyles, projectColors, radius, useColors, useTheme } from "../../theme";
 import { PROJECT_ICONS, ProjectBadge } from "../project-badge";
 import { Option, Sheet } from "../cli-picker";
+import { EvaluatorList } from "../evaluator-picker";
+import { runnersQueryKey, workspaceQueryKey } from "../../lib/queries";
 import { Notice, Section, ValueRow } from "../settings-section";
 import { Button, errorMessage, Input } from "../ui";
 
@@ -84,6 +86,17 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
         {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
       </Section>
 
+      <Section title={t("projectSettings.checks")} hint={t("projectSettings.checksDescription")}>
+        <VisualCheckToggle
+          on={s.visualCheck}
+          disabled={!canManage || save.isPending}
+          onChange={(visualCheck) => save.mutate({ visualCheck })}
+        />
+        {s.visualCheck && (
+          <ProjectEvaluator projectId={projectId} value={s.checkModels} canManage={canManage} onChange={(checkModels) => save.mutate({ checkModels })} />
+        )}
+      </Section>
+
       <Sheet open={open === "target"} onClose={() => setOpen(null)} title={t("projectSettings.runTasks")} hint={t("projectSettings.tasksDescription")}>
         {TaskTarget.options.map((target) => (
           <Option
@@ -114,6 +127,96 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
         ))}
       </Sheet>
     </>
+  );
+}
+
+/**
+ * Whether the project's threads work in their own worktree on a computer (the default) or in the
+ * project's folder itself, one at a time (ProjectSettings.worktrees), as on the web's Folders tab. A change saves.
+ */
+export function WorktreeSettings({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
+  const { api, server } = useSession();
+  const { settings, save } = useProjectSettings(projectId);
+  // The project's computer, when it is the viewer's own: an older runner there cannot work in the folder itself.
+  const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
+  if (!settings.data) return null;
+  const on = save.isPending && save.variables.worktrees !== undefined ? save.variables.worktrees : settings.data.worktrees;
+  return (
+    <Section title={t("projectFolders.copies")}>
+      <View style={styles.toggle}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.toggleTitle}>{t("projectFolders.worktrees")}</Text>
+          <Text style={styles.label}>{t(on ? "projectFolders.worktreesOn" : "projectFolders.worktreesOff")}</Text>
+        </View>
+        <Switch
+          value={on}
+          disabled={!canManage || save.isPending}
+          onValueChange={(worktrees) => save.mutate({ worktrees })}
+          accessibilityLabel={t("projectFolders.worktrees")}
+          trackColor={{ false: colors.edge, true: colors.accent }}
+          thumbColor={colors.raised}
+        />
+      </View>
+      {!on && computer && !computer.features.includes("shared-folder") && (
+        <Notice>{t("projectFolders.worktreesUpdate", { computer: computer.name, command: "npx myrel-runner@latest update" })}</Notice>
+      )}
+      {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
+    </Section>
+  );
+}
+
+/** The CLIs that may judge the project's visual checks, from its folder's computer (which only its owner's list has). */
+function ProjectEvaluator({
+  projectId,
+  value,
+  canManage,
+  onChange,
+}: {
+  projectId: string;
+  value: CheckModels;
+  canManage: boolean;
+  onChange: (next: CheckModels) => void;
+}) {
+  const t = useT();
+  const styles = useStyles();
+  const { api, server } = useSession();
+  const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
+  const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
+  const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
+  return (
+    <>
+      <Text style={styles.toggleTitle}>{t("evaluator.title")}</Text>
+      <Text style={styles.label}>{t("evaluator.projectHint")}</Text>
+      <EvaluatorList clis={computer?.clis ?? []} value={value} onChange={onChange} disabled={!canManage} />
+    </>
+  );
+}
+
+/** The visual check's switch (ProjectSettings.visualCheck), with what it does; a change saves. */
+function VisualCheckToggle({ on, disabled, onChange }: { on: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  const t = useT();
+  const colors = useColors();
+  const styles = useStyles();
+  return (
+    <View style={styles.toggle}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.toggleTitle}>{t("projectSettings.visualCheck")}</Text>
+        <Text style={styles.label}>{t("projectSettings.visualCheckHint")}</Text>
+      </View>
+      <Switch
+        value={on}
+        disabled={disabled}
+        onValueChange={onChange}
+        accessibilityLabel={t("projectSettings.visualCheck")}
+        trackColor={{ false: colors.edge, true: colors.accent }}
+        thumbColor={colors.raised}
+      />
+    </View>
   );
 }
 
@@ -258,6 +361,8 @@ export function DeleteProject({ projectId, name }: { projectId: string; name: st
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
     label: { color: colors.subtle, fontSize: 13, lineHeight: 18 },
+    toggle: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
+    toggleTitle: { color: colors.fg, fontSize: 15, fontWeight: "500" },
     grid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
     option: {
       width: 40,

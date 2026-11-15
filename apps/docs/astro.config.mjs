@@ -19,6 +19,8 @@ export default defineConfig({
       logo: { src: "./src/assets/logo.svg" },
       favicon: "/favicon.svg",
       customCss: ["./src/styles/theme.css"],
+      // A page the mobile app opened keeps plans and purchases out of the web app it links to.
+      head: [{ tag: "script", attrs: { src: "/app-links.js" } }],
       description: "How to use Fibteq Myrel: projects, threads, your computer and GitHub.",
       social: [{ icon: "github", label: "GitHub", href: repo }],
       editLink: { baseUrl: `${repo}/edit/main/apps/docs/` },
@@ -28,13 +30,13 @@ export default defineConfig({
         { label: "Projects", items: ["projects/create", "projects/members", "projects/knowledge"] },
         {
           label: "Working with Myrel",
-          items: ["work/asking", "work/threads", "work/decisions", "work/artifacts", "work/finishing"],
+          items: ["work/asking", "work/threads", "work/decisions", "work/artifacts", "work/visual-check", "work/finishing"],
         },
         {
           label: "Your computer",
           items: ["computer/connect", "computer/folders", "computer/clis", "computer/approvals", "computer/runner"],
         },
-        { label: "GitHub", items: ["github/connect", "github/pull-requests"] },
+        { label: "GitHub", items: ["github/connect", "github/pull-requests", "github/issues"] },
         {
           label: "Automate and extend",
           items: ["automate/routines", "automate/skills", "automate/connectors", "automate/notifications"],

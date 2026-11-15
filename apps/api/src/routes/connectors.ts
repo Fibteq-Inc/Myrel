@@ -20,7 +20,7 @@ import {
   sealSecrets,
 } from "../connectors/store";
 import { canAddConnector } from "../extensions";
-import { type AppEnv, requireUser } from "../middleware";
+import { type AppEnv, fromApp, requireUser } from "../middleware";
 import { findMembership } from "./projects";
 
 const { connectors } = schema;
@@ -85,7 +85,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
         row.status = "needs_auth";
         await createDb(c.env.DB).insert(connectors).values(row);
         try {
-          const authorizeUrl = await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id);
+          const authorizeUrl = await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id, fetch, { app: fromApp(c) });
           return c.json({ connector: await presentConnector(c.env, row, true), authorizeUrl }, 201);
         } catch (err) {
           // A server without a sign-in may need none at all (catalog entries don't say): try it as it is.
@@ -196,7 +196,7 @@ function connectorRoutes(scope: (c: Context<AppEnv>) => Promise<Scope | null>) {
       if (!row || row.auth !== "oauth") return c.json({ error: "not_found" }, 404);
       if (!s.canEdit) return c.json({ error: "forbidden" }, 403);
       try {
-        return c.json({ authorizeUrl: await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id) });
+        return c.json({ authorizeUrl: await startAuthorization(c.env, row, publicOrigin(c), c.get("user").id, fetch, { app: fromApp(c) }) });
       } catch (err) {
         return c.json({ error: "sign_in_failed", message: err instanceof Error ? err.message : String(err) }, 502);
       }
@@ -213,7 +213,7 @@ export function publicOrigin(c: Context<AppEnv>): string {
  * sign-in Myrel started; it finishes only for the person who started it. A browser signed in to
  * Myrel as them finishes at once; one signed in as someone else is refused; one not signed in (the
  * desktop and mobile apps open the system browser) is asked to confirm whose connector it is.
- * Ends on the settings page with the result.
+ * Ends on the settings page with the result; one an app started, on a page marked ?app.
  */
 export const connectorOAuthRoutes = new Hono<AppEnv>()
   .get("/callback", async (c) => {
@@ -267,7 +267,7 @@ async function finish(c: Context<AppEnv>, params: { code?: string; state?: strin
     }
     const to = new URL(`/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`, publicOrigin(c));
     to.searchParams.set("connector", result.ok ? "ok" : "error");
-    return c.redirect(to.toString(), 302);
+    return c.redirect(appMarked(to, result.app), 302);
   }
   const back = new URL("/settings", publicOrigin(c));
   back.searchParams.set("section", "connectors");
@@ -275,7 +275,16 @@ async function finish(c: Context<AppEnv>, params: { code?: string; state?: strin
   // A project's connector comes back to that project's settings.
   if (row?.projectId) back.searchParams.set("project", row.projectId);
   back.searchParams.set("result", result.ok ? "ok" : "error");
-  return c.redirect(back.toString(), 302);
+  return c.redirect(appMarked(back, result.app), 302);
+}
+
+/**
+ * The web app page a sign-in ends on. One the desktop or mobile app started ends in the browser it
+ * opened, which ?app keeps free of plans and purchases (apps/web/src/lib/app-tab.ts; App Store
+ * guideline 3.1.1).
+ */
+function appMarked(to: URL, app: boolean | undefined): string {
+  return app ? `${to.toString()}${to.search ? "&" : "?"}app` : to.toString();
 }
 
 /** Asks the person to confirm the connector and the Myrel account the sign-in will go to. */

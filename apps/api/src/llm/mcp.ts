@@ -13,9 +13,12 @@ export type McpServerInfo = { name: string; version: string; instructions?: stri
  * such as Claude Code to list and call Myrel's tools. Returns null for
  * notifications, which get an empty 202.
  */
-export async function handleMcp(tools: Tool[], info: McpServerInfo, body: unknown): Promise<object | null> {
+export async function handleMcp(tools: Tool[] | (() => Promise<Tool[]>), info: McpServerInfo, body: unknown): Promise<object | null> {
+  // Tools that take queries to build are built only for a message that lists or calls them, once per
+  // POST: a client gives up on a server that is slow to connect (Claude Code after 5 s per request).
+  const toolset = typeof tools === "function" ? once(tools) : async () => tools;
   if (Array.isArray(body)) {
-    const answers = (await Promise.all(body.map((m) => handleMcp(tools, info, m)))).filter((a) => a !== null);
+    const answers = (await Promise.all(body.map((m) => handleMcp(toolset, info, m)))).filter((a) => a !== null);
     return answers.length ? answers : null;
   }
   const msg = body as Partial<JsonRpcRequest> | null;
@@ -40,7 +43,7 @@ export async function handleMcp(tools: Tool[], info: McpServerInfo, body: unknow
       return result(id, {});
     case "tools/list":
       return result(id, {
-        tools: tools.map((t) => {
+        tools: (await toolset()).map((t) => {
           const spec = toolSpec(t);
           return { name: spec.name, description: spec.description, inputSchema: spec.parameters };
         }),
@@ -48,7 +51,7 @@ export async function handleMcp(tools: Tool[], info: McpServerInfo, body: unknow
     case "tools/call": {
       const name = msg.params?.name;
       if (typeof name !== "string") return rpcError(id, -32602, "Missing tool name");
-      const t = tools.find((x) => x.name === name);
+      const t = (await toolset()).find((x) => x.name === name);
       if (!t) return rpcError(id, -32602, `Unknown tool "${name}"`);
       const { result: out } = await runTool(t, { id: String(id), name, input: msg.params?.arguments ?? {} });
       return result(id, { content: [{ type: "text", text: out.output }], isError: out.isError ?? false });
@@ -56,6 +59,12 @@ export async function handleMcp(tools: Tool[], info: McpServerInfo, body: unknow
     default:
       return rpcError(id, -32601, `Method not found: ${msg.method}`);
   }
+}
+
+/** `make`'s promise, made on the first call only. */
+function once<T>(make: () => Promise<T>): () => Promise<T> {
+  let made: Promise<T> | undefined;
+  return () => (made ??= make());
 }
 
 const result = (id: string | number | null, value: unknown) => ({ jsonrpc: "2.0", id, result: value });

@@ -1,11 +1,11 @@
 import type { MessageKey } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
-import { cliMark } from "@myrel/client";
+import { CLI_NAMES, CLOUD_RUNNER, type CliId, type CliLimits, type CliLogin, cliLogins, type CliModelDefaults, CloudCli, EFFORT_LEVELS, effortsFor, OWN_ACCOUNT, type ProjectWorkspace, type PromptSize, type RunnerCli, type Thread } from "@myrel/protocol";
+import { cliMark, sessionUse, threadLogin as loginOf } from "@myrel/client";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Cloud, Lock, SlidersHorizontal, Sparkles, SquareTerminal } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { memoryLow, usageSummary } from "../lib/format";
 import { runnersQueryKey, workspaceQueryKey } from "../lib/queries";
@@ -22,6 +22,15 @@ const CLOUD_CLIS: RunnerCli[] = CloudCli.options.map((id) => ({ id, version: nul
 export function cliName(id: string): string {
   return CLI_NAMES[id as CliId] ?? id;
 }
+
+/** "Claude Code · Work": a CLI's login by its name; just the CLI's name when it has no other. */
+export function loginName(cli: string, login: CliLogin | undefined, several: boolean, t: ReturnType<typeof useT>): string {
+  if (!several || !login) return cliName(cli);
+  return `${cliName(cli)} · ${login.name ?? t("cliPicker.ownLogin")}`;
+}
+
+/** The login the thread's `cli` runs with from its next turn (none in the cloud), as on the web. */
+const threadLogin = (pickable: Pickable, thread: Thread, cli: string) => loginOf(pickable.cloud ? undefined : pickable.clis, pickable.defaults, thread, cli);
 
 /**
  * The CLIs the signed-in person can pick for this project's threads, as on the web: those on the
@@ -87,7 +96,7 @@ export function AskCliPicker({ pickable, value, onChange }: { pickable: Pickable
       <Sheet open={open} onClose={() => setOpen(false)} title={t("cliPicker.askTitle")} hint={[pickable.clis.length > 1 && t("cliPicker.askHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ") || undefined}>
         <Option kind="radio" checked={value.length === 0} title={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} onPress={() => onChange([])} />
         {pickable.clis.map((c) => (
-          <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} cli={c.id} note={limitNote(c, t)} onPress={() => toggle(c.id)} />
+          <Option key={c.id} kind="check" checked={value.includes(c.id)} title={cliName(c.id)} cli={c.id} note={limitNote(c.limits, t)} onPress={() => toggle(c.id)} />
         ))}
       </Sheet>
     </>
@@ -160,7 +169,8 @@ export function ThreadSettingsPicker({
   /** What the agent's prompt held on its last turn, once it had one. */
   prompt?: PromptSize | null;
   onRunner: (runnerId: string | null) => void;
-  onCli: (cli: CliId | null) => void;
+  /** `account`: one of the CLI's logins on the computer, or OWN_ACCOUNT for its own; absent: the project's default. */
+  onCli: (cli: CliId | null, account?: string) => void;
   onModel: (pick: { cli: CliId; model: string | null; effort: string | null }) => void;
 }) {
   const t = useT();
@@ -227,7 +237,8 @@ export function ThreadSettingsPicker({
   const choice = modelChoice(pickable, thread);
   const active = !!pickedRunner || !!currentCli || !!choice?.own;
   const where = cloud ? t("runnerPicker.cloud") : showRunner && computer && computer !== workspaces[0] ? computer.runnerName : null;
-  const label = [where, cliName(currentCli ?? pickable.folderCli), choice?.model?.name, choice?.effort && effortName(choice.effort, t)]
+  const running = threadLogin(pickable, thread, currentCli ?? pickable.folderCli);
+  const label = [where, loginName(currentCli ?? pickable.folderCli, running.login, running.logins.length > 1, t), choice?.model?.name, choice?.effort && effortName(choice.effort, t)]
     .filter(Boolean)
     .join(" · ");
   const hint = [showRunner && cloud ? t("runnerPicker.hint") : t("cliPicker.threadHint"), pickable.cloud && t("cliPicker.cloudHint")].filter(Boolean).join(" ");
@@ -304,17 +315,38 @@ export function ThreadSettingsPicker({
             <Text style={styles.section}>{t("threadSettings.cli")}</Text>
             <Pills>
               <Pill checked={!currentCli} onPress={() => currentCli && onCli(null)} label={t("cliPicker.default", { cli: cliName(pickable.folderCli) })} />
-              {pickable.clis.map((c) => {
-                const note = limitNote(c, t);
-                return (
-                  <Pill
-                    key={c.id}
-                    checked={currentCli === c.id}
-                    onPress={() => currentCli !== c.id && onCli(c.id)}
-                    label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
-                    cli={c.id}
-                  />
-                );
+              {pickable.clis.flatMap((c) => {
+                const logins = cliLogins(c);
+                // A CLI with several logins on the computer is one pill per login, each with its own limits.
+                if (logins.length === 1) {
+                  const note = limitNote(c.limits, t);
+                  return [
+                    <Pill
+                      key={c.id}
+                      checked={currentCli === c.id}
+                      onPress={() => currentCli !== c.id && onCli(c.id)}
+                      label={note ? `${cliName(c.id)} (${note})` : cliName(c.id)}
+                      cli={c.id}
+                    />,
+                  ];
+                }
+                const picked = currentCli === c.id ? threadLogin(pickable, thread, c.id).login : undefined;
+                return logins.map((login) => {
+                  const name = loginName(c.id, login, true, t);
+                  const status = limitNote(login.limits, t);
+                  const session = sessionUse(login.limits);
+                  return (
+                    <Pill
+                      key={`${c.id}@${login.account ?? ""}`}
+                      checked={picked === login}
+                      onPress={() => picked !== login && onCli(c.id, login.account ?? OWN_ACCOUNT)}
+                      label={status ? `${name} (${status})` : name}
+                      cli={c.id}
+                      note={session === null ? undefined : t("runners.usage.percent", { percent: session })}
+                      warn={login.limits?.status === "limited" || login.limits?.status === "warning"}
+                    />
+                  );
+                });
               })}
             </Pills>
             <Text style={styles.section}>{t("threadSettings.model")}</Text>
@@ -514,15 +546,18 @@ export function Sheet({ open, onClose, title, hint, children }: { open: boolean;
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} accessibilityLabel={t("common.close")} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-        <Text style={styles.sheetTitle}>{title}</Text>
-        <View style={{ gap: 2 }}>{children}</View>
-        {hint && <Text style={styles.hint}>{hint}</Text>}
-        <Pressable accessibilityRole="button" onPress={onClose} style={({ pressed }) => [styles.done, pressed && { opacity: 0.8 }]}>
-          <Text style={styles.doneText}>{t("common.close")}</Text>
-        </Pressable>
-      </View>
+      {/* Lifts the sheet over the keyboard when an option holds a text field (a report's note). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <Pressable style={styles.backdrop} accessibilityLabel={t("common.close")} onPress={onClose} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <View style={{ gap: 2, flexShrink: 1 }}>{children}</View>
+          {hint && <Text style={styles.hint}>{hint}</Text>}
+          <Pressable accessibilityRole="button" onPress={onClose} style={({ pressed }) => [styles.done, pressed && { opacity: 0.8 }]}>
+            <Text style={styles.doneText}>{t("common.close")}</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -567,9 +602,9 @@ export function Option({
   );
 }
 
-function limitNote(cli: RunnerCli, t: ReturnType<typeof useT>): string | undefined {
-  if (cli.limits?.status === "limited") return t("cliPicker.limited");
-  if (cli.limits?.status === "warning") return t("cliPicker.nearLimit");
+function limitNote(limits: CliLimits | undefined, t: ReturnType<typeof useT>): string | undefined {
+  if (limits?.status === "limited") return t("cliPicker.limited");
+  if (limits?.status === "warning") return t("cliPicker.nearLimit");
   return undefined;
 }
 
@@ -589,6 +624,8 @@ const useStyles = makeStyles((colors) =>
     chipText: { color: colors.muted, fontSize: 13, flexShrink: 1 },
     backdrop: { flex: 1, backgroundColor: colors.scrim },
     sheet: {
+      // Gives way (to a scrolling option list) rather than running off the top of a short screen.
+      flexShrink: 1,
       gap: 12,
       borderTopLeftRadius: radius.lg,
       borderTopRightRadius: radius.lg,

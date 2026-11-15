@@ -1,9 +1,16 @@
 import type { Project } from "@myrel/protocol";
 
+/** The server's order of projects that are not pinned: working ones first, then the latest activity. */
+export function compareUnpinnedProjects(a: Project, b: Project): number {
+  const working = Number((b.activity?.working ?? 0) > 0) - Number((a.activity?.working ?? 0) > 0);
+  if (working !== 0) return working;
+  return (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt);
+}
+
 /**
  * The project list with one project's pin changed, ordered the way the server orders it:
  * pinned projects first in the order they were pinned, so a new pin goes last among them,
- * then the rest newest first. For updating a cached list before the server answers.
+ * then the rest by compareUnpinnedProjects. For updating a cached list before the server answers.
  */
 export function withProjectPinned(projects: Project[], id: string, pinned: boolean): Project[] {
   const target = projects.find((p) => p.id === id);
@@ -13,5 +20,5 @@ export function withProjectPinned(projects: Project[], id: string, pinned: boole
   const rest = others.filter((p) => !p.pinned);
   if (pinned) return [...pins, { ...target, pinned: true }, ...rest];
   const unpinned = { ...target, pinned: false };
-  return [...pins, ...[...rest, unpinned].sort((a, b) => b.createdAt.localeCompare(a.createdAt))];
+  return [...pins, ...[...rest, unpinned].sort(compareUnpinnedProjects)];
 }

@@ -13,6 +13,6 @@ describe("sandbox output", () => {
     expect(JSON.parse(scrub(line))).toEqual({ type: "text", text: "FIRST=[hidden] SECOND=[hidden] yes" });
     expect(secretScrubber({})("plain")).toBe("plain");
     // The container's own filter hides the same ones, by name.
-    expect(scrubbedNames({ FIRST: "placeholder-one-xxxx", SHORT: "yes", MYREL_FILES: "[".padEnd(40, "x") })).toEqual(["FIRST"]);
+    expect(scrubbedNames({ FIRST: "placeholder-one-xxxx", SHORT: "yes", MYREL_FILES: "[".padEnd(40, "x"), GITHUB_REPOS_1: "acme/a-repository-with-a-long-name" })).toEqual(["FIRST"]);
   });
 });

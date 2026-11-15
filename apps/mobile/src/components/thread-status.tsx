@@ -5,12 +5,13 @@ import { CircleAlert, CircleCheck, CircleDot, CircleMinus, CirclePause } from "l
 import { type Colors, useColors } from "../theme";
 import { Spinner } from "./ui";
 
-type StatusKey = "working" | "blocked" | "review_ready" | "done" | "failed" | "closed";
+type StatusKey = "working" | "blocked" | "review_ready" | "replied" | "done" | "failed" | "closed";
 
 const STATUS: Record<StatusKey, { label: MessageKey; color: keyof Colors }> = {
   working: { label: "status.working", color: "subtle" },
-  blocked: { label: "status.blocked", color: "subtle" },
+  blocked: { label: "status.reviewReady", color: "warn" },
   review_ready: { label: "status.reviewReady", color: "warn" },
+  replied: { label: "status.replied", color: "subtle" },
   done: { label: "status.done", color: "subtle" },
   failed: { label: "status.failed", color: "bad" },
   closed: { label: "status.closedCancelled", color: "subtle" },
@@ -24,7 +25,9 @@ const CLOSED: Record<ThreadCloseReason, MessageKey> = {
 };
 
 function statusKey(thread: Thread): StatusKey {
-  return thread.closeReason ? "closed" : thread.resolved ? "done" : thread.status;
+  if (thread.closeReason) return "closed";
+  if (thread.resolved) return "done";
+  return thread.status === "review_ready" && !thread.needs ? "replied" : thread.status;
 }
 
 type Translate = (key: MessageKey) => string;
@@ -50,9 +53,11 @@ export function ThreadStatusIcon({ thread, size = 16 }: { thread: Thread; size?:
     case "working":
       return <Spinner size={size} />;
     case "blocked":
-      return <CirclePause size={size} color={colors.muted} />;
+      return <CirclePause size={size} color={colors.warn} />;
     case "review_ready":
       return <CircleDot size={size} color={colors.warn} />;
+    case "replied":
+      return <CircleDot size={size} color={colors.subtle} />;
     case "done":
       return <CircleCheck size={size} color={colors.ok} />;
     case "failed":

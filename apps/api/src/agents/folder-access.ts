@@ -233,6 +233,14 @@ export function opensPullRequest(input: Record<string, unknown>): boolean {
 export const USE_OPEN_PULL_REQUEST =
   "Do not open pull requests with gh here. Push the branch with git, then call Myrel's open_pull_request tool: it opens the pull request through Myrel's GitHub App, credits the person and follows it.";
 
+/** A shell command that changes an issue with the GitHub CLI; reading one stays allowed. */
+export function opensIssue(input: Record<string, unknown>): boolean {
+  return typeof input.command === "string" && /\bgh\s+issue\s+(?!list\b|view\b|status\b|ls\b)[a-z]/.test(input.command);
+}
+
+export const USE_OPEN_ISSUES =
+  "Do not change issues with gh here. Call Myrel's open_issues, comment_on_issue or update_issue tool: they go through Myrel's GitHub App, credit the person and ask a person first when they should.";
+
 /** A short description of the request for the card, e.g. "Read /Users/a/notes/todo.md". */
 export function describeRequest(toolName: string, target: AccessTarget): string {
   const name = toolName.replace(/^mcp__/, "").slice(0, 40);
