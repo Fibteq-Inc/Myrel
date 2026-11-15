@@ -2982,6 +2982,27 @@ export class ThreadAgent extends Agent<Env> {
     return this.taskRows().map((row) => ({ ...this.toTask(row), log: this.taskLog(row.id, 500) }));
   }
 
+  /**
+   * Every task in this thread, with terminal output only for the ones a terminal shows open: the
+   * running ones and the newest. A long thread has hundreds of turns, and sending every turn's lines
+   * at once (tens of MB) froze the phone opening it or failed outright; the rest load when opened
+   * (getTaskLog). Callable over RPC.
+   */
+  getTaskList(): (Task & { log?: TerminalLine[] })[] {
+    const rows = this.taskRows();
+    const newest = rows.at(-1)?.id;
+    return rows.map((row) => {
+      const task = this.toTask(row);
+      return task.status === "running" || row.id === newest ? { ...task, log: this.taskLog(row.id, 500) } : task;
+    });
+  }
+
+  /** One task's recent terminal output, or null when the thread has no such task. Callable over RPC. */
+  getTaskLog(taskId: string): TerminalLine[] | null {
+    if (!this.sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${taskId}`.length) return null;
+    return this.taskLog(taskId, 500);
+  }
+
   /** Cancels a task on a person's request. Callable over RPC. */
   async cancelTask(taskId: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const row = this.runningTask();

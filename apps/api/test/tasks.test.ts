@@ -371,6 +371,38 @@ describe("reading a thread's workspace", () => {
 });
 
 describe("tasks from before run_task", () => {
+  it("lists a thread's tasks with output only for the open ones, and hands out the others' on request", async () => {
+    const { project, token, threadAgent, thread } = await threadSetup();
+    await runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
+      const sql = state.storage.sql;
+      const add = (id: string, status: string, at: string) => {
+        sql.exec(
+          "INSERT INTO tasks (id, spec, backend, status, progress, created_at) VALUES (?, ?, 'local', ?, '{}', ?)",
+          id, JSON.stringify({ title: id, harness: "claude" }), status, at,
+        );
+        sql.exec("INSERT INTO task_log (task_id, stream, text) VALUES (?, 'stdout', ?)", id, `line of ${id}`);
+      };
+      add("task_old", "done", "2026-11-01T10:00:00.000Z");
+      add("task_running", "running", "2026-11-02T10:00:00.000Z");
+      add("task_middle", "done", "2026-11-03T10:00:00.000Z");
+      add("task_new", "done", "2026-11-04T10:00:00.000Z");
+    });
+
+    const list = await api(`/api/projects/${project.id}/threads/${thread.id}/tasks`, { token });
+    const { tasks } = (await list.json()) as { tasks: (Task & { log?: { text: string }[] })[] };
+    expect(tasks.map((x) => [x.id, x.log?.map((l) => l.text)])).toEqual([
+      ["task_old", undefined],
+      ["task_running", ["line of task_running"]],
+      ["task_middle", undefined],
+      ["task_new", ["line of task_new"]],
+    ]);
+
+    const log = await api(`/api/projects/${project.id}/threads/${thread.id}/tasks/task_old/log`, { token });
+    expect(((await log.json()) as { log: { text: string }[] }).log.map((l) => l.text)).toEqual(["line of task_old"]);
+    const missing = await api(`/api/projects/${project.id}/threads/${thread.id}/tasks/task_nope/log`, { token });
+    expect(missing.status).toBe(404);
+  });
+
   it("moves a thread's older local tasks into the tasks table", async () => {
     const stub = env.THREAD_AGENT.get(env.THREAD_AGENT.idFromName(`thr_${crypto.randomUUID()}`));
     await runInDurableObject(stub, async (instance: ThreadAgent, state) => {

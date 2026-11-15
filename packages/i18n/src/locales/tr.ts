@@ -1384,6 +1384,7 @@ export const tr: Catalog = {
   "tasks.subagentStatusFailed": "Başarısız",
   "tasks.subagentStatusStopped": "Durdu",
   "tasks.subagentFilter": "Yalnızca {name} satırları gösteriliyor",
+  "tasks.earlierTasks": { one: "1 önceki görevi göster", other: "{count} önceki görevi göster" },
   "tasks.earlierLines": { one: "1 önceki satırı göster", other: "{count} önceki satırı göster" },
   "tasks.showAllLines": "Tüm satırları göster",
   "tasks.showMore": "Devamını göster",

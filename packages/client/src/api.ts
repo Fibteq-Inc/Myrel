@@ -701,10 +701,19 @@ export class ApiClient {
 
   // --- tasks (run_task) ---
 
-  /** A thread's tasks with their recent terminal output. */
+  /**
+   * A thread's tasks. Only the running ones and the newest come with their recent terminal output
+   * (`log`); the others' is fetched with `taskLog` when opened.
+   */
   async listTasks(projectId: string, threadId: string) {
     const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/tasks`;
-    return (await this.request<{ tasks: (Task & { log: TerminalLine[] })[] }>(path)).tasks;
+    return (await this.request<{ tasks: (Task & { log?: TerminalLine[] })[] }>(path)).tasks;
+  }
+
+  /** One task's recent terminal output. */
+  async taskLog(projectId: string, threadId: string, taskId: string) {
+    const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/tasks/${encodeURIComponent(taskId)}/log`;
+    return (await this.request<{ log: TerminalLine[] }>(path)).log;
   }
 
   /** Pull requests the thread's tasks opened, with their live state. */

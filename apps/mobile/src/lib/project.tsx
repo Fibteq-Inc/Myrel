@@ -43,7 +43,7 @@ type ProjectValue = {
   ready: boolean;
   send(body: string, threadId?: string | null, attachments?: string[], clis?: CliId[], pick?: DecisionPick): void;
   emit(event: ClientEventInput): void;
-  /** Loads a thread's tasks with their earlier terminal output, and the pull requests they opened. */
+  /** Loads a thread's tasks (the open ones with their terminal output) and the pull requests they opened. */
   loadTasks(threadId: string): Promise<void>;
   /** Fetches a conversation's newest page (null: the project chat), or the page before `beforeSeq`. */
   loadConversation(threadId: string | null, beforeSeq?: number): Promise<void>;
@@ -135,9 +135,11 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
   const emit = useCallback((event: ClientEventInput) => socketRef.current?.send(event), []);
   const loadTasks = useCallback(
     async (threadId: string) => {
-      const [tasks, pullRequests] = await Promise.all([api.listTasks(projectId, threadId), api.listPullRequests(projectId, threadId)]);
-      dispatch({ type: "tasks", tasks });
-      dispatch({ type: "pullRequests", pullRequests });
+      // Each lands on its own: a slow task list does not hold back the pull requests (and their count).
+      await Promise.all([
+        api.listTasks(projectId, threadId).then((tasks) => dispatch({ type: "tasks", tasks })),
+        api.listPullRequests(projectId, threadId).then((pullRequests) => dispatch({ type: "pullRequests", pullRequests })),
+      ]);
     },
     [api, projectId],
   );
