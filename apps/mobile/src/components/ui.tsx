@@ -1,6 +1,7 @@
 import { cliMark } from "@myrel/client";
 import { LoaderCircle } from "lucide-react-native";
 import { useI18n } from "@myrel/i18n/react";
+import { dateFormat } from "@myrel/i18n";
 import { type ReactNode, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
@@ -208,7 +209,7 @@ export function useRelativeTime() {
       if (s < 3600) return t("time.minutes", { count: Math.floor(s / 60) });
       if (s < 86400) return t("time.hours", { count: Math.floor(s / 3600) });
       if (s < 7 * 86400) return t("time.days", { count: Math.floor(s / 86400) });
-      return new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric" });
+      return dateFormat(locale, { month: "short", day: "numeric" }).format(new Date(iso));
     },
     [t, locale],
   );

@@ -1,7 +1,18 @@
 import type { Locale, Translate } from "@myrel/i18n";
 import type { RunnerStats } from "@myrel/protocol";
 
-const number = (locale: Locale, options?: Intl.NumberFormatOptions) => new Intl.NumberFormat(locale, options);
+/**
+ * One formatter per language and options, made once: building an Intl formatter costs far more than
+ * using one (on Android, Hermes goes through Java for it), and a thread draws figures for every
+ * message and every terminal line.
+ */
+const formatters = new Map<string, Intl.NumberFormat>();
+function number(locale: Locale, options?: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = `${locale}${JSON.stringify(options ?? {})}`;
+  let formatter = formatters.get(key);
+  if (!formatter) formatters.set(key, (formatter = new Intl.NumberFormat(locale, options)));
+  return formatter;
+}
 const compact = (locale: Locale) => number(locale, { notation: "compact", maximumFractionDigits: 1 });
 
 export function formatTokens(n: number, locale: Locale) {

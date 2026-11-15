@@ -66,6 +66,19 @@ function interpolate(text: string, params?: Params) {
   return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in params ? String(params[name]) : match));
 }
 
+/**
+ * One date formatter per language and options, made once: `toLocale…String` builds a new one on each
+ * call, which costs far more than formatting (on Android, Hermes goes through Java for it), and lists
+ * format a date or time for every row.
+ */
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+export function dateFormat(locale: Locale, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale}${JSON.stringify(options)}`;
+  let format = dateFormats.get(key);
+  if (!format) dateFormats.set(key, (format = new Intl.DateTimeFormat(locale, options)));
+  return format;
+}
+
 /** "now", "5m", "3h", "2d", then a short date, in the given language. */
 export function relativeTime(t: Translate, locale: Locale, iso: string, now = Date.now()) {
   const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
@@ -73,7 +86,7 @@ export function relativeTime(t: Translate, locale: Locale, iso: string, now = Da
   if (s < 3600) return t("time.minutes", { count: Math.floor(s / 60) });
   if (s < 86400) return t("time.hours", { count: Math.floor(s / 3600) });
   if (s < 7 * 86400) return t("time.days", { count: Math.floor(s / 86400) });
-  return new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric" });
+  return dateFormat(locale, { month: "short", day: "numeric" }).format(new Date(iso));
 }
 
 /** The local calendar day a time falls on, e.g. "2026-10-26": for grouping by day. */
@@ -90,15 +103,15 @@ export function dayLabel(t: Translate, locale: Locale, at: string | number, now 
   yesterday.setDate(yesterday.getDate() - 1);
   if (day === localDay(yesterday.getTime())) return t("time.yesterday");
   const d = new Date(at);
-  return d.toLocaleDateString(locale, {
+  return dateFormat(locale, {
     weekday: "short",
     month: "short",
     day: "numeric",
     ...(d.getFullYear() !== new Date(now).getFullYear() && { year: "numeric" }),
-  });
+  }).format(d);
 }
 
 /** The local clock time, e.g. "14:32". */
 export function clockTime(locale: Locale, at: string | number) {
-  return new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return dateFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(at));
 }

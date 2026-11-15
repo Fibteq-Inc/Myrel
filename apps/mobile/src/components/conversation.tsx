@@ -164,6 +164,9 @@ export function Conversation({
             inverted
             data={data}
             keyExtractor={(m) => m.id}
+            // Draws about four screens of messages around the one in view instead of ten: a thread opens
+            // with a page of 60 and each message is markdown, so the default drew the whole page at once.
+            windowSize={WINDOW}
             contentContainerStyle={styles.list}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
@@ -340,6 +343,9 @@ const AWAY = 400;
 
 /** Within this distance (in px) of the newest message, the list keeps following new ones. */
 const FOLLOW = 80;
+
+/** How many screens of messages the list keeps drawn, the one in view included (FlatList's default is 21). */
+const WINDOW = 9;
 
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
