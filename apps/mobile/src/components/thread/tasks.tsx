@@ -14,7 +14,7 @@ import {
   Square,
   SquareTerminal,
 } from "lucide-react-native";
-import { type ComponentRef, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentRef, memo, useEffect, useMemo, useRef, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { formatDuration, formatTokens } from "../../lib/format";
 import { useSession } from "../../lib/session";
@@ -25,7 +25,8 @@ import { CliMark, errorMessage, Spinner } from "../ui";
 
 /**
  * Every task the thread's agent ran, newest first under a heading for its day. The running one and,
- * once all are done, the latest open by themselves; the rest stay folded.
+ * once all are done, the latest open by themselves; the rest stay folded. A working thread brings
+ * new lines about once a second: only the task they belong to draws again, and only its new lines.
  */
 export function TerminalTab({ projectId, tasks, output }: { projectId: string; tasks: Task[]; output: Record<string, TerminalLine[]> }) {
   const colors = useColors();
@@ -55,7 +56,7 @@ export function TerminalTab({ projectId, tasks, output }: { projectId: string; t
             {dayLabel(t, locale, dayTasks[0]!.createdAt)}
           </Text>
           {dayTasks.map((task) => (
-            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? []} latest={task.id === sorted[0]!.id} />
+            <TaskRow key={task.id} projectId={projectId} task={task} lines={output[task.id] ?? NO_LINES} latest={task.id === sorted[0]!.id} />
           ))}
         </View>
       ))}
@@ -126,7 +127,9 @@ function PullRequestLink({ url }: { url: string }) {
   );
 }
 
-function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: Task; lines: TerminalLine[]; latest: boolean }) {
+const NO_LINES: TerminalLine[] = [];
+
+const TaskRow = memo(function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: Task; lines: TerminalLine[]; latest: boolean }) {
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();
@@ -220,7 +223,7 @@ function TaskRow({ projectId, task, lines, latest }: { projectId: string; task: 
       {quietMs > QUIET_MS && <Text style={styles.note}>{t("tasks.quiet", { time: dur(quietMs) })}</Text>}
     </View>
   );
-}
+});
 
 /** Past this long without a new line, a running task says it may be stuck. */
 const QUIET_MS = 3 * 60_000;
@@ -254,10 +257,18 @@ function stepTimes(lines: TerminalLine[], end: number): (number | undefined)[] {
   return times;
 }
 
+/**
+ * A terminal draws its newest lines and more on request: a task keeps up to a thousand, and drawing
+ * them all at once (this is no virtualized list) held the phone up for seconds.
+ */
+const TERMINAL_LINES = 150;
+
 function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
   const colors = useColors();
   const styles = useStyles();
   const { t, locale } = useI18n();
+  const [limit, setLimit] = useState(TERMINAL_LINES);
+  const from = Math.max(0, lines.length - limit);
   const times = stepTimes(lines, end);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   // Follows new output while the reader is at the bottom; scrolling up stops that.
@@ -277,12 +288,17 @@ function Terminal({ lines, end }: { lines: TerminalLine[]; end: number }) {
       onContentSizeChange={() => pinned.current && scroll.current?.scrollToEnd({ animated: false })}
     >
       {lines.length === 0 && <Text style={[styles.out, { color: colors.subtle }]}>{t("tasks.waiting")}</Text>}
-      {lines.map((l, i) => (
+      {from > 0 && (
+        <Pressable accessibilityRole="button" onPress={() => setLimit(limit + TERMINAL_LINES)} hitSlop={6} style={styles.earlier}>
+          <Text style={styles.more}>{t("tasks.earlierLines", { count: Math.min(from, TERMINAL_LINES) })}</Text>
+        </Pressable>
+      )}
+      {lines.slice(from).map((l, i) => (
         <TerminalRow
-          key={i}
+          key={from + i}
           line={l}
-          first={i === 0}
-          time={times[i] === undefined ? undefined : formatDuration(times[i]!, t, locale)}
+          first={from + i === 0}
+          time={times[from + i] === undefined ? undefined : formatDuration(times[from + i]!, t, locale)}
         />
       ))}
     </ScrollView>
@@ -365,7 +381,7 @@ const FOLD_LINES = 3;
  * One terminal line. A command shows after a prompt, without the shell wrapper the CLI ran it in;
  * an agent's step or message reads as prose; output stays monospace under its command.
  */
-function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
+const TerminalRow = memo(function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
   const colors = useColors();
   const styles = useStyles();
   const t = useT();
@@ -402,7 +418,7 @@ function TerminalRow({ line, first, time }: { line: TerminalLine; first: boolean
       {time && <Text style={[styles.out, { color: colors.subtle }]}>{time}</Text>}
     </View>
   );
-}
+});
 
 /** A subagent starting (with what it is for) or ending (with its answer, folded when long). */
 function AgentRow({ line, first, time }: { line: TerminalLine; first: boolean; time?: string }) {
@@ -511,5 +527,6 @@ const useStyles = makeStyles((colors) =>
     out: { fontFamily: mono, fontSize: 11.5, lineHeight: 18, color: colors.muted },
     prose: { fontSize: 13, lineHeight: 19 },
     more: { color: colors.accent, fontSize: 12, marginTop: 2 },
+    earlier: { alignSelf: "flex-start", marginBottom: 8 },
   }),
 );
