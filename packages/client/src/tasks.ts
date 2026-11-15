@@ -70,3 +70,11 @@ export function taskSubagents(lines: TerminalLine[], running: boolean): Subagent
   if (!running) for (const a of list) if (a.status === "running") a.status = "stopped";
   return list;
 }
+
+/**
+ * Orders two ISO timestamps (oldest first). They sort as plain strings; localeCompare gives the same
+ * order but is slow on Android's Hermes, and lists sorted on every live event (tasks, threads) felt it.
+ */
+export function compareIso(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}

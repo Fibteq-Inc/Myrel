@@ -1,10 +1,11 @@
 import type { Project } from "@myrel/protocol";
+import { compareIso } from "./tasks";
 
 /** The server's order of projects that are not pinned: working ones first, then the latest activity. */
 export function compareUnpinnedProjects(a: Project, b: Project): number {
   const working = Number((b.activity?.working ?? 0) > 0) - Number((a.activity?.working ?? 0) > 0);
   if (working !== 0) return working;
-  return (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt);
+  return compareIso(b.lastActivityAt ?? b.createdAt, a.lastActivityAt ?? a.createdAt);
 }
 
 /**
