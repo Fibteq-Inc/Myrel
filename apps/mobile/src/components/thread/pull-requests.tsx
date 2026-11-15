@@ -1,7 +1,8 @@
+import { newestPullRequestsFirst, patchPreview, PULL_REQUESTS_PAGE } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
 import { highlightLines } from "@myrel/client/highlight";
 import type { PullFile, PullRequest } from "@myrel/protocol";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
@@ -15,7 +16,7 @@ import {
   MessageSquareWarning,
   TriangleAlert,
 } from "lucide-react-native";
-import { type ReactNode, useMemo, useState } from "react";
+import { memo, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSession } from "../../lib/session";
 import { makeStyles, mono, radius, useColors } from "../../theme";
@@ -25,14 +26,30 @@ import { Empty } from "../project/empty";
 import { Spinner } from "../ui";
 
 /**
- * The pull requests a thread opened, each with its live state: open, merged or closed, CI and
- * review. Tapping one opens its changed files; tapping a file shows its diff.
+ * The pull requests a thread opened, the newest first, each with its live state: open, merged or
+ * closed, CI and review. Tapping one opens its changed files; tapping a file shows its diff. A long
+ * list, a long file list and a long diff each show their start and load the rest on a tap, so a
+ * thread with many big pull requests opens light.
  */
-export function PullRequestsTab({ projectId, threadId, pullRequests }: { projectId: string; threadId: string; pullRequests: PullRequest[] }) {
+export function PullRequestsTab({
+  projectId,
+  threadId,
+  pullRequests: given,
+}: {
+  projectId: string;
+  threadId: string;
+  pullRequests: PullRequest[];
+}) {
   const colors = useColors();
   const styles = useStyles();
   const t = useT();
+  const pullRequests = useMemo(() => newestPullRequestsFirst(given), [given]);
   const [picked, setPicked] = useState<string | null>(null);
+  const [limit, setLimit] = useState(PULL_REQUESTS_PAGE);
+  // Stable, so the cards (memoized) do not redraw on every live event while the tab is open.
+  const toggle = useCallback((url: string) => setPicked((now) => (now === url ? null : url)), []);
+  const shown = pullRequests.slice(0, limit);
+  const older = pullRequests.length - shown.length;
   if (pullRequests.length === 0) {
     return (
       <Empty
@@ -44,21 +61,23 @@ export function PullRequestsTab({ projectId, threadId, pullRequests }: { project
   }
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      {pullRequests.map((pr) => (
-        <PullRequestCard
-          key={pr.url}
-          projectId={projectId}
-          threadId={threadId}
-          pr={pr}
-          open={picked === pr.url}
-          onToggle={() => setPicked(picked === pr.url ? null : pr.url)}
-        />
+      {shown.map((pr) => (
+        <PullRequestCard key={pr.url} projectId={projectId} threadId={threadId} pr={pr} open={picked === pr.url} onToggle={toggle} />
       ))}
+      {older > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setLimit(shown.length + PULL_REQUESTS_PAGE)}
+          style={({ pressed }) => [styles.older, pressed && { backgroundColor: colors.hover }]}
+        >
+          <Text style={styles.olderText}>{t("pr.older", { count: Math.min(older, PULL_REQUESTS_PAGE) })}</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
 
-function PullRequestCard({
+const PullRequestCard = memo(function PullRequestCard({
   projectId,
   threadId,
   pr,
@@ -69,7 +88,7 @@ function PullRequestCard({
   threadId: string;
   pr: PullRequest;
   open: boolean;
-  onToggle: () => void;
+  onToggle: (url: string) => void;
 }) {
   const colors = useColors();
   const styles = useStyles();
@@ -89,7 +108,7 @@ function PullRequestCard({
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         accessibilityLabel={`${pr.title}, ${pr.repo}#${pr.number}, ${state.label}`}
-        onPress={onToggle}
+        onPress={() => onToggle(pr.url)}
         style={({ pressed }) => [styles.cardHead, pressed && { backgroundColor: colors.hover }]}
       >
         <View style={styles.icon}>
@@ -144,7 +163,7 @@ function PullRequestCard({
       {expanded && <PullRequestFiles projectId={projectId} threadId={threadId} pr={pr} />}
     </View>
   );
-}
+});
 
 /** A pull request's changed files, a link to it on GitHub, and each file's diff on a tap. */
 function PullRequestFiles({ projectId, threadId, pr }: { projectId: string; threadId: string; pr: PullRequest }) {
@@ -153,11 +172,16 @@ function PullRequestFiles({ projectId, threadId, pr }: { projectId: string; thre
   const t = useT();
   const { api, server } = useSession();
   // A new commit moves updatedAt; the server answers from its cache while the commit stays the same.
-  const { data, isPending, error } = useQuery({
+  // Files come a page at a time, so a huge pull request opens with its first files only.
+  const { data, isPending, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ["pullFiles", server, projectId, threadId, pr.repo, pr.number, pr.updatedAt],
-    queryFn: () => api.pullRequestFiles(projectId, threadId, pr.repo, pr.number),
+    queryFn: ({ pageParam }) => api.pullRequestFiles(projectId, threadId, pr.repo, pr.number, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (last) => last.nextPage ?? undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
+  const files = useMemo(() => data?.pages.flatMap((page) => page.files) ?? [], [data]);
+  const truncated = !hasNextPage && !!data?.pages.at(-1)?.truncated;
   return (
     <View style={styles.detail}>
       {isPending ? (
@@ -166,12 +190,23 @@ function PullRequestFiles({ projectId, threadId, pr }: { projectId: string; thre
         <Text style={[styles.metaText, { color: colors.bad }]}>{t("pr.filesFailed")}</Text>
       ) : (
         <View style={styles.files}>
-          {data.files.map((file) => (
+          {files.map((file) => (
             <FileRow key={file.path} file={file} />
           ))}
         </View>
       )}
-      {data?.truncated && <Text style={styles.metaText}>{t("pr.filesTruncated", { count: data.files.length })}</Text>}
+      {hasNextPage && (
+        <Pressable
+          accessibilityRole="button"
+          disabled={isFetchingNextPage}
+          onPress={() => void fetchNextPage()}
+          style={({ pressed }) => [styles.github, styles.moreFiles, pressed && { backgroundColor: colors.hover }]}
+        >
+          {isFetchingNextPage && <Spinner size={12} color={colors.subtle} />}
+          <Text style={styles.githubText}>{t("pr.moreFiles")}</Text>
+        </Pressable>
+      )}
+      {truncated && <Text style={styles.metaText}>{t("pr.filesTruncated", { count: files.length })}</Text>}
       <View style={styles.actions}>
         <MergeButton projectId={projectId} threadId={threadId} pr={pr} />
         <Pressable
@@ -225,31 +260,49 @@ function FileRow({ file }: { file: PullFile }) {
   );
 }
 
-/** A file's diff hunks, colored like a diff; long lines scroll sideways. */
+/**
+ * A file's diff hunks, colored like a diff; long lines scroll sideways. A long diff draws its
+ * first lines until asked for all of them.
+ */
 function Patch({ patch }: { patch: string }) {
   const colors = useColors();
   const styles = useStyles();
-  const lines = useMemo(() => highlightLines(patch, "diff"), [patch]);
+  const t = useT();
+  const [whole, setWhole] = useState(false);
+  const preview = useMemo(() => patchPreview(patch), [patch]);
+  const text = whole ? patch : preview.text;
+  const lines = useMemo(() => highlightLines(text, "diff"), [text]);
   return (
-    <ScrollView horizontal style={styles.patch} contentContainerStyle={{ flexDirection: "column", minWidth: "100%" }}>
-      {lines.map((line, i) => {
-        const kind = line[0]?.kind;
-        return (
-          <Text
-            key={i}
-            style={[
-              styles.patchLine,
-              kind === "addition" && { backgroundColor: colors.okSoft },
-              kind === "deletion" && { backgroundColor: colors.badSoft },
-              kind === "meta" && { color: colors.subtle },
-            ]}
-          >
-            <CodeTokens line={line} />
-            {line.length === 0 && " "}
-          </Text>
-        );
-      })}
-    </ScrollView>
+    <View style={styles.patch}>
+      <ScrollView horizontal contentContainerStyle={{ flexDirection: "column", minWidth: "100%" }}>
+        {lines.map((line, i) => {
+          const kind = line[0]?.kind;
+          return (
+            <Text
+              key={i}
+              style={[
+                styles.patchLine,
+                kind === "addition" && { backgroundColor: colors.okSoft },
+                kind === "deletion" && { backgroundColor: colors.badSoft },
+                kind === "meta" && { color: colors.subtle },
+              ]}
+            >
+              <CodeTokens line={line} />
+              {line.length === 0 && " "}
+            </Text>
+          );
+        })}
+      </ScrollView>
+      {text !== patch && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setWhole(true)}
+          style={({ pressed }) => [styles.github, styles.wholeDiff, pressed && { backgroundColor: colors.hover }]}
+        >
+          <Text style={styles.githubText}>{t("pr.wholeDiff", { count: preview.lines })}</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -296,6 +349,17 @@ const useStyles = makeStyles((colors) =>
       paddingVertical: 6,
     },
     githubText: { color: colors.fg, fontSize: 12 },
+    moreFiles: { alignSelf: "flex-start" },
+    wholeDiff: { alignSelf: "flex-start", marginHorizontal: 10, marginVertical: 8 },
+    older: {
+      alignItems: "center",
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: colors.edge,
+      paddingVertical: 10,
+    },
+    olderText: { color: colors.subtle, fontSize: 13 },
     icon: {
       width: 36,
       height: 36,

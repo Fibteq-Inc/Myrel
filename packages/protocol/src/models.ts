@@ -592,6 +592,8 @@ export const PullRequest = z.object({
   additions: z.number().int().nullable().default(null),
   deletions: z.number().int().nullable().default(null),
   changedFiles: z.number().int().nullable().default(null),
+  /** When Myrel started following it; null from servers that did not send it yet. Lists show the newest first. */
+  createdAt: Timestamp.nullable().default(null),
   updatedAt: Timestamp,
 });
 export type PullRequest = z.infer<typeof PullRequest>;
@@ -610,7 +612,13 @@ export const PullFile = z.object({
 export type PullFile = z.infer<typeof PullFile>;
 
 /** The files of a pull request at its latest commit; `truncated` when there were more than are listed. */
-export const PullFiles = z.object({ files: z.array(PullFile), truncated: z.boolean() });
+export const PullFiles = z.object({
+  files: z.array(PullFile),
+  /** More files exist than GitHub lets Myrel list; the rest are only on GitHub. */
+  truncated: z.boolean(),
+  /** The page to ask for next when the files were asked for in pages (?page=); null on the last one. */
+  nextPage: z.number().int().nullable().default(null),
+});
 export type PullFiles = z.infer<typeof PullFiles>;
 
 export const MergeMethod = z.enum(["merge", "squash", "rebase"]);
