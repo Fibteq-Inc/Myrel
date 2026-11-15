@@ -12,6 +12,8 @@ import {
   emptyProjectState,
   findMessage,
   foldPullRequests,
+  newestPullRequestsFirst,
+  patchPreview,
   freshSteps,
   parseChecklist,
   projectChat,
@@ -296,7 +298,7 @@ describe("tasks", () => {
 });
 
 describe("pull request folding", () => {
-  const pr = (number: number, state: PullRequest["state"], updatedAt = now): PullRequest => ({
+  const pr = (number: number, state: PullRequest["state"], updatedAt = now, createdAt: string | null = null): PullRequest => ({
     repo: "a/b",
     number,
     url: `https://github.com/a/b/pull/${number}`,
@@ -311,6 +313,7 @@ describe("pull request folding", () => {
     additions: null,
     deletions: null,
     changedFiles: null,
+    createdAt,
     updatedAt,
   });
   const numbers = (prs: PullRequest[]) => prs.map((p) => p.number);
@@ -329,6 +332,20 @@ describe("pull request folding", () => {
     const prs = [pr(1, "merged", "2026-10-22T10:00:00Z"), pr(2, "merged", "2026-10-22T12:00:00Z"), pr(3, "merged", "2026-10-22T11:00:00Z")];
     const { shown, folded } = foldPullRequests(prs);
     expect([numbers(shown), numbers(folded)]).toEqual([[2], [1, 3]]);
+  });
+
+  it("lists the newest first in the PR tab, whatever order they arrived in", () => {
+    const at = (h: number) => `2026-11-15T${String(h).padStart(2, "0")}:00:00.000Z`;
+    const prs = [pr(3, "open", now, at(12)), pr(1, "merged", now, at(9)), pr(2, "closed", now, at(10))];
+    expect(numbers(newestPullRequestsFirst(prs))).toEqual([3, 2, 1]);
+    // Without start times (an older server) the arrival order is reversed.
+    expect(numbers(newestPullRequestsFirst([pr(1, "merged"), pr(2, "open")]))).toEqual([2, 1]);
+    expect(numbers(prs)).toEqual([3, 1, 2]);
+  });
+
+  it("shows the start of a long diff and counts its lines", () => {
+    expect(patchPreview("a\nb\nc", 2)).toEqual({ text: "a\nb", lines: 3 });
+    expect(patchPreview("a\nb", 2)).toEqual({ text: "a\nb", lines: 2 });
   });
 });
 

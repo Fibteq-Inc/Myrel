@@ -666,9 +666,10 @@ export class ApiClient {
   }
 
   /** The files a thread's pull request changes, with their diffs, at its latest commit. */
-  pullRequestFiles(projectId: string, threadId: string, repo: string, number: number) {
+  /** A page (from 1) of the files a thread's pull request changes; `nextPage` says whether more follow. */
+  pullRequestFiles(projectId: string, threadId: string, repo: string, number: number, page = 1) {
     const base = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/pull-requests/${number}/files`;
-    return this.request<PullFiles>(`${base}?repo=${encodeURIComponent(repo)}`);
+    return this.request<PullFiles>(`${base}?repo=${encodeURIComponent(repo)}&page=${page}`);
   }
 
   /** Whether the signed-in person may merge a thread's pull request from Myrel, and why not right now. */

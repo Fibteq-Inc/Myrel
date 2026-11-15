@@ -32,7 +32,7 @@ import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { SESSION_HEADER, USER_ID_HEADER } from "../agents/project-agent";
 import { GithubError, githubConfigured, installationToken } from "../github/app";
-import { listPullRequests, MergeError, mergePullRequest, pullFiles, pullMergeState } from "../github/pulls";
+import { listPullRequests, MergeError, mergePullRequest, pageOfFiles, pullFiles, pullMergeState } from "../github/pulls";
 import { canUseInstallation, githubGrantStale, listProjectRepos, userCanReachRepo } from "../github/store";
 import { type AppEnv, requireUser } from "../middleware";
 import { canCreateProject } from "../extensions";
@@ -432,14 +432,19 @@ export const projectRoutes = new Hono<AppEnv>()
     if (!thread) return c.json({ error: "not_found" }, 404);
     return c.json({ pullRequests: await listPullRequests(c.env.DB, c.req.param("id"), thread) });
   })
-  // The files one of them changes, with their diffs (?repo=owner/name).
+  // The files one of them changes, with their diffs (?repo=owner/name). With ?page=n only that
+  // page of them; without it all at once, as apps before paging ask.
   .get("/:id/threads/:threadId/pull-requests/:number/files", async (c) => {
     const thread = await findThread(c.env, c.req.param("id"), c.req.param("threadId"), c.get("user").id);
     const number = Number(c.req.param("number"));
     const repo = c.req.query("repo");
-    if (!thread || !repo || !Number.isInteger(number)) return c.json({ error: "not_found" }, 404);
+    const page = c.req.query("page") === undefined ? null : Number(c.req.query("page"));
+    if (!thread || !repo || !Number.isInteger(number) || (page !== null && !(Number.isInteger(page) && page >= 1))) {
+      return c.json({ error: "not_found" }, 404);
+    }
     const files = await pullFiles(c.env, c.req.param("id"), thread, repo, number);
-    return files ? c.json(files) : c.json({ error: "not_found" }, 404);
+    if (!files) return c.json({ error: "not_found" }, 404);
+    return c.json(page === null ? { ...files, nextPage: null } : pageOfFiles(files, page));
   })
   // Whether the signed-in person may merge it from here (their own GitHub rights), and why not right now.
   .get("/:id/threads/:threadId/pull-requests/:number/merge", async (c) => {

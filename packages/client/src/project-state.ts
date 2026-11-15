@@ -91,6 +91,24 @@ export const threadPullRequests = (s: ProjectState, threadId: string) =>
   Object.values(s.pullRequests).filter((pr) => pr.threadId === threadId);
 
 /**
+ * A thread's pull requests for its PR tab: the one Myrel started following last comes first.
+ * Ones without a start time (from an older server) keep their order, reversed, after the rest.
+ */
+export const newestPullRequestsFirst = (prs: PullRequest[]) =>
+  [...prs].reverse().sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+/** The PR tab shows this many pull requests at first, and this many more on each "show older". */
+export const PULL_REQUESTS_PAGE = 10;
+/** A diff shows this many lines at first; the rest wait for a tap, so one huge file stays light. */
+export const PATCH_PREVIEW_LINES = 400;
+
+/** The first `max` lines of a diff and how many lines it has in all. */
+export function patchPreview(patch: string, max = PATCH_PREVIEW_LINES): { text: string; lines: number } {
+  const lines = patch.split("\n");
+  return { text: lines.length > max ? lines.slice(0, max).join("\n") : patch, lines: lines.length };
+}
+
+/**
  * Splits a run of pull requests into the cards worth showing and the rest,
  * so a thread that opened many does not stack a card for each. Open ones
  * stay out (they still need someone); with none open, the one updated last
