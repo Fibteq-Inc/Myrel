@@ -18,7 +18,7 @@ import { listWorktrees, pruneWorktrees, removeWorktree, worktreeState } from "./
 
 const HELP = `myrel-runner ${RUNNER_VERSION}
 Connects this computer to Myrel, so projects can work in folders you share
-using your own Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code or Kimi Code. Your CLI logins never leave
+using your own Claude Code, Codex, Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code, Kimi Code or Qwen Code. Your CLI logins never leave
 this computer.
 
 Usage:

@@ -2,7 +2,7 @@
 
 Connects your computer to a Myrel server, so a project can work in one of your
 local folders with the coding CLI you already use: Claude Code, Codex CLI,
-Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code or Kimi Code.
+Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code, Kimi Code or Qwen Code.
 
 - It opens an **outbound** WebSocket to the server. No port is opened, and it works behind NAT.
 - The server sends a task (a folder, a CLI and a prompt). The runner starts the CLI in that folder, streams its
@@ -19,7 +19,7 @@ Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code or Kimi Code.
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code) or `kimi` (Kimi Code) on your `PATH`, already signed in. The runner looks for them again every few minutes, so one you install later shows up without a restart; on Windows it also reads the PATH saved in your user settings and the usual npm, pnpm, Scoop and winget folders. `myrel-runner status` lists the CLIs it could not find and why.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code), `kimi` (Kimi Code) or `qwen` (Qwen Code) on your `PATH`, already signed in. The runner looks for them again every few minutes, so one you install later shows up without a restart; on Windows it also reads the PATH saved in your user settings and the usual npm, pnpm, Scoop and winget folders. `myrel-runner status` lists the CLIs it could not find and why.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -216,6 +216,12 @@ repository run, the rest asks) and `auto` ("never ask") with `full`. What it ask
 below `full` its shell commands are declined; its `yolo` mode would run them all but system commands (shutdown,
 `mkfs`), so `auto` stays with `edit` as for Codex. Rules you set to `deny` in its config always hold.
 
+Qwen Code runs as an ACP server too (`qwen --acp`): `default` with `read`, edits without asking with `edit`
+(`acceptEdits` in 1.x, `auto-edit` in 0.x), its safety classifier with `auto` and `yolo` with `full`. What it asks
+permission for is declined below `full`, except the run's own MCP tools. Qwen Code 0.x ends the whole turn when a step
+is declined, so there the tools it would ask about are left out of the run (`--exclude-tools`): commands, `monitor` and
+`web_fetch` below `auto`, file edits too with `read`, and its own question tool at every level.
+
 With `edit`, the CLI can change files in the folder but cannot run commands that would need your approval. Use
 `full` only for folders and projects you trust: it lets the CLI run any command without asking.
 
@@ -232,8 +238,8 @@ Allow commands this turn, Don't run), so there is no need to restart the runner 
 file change inside the folders with `read` is declined as before. With `full`, Claude Code then runs with
 `acceptEdits` and commands and web tools pre-allowed instead of `bypassPermissions`, so only files outside the folders
 are asked about. Codex asks the same way for what its sandbox does not allow, when it runs as its app server (see
-above). Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code and Kimi Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
-`external_directory` allow rules, Kimi Code as the session's `additionalDirectories`).
+above). Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code, Kimi Code and Qwen Code cannot ask mid-run, so they stay inside the folders (OpenCode gets them as
+`external_directory` allow rules, Kimi Code as the session's `additionalDirectories`, Qwen Code as both and `--add-dir`).
 
 Tasks in the same Myrel thread continue the same Claude Code session (`--resume`), so follow-ups keep context.
 
@@ -270,11 +276,12 @@ decisions, artifacts, memory, routines) added over MCP:
 | Cursor CLI | `mcp.json` of a plugin folder of the run (`--plugin-dir`, `--approve-mcps`), allowed with `Mcp(plugin-myrel-myrel:*)` in a `cli-config.json` of the run (`CURSOR_CONFIG_DIR`) |
 | Muse Code | `-c 'mcpServers.myrel={"url":…,"headers":{"Authorization":"${MYREL_MCP_AUTH}"}}'`, run with `--approval-mode never` |
 | Kimi Code | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header, its tools allowed when it asks |
+| Qwen Code | `mcpServers` of ACP's `session/new` (or `session/resume`), the token in its `Authorization` header, its tools allowed when it asks |
 
 The MCP endpoint is `<server>/api/agent-mcp/<thread>` and its token is valid only for that turn. Config files holding
 it are readable only by you and deleted when the run ends; Codex gets it in its environment instead. The whole turn
 uses your own CLI login. Needs myrel-runner 0.4.0 or later for Claude Code, 0.5.0 or later for Codex, 0.13.0 or later
-for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.19.0 or later for Muse Code, 0.20.0 or later for Kimi Code.
+for Antigravity CLI, 0.15.0 or later for OpenCode, 0.16.0 or later for Hermes Agent, 0.17.0 or later for Cursor CLI, 0.19.0 or later for Muse Code, 0.20.0 or later for Kimi Code, 0.39.0 or later for Qwen Code.
 
 Antigravity CLI takes MCP servers only from its global config, never for one run. So the runner adds one fixed
 server there, the bridge, and an allow rule for its tools; the rest of both files stays as it is. Each run hands the
@@ -327,6 +334,16 @@ providers), each with its thinking levels (`supportEfforts`); a picked model and
 servers in `mcp.json` load too, but only the run's are allowed without asking. Skills: the prompt names the run's
 skills folder, which Kimi Code may read. Detection checks that `kimi --version` prints a bare version (the archived
 Python kimi-cli prints `kimi, version …`). Sign in once with `kimi login`.
+
+Qwen Code (`qwen`, the npm package `@qwen-code/qwen-code` or its own installer) runs as an ACP server (`qwen --acp`)
+for the same reason: its `-p` flags differ between 0.x and the 1.x previews, while ACP takes the run's MCP servers per
+session in both. A run is `session/new` (or `session/resume`) with the run's servers, `session/set_mode`, then
+`session/prompt`; the project's other folders and the skills folder go in as `--add-dir` and, in 1.x, as the
+session's `additionalDirectories`. Nothing is written to your `~/.qwen`. Qwen Code asks about every MCP tool and names
+it `mcp__<server>__<tool>` in the request; only the run's are allowed without asking, your own servers in
+`settings.json` load too. It runs on the model set in Qwen Code: 0.x has no command that lists its models, and the
+1.x previews' ACP session offers only the current one, so Myrel shows no model picker for it yet. Detection checks
+that `qwen --version` prints a bare version. Sign in or set up a provider once by starting `qwen`.
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 
