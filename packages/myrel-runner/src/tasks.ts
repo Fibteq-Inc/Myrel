@@ -22,6 +22,8 @@ type Send = (frame: RunnerToServer) => void;
 const RESUMES = new Set<CliId>(["claude", "codex", "antigravity", "opencode", "hermes", "cursor", "muse", "kimi", "qwen"]);
 /** Results are cut to fit the protocol's limit. */
 const MAX_RESULT = 90_000;
+/** How long a CLI may write nothing before its task is stopped as stuck. */
+export const IDLE_MS = 60 * 60 * 1000;
 /** At most one progress frame per this many ms. */
 const PROGRESS_EVERY_MS = 1000;
 /** The wait before starting Claude Code once more when it could not connect to Myrel's tools. */
@@ -32,8 +34,11 @@ export type TaskRunnerOptions = {
   sessions: SessionStore;
   /** Called whenever a task starts or ends, e.g. to tell `myrel-runner update` what is running. */
   onChange?: (running: string[]) => void;
-  /** Kill a task after this long. Default 60 minutes. */
-  timeoutMs?: number;
+  /**
+   * Stop a task whose CLI wrote nothing for this long, as stuck. Default 60 minutes. A CLI that keeps
+   * working runs for as long as it needs (İsmail, 2026-11-16).
+   */
+  idleMs?: number;
   /** For tests: replaces child_process.spawn. */
   spawn?: typeof spawn;
   log?: (line: string) => void;
@@ -296,6 +301,15 @@ export class TaskRunner {
     this.running.set(task.taskId, child);
     this.opts.onChange?.(this.runningIds());
 
+    // Stuck, not slow: only a CLI that writes nothing for this long is stopped; each output starts it again.
+    const idleMs = this.opts.idleMs ?? IDLE_MS;
+    let idled = false;
+    const idle = setTimeout(() => {
+      idled = true;
+      child.kill("SIGTERM");
+      setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 5000).unref();
+    }, idleMs);
+
     const state: ParseState = {};
     let stdout = "";
     let stderr = "";
@@ -337,6 +351,7 @@ export class TaskRunner {
 
     child.stdout!.setEncoding("utf8");
     child.stdout!.on("data", (chunk: string) => {
+      idle.refresh();
       if (stdout.length < 4 * MAX_RESULT) stdout += chunk;
       buffered += chunk;
       const lines = buffered.split("\n");
@@ -364,6 +379,7 @@ export class TaskRunner {
     });
     child.stderr!.setEncoding("utf8");
     child.stderr!.on("data", (chunk: string) => {
+      idle.refresh();
       if (stderr.length < 20_000) stderr += chunk;
     });
     child.stdin!.on("error", () => {}); // the CLI may exit before reading all of stdin
@@ -386,14 +402,13 @@ export class TaskRunner {
       state.claudeStream.start();
     } else child.stdin!.end(promptFile ? "" : input);
 
-    const timer = setTimeout(() => child.kill("SIGTERM"), this.opts.timeoutMs ?? 60 * 60 * 1000);
 
     return await new Promise<boolean>((resolve) => {
       let done = false;
       const finish = (ok: boolean, result: string) => {
         if (done) return;
         done = true;
-        clearTimeout(timer);
+        clearTimeout(idle);
         void cleanup();
         this.running.delete(task.taskId);
         this.turns.delete(task.taskId);
@@ -434,7 +449,7 @@ export class TaskRunner {
       const startAgain = async () => {
         if (startingAgain || done) return;
         startingAgain = true;
-        clearTimeout(timer);
+        clearTimeout(idle);
         // New messages wait for the next run, which gets them with its first call to Myrel.
         this.turns.delete(task.taskId);
         const why = await this.mcpProbe(task);
@@ -450,16 +465,17 @@ export class TaskRunner {
       child.on("exit", () => {
         if (this.cancelled.has(task.taskId) || this.interrupted.has(task.taskId)) finish(false, "");
         else if (stoppedForMcp) void startAgain();
+        else if (idled) finish(false, idleMessage(adapter.bin, idleMs));
       });
       child.on("close", async (code, signal) => {
         if (stoppedForMcp) return;
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
         reportLimits(state.limits ?? (await adapter.limits?.(state).catch(() => undefined)));
-        const ok = code === 0 && !state.failed;
-        if (resume && !ok && !state.usage && !state.progress && !this.cancelled.has(task.taskId)) {
+        const ok = code === 0 && !state.failed && !idled;
+        if (resume && !ok && !idled && !state.usage && !state.progress && !this.cancelled.has(task.taskId)) {
           done = true;
-          clearTimeout(timer);
+          clearTimeout(idle);
           this.running.delete(task.taskId);
           this.turns.delete(task.taskId);
           // Stopping now: the new session would only be killed too.
@@ -476,9 +492,9 @@ export class TaskRunner {
         if (state.sessionId && keepsSession) {
           await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
         }
-        const result =
-          state.result ??
-          (ok ? stdout.trim() : exitMessage(adapter.bin, code, signal, state.error ?? (stderr.trim() || stdout.trim())));
+        const result = idled
+          ? idleMessage(adapter.bin, idleMs)
+          : (state.result ?? (ok ? stdout.trim() : exitMessage(adapter.bin, code, signal, state.error ?? (stderr.trim() || stdout.trim()))));
         finish(ok, result || "(no output)");
       });
     });
@@ -580,6 +596,12 @@ const errorLine = (err: unknown) =>
  * this) is nearly always the kernel's out-of-memory killer, so it says so instead of dumping the
  * CLI's first output lines.
  */
+/** Why a task stopped when its CLI went quiet, for the person reading the thread. */
+export function idleMessage(bin: string, idleMs: number): string {
+  const minutes = Math.round(idleMs / 60_000);
+  return `${bin} wrote nothing for ${minutes} minutes, so Myrel stopped it as stuck. Write here to continue; the next turn picks up where it left off.`;
+}
+
 export function exitMessage(bin: string, code: number | null, signal: NodeJS.Signals | null, detail: string): string {
   if (signal === "SIGKILL") {
     return `${bin} was killed (SIGKILL), most likely because this computer ran out of memory. Stop programs it does not need (dev servers left running, say) or add swap, then send the message again.`;

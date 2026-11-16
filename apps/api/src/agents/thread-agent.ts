@@ -296,8 +296,20 @@ function saveBranch(threadId: string): string {
 
 /** Room left under the runner protocol's prompt limit for what the runner adds (the skills folder line). */
 const PROMPT_SLACK = 1000;
-/** How long one agent turn may run. */
+/**
+ * How long one cloud turn may run. A turn on a person's computer has no such limit: its runner stops
+ * only a CLI that wrote nothing for LOCAL_IDLE_SEC (İsmail, 2026-11-16).
+ */
 const AGENT_TURN_SEC = 3600;
+/** How long a CLI on a person's computer may write nothing before its runner stops it as stuck (the runner's IDLE_MS). */
+const LOCAL_IDLE_SEC = 3600;
+/** How often the watchdog of a long turn on a person's computer looks again. */
+const LOCAL_WATCHDOG_SEC = 10 * 60;
+/**
+ * A turn on a connected computer that shows nothing for this long is given up even so: its runner
+ * stops a quiet CLI well before, so the task was lost without word.
+ */
+const LOCAL_LOST_SEC = 3 * 3600;
 /** A turn on a person's computer gets a new GitHub token this often; each lasts an hour. */
 const GITHUB_RENEW_SEC = 45 * 60;
 /**
@@ -3242,6 +3254,20 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   async taskWatchdog(payload: { taskId: string }): Promise<void> {
+    const [row] = this.sql<TaskRow>`SELECT * FROM tasks WHERE id = ${payload.taskId}`;
+    if (!row || row.status !== "running") return;
+    if (row.backend === "local") {
+      // No time limit on a person's computer: the turn goes on while its runner is there to stop it
+      // (it stops a CLI quiet for an hour) or while the CLI still shows work.
+      const [last] = this.sql<{ at: number | null }>`SELECT MAX(at) AS at FROM task_log WHERE task_id = ${row.id}`;
+      const quietSec = (Date.now() - (last?.at ?? Date.parse(row.created_at))) / 1000;
+      const runnerId = (JSON.parse(row.spec) as StoredSpec).runnerId;
+      const online = runnerId ? await (await getAgentByName(this.env.RUNNER_AGENT, runnerId)).isOnline().catch(() => false) : false;
+      if (quietSec < (online ? LOCAL_LOST_SEC : LOCAL_IDLE_SEC + WATCHDOG_GRACE_SEC)) {
+        await this.schedule(LOCAL_WATCHDOG_SEC, "taskWatchdog", payload);
+        return;
+      }
+    }
     await this.taskEvents(payload.taskId, [
       { type: "done", ok: false, error: "The runner stopped answering, so the task was given up." },
     ]);

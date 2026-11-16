@@ -379,6 +379,26 @@ describe.skipIf(process.platform === "win32")("TaskRunner", () => {
     expect(runner.runningIds()).toEqual([]);
   });
 
+  it("lets a CLI that keeps writing run on and stops one that went quiet, saying why", async () => {
+    await fakeClaude("read prompt\nfor i in 1 2 3 4 5 6; do echo '{}'; sleep 0.1; done\nsleep 30");
+    const folder = join(home, "proj");
+    await mkdir(folder);
+    const config: RunnerConfig = { folders: [{ path: folder, name: "proj" }], access: "edit" };
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => config, sessions: new SessionStore(), idleMs: 300 });
+    runner.setSender((f) => frames.push(f));
+    const taskId = "task_01JTEST0000000000000000005";
+    const started = Date.now();
+    await runner.start({ type: "task.start", taskId, threadId: "thr_01JTEST0000000000000000000", folder, cli: "claude", prompt: "x" });
+    // Writing for 600 ms outlasts the 300 ms limit; it is stopped only 300 ms after the last line.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(800);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    const done = frames.at(-1);
+    expect(done).toMatchObject({ type: "task.done", taskId, ok: false });
+    expect(done?.type === "task.done" && done.result).toContain("wrote nothing for 0 minutes, so Myrel stopped it as stuck");
+    expect(runner.runningIds()).toEqual([]);
+  });
+
   it("stops tasks as the runner shuts down without failing them, its session already saved", async () => {
     await fakeClaude(`read prompt
 echo '{"type":"system","subtype":"init","session_id":"sess-7"}'

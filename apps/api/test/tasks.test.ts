@@ -199,6 +199,39 @@ describe("the cloud agent", () => {
     })).toBe(true);
   }, 20_000);
 
+  it("lets a long turn on a person's computer run on, and gives up one whose computer went quiet", async () => {
+    const { threadAgent } = await threadSetup();
+    const local = (id: string, lastLineAgoMs: number) =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (_, state) => {
+        const sql = state.storage.sql;
+        const spec = { taskId: id, title: "Claude Code", prompt: "x", harness: "claude", openPr: false, timeoutSec: 3600, runnerId: "run_gone" };
+        const progress = { phases: { prepare: "skipped", clone: "skipped", agent: "started", save: "skipped", publish: "skipped" }, phaseDetail: {}, todos: [], lastText: null, lastTool: null, prUrl: null, usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, finished: null };
+        // Started two hours ago: past the old one-hour limit.
+        sql.exec(
+          "INSERT INTO tasks (id, spec, backend, status, progress, language, created_at) VALUES (?, ?, 'local', 'running', ?, 'en', ?)",
+          id, JSON.stringify(spec), JSON.stringify(progress), new Date(Date.now() - 2 * 3600_000).toISOString(),
+        );
+        sql.exec("INSERT INTO task_log (task_id, stream, text, at) VALUES (?, 'system', '→ Bash', ?)", id, Date.now() - lastLineAgoMs);
+      });
+    const status = async (id: string) => (await threadAgent.getTasks()).find((t) => t.id === id)?.status;
+    const checks = (id: string) =>
+      runInDurableObject(threadAgent as unknown as DurableObjectStub, (agent: ThreadAgent) =>
+        agent.getSchedules().filter((x) => x.callback === "taskWatchdog" && JSON.stringify(x.payload).includes(id)).length,
+      );
+
+    // Still showing work a minute ago: it runs on and the watchdog looks again later.
+    await local("task_busy", 60_000);
+    await threadAgent.taskWatchdog({ taskId: "task_busy" });
+    expect(await status("task_busy")).toBe("running");
+    expect(await checks("task_busy")).toBe(1);
+
+    // Its computer is offline and nothing came for over an hour: given up.
+    await local("task_quiet", 70 * 60_000);
+    await threadAgent.taskWatchdog({ taskId: "task_quiet" });
+    expect(await status("task_quiet")).toBe("failed");
+    expect(await checks("task_quiet")).toBe(0);
+  });
+
   it("opens the model proxy to a cloud turn's token only, never a local turn's", async () => {
     const { project, thread, threadAgent } = await threadSetup();
     const running = (backend: string) =>
