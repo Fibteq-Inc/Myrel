@@ -343,7 +343,10 @@ session's `additionalDirectories`. Nothing is written to your `~/.qwen`. Qwen Co
 it `mcp__<server>__<tool>` in the request; only the run's are allowed without asking, your own servers in
 `settings.json` load too. It runs on the model set in Qwen Code: 0.x has no command that lists its models, and the
 1.x previews' ACP session offers only the current one, so Myrel shows no model picker for it yet. Detection checks
-that `qwen --version` prints a bare version. Sign in or set up a provider once by starting `qwen`.
+that `qwen --version` prints a bare version. Sign in or set up a provider once by starting `qwen`. In the terminal, a
+message shows once it is whole (ACP sends it in pieces), a CodeMode step names the tools its script calls (the
+script's own calls are not reported one by one), and a subagent (its Agent tool) shows starting and ending; one in the
+background ends with Qwen Code's notice that it finished.
 
 Projects without a local folder are worked in the cloud by OpenCode, in the thread's own sandbox.
 

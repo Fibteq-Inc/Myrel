@@ -314,6 +314,9 @@ export class TaskRunner {
     /** The CLI's usage so far, for the server to show under the agent's replies. */
     const usage = () => (state.usage ? { ...state.usage, ...(state.model && { model: state.model.slice(0, 200) }) } : undefined);
     const flushProgress = () => {
+      // A message the agent finished between two steps is a line of its own, never skipped for the
+      // step after it (ACP agents, whose messages arrive in pieces).
+      for (const text of state.lines?.splice(0) ?? []) this.send({ type: "task.progress", taskId: task.taskId, text });
       // A subagent starting or ending is a line of its own, never skipped for a later step; it goes
       // first, since the latest step comes after it.
       for (const note of state.agentNotes?.splice(0) ?? []) {
@@ -357,7 +360,7 @@ export class TaskRunner {
       }
       // New usage goes at once, so a reply the agent sends right after can count it.
       const u = usage();
-      if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage) || state.agentNotes?.length) flushProgress();
+      if (Date.now() - lastProgress >= PROGRESS_EVERY_MS || (u && JSON.stringify(u) !== sentUsage) || state.agentNotes?.length || state.lines?.length) flushProgress();
     });
     child.stderr!.setEncoding("utf8");
     child.stderr!.on("data", (chunk: string) => {

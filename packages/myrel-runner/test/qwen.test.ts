@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { RunnerToServer } from "@myrel/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AcpTurn, type AcpTurnOptions } from "../src/acp";
-import { ADAPTERS, detectClis, type ParseState, qwenVersionArgs } from "../src/clis";
+import { ADAPTERS, detectClis, type ParseState, qwenStep, qwenSubagent, qwenVersionArgs } from "../src/clis";
 import { type RunnerConfig, SessionStore } from "../src/config";
 import { TaskRunner } from "../src/tasks";
 
@@ -209,5 +209,102 @@ describe("ACP turn with Qwen Code's options", () => {
     expect(sent.at(-1)).toMatchObject({ id: 4, result: { outcome: { optionId: "cancel" } } });
     ask(5, { title: "rm -rf x", _meta: null });
     expect(sent.at(-1)).toMatchObject({ id: 5, result: { outcome: { optionId: "cancel" } } });
+  });
+});
+
+describe("Qwen Code's steps and subagents in the terminal", () => {
+  /** A turn with Qwen Code's options, already prompting; `update` feeds one session/update. */
+  function prompting() {
+    const sent: Array<Record<string, unknown>> = [];
+    const state: ParseState = {};
+    const t = new AcpTurn({ write: (line) => sent.push(JSON.parse(line)), end: () => {} }, { cwd: "/w", prompt: "hi", mcpServers: [], ...qwen.acp!("full") }, state);
+    const reply = (result: unknown) => t.receive(JSON.stringify({ jsonrpc: "2.0", id: sent.at(-1)!.id, result }));
+    t.start();
+    reply({ protocolVersion: 1 });
+    reply({ sessionId: "s1" });
+    reply({});
+    const update = (u: Record<string, unknown>) => t.receive(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "s1", update: u } }));
+    const chunk = (text: string, _meta?: unknown) => update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text }, ...(_meta ? { _meta } : {}) });
+    const end = () => reply({ stopReason: "end_turn" });
+    return { state, update, chunk, end };
+  }
+
+  it("makes a message a line once it is whole, not its first piece", () => {
+    const { state, update, chunk, end } = prompting();
+    chunk("Ş");
+    chunk("imdi dosyalara bakıyorum.");
+    expect(state.progress).toBeUndefined();
+    expect(state.lines).toBeUndefined();
+    update({ sessionUpdate: "tool_call", toolCallId: "c1", title: "echo hi", kind: "execute", rawInput: { command: "echo hi" } });
+    expect(state.lines).toEqual(["Şimdi dosyalara bakıyorum."]);
+    expect(state.progress).toBe("echo hi");
+    chunk("Bitti.");
+    end();
+    expect(state.result).toBe("Bitti.");
+    expect(state.lines).toHaveLength(1);
+  });
+
+  it("names the tools a CodeMode script calls (1.x)", () => {
+    const call = (code: string) => ({ title: "CodeMode", rawInput: { code }, _meta: { qwen: { toolName: "CodeMode" } } });
+    expect(qwenStep(call("const r = await tools.Read({file_path: 'a'}); await tools['mcp__myrel__reply']({text: 'hi'}); await tools.Read({})"))).toBe(
+      "CodeMode: Read, mcp__myrel__reply",
+    );
+    expect(qwenStep(call("return 1 + 1\n// more"))).toBe("CodeMode: return 1 + 1");
+    expect(qwenStep({ title: "echo hi", rawInput: { command: "echo hi" }, _meta: { qwen: { toolName: "Bash" } } })).toBeUndefined();
+    const { state, update } = prompting();
+    update({ sessionUpdate: "tool_call", toolCallId: "c1", status: "pending", kind: "other", ...call("await tools.Grep({pattern: 'x'})") });
+    expect(state.progress).toBe("CodeMode: Grep");
+  });
+
+  it("takes the fuller title of a later update (0.x), and adds the main argument to a bare tool name", () => {
+    const { state, update } = prompting();
+    update({ sessionUpdate: "tool_call", toolCallId: "c1", status: "pending", title: "ToolSearch", rawInput: {}, _meta: { toolName: "tool_search", phase: "preparing" } });
+    expect(state.progress).toBe("ToolSearch");
+    update({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress", title: "ToolSearch: select:agent", rawInput: { query: "select:agent" } });
+    expect(state.progress).toBe("ToolSearch: select:agent");
+    // Lifecycle updates say nothing new.
+    update({ sessionUpdate: "tool_call_update", toolCallId: "c1", _meta: { toolLifecycle: { phase: "ended" } } });
+    expect(state.progress).toBe("ToolSearch: select:agent");
+    update({ sessionUpdate: "tool_call", toolCallId: "c2", title: "ReadFile", rawInput: { file_path: "/w/a.ts" }, _meta: { toolName: "read_file" } });
+    expect(state.progress).toBe("ReadFile: /w/a.ts");
+  });
+
+  it("shows a subagent starting and ending with its answer (1.x)", () => {
+    expect(qwenSubagent({ title: "Agent", rawInput: { description: "Look around", subagent_type: "Explore" }, _meta: { qwen: { toolName: "Agent" } } })).toEqual({
+      label: "Explore",
+      purpose: "Look around",
+      background: false,
+    });
+    expect(qwenSubagent({ title: "Bash", _meta: { qwen: { toolName: "Bash" } } })).toBeUndefined();
+    const { state, update } = prompting();
+    update({
+      sessionUpdate: "tool_call",
+      toolCallId: "call_2",
+      status: "pending",
+      title: "Agent",
+      kind: "think",
+      rawInput: { description: "Look around", prompt: "read", subagent_type: "general-purpose" },
+      _meta: { qwen: { toolName: "Agent" } },
+    });
+    expect(state.agentNotes).toEqual([{ text: "Look around", agent: { id: "call_2", label: "general-purpose", state: "started" } }]);
+    update({ sessionUpdate: "tool_call_update", toolCallId: "call_2", status: "completed", content: [{ type: "content", content: { type: "text", text: "Found it." } }] });
+    expect(state.agentNotes?.[1]).toMatchObject({ text: "Found it.", agent: { id: "call_2", label: "general-purpose", state: "done" } });
+  });
+
+  it("ends a background subagent with Qwen Code's notice, which is not part of the answer (0.x)", () => {
+    const { state, update, chunk, end } = prompting();
+    update({ sessionUpdate: "tool_call", toolCallId: "call_2", status: "pending", title: "Agent", rawInput: {}, _meta: { toolName: "agent", phase: "preparing" } });
+    expect(state.agentNotes).toBeUndefined();
+    update({ sessionUpdate: "tool_call_update", toolCallId: "call_2", status: "in_progress", title: "Agent: Look around", rawInput: { description: "Look around", subagent_type: "general-purpose" } });
+    expect(state.agentNotes).toHaveLength(1);
+    update({ sessionUpdate: "tool_call_update", toolCallId: "call_2", status: "completed", content: [{ type: "content", content: { type: "text", text: "Background agent launched successfully.\ntask_id: x" } }] });
+    expect(state.agentNotes).toHaveLength(1);
+    chunk("Ana cevap.");
+    const notice = { source: "background_task_completed", qwenDiscreteMessage: true, backgroundTask: { status: "completed", kind: "agent", toolUseId: "call_2" } };
+    chunk('Background agent "general-purpose: Look around" completed.', notice);
+    expect(state.agentNotes?.[1]).toMatchObject({ agent: { id: "call_2", state: "done" } });
+    // No text after the notice: the message before it is the answer.
+    end();
+    expect(state.result).toBe("Ana cevap.");
   });
 });
