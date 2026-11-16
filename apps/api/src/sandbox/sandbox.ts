@@ -329,7 +329,7 @@ export class Sandbox extends DurableObject<Env> {
       await killed;
       return signal.aborted
         ? { type: "done", ok: false, error: "Cancelled." }
-        : { type: "done", ok: false, error: `Timed out after ${run.timeoutSec} seconds.` };
+        : { type: "done", ok: false, error: `Stopped after ${Math.round(run.timeoutSec / 60)} minutes, the time limit of one cloud turn. Write here to continue.` };
     }
     if (exitCode === undefined || exitCode === null) {
       // Its output could not be followed to the end: nothing would report the rest, so it stops here.
