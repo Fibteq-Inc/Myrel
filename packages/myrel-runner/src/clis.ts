@@ -1098,6 +1098,64 @@ const kimi: CliAdapter = {
 };
 
 /**
+ * What Qwen Code is told below full access. Nobody can answer its approval questions mid-run, so they
+ * are declined; 0.x then ends the whole turn, 1.x goes on without the step.
+ */
+const QWEN_LIMITED: Record<Access, string | null> = {
+  read: "(myrel-runner: this run may only read. Do not change files or run commands: steps that need approval are declined, and a declined step may end your run at once. Answer with Myrel's tools.)",
+  edit: "(myrel-runner: in this run shell commands, web pages and anything else that needs approval are declined, and a declined step may end your run at once. Read and edit the files here and use Myrel's tools. If a command is essential, say so in a reply: it needs full access on this computer, which the person sets in Myrel > Devices.)",
+  auto: "(myrel-runner: in this run a step Qwen Code's safety check does not let through is declined, and a declined step may end your run at once. Keep to this folder and Myrel's tools. If a blocked command is essential, say so in a reply: it needs full access on this computer, which the person sets in Myrel > Devices.)",
+  full: null,
+};
+
+/**
+ * The tools Qwen Code 0.x would ask about at each access. There a declined step ends the whole turn with
+ * no answer, so they are left out of the run instead. Its question tool is left out everywhere: people
+ * are asked through Myrel, and its questions would only be declined.
+ */
+const QWEN0_EXCLUDED: Record<Access, string[]> = {
+  read: ["run_shell_command", "monitor", "web_fetch", "write_file", "edit", "notebook_edit", "ask_user_question"],
+  edit: ["run_shell_command", "monitor", "web_fetch", "ask_user_question"],
+  auto: ["ask_user_question"],
+  full: ["ask_user_question"],
+};
+
+/**
+ * Flags that depend on the installed Qwen Code: `qwen --version` prints "0.27.4", or "1.0.0-preview.2"
+ * for the 1.x previews. 1.x has no --exclude-tools, and declining a step there does not end the turn.
+ */
+export function qwenVersionArgs(version: string | null, access: Access): string[] {
+  const major = Number(/^v?(\d+)\./.exec(version ?? "")?.[1] ?? 0);
+  return major >= 1 ? [] : QWEN0_EXCLUDED[access].flatMap((tool) => ["--exclude-tools", tool]);
+}
+
+const qwen: CliAdapter = {
+  id: "qwen",
+  bin: "qwen",
+  // Its ACP server takes MCP servers per session and speaks the same in 0.x and 1.x, whose -p flags
+  // differ. The other folders go in as flags too, for 0.x, whose session takes none.
+  args: ({ extra = [], dirs = [] }) => ["--acp", ...dirs.flatMap((d) => ["--add-dir", quotePath(d)]), ...extra],
+  acp: (access) => ({
+    // default asks about edits and commands (declined here). Edits without asking: 1.x calls it
+    // acceptEdits, 0.x auto-edit. auto: its safety classifier decides; yolo: nothing asks.
+    mode: { read: "default", edit: ["acceptEdits", "auto-edit"], auto: "auto", full: "yolo" }[access],
+    allow: access === "full",
+    // It asks about every MCP tool, naming it mcp__<server>__<tool> in the request's _meta: the run's own are allowed.
+    serverTools: (server) => `mcp__${server}__`,
+  }),
+  input: (prompt, access) => (QWEN_LIMITED[access] ? `${prompt}\n\n${QWEN_LIMITED[access]}` : prompt),
+  agent: async (mcp) => ({
+    // Its workspace takes in the skills' folder, so it may read them.
+    args: [...qwenVersionArgs(await cliVersion("qwen"), mcp.access ?? "edit"), ...(mcp.skills ? ["--add-dir", quotePath(mcp.skills.dir)] : [])],
+    mcpServers: acpServers(mcp),
+  }),
+  line: (line, state) => state.acp?.receive(line),
+  isMine: (version) => /^v?\d+\.\d+/.test(version),
+  // No models: 0.x cannot list them, and 1.x's ACP session offers only its current model (it takes
+  // neither another one nor -m), so a pick would be dropped. It runs on the model set in Qwen Code.
+};
+
+/**
  * `kimi provider list --json`: the model aliases the person set up or got with their login, with the
  * thinking levels each takes. The providers next to them (with their keys) are left alone.
  */
@@ -1120,7 +1178,7 @@ export function parseKimiModels(json: string): CliModel[] | undefined {
   }
 }
 
-export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor, muse, kimi };
+export const ADAPTERS: Record<CliId, CliAdapter> = { claude, codex, antigravity, opencode, hermes, cursor, muse, kimi, qwen };
 
 /** How long `<bin> --version` may take: a first start on Windows, behind a virus scan, can be slow. */
 const VERSION_TIMEOUT = process.platform === "win32" ? 30_000 : 10_000;

@@ -17,13 +17,16 @@ export type AcpTurnOptions = {
   mcpServers: AcpMcpServer[];
   /** A session to continue instead of starting one. */
   resume?: string;
-  /** The session mode to switch to before the prompt, when the agent has modes. */
-  mode?: string;
+  /**
+   * The session mode to switch to before the prompt, when the agent has modes. Several: the first one
+   * the session lists, for an agent whose versions name their modes differently (Qwen Code).
+   */
+  mode?: string | string[];
   /** Whether to allow a step the agent asks permission for. Nobody can answer mid-run, so this decides. */
   allow: boolean;
   /**
-   * The title the agent gives a tool of one of the run's MCP servers, when that title starts with the
-   * server's name: such tools are allowed at any access, like the other CLIs pre-approve them.
+   * How a tool of one of the run's MCP servers begins, in the title the agent gives it or the tool name
+   * in its `_meta` (Qwen Code): such tools are allowed at any access, like the other CLIs pre-approve them.
    */
   serverTools?: (server: string) => string;
   /** Session config options to set before the prompt (model, thinking level), in order. One the agent refuses is skipped. */
@@ -40,6 +43,8 @@ export class AcpTurn {
   private finished = false;
   /** Updates before the prompt replay the session's history (session/resume, session/load): not this turn. */
   private prompting = false;
+  /** The modes the session listed when it opened, if any. */
+  private modes: string[] = [];
 
   constructor(
     private readonly io: { write(line: string): void; end(): void },
@@ -52,10 +57,15 @@ export class AcpTurn {
       const { cwd, mcpServers, resume, dirs = [] } = this.opts;
       const caps = (init as { agentCapabilities?: { sessionCapabilities?: Record<string, unknown> } } | undefined)?.agentCapabilities?.sessionCapabilities;
       const extra = dirs.length && caps?.additionalDirectories ? { additionalDirectories: dirs } : {};
-      if (resume) this.call("session/resume", { sessionId: resume, cwd, mcpServers }, () => this.opened(resume));
+      if (resume)
+        this.call("session/resume", { sessionId: resume, cwd, mcpServers }, (r) => {
+          this.listed(r);
+          this.opened(resume);
+        });
       else
         this.call("session/new", { cwd, mcpServers, ...extra }, (r) => {
           this.configured(r);
+          this.listed(r);
           this.opened(String((r as { sessionId?: unknown }).sessionId ?? ""));
         });
     });
@@ -85,10 +95,10 @@ export class AcpTurn {
       this.prompting = true;
       this.call("session/prompt", { sessionId, prompt: [{ type: "text", text: this.opts.prompt }] }, (r) => {
         const { stopReason, usage } = (r ?? {}) as { stopReason?: unknown; usage?: Record<string, unknown> };
-        if (usage) {
-          const n = (v: unknown) => (typeof v === "number" && v > 0 ? Math.round(v) : 0);
-          this.state.usage = { inputTokens: n(usage.inputTokens), outputTokens: n(usage.outputTokens) + n(usage.thoughtTokens) };
-        }
+        // Qwen Code 1.x sends all zeros: that is no usage, not a free turn.
+        const n = (v: unknown) => (typeof v === "number" && v > 0 ? Math.round(v) : 0);
+        const used = usage && { inputTokens: n(usage.inputTokens), outputTokens: n(usage.outputTokens) + n(usage.thoughtTokens) };
+        if (used && used.inputTokens + used.outputTokens > 0) this.state.usage = used;
         this.state.failed = stopReason === "refusal" || stopReason === "cancelled";
         this.state.result = (this.state.draft ?? "").trim();
         if (this.state.failed && !this.state.result) this.state.result = `The agent stopped: ${String(stopReason)}.`;
@@ -106,8 +116,22 @@ export class AcpTurn {
         next();
       });
     };
-    if (this.opts.mode) this.call("session/set_mode", { sessionId, modeId: this.opts.mode }, next);
+    const mode = this.mode();
+    if (mode) this.call("session/set_mode", { sessionId, modeId: mode }, next);
     else next();
+  }
+
+  /** The modes a session lists when it opens. */
+  private listed(result: unknown) {
+    const modes = (result as { modes?: { availableModes?: unknown } } | undefined)?.modes?.availableModes;
+    if (Array.isArray(modes)) this.modes = modes.map((m: { id?: unknown }) => m?.id).filter((id): id is string => typeof id === "string");
+  }
+
+  /** The mode to switch to: of several, the first the session lists, else the first. */
+  private mode(): string | undefined {
+    const { mode } = this.opts;
+    if (!Array.isArray(mode)) return mode;
+    return mode.find((m) => this.modes.includes(m)) ?? mode[0];
   }
 
   /** The model a session or config change reports, as the run's model. */
@@ -135,9 +159,9 @@ export class AcpTurn {
   /** The agent's own requests: permissions are decided by the run's access; nothing else is offered. */
   private answer(m: Message) {
     if (m.method === "session/request_permission") {
-      const params = (m.params ?? {}) as { options?: unknown; toolCall?: { title?: unknown } };
+      const params = (m.params ?? {}) as { options?: unknown; toolCall?: { title?: unknown; _meta?: unknown } };
       const options = (params.options ?? []) as Array<{ optionId?: unknown; kind?: unknown }>;
-      const allow = this.opts.allow || this.ownTool(params.toolCall?.title);
+      const allow = this.opts.allow || this.ownTool(params.toolCall);
       const pick = options.find((o) => o.kind === (allow ? "allow_once" : "reject_once"));
       const outcome = pick ? { outcome: "selected", optionId: pick.optionId } : { outcome: "cancelled" };
       return this.send({ jsonrpc: "2.0", id: m.id, result: { outcome } });
@@ -145,10 +169,17 @@ export class AcpTurn {
     this.send({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: `${m.method} is not offered by myrel-runner` } });
   }
 
-  /** Whether a permission request is for a tool of one of the run's own MCP servers. */
-  private ownTool(title: unknown): boolean {
+  /**
+   * Whether a permission request is for a tool of one of the run's own MCP servers, by its title or the
+   * tool name in its `_meta`: Qwen Code titles one "reply (myrel)" and names it in `_meta.toolName`
+   * (0.x) or `_meta.qwen.toolName` (1.x).
+   */
+  private ownTool(toolCall: { title?: unknown; _meta?: unknown } | undefined): boolean {
     const { serverTools, mcpServers } = this.opts;
-    return !!serverTools && typeof title === "string" && mcpServers.some((s) => title.startsWith(serverTools(s.name)));
+    if (!serverTools || !toolCall) return false;
+    const meta = (toolCall._meta ?? {}) as Record<string, unknown>;
+    const names = [toolCall.title, meta.toolName, ...Object.values(meta).map((v) => (v as { toolName?: unknown } | null)?.toolName)];
+    return names.some((name) => typeof name === "string" && mcpServers.some((s) => name.startsWith(serverTools(s.name))));
   }
 
   private call(method: string, params: unknown, then: (result: unknown) => void) {
