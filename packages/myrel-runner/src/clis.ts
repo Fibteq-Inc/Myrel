@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type CliId, type CliLimits, type CliModel, type LineAgent, type RunnerCli, type TaskModel, unwrapShell } from "@myrel/protocol";
-import type { AcpMcpServer, AcpTurn, AcpTurnOptions } from "./acp";
+import type { AcpMcpServer, AcpSubagent, AcpToolCall, AcpTurn, AcpTurnOptions } from "./acp";
 import type { AppServerTurn, AppServerTurnOptions } from "./app-server";
 import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import type { ClaudeStreamTurn } from "./claude-stream";
@@ -38,6 +38,8 @@ export type ParseState = {
   counted?: Set<string>;
   /** The subscription limits the CLI reported in its output (Claude Code's rate_limit_event). */
   limits?: CliLimits;
+  /** Steps that ended, each a line of its own, sent before the latest step (an ACP agent's finished messages). */
+  lines?: string[];
   /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI, Muse Code). */
   draft?: string;
   draftStep?: unknown;
@@ -1129,6 +1131,35 @@ export function qwenVersionArgs(version: string | null, access: Access): string[
   return major >= 1 ? [] : QWEN0_EXCLUDED[access].flatMap((tool) => ["--exclude-tools", tool]);
 }
 
+/** The tool name Qwen Code gives a tool call: `_meta.qwen.toolName` in 1.x, `_meta.toolName` in 0.x. */
+function qwenTool(call: AcpToolCall): string | undefined {
+  const meta = (call._meta ?? {}) as { toolName?: unknown; qwen?: { toolName?: unknown } };
+  const name = meta.qwen?.toolName ?? meta.toolName;
+  return typeof name === "string" ? name : undefined;
+}
+
+/**
+ * The line for a Qwen Code step. Its CodeMode tool runs a script that calls other tools, and no step
+ * of the script is reported on its own: the line names the tools the script calls.
+ */
+export function qwenStep(call: AcpToolCall): string | undefined {
+  const code = call.rawInput?.code;
+  if (qwenTool(call) !== "CodeMode" || typeof code !== "string") return undefined;
+  const called = [...code.matchAll(/\btools(?:\.([A-Za-z_$][\w$]*)|\[\s*(["'`])([^"'`]+)\2\s*\])/g)].map((m) => m[1] ?? m[3]!);
+  const tools = [...new Set(called)];
+  const first = code.trim().split("\n")[0] ?? "";
+  return `CodeMode: ${tools.length ? tools.slice(0, 10).join(", ") : first}`;
+}
+
+/** Qwen Code's subagent tool (Agent in 1.x, agent in 0.x), which runs in the background when asked or in 0.x's ACP. */
+export function qwenSubagent(call: AcpToolCall): AcpSubagent | undefined {
+  const name = qwenTool(call) ?? call.title;
+  if (name !== "Agent" && name !== "agent") return undefined;
+  const input = call.rawInput ?? {};
+  const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  return { label: text(input.subagent_type) || "Agent", purpose: text(input.description), background: input.run_in_background === true };
+}
+
 const qwen: CliAdapter = {
   id: "qwen",
   bin: "qwen",
@@ -1142,6 +1173,8 @@ const qwen: CliAdapter = {
     allow: access === "full",
     // It asks about every MCP tool, naming it mcp__<server>__<tool> in the request's _meta: the run's own are allowed.
     serverTools: (server) => `mcp__${server}__`,
+    describe: qwenStep,
+    subagent: qwenSubagent,
   }),
   input: (prompt, access) => (QWEN_LIMITED[access] ? `${prompt}\n\n${QWEN_LIMITED[access]}` : prompt),
   agent: async (mcp) => ({
