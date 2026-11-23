@@ -80,3 +80,15 @@ describe("web palette", () => {
     }
   });
 });
+
+describe("chart colors", () => {
+  const css = readFileSync(new URL("../../web/src/styles.css", import.meta.url), "utf8");
+  /** `--chart-n: #hex;` values of one theme, in order. */
+  const charts = (from: string) => [...css.slice(css.indexOf("--chart-1:", css.indexOf(from))).slice(0, 400).matchAll(/--chart-(\d): (#[0-9a-f]{6});/g)].slice(0, 8).map((m) => m[2]);
+
+  it("match the web's in both themes", () => {
+    for (const [from, colors] of [["Series in charts", darkColors], [':root[data-theme="light"] {\n  --chart-1', lightColors]] as const) {
+      expect(charts(from)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map((i) => colors[`chart${i}` as keyof Colors]));
+    }
+  });
+});

@@ -83,6 +83,10 @@ export function useFormat() {
   const { locale } = useI18n();
   return {
     tokens: (n: number) => formatTokens(n, locale),
+    number: (n: number) => number(locale).format(n),
+    /** Tokens per second: a decimal only below 10. */
+    speed: (perSecond: number) => number(locale, { maximumFractionDigits: perSecond < 10 ? 1 : 0 }).format(perSecond),
+    percent: (share: number) => number(locale, { style: "percent", maximumFractionDigits: 0 }).format(share),
     bytes: (n: number) => formatBytes(n, locale),
     bytesOf: (used: number, total: number, compact = false) => formatBytesOf(used, total, locale, compact),
     cost: (micros: number) => formatCost(micros, locale),

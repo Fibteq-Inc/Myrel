@@ -17,3 +17,4 @@ export * from "./token-store";
 export * from "./error-report";
 export * from "./cli-marks";
 export * from "./cli-accounts";
+export * from "./usage";

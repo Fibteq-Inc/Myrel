@@ -1,10 +1,12 @@
 import type { Locale, MessageKey } from "@myrel/i18n";
 import { useI18n } from "@myrel/i18n/react";
 import { PROMPT_PARTS, type PromptPart, type PromptSize, promptGauge } from "@myrel/protocol";
-import { StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { formatTokens } from "../lib/format";
 import { type Colors, makeStyles, radius, useColors } from "../theme";
+import { Sheet } from "./cli-picker";
 
 const PART_COLORS: Record<PromptPart, keyof Colors> = {
   instructions: "frame",
@@ -22,15 +24,14 @@ function percent(share: number, locale: string) {
   return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 }).format(share);
 }
 
-/** The small ring on the thread settings chip: how full the last turn's prompt was. */
-export function ContextRing({ prompt }: { prompt: PromptSize }) {
-  const { t, locale } = useI18n();
+/** The small ring on the context chip: how full the last turn's prompt was. */
+function ContextRing({ prompt }: { prompt: PromptSize }) {
   const colors = useColors();
   const { share, level } = promptGauge(prompt);
   const r = 5;
   const length = 2 * Math.PI * r;
   return (
-    <View accessible accessibilityLabel={t("context.ring", { percent: percent(share, locale) })}>
+    <View>
       <Svg width={14} height={14} viewBox="0 0 14 14" style={{ transform: [{ rotate: "-90deg" }] }}>
         <Circle cx={7} cy={7} r={r} fill="none" strokeWidth={2.5} stroke={colors.edge} />
         <Circle
@@ -48,11 +49,36 @@ export function ContextRing({ prompt }: { prompt: PromptSize }) {
   );
 }
 
-/**
- * The thread settings sheet's context part: what Myrel put in the agent's prompt on its last turn,
- * by kind, and what a long thread left out.
- */
-export function ContextSection({ prompt }: { prompt: PromptSize }) {
+/** Thread: a chip with how full the last turn's prompt was, once the agent had a turn, opening what it held. */
+export function ContextPicker({ prompt }: { prompt: PromptSize }) {
+  const { t, locale } = useI18n();
+  const colors = useColors();
+  const styles = useStyles();
+  const [open, setOpen] = useState(false);
+  const { share, level } = promptGauge(prompt);
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t("context.ring", { percent: percent(share, locale) })}
+        hitSlop={6}
+        onPress={() => setOpen(true)}
+        style={({ pressed }) => [styles.chip, pressed && { backgroundColor: colors.hover }]}
+      >
+        <ContextRing prompt={prompt} />
+        <Text style={[styles.chipText, level !== "ok" && { color: colors[LEVEL_COLORS[level]] }]}>{percent(share, locale)}</Text>
+      </Pressable>
+      <Sheet open={open} onClose={() => setOpen(false)} title={t("context.title")}>
+        <ScrollView style={{ maxHeight: 460 }}>
+          <ContextSection prompt={prompt} />
+        </ScrollView>
+      </Sheet>
+    </>
+  );
+}
+
+/** What Myrel put in the agent's prompt on its last turn, by kind, and what a long thread left out. */
+function ContextSection({ prompt }: { prompt: PromptSize }) {
   const { t, locale } = useI18n();
   const colors = useColors();
   const styles = useStyles();
@@ -61,10 +87,7 @@ export function ContextSection({ prompt }: { prompt: PromptSize }) {
   const total = Math.max(prompt.limit, prompt.chars);
   return (
     <View style={{ gap: 8 }}>
-      <View style={styles.head}>
-        <Text style={styles.section}>{t("context.title")}</Text>
-        <Text style={[styles.share, { color: colors[LEVEL_COLORS[level]] }]}>{percent(share, locale)}</Text>
-      </View>
+      <Text style={[styles.share, { color: colors[LEVEL_COLORS[level]] }]}>{percent(share, locale)}</Text>
       <View style={styles.bar}>
         {parts.map((p) => (
           <View key={p} style={{ width: `${(prompt.parts[p] / total) * 100}%`, backgroundColor: colors[PART_COLORS[p]] }} />
@@ -109,8 +132,8 @@ export function promptStatsValue(prompt: PromptSize, t: ReturnType<typeof useI18
 
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
-    head: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
-    section: { color: colors.subtle, fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+    chip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 7 },
+    chipText: { color: colors.muted, fontSize: 13, fontVariant: ["tabular-nums"] },
     share: { fontSize: 13, fontVariant: ["tabular-nums"] },
     bar: { flexDirection: "row", height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: colors.line },
     row: { flexDirection: "row", alignItems: "center", gap: 8 },

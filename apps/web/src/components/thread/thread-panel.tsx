@@ -34,7 +34,9 @@ import {
   useHistoryWindow,
 } from "../chat";
 import { ThreadCliNote, ThreadRunnerNote, ThreadSettingsPicker, useOwnWorkspaces, usePickableClis } from "../chat/cli-picker";
+import { ContextPicker } from "../chat/context-gauge";
 import { ThreadUsageLabel } from "../chat/message-stats";
+import { ThreadStatsPicker } from "../chat/thread-stats";
 import { threadStatus, ThreadStatusIcon } from "../chat/thread-status";
 import { withTasks } from "../workspace/tasks";
 import { defaultWorkspaceTabs, EmptyTab, type WorkspaceTab } from "../workspace/workspace-panel";
@@ -246,7 +248,7 @@ export function ThreadPanel({
                     </span>
                   </>
                 )}
-                <span className={cn("truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
+                <span className={cn("flex-none", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
                 {usage && usage.tokens > 0 && (
                   <>
                     <span aria-hidden="true" className="text-edge-strong">
@@ -350,6 +352,7 @@ export function ThreadPanel({
               me={me}
               wide={measured > 900}
               openArtifact={artifact}
+              onUsage={() => openTool("usage")}
               className={current ? "hidden" : "flex"}
             />
             {current && <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-sunken">{current.content}</div>}
@@ -365,12 +368,15 @@ function Conversation({
   me,
   wide,
   openArtifact,
+  onUsage,
   className = "",
 }: {
   threadId: string;
   me: string;
   wide: boolean;
   openArtifact?: string;
+  /** Opens the Usage tab. */
+  onUsage: () => void;
   className?: string;
 }) {
   const t = useT();
@@ -400,6 +406,7 @@ function Conversation({
   // Each pull request shows under the message that links it; one no message linked yet shows at the end.
   const pullRequests = threadPullRequests(state, thread.id);
   const unmentioned = pullRequests.filter((pr) => !messages.some((m) => m.body.includes(pr.url)));
+  const prompt = lastPromptSize(messages);
   const active = !!state.active[thread.id];
   const last = messages.at(-1);
   const working = thread.status === "working" && !thread.resolved;
@@ -518,17 +525,27 @@ function Conversation({
           onSend={(body, attachments) => send(body, thread.id, attachments)}
           onUpload={(file) => api.upload(project.id, file.name, file)}
           tools={
-            <ThreadSettingsPicker
-              project={project}
-              pickable={pickable}
-              workspaces={ownWorkspaces}
-              placeable={placeable}
-              thread={thread}
-              prompt={lastPromptSize(messages)}
-              onRunner={(runnerId) => emit({ type: "thread.runner", threadId: thread.id, runnerId })}
-              onCli={(cli, account) => emit({ type: "thread.cli", threadId: thread.id, cli, ...(account && { account }) })}
-              onModel={(pick) => emit({ type: "thread.model", threadId: thread.id, ...pick })}
-            />
+            <>
+              <ThreadSettingsPicker
+                project={project}
+                pickable={pickable}
+                workspaces={ownWorkspaces}
+                placeable={placeable}
+                thread={thread}
+                onRunner={(runnerId) => emit({ type: "thread.runner", threadId: thread.id, runnerId })}
+                onCli={(cli, account) => emit({ type: "thread.cli", threadId: thread.id, cli, ...(account && { account }) })}
+                onModel={(pick) => emit({ type: "thread.model", threadId: thread.id, ...pick })}
+              />
+              {prompt && <ContextPicker prompt={prompt} />}
+              <ThreadStatsPicker
+                projectId={project.id}
+                threadId={thread.id}
+                messages={messages}
+                complete={!held.hasEarlier}
+                version={JSON.stringify(thread.summary?.usage ?? null)}
+                onDetails={onUsage}
+              />
+            </>
           }
         />
       </div>

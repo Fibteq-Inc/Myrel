@@ -3,7 +3,8 @@ import { useI18n, useT } from "@myrel/i18n/react";
 import { PROMPT_PARTS, type PromptPart, type PromptSize, promptGauge } from "@myrel/protocol";
 import { useFormat } from "../../lib/format";
 import { cn } from "../../lib/ui";
-import { MenuLabel, MenuSeparator } from "../ui/menu";
+import { Menu, MenuLabel } from "../ui/menu";
+import { ComposerButton } from "./composer-button";
 
 const PART_COLORS: Record<PromptPart, string> = {
   instructions: "bg-edge-strong",
@@ -22,15 +23,13 @@ function usePercent() {
   return (share: number) => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 }).format(share);
 }
 
-/** The small ring on the thread settings button: how full the last turn's prompt was. */
-export function ContextRing({ prompt }: { prompt: PromptSize }) {
-  const t = useT();
-  const percent = usePercent();
+/** The small ring on the context button: how full the last turn's prompt was. */
+function ContextRing({ prompt }: { prompt: PromptSize }) {
   const { share, level } = promptGauge(prompt);
   const r = 5;
   const length = 2 * Math.PI * r;
   return (
-    <svg width={14} height={14} viewBox="0 0 14 14" className="flex-none -rotate-90" role="img" aria-label={t("context.ring", { percent: percent(share) })}>
+    <svg width={14} height={14} viewBox="0 0 14 14" className="flex-none -rotate-90" aria-hidden="true">
       <circle cx={7} cy={7} r={r} fill="none" strokeWidth={2.5} className="stroke-edge" />
       <circle
         cx={7}
@@ -46,11 +45,32 @@ export function ContextRing({ prompt }: { prompt: PromptSize }) {
   );
 }
 
-/**
- * The thread settings panel's context part: what Myrel put in the agent's prompt on its last turn,
- * by kind, and what a long thread left out.
- */
-export function ContextSection({ prompt }: { prompt: PromptSize }) {
+/** Composer control in a thread, once its agent had a turn: how full that turn's prompt was, opening what it held. */
+export function ContextPicker({ prompt }: { prompt: PromptSize }) {
+  const t = useT();
+  const percent = usePercent();
+  const { share, level } = promptGauge(prompt);
+  return (
+    <Menu
+      label={t("context.ring", { percent: percent(share) })}
+      kind="dialog"
+      side="top"
+      trigger={
+        <ComposerButton>
+          <ContextRing prompt={prompt} />
+          <span className={cn("tabular-nums", level === "near" ? "text-warn" : level === "dropped" && "text-bad")}>{percent(share)}</span>
+        </ComposerButton>
+      }
+      className="flex-none rounded-lg"
+      panelClassName="w-80 max-w-[calc(100vw-1rem)] max-h-[min(34rem,75vh)] overflow-y-auto"
+    >
+      {() => <ContextSection prompt={prompt} />}
+    </Menu>
+  );
+}
+
+/** What Myrel put in the agent's prompt on its last turn, by kind, and what a long thread left out. */
+function ContextSection({ prompt }: { prompt: PromptSize }) {
   const t = useT();
   const fmt = useFormat();
   const percent = usePercent();
@@ -59,7 +79,6 @@ export function ContextSection({ prompt }: { prompt: PromptSize }) {
   const total = Math.max(prompt.limit, prompt.chars);
   return (
     <>
-      <MenuSeparator />
       <div className="flex items-baseline justify-between pr-2.5">
         <MenuLabel>{t("context.title")}</MenuLabel>
         <span className={cn("text-xs tabular-nums", level === "ok" ? "text-subtle" : level === "near" ? "text-warn" : "text-bad")}>{percent(share)}</span>

@@ -1,4 +1,4 @@
-import type { Locale, Translate } from "@myrel/i18n";
+import { dateFormat, type Locale, type Translate } from "@myrel/i18n";
 import type { RunnerStats } from "@myrel/protocol";
 
 /**
@@ -17,6 +17,26 @@ const compact = (locale: Locale) => number(locale, { notation: "compact", maximu
 
 export function formatTokens(n: number, locale: Locale) {
   return n < 10_000 ? number(locale).format(n) : compact(locale).format(n);
+}
+
+export function formatNumber(n: number, locale: Locale) {
+  return number(locale).format(n);
+}
+
+export function formatPercent(share: number, locale: Locale) {
+  return number(locale, { style: "percent", maximumFractionDigits: 0 }).format(share);
+}
+
+/** Tokens per second in words, a decimal only below 10; a dash when there is nothing to show. */
+export function formatSpeed(perSecond: number | null, t: Translate, locale: Locale) {
+  if (perSecond === null) return "–";
+  return t("usage.speedValue", { value: number(locale, { maximumFractionDigits: perSecond < 10 ? 1 : 0 }).format(perSecond) });
+}
+
+/** A YYYY-MM-DD day as "Nov 3"; `month`: its month and year. */
+export function formatDay(day: string, locale: Locale, month = false) {
+  const options: Intl.DateTimeFormatOptions = month ? { month: "long", year: "numeric" } : { month: "short", day: "numeric" };
+  return dateFormat(locale, { ...options, timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`));
 }
 
 /** Micro-dollars as US dollars: cents precision, more for sub-cent amounts. */

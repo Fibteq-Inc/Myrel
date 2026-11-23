@@ -15,7 +15,6 @@ import {
   OWN_ACCOUNT,
   type Project,
   type ProjectWorkspace,
-  type PromptSize,
   type RunnerCli,
   type Thread,
 } from "@myrel/protocol";
@@ -27,7 +26,6 @@ import { useFormat } from "../../lib/format";
 import { CliMark, cn } from "../../lib/ui";
 import { memoryLow, usageSummary } from "../runners";
 import { Menu, MenuLabel, MenuSeparator } from "../ui/menu";
-import { ContextRing, ContextSection } from "./context-gauge";
 
 export function cliName(id: string): string {
   return CLI_NAMES[id as CliId] ?? id;
@@ -177,7 +175,7 @@ function modelChoice(pickable: PickableClis, thread: Thread) {
  * The composer control in a thread: one button summing up where it works, its CLI, model and effort,
  * opening one panel to change any of them from its next turn. The panel stays open across picks, so
  * a new CLI's model can be picked right after. Someone who can pick nothing sees it read-only.
- * After the agent's first turn it also shows how full that turn's prompt was.
+ * The turn's context and the thread's statistics have windows of their own beside it.
  */
 export function ThreadSettingsPicker({
   project,
@@ -185,7 +183,6 @@ export function ThreadSettingsPicker({
   workspaces,
   placeable,
   thread,
-  prompt,
   onRunner,
   onCli,
   onModel,
@@ -197,8 +194,6 @@ export function ThreadSettingsPicker({
   /** The project does not always work in the cloud, so a thread can be moved. */
   placeable: boolean;
   thread: Thread;
-  /** What the agent's prompt held on its last turn, once it had one. */
-  prompt?: PromptSize | null;
   onRunner: (runnerId: string | null) => void;
   /** `account`: one of the CLI's logins on the computer, or OWN_ACCOUNT for its own; absent: the project's default. */
   onCli: (cli: CliId | null, account?: string) => void;
@@ -220,7 +215,7 @@ export function ThreadSettingsPicker({
     const own = thread.model?.cli === cli ? thread.model : null;
     const label = [cliName(cli), own?.model, own?.effort && effortName(own.effort, t)].filter(Boolean).join(" · ");
     return (
-      <Menu label={t("threadSettings.title")} side="top" trigger={<SettingsTrigger label={label} active={false} prompt={prompt} />} className={triggerClass} panelClassName="w-80">
+      <Menu label={t("threadSettings.title")} side="top" trigger={<SettingsTrigger label={label} active={false} />} className={triggerClass} panelClassName="w-80">
         {() => (
           <div className="px-1 pb-1">
             <MenuLabel>{t("threadSettings.where")}</MenuLabel>
@@ -239,7 +234,6 @@ export function ThreadSettingsPicker({
               </>
             )}
             <p className="px-2.5 pb-1.5 pt-2 text-xs leading-relaxed text-subtle">{t("threadSettings.readOnly")}</p>
-            {prompt && <ContextSection prompt={prompt} />}
           </div>
         )}
       </Menu>
@@ -269,7 +263,7 @@ export function ThreadSettingsPicker({
     <Menu
       label={t("threadSettings.title")}
       side="top"
-      trigger={<SettingsTrigger label={label} active={active} several={thread.cli?.by === "coordinator"} cloud={cloud} prompt={prompt} />}
+      trigger={<SettingsTrigger label={label} active={active} several={thread.cli?.by === "coordinator"} cloud={cloud} />}
       className={triggerClass}
       panelClassName="w-80 max-h-[min(34rem,75vh)] overflow-y-auto"
     >
@@ -392,7 +386,6 @@ export function ThreadSettingsPicker({
             {showRunner && cloud ? t("runnerPicker.hint") : t("cliPicker.threadHint")}
             {pickable.cloud && ` ${t("cliPicker.cloudHint")}`}
           </p>
-          {prompt && <ContextSection prompt={prompt} />}
         </div>
       )}
     </Menu>
@@ -404,18 +397,15 @@ function SettingsTrigger({
   active,
   several,
   cloud,
-  prompt,
 }: {
   label: string;
   active: boolean;
   several?: boolean;
   cloud?: boolean;
-  prompt?: PromptSize | null;
 }) {
   const Icon = several ? Sparkles : cloud ? Cloud : SlidersHorizontal;
   return (
     <>
-      {prompt && <ContextRing prompt={prompt} />}
       <Icon size={14} className={cn("flex-none", (active || several) && "text-accent")} aria-hidden="true" />
       <span className={cn("truncate", active && "text-fg")}>{label}</span>
       <ChevronDown size={12} className="flex-none text-subtle" aria-hidden="true" />

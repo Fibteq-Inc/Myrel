@@ -1,23 +1,12 @@
 import { messageUsage } from "@myrel/client";
 import { useI18n, useT } from "@myrel/i18n/react";
-import { type Message, planChecklist } from "@myrel/protocol";
-import { useQuery } from "@tanstack/react-query";
-import { ChartColumn, Clock, Coins, LoaderCircle, Network } from "lucide-react";
-import { api } from "../../lib/api";
+import { type Message, planChecklist, threadWork, usageSpeed } from "@myrel/protocol";
+import { ChartColumn, Clock, Coins, Gauge, LoaderCircle, Network } from "lucide-react";
 import { useFormat } from "../../lib/format";
 import { duration, harnessName, modelName } from "../chat/message-stats";
-import { Card, Stat } from "../usage-dashboard";
+import { Card, speedText, Stat } from "../usage-dashboard";
 import { EmptyTab } from "../workspace/workspace-panel";
-
-type Usage = ReturnType<typeof messageUsage>;
-
-const add = (a: Usage, b: Usage): Usage => ({
-  inputTokens: a.inputTokens + b.inputTokens,
-  outputTokens: a.outputTokens + b.outputTokens,
-  durationMs: a.durationMs + b.durationMs,
-  costMicros: a.costMicros === null || b.costMicros === null ? null : a.costMicros + b.costMicros,
-});
-const ZERO: Usage = { inputTokens: 0, outputTokens: 0, durationMs: 0, costMicros: 0 };
+import { useThreadStatsMessages } from "./use-thread-stats";
 
 /**
  * The usage tab of a thread: from the messages held when they are all here, otherwise from the
@@ -39,20 +28,15 @@ export function ThreadUsageTab({
   version: string;
 }) {
   const t = useT();
-  const fetched = useQuery({
-    queryKey: ["projects", projectId, "threads", threadId, "usage", version],
-    queryFn: () => api.threadUsageMessages(projectId, threadId),
-    enabled: !complete,
-  });
-  if (complete) return <ThreadUsage messages={messages} />;
-  if (!fetched.data) {
+  const all = useThreadStatsMessages({ projectId, threadId, messages, complete, version });
+  if (!all) {
     return (
       <div className="flex h-full min-h-60 items-center justify-center text-subtle">
         <LoaderCircle size={20} className="animate-spin" aria-label={t("chat.loading")} />
       </div>
     );
   }
-  return <ThreadUsage messages={fetched.data} />;
+  return <ThreadUsage messages={all} />;
 }
 
 /**
@@ -72,57 +56,65 @@ export function ThreadUsage({ messages }: { messages: Message[] }) {
     );
   }
 
-  const total = replies.reduce((sum, m) => add(sum, messageUsage(m.stats)), ZERO);
+  const { total, groups } = threadWork(replies);
   const tokens = total.inputTokens + total.outputTokens;
-  const where = (local: boolean) => t(local ? "stats.local" : "stats.cloud");
-  const groups = new Map<string, { label: string; sub: string; usage: Usage }>();
-  for (const m of replies) {
-    const st = m.stats;
-    const model = modelName(st.task?.model ?? st.model);
-    const harness = st.task?.harness ?? st.harness;
-    const key = `${st.runtime}/${st.computer ?? ""}/${harness ?? ""}/${model}`;
-    const group = groups.get(key) ?? {
-      label: model || (harness ? harnessName(harness) : t("stats.unpriced")),
-      sub: [st.computer ?? where(st.runtime === "local"), model && harness ? harnessName(harness) : null].filter(Boolean).join(" · "),
-      usage: ZERO,
-    };
-    group.usage = add(group.usage, messageUsage(st));
-    groups.set(key, group);
-  }
-  const cost = (u: Usage) => (u.costMicros === null ? "–" : fmt.cost(u.costMicros));
-  const tok = (u: Usage) => u.inputTokens + u.outputTokens;
+  const speed = usageSpeed(total);
+  // A person's own CLI runs on their own account: it has no cost rather than none.
+  const own = (u: { runtime: string; harness?: string | null }) => u.runtime === "local" && !!u.harness;
+  const cost = (micros: number | null, free: boolean) => (free || micros === null ? "–" : fmt.cost(micros));
+  const tok = (u: { inputTokens: number; outputTokens: number }) => u.inputTokens + u.outputTokens;
 
   return (
     <div className="space-y-4 p-4">
-      <section aria-label={t("usage.totals")} className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+      <section aria-label={t("usage.totals")} className="grid grid-cols-2 gap-3">
         <Stat icon={<Network size={15} />} label={t("usage.tokens")} value={fmt.tokens(tokens)}>
           {t("usage.inOut", { input: fmt.tokens(total.inputTokens), output: fmt.tokens(total.outputTokens) })}
         </Stat>
-        <Stat icon={<Coins size={15} />} label={t("usage.cost")} value={cost(total)}>
+        <Stat icon={<Coins size={15} />} label={t("usage.cost")} value={cost(total.costMicros, groups.every(own))}>
           {t("usage.listPrices")}
         </Stat>
         <Stat icon={<Clock size={15} />} label={t("threadUsage.time")} value={duration(total.durationMs, t, locale)}>
-          {t("threadUsage.replies", { count: replies.length })}
+          {t("threadStats.turns", { count: total.turns })}
+        </Stat>
+        <Stat
+          icon={<Gauge size={15} />}
+          label={t(speed.model === null ? "usage.turnSpeed" : "usage.modelSpeed")}
+          value={speedText(speed.model ?? speed.turn, fmt, t)}
+          title={t("usage.speedHint")}
+        >
+          {speed.model === null ? t("usage.modelSpeedNone") : `${t("usage.turnSpeed")} ${speedText(speed.turn, fmt, t)}`}
         </Stat>
       </section>
 
       <Card title={t("usage.byModel")}>
         <ul className="divide-y divide-line text-[13px]">
-          {[...groups.entries()].map(([key, g]) => {
-            const share = tokens ? tok(g.usage) / tokens : 0;
+          {groups.map((g) => {
+            const share = tokens ? tok(g) / tokens : 0;
+            const model = modelName(g.model);
+            const label = model || (g.harness ? harnessName(g.harness) : t("stats.unpriced"));
+            const speedOf = usageSpeed(g);
+            const sub = [
+              g.computer ?? t(g.runtime === "local" ? "stats.local" : "stats.cloud"),
+              model && g.harness ? harnessName(g.harness) : null,
+              `${t(speedOf.model === null ? "usage.turnSpeed" : "usage.modelSpeed")} ${speedText(speedOf.model ?? speedOf.turn, fmt, t)}`,
+            ]
+              .filter(Boolean)
+              .join(" · ");
             return (
-              <li key={key} className="flex items-center gap-3 py-2.5">
+              <li key={g.key} className="flex items-center gap-3 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <span className="block truncate font-mono text-[12px]" title={g.label}>
-                    {g.label}
+                  <span className="block truncate font-mono text-[12px]" title={label}>
+                    {label}
                   </span>
-                  <span className="block truncate text-xs text-subtle">{g.sub}</span>
+                  <span className="block truncate text-xs text-subtle" title={sub}>
+                    {sub}
+                  </span>
                   <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-hover" aria-hidden="true">
                     <div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(share * 100, 1)}%` }} />
                   </div>
                 </div>
-                <span className="w-16 text-right tabular-nums text-muted">{fmt.tokens(tok(g.usage))}</span>
-                <span className="w-16 text-right tabular-nums">{cost(g.usage)}</span>
+                <span className="w-16 text-right tabular-nums text-muted">{fmt.tokens(tok(g))}</span>
+                <span className="w-16 text-right tabular-nums">{cost(g.costMicros, own(g))}</span>
               </li>
             );
           })}
@@ -142,7 +134,7 @@ export function ThreadUsage({ messages }: { messages: Message[] }) {
                   </span>
                 </div>
                 <span className="w-16 text-right tabular-nums text-muted">{fmt.tokens(tok(u))}</span>
-                <span className="w-16 text-right tabular-nums">{cost(u)}</span>
+                <span className="w-16 text-right tabular-nums">{cost(u.costMicros, own(m.stats))}</span>
               </li>
             );
           })}
