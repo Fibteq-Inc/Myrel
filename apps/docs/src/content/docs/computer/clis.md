@@ -65,6 +65,22 @@ Then:
 
 A thread that switches accounts starts a new Claude Code session, with the thread's history. A new account has none of your `~/.claude` settings or plugins. If an account is removed from the computer, the thread's next turn runs with Claude Code's own login and says so. Use accounts that are all yours: Claude's terms don't allow sharing a login with someone else. Needs runner 0.34.0 or newer.
 
+## GLM with OpenCode
+
+[Z.ai's GLM Coding Plan](https://docs.z.ai/devpack/overview) works with OpenCode, so your threads can run on GLM models with your own plan. On the computer:
+
+1. Install [OpenCode](https://opencode.ai) 2.x.
+2. Run `opencode auth login zai-coding-plan` and paste a key made for the Coding Plan. Plan keys and Z.ai's pay-as-you-go keys are separate: a pay-as-you-go key is billed to your balance, not your plan.
+3. Run `opencode models` and check that it lists `zai-coding-plan/…` models.
+4. Restart the runner so Myrel reads the list again (it also does so every 6 hours).
+
+Then pick **OpenCode** and a model that starts with `zai-coding-plan/` in **How this thread works**, or as the project's default in **Project settings › Models on the computer**. Models that start with `zai/` use Z.ai's pay-as-you-go API instead.
+
+- Sign in with that command rather than setting `ZHIPU_API_KEY` in the runner's environment: commands a thread runs with **Full access** can read that variable.
+- As for every OpenCode thread, shell commands need **Full access** and it can't ask you mid-task.
+- Myrel shows no plan limits for it; see your usage on Z.ai.
+- Z.ai's terms allow the plan only in [the tools it supports](https://docs.z.ai/devpack/tool/others), for one person. Don't share your key with others.
+
 ## The coordinator on your CLI
 
 The coordinator, which routes every message in the project chat, normally works with the server's model. You can have it work with Claude Code on your own computer instead, in **Project settings › Model › Coordinator**:
