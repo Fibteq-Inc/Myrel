@@ -248,7 +248,7 @@ export function ThreadPanel({
                     </span>
                   </>
                 )}
-                <span className={cn("flex-none", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
+                <span className={cn("min-w-0 truncate", threadStatus(thread, t).tone)}>{threadStatus(thread, t).label}</span>
                 {usage && usage.tokens > 0 && (
                   <>
                     <span aria-hidden="true" className="text-edge-strong">
