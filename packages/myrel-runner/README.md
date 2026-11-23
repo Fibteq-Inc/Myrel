@@ -130,7 +130,7 @@ Claude's consumer terms do not allow sharing a login with someone else. Needs ru
 |---|---|---|---|---|---|---|
 | `read` | `--permission-mode plan` | `--sandbox read-only` | `--mode plan` | edit and bash denied | `--mode ask` | `--approval-mode never --disable-write --disable-shell` |
 | `edit` (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` | `--approval-mode never --trust-workspace` |
-| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, bash denied | `--sandbox enabled` | `--approval-mode never --trust-workspace` |
+| `auto` | `--permission-mode auto` | `--sandbox workspace-write` | `--mode accept-edits` | edit allowed, each command reviewed (OpenCode 2; denied on 1) | `--sandbox enabled` | `--approval-mode never --trust-workspace` |
 | `full` | `--permission-mode bypassPermissions` | `--sandbox danger-full-access` | `--dangerously-skip-permissions` | edit and bash allowed, `--auto` | `--force --sandbox disabled` | `--yolo` |
 
 With `auto`, Claude Code's auto mode decides which steps are safe to run (tests, git commit, builds) and runs them;
@@ -170,8 +170,13 @@ and Myrel's tools, and a run that still stops says which permission stopped it. 
 commands, or allow single ones under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (e.g.
 `command(git)`).
 
-OpenCode has no sandbox for commands either, so below `full` its command tool is denied: OpenCode then does not
-offer it at all, and the run goes on with files and Myrel's tools. Anything else that would ask (for example a
+OpenCode has no sandbox for commands either, so with `read` and `edit` its command tool is denied: OpenCode then does
+not offer it at all, and the run goes on with files and Myrel's tools. With `auto` on OpenCode 2 (runner 0.41.0 or
+later; verified with 2.4.0) a plugin the runner adds for the run judges each command before it runs, with the run's
+own model (one extra model call per command, on your OpenCode account): ordinary development work runs, and what it
+is unsure about comes to you as a card in the thread. `sudo`, SSH, keys, force pushes and publishing always do. The
+review reads the command, not what it does, and there is still no sandbox, so a command it allows runs with your
+rights. On OpenCode 1, `auto` is the same as `edit`. Anything else that would ask (for example a
 permission you set to `ask` yourself) is declined; on OpenCode 1 the run goes on too
 (`experimental.continue_loop_on_deny`). OpenCode 2 dropped that flag and allows folders outside the project by
 default, so there the runner writes OpenCode 2's native permission rules instead: below `full`, folders outside

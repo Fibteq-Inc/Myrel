@@ -288,7 +288,8 @@ export class TaskRunner {
     const keepsSession = !run.fixed && RESUMES.has(task.cli);
     const child = (this.opts.spawn ?? spawn)(adapter.bin, args, {
       cwd,
-      env: childEnv(run.env),
+      // A runner started in a terminal has that terminal's PWD, and opencode works in PWD rather than its cwd.
+      env: childEnv({ ...run.env, ...(process.platform !== "win32" && { PWD: cwd }) }),
       stdio: ["pipe", "pipe", "pipe"],
       // Windows CLIs are .cmd shims. Only fixed flags are on the command line; the prompt goes on stdin.
       shell: process.platform === "win32",

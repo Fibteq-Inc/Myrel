@@ -9,6 +9,7 @@ import { BRIDGE_VAR, type BridgeRun, ensureBridge } from "./bridge";
 import type { ClaudeStreamTurn } from "./claude-stream";
 import { type Access, childEnv } from "./config";
 import { claudeLimits, readCodexLimits } from "./limits";
+import { reviewPlugin } from "./opencode-review";
 import { refreshPath } from "./path";
 import { type AgentNote, agentUsage, endAgent, type SubAgent, startAgent, step } from "./subagents";
 
@@ -621,7 +622,8 @@ const antigravity: CliAdapter = {
 
 /**
  * What opencode may do at each access level. They are its last permission rules, so they win over the
- * person's own for these tools. Commands are never sandboxed in opencode, so they need full access.
+ * person's own for these tools. Commands are never sandboxed in opencode, so they need full access; on
+ * opencode 2 at auto, the review plugin decides about each one instead (see opencode-review.ts).
  */
 const OPENCODE_ACCESS: Record<Access, Record<string, string>> = {
   read: { edit: "deny", bash: "deny" },
@@ -644,7 +646,7 @@ const opencode: CliAdapter = {
     ...extra,
   ],
   // Servers, permissions and skills for one run, in the environment: nothing goes into the person's config.
-  async agent({ url, token, connectors = [], skills, access = "edit", dirs = [] }) {
+  async agent({ url, token, dir, connectors = [], skills, access = "edit", dirs = [] }) {
     const version = await cliVersion("opencode");
     const auth = { Authorization: `Bearer {env:${TOKEN_VAR}}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "remote", url, headers: auth, oauth: false } };
@@ -658,6 +660,11 @@ const opencode: CliAdapter = {
     let config: Record<string, unknown>;
     if (opencodeMajor(version) >= 2) {
       config = opencodeV2Config(servers, access, folders, skills?.dir);
+      // Auto: each command is judged before it runs, and the person is asked about the rest. The last rule wins.
+      if (access === "auto") {
+        (config.permissions as unknown[]).push({ action: "shell", resource: "*", effect: "ask" });
+        config.plugins = [await reviewPlugin(dir, { url, folders })];
+      }
     } else {
       // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.
       const permission: Record<string, unknown> = { ...OPENCODE_ACCESS[access] };
