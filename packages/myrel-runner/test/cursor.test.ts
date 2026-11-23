@@ -104,7 +104,7 @@ describe("Cursor CLI output", () => {
     expect(state.result).toBe("`f.txt` contains **secret42**.");
     expect(state.failed).toBe(false);
     // Cache reads and writes count as input.
-    expect(state.usage).toEqual({ inputTokens: 13328 + 22272 + 10, outputTokens: 114 });
+    expect(state.usage).toEqual({ inputTokens: 13328 + 22272 + 10, outputTokens: 114, cachedInputTokens: 22272 });
   });
 
   it("shows a command as its command", () => {

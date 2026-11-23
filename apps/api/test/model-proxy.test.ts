@@ -18,7 +18,7 @@ function run(upstream: Response, body: object, kind: "openai" | "anthropic" = "o
     headers: { authorization: "Bearer turn-token", "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const res = proxyModel(req, { url, apiKey: "real-key", kind, prices }, async (usd) => void costs.push(usd), (p) => void waits.push(p));
+  const res = proxyModel(req, { url, apiKey: "real-key", kind, prices }, async (call) => void (call.costUsd !== 0 && costs.push(call.costUsd)), (p) => void waits.push(p));
   return { res, seen, costs, settle: () => Promise.all(waits) };
 }
 
@@ -198,6 +198,23 @@ describe("proxyModel", () => {
     await Promise.all([settle(), empty.settle()]);
     expect(costs).toEqual([null]);
     expect(empty.costs).toEqual([]);
+  });
+});
+
+describe("proxyModel's report", () => {
+  it("times every call that used tokens, also one that costs nothing", async () => {
+    vi.stubGlobal("fetch", async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      return Response.json({ model: "free", usage: { prompt_tokens: 10, completion_tokens: 5, cost: 0 } });
+    });
+    const calls: { ms: number; costUsd: number | null }[] = [];
+    const waits: Promise<unknown>[] = [];
+    const req = new Request("https://myrel.test/m", { method: "POST", body: JSON.stringify({ model: "free", messages: [] }) });
+    await proxyModel(req, { url: "https://up.test/v1/chat/completions", apiKey: "k", kind: "openai" }, async (call) => void calls.push(call), (p) => void waits.push(p));
+    await Promise.all(waits);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.costUsd).toBe(0);
+    expect(calls[0]!.ms).toBeGreaterThanOrEqual(20);
   });
 });
 

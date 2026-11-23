@@ -1,6 +1,6 @@
 import { artifactList } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { USAGE_RANGES } from "@myrel/protocol";
+import { DEFAULT_USAGE_FILTER, type UsageFilter } from "@myrel/client";
 import { Blocks } from "lucide-react";
 import { useState } from "react";
 import { useProjectContext } from "../lib/project-context";
@@ -11,8 +11,8 @@ import { ProjectChat } from "./chat/project-chat";
 import { ProjectIssues } from "./project-issues";
 import { ProjectFiles, ProjectKnowledge } from "./project-knowledge";
 import { ProjectThreads } from "./project-threads";
-import { Segmented, Skeleton, UsageDashboard, useUsage } from "./usage-dashboard";
-import type { ChartMetric } from "./usage-chart";
+import { Skeleton, UsageDashboard, useUsage } from "./usage-dashboard";
+import { UsageFilters } from "./usage-filters";
 import { useProjectView } from "./project-view";
 import { PROJECT_TABPANEL } from "./shell/project-header";
 
@@ -103,27 +103,19 @@ function KnowledgeTab() {
 function UsageTab() {
   const t = useT();
   const { project } = useProjectContext();
-  const [days, setDays] = useState<number>(30);
-  const [metric, setMetric] = useState<ChartMetric>("tokens");
-  const { data, error, isPending, isFetching } = useUsage(days, project.id);
+  const [filter, setFilter] = useState<UsageFilter>(DEFAULT_USAGE_FILTER);
+  const scoped = { ...filter, project: project.id };
+  const { data, error, isPending, isFetching } = useUsage(scoped);
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[960px] flex-col gap-5 px-3 py-5 sm:px-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Segmented
-            label={t("usage.range")}
-            value={days}
-            options={USAGE_RANGES.map((d) => ({ value: d, label: t("usage.rangeDays", { count: d }) }))}
-            onChange={setDays}
-          />
-          {isFetching && !isPending && <span className="text-xs text-subtle">{t("usage.updating")}</span>}
-        </div>
+        <UsageFilters filter={filter} onChange={(next) => setFilter((f) => ({ ...f, ...next }))} updating={isFetching && !isPending} />
         {error ? (
           <p className="text-sm text-bad">{errorMessage(error, t)}</p>
         ) : !data ? (
           <Skeleton />
         ) : (
-          <UsageDashboard data={data} metric={metric} onMetric={setMetric} inProject />
+          <UsageDashboard data={data} filter={scoped} inProject />
         )}
       </div>
     </div>

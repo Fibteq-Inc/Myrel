@@ -169,7 +169,7 @@ export function ThreadUsageLabel({ usage }: { usage: { tokens: number; durationM
   const { locale } = useI18n();
   const tokens = fmt.tokens(usage.tokens);
   return (
-    <span className="flex-none tabular-nums text-subtle" title={t("stats.threadTotal", { tokens, time: duration(usage.durationMs, t, locale) })}>
+    <span className="min-w-0 shrink-[999] truncate tabular-nums text-subtle" title={t("stats.threadTotal", { tokens, time: duration(usage.durationMs, t, locale) })}>
       {t("stats.tokens", { tokens })}
       {usage.costMicros !== null && usage.costMicros > 0 && ` · ${fmt.cost(usage.costMicros)}`}
     </span>

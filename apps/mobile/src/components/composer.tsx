@@ -212,8 +212,8 @@ const useStyles = makeStyles((colors) =>
       paddingVertical: 8,
     },
     row: { flexDirection: "row", alignItems: "flex-end", gap: 4 },
-    // Pickers sit side by side and wrap only when the screen is too narrow for them.
-    tools: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" },
+    // One line: the settings chip gives way to what is beside it.
+    tools: { flexDirection: "row", alignItems: "center" },
     pending: { gap: 6, paddingHorizontal: 6 },
     chip: {
       flexDirection: "row",

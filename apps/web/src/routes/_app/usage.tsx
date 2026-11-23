@@ -1,35 +1,66 @@
+import { DEFAULT_USAGE_FILTER, USAGE_PRESETS, type UsageFilter, type UsagePreset } from "@myrel/client";
 import { useT } from "@myrel/i18n/react";
-import { USAGE_RANGES } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { BarChart3 } from "lucide-react";
-import { useState } from "react";
 import { NavToggle } from "../../components/shell/shell";
-import { Select } from "../../components/ui/controls";
-import type { ChartMetric } from "../../components/usage-chart";
-import { Segmented, Skeleton, UsageDashboard, useUsage } from "../../components/usage-dashboard";
+import { Skeleton, UsageDashboard, useUsage } from "../../components/usage-dashboard";
+import { UsageFilters } from "../../components/usage-filters";
 import { projectsQuery } from "../../lib/api";
 import { errorMessage } from "../../lib/ui";
 
-type Search = { days?: number; project?: string };
+/** The filter in the address, so a view can be linked and survives a reload. `days` is what older links carry. */
+type Search = { range?: UsagePreset; days?: number; from?: string; to?: string; project?: string; cli?: string; where?: "local" | "cloud"; mine?: boolean };
+
+const text = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+const day = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
 
 export const Route = createFileRoute("/_app/usage")({
-  validateSearch: (s: Record<string, unknown>): Search => ({
-    ...(USAGE_RANGES.includes(Number(s.days) as never) && { days: Number(s.days) }),
-    ...(typeof s.project === "string" && s.project && { project: s.project }),
-  }),
+  validateSearch: (s: Record<string, unknown>): Search => {
+    const asked = String(s.range ?? s.days ?? "");
+    const search: Search = {
+      range: (USAGE_PRESETS as readonly string[]).includes(asked) && asked !== DEFAULT_USAGE_FILTER.range ? (asked as UsagePreset) : undefined,
+      from: day(s.from),
+      to: day(s.to),
+      project: text(s.project),
+      cli: text(s.cli),
+      where: s.where === "local" || s.where === "cloud" ? s.where : undefined,
+      mine: s.mine === true || undefined,
+    };
+    return Object.fromEntries(Object.entries(search).filter(([, v]) => v !== undefined)) as Search;
+  },
   component: UsagePage,
 });
 
 function UsagePage() {
   const t = useT();
-  const { days = 30, project } = Route.useSearch();
+  const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const [metric, setMetric] = useState<ChartMetric>("tokens");
   const { data: projects = [] } = useQuery(projectsQuery);
-  const { data, error, isPending, isFetching } = useUsage(days, project);
-
-  const setSearch = (next: Search) => navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  const filter: UsageFilter = {
+    range: search.range ?? DEFAULT_USAGE_FILTER.range,
+    from: search.from,
+    to: search.to,
+    project: search.project,
+    cli: search.cli,
+    runtime: search.where,
+    scope: search.mine ? "mine" : "all",
+  };
+  const { data, error, isPending, isFetching } = useUsage(filter);
+  const change = (next: Partial<UsageFilter>) => {
+    const f = { ...filter, ...next };
+    void navigate({
+      search: {
+        range: f.range,
+        ...(f.range === "custom" && { from: f.from, to: f.to }),
+        project: f.project,
+        cli: f.cli,
+        where: f.runtime,
+        mine: f.scope === "mine" || undefined,
+      },
+      replace: true,
+    });
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -41,39 +72,16 @@ function UsagePage() {
 
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-5 px-4 py-6 sm:px-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              aria-label={t("usage.project")}
-              value={project ?? ""}
-              onChange={(e) => setSearch({ project: e.target.value || undefined })}
-              className="h-8 w-auto max-w-[240px] text-[13px]"
-            >
-              <option value="">{t("usage.allProjects")}</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-            <Segmented
-              label={t("usage.range")}
-              value={days}
-              options={USAGE_RANGES.map((d) => ({ value: d, label: t("usage.rangeDays", { count: d }) }))}
-              onChange={(d) => setSearch({ days: d })}
-            />
-            {isFetching && !isPending && <span className="text-xs text-subtle">{t("usage.updating")}</span>}
-          </div>
-
+          <UsageFilters filter={filter} onChange={change} projects={projects} updating={isFetching && !isPending} />
           {error ? (
             <p className="text-sm text-bad">{errorMessage(error, t)}</p>
           ) : !data ? (
             <Skeleton />
           ) : (
-            <UsageDashboard data={data} metric={metric} onMetric={setMetric} />
+            <UsageDashboard data={data} filter={filter} />
           )}
         </div>
       </main>
     </div>
   );
 }
-

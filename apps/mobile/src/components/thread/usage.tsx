@@ -1,26 +1,47 @@
 import { messageUsage } from "@myrel/client";
 import { useI18n } from "@myrel/i18n/react";
-import { type Message, planChecklist } from "@myrel/protocol";
+import { type Message, planChecklist, threadWork, usageSpeed } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { ChartColumn } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { formatCost, formatDuration, formatTokens, modelName } from "../../lib/format";
+import { formatCost, formatDuration, formatSpeed, formatTokens, modelName } from "../../lib/format";
 import { makeStyles, mono, radius, useColors } from "../../theme";
 import { harnessName } from "../message-stats";
 import { Empty } from "../project/empty";
 import { useSession } from "../../lib/session";
 import { Spinner, useRelativeTime } from "../ui";
 
-type Usage = ReturnType<typeof messageUsage>;
-
-const add = (a: Usage, b: Usage): Usage => ({
-  inputTokens: a.inputTokens + b.inputTokens,
-  outputTokens: a.outputTokens + b.outputTokens,
-  durationMs: a.durationMs + b.durationMs,
-  costMicros: a.costMicros === null || b.costMicros === null ? null : a.costMicros + b.costMicros,
-});
-const ZERO: Usage = { inputTokens: 0, outputTokens: 0, durationMs: 0, costMicros: 0 };
+/**
+ * The messages a thread's statistics are added up from: the ones held when they are all here, otherwise
+ * the thread's replies with a stats line, fetched (again whenever the thread's usage moves) while
+ * `enabled`. Null until they are here.
+ */
+export function useThreadStatsMessages({
+  projectId,
+  threadId,
+  messages,
+  complete,
+  version,
+  enabled = true,
+}: {
+  projectId: string;
+  threadId: string;
+  messages: Message[];
+  /** Every message of the thread is held. */
+  complete: boolean;
+  /** Changes when the thread's usage does. */
+  version: string;
+  enabled?: boolean;
+}): Message[] | null {
+  const { api, server } = useSession();
+  const fetched = useQuery({
+    queryKey: ["threadUsage", server, projectId, threadId, version],
+    queryFn: () => api.threadUsageMessages(projectId, threadId),
+    enabled: enabled && !complete,
+  });
+  return complete ? messages : (fetched.data ?? null);
+}
 
 /**
  * A thread's usage from the messages held when they are all here, otherwise from the thread's replies
@@ -41,21 +62,15 @@ export function ThreadUsageTab({
   /** Changes when the thread's usage does. */
   version: string;
 }) {
-  const { api, server } = useSession();
-  const fetched = useQuery({
-    queryKey: ["threadUsage", server, projectId, threadId, version],
-    queryFn: () => api.threadUsageMessages(projectId, threadId),
-    enabled: !complete,
-  });
-  if (complete) return <ThreadUsage messages={messages} />;
-  if (!fetched.data) {
+  const all = useThreadStatsMessages({ projectId, threadId, messages, complete, version });
+  if (!all) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
         <Spinner size={20} />
       </View>
     );
   }
-  return <ThreadUsage messages={fetched.data} />;
+  return <ThreadUsage messages={all} />;
 }
 
 /**
@@ -78,26 +93,13 @@ function ThreadUsage({ messages }: { messages: Message[] }) {
     );
   }
 
-  const total = replies.reduce((sum, m) => add(sum, messageUsage(m.stats)), ZERO);
-  const tok = (u: Usage) => u.inputTokens + u.outputTokens;
+  const { total, groups } = threadWork(replies);
+  const tok = (u: { inputTokens: number; outputTokens: number }) => u.inputTokens + u.outputTokens;
   const tokens = tok(total);
-  const groups = new Map<string, { label: string; sub: string; usage: Usage }>();
-  for (const m of replies) {
-    const st = m.stats;
-    const model = modelName(st.task?.model ?? st.model);
-    const harness = st.task?.harness ?? st.harness;
-    const key = `${st.runtime}/${st.computer ?? ""}/${harness ?? ""}/${model}`;
-    const group = groups.get(key) ?? {
-      label: model || (harness ? harnessName(harness) : t("stats.unpriced")),
-      sub: [st.computer ?? t(st.runtime === "local" ? "stats.local" : "stats.cloud"), model && harness ? harnessName(harness) : null]
-        .filter(Boolean)
-        .join(" · "),
-      usage: ZERO,
-    };
-    group.usage = add(group.usage, messageUsage(st));
-    groups.set(key, group);
-  }
-  const cost = (u: Usage) => (u.costMicros === null ? "–" : formatCost(u.costMicros, locale));
+  const speed = usageSpeed(total);
+  // A person's own CLI runs on their own account: it has no cost rather than none.
+  const own = (u: { runtime: string; harness?: string | null }) => u.runtime === "local" && !!u.harness;
+  const cost = (micros: number | null, free: boolean) => (free || micros === null ? "–" : formatCost(micros, locale));
   const fmt = (n: number) => formatTokens(n, locale);
 
   return (
@@ -108,32 +110,42 @@ function ThreadUsage({ messages }: { messages: Message[] }) {
           value={fmt(tokens)}
           hint={t("usage.inOut", { input: fmt(total.inputTokens), output: fmt(total.outputTokens) })}
         />
-        <Stat label={t("usage.cost")} value={cost(total)} hint={t("usage.listPrices")} />
+        <Stat label={t("usage.cost")} value={cost(total.costMicros, groups.every(own))} hint={t("usage.listPrices")} />
         <Stat
           label={t("threadUsage.time")}
           value={formatDuration(total.durationMs, t, locale)}
-          hint={t("threadUsage.replies", { count: replies.length })}
+          hint={t("threadStats.turns", { count: total.turns })}
+        />
+        <Stat
+          label={t(speed.model === null ? "usage.turnSpeed" : "usage.modelSpeed")}
+          value={formatSpeed(speed.model ?? speed.turn, t, locale)}
+          hint={speed.model === null ? t("usage.modelSpeedNone") : `${t("usage.turnSpeed")} ${formatSpeed(speed.turn, t, locale)}`}
         />
       </View>
 
       <Section title={t("usage.byModel")}>
-        {[...groups.entries()].map(([key, g]) => {
-          const share = tokens ? tok(g.usage) / tokens : 0;
+        {groups.map((g) => {
+          const share = tokens ? tok(g) / tokens : 0;
+          const model = modelName(g.model);
+          const speedOf = usageSpeed(g);
           return (
-            <View key={key} style={styles.line}>
+            <View key={g.key} style={styles.line}>
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                 <Text style={[styles.lineName, { fontFamily: mono, fontSize: 12 }]} numberOfLines={1}>
-                  {g.label}
+                  {model || (g.harness ? harnessName(g.harness) : t("stats.unpriced"))}
                 </Text>
                 <Text style={styles.hint} numberOfLines={1}>
-                  {g.sub}
+                  {[g.computer ?? t(g.runtime === "local" ? "stats.local" : "stats.cloud"), model && g.harness ? harnessName(g.harness) : null].filter(Boolean).join(" · ")}
+                </Text>
+                <Text style={styles.hint} numberOfLines={1}>
+                  {t(speedOf.model === null ? "usage.turnSpeed" : "usage.modelSpeed")} {formatSpeed(speedOf.model ?? speedOf.turn, t, locale)}
                 </Text>
                 <View style={styles.bar}>
                   <View style={[styles.fill, { width: `${Math.max(share * 100, 1)}%` }]} />
                 </View>
               </View>
-              <Text style={styles.number}>{fmt(tok(g.usage))}</Text>
-              <Text style={styles.value}>{cost(g.usage)}</Text>
+              <Text style={styles.number}>{fmt(tok(g))}</Text>
+              <Text style={styles.value}>{cost(g.costMicros, own(g))}</Text>
             </View>
           );
         })}
@@ -153,7 +165,7 @@ function ThreadUsage({ messages }: { messages: Message[] }) {
                 </Text>
               </View>
               <Text style={styles.number}>{fmt(tok(u))}</Text>
-              <Text style={styles.value}>{cost(u)}</Text>
+              <Text style={styles.value}>{cost(u.costMicros, own(m.stats))}</Text>
             </View>
           );
         })}

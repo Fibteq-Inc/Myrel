@@ -1,5 +1,6 @@
 import { createDb, schema } from "@myrel/db";
 import { createId, type MessageStats, type Runtime, type TaskStats } from "@myrel/protocol";
+import type { TaskProgress } from "@myrel/runner-core";
 import { eq } from "drizzle-orm";
 import { type CallRecord, costMicros, DEFAULT_PRICES, type LlmEnv, metered, type ModelProvider, parsePrices, type Price, priceFor } from "./llm";
 
@@ -123,7 +124,7 @@ async function recordUsage(d1: D1Database, ctx: UsageContext & { turnId: string 
  * One row for a finished run_task: the coding harness's own model calls, summed. A cloud turn's
  * calls that could not be priced (`unpricedCalls`, see proxyModel) add one unpriced row each, so
  * plan limits charge each of them rather than the turn once. The task id is the turn id. Billed as
- * the thread's work.
+ * the thread's work. Returns what it cost, for the turn's statistics.
  */
 export async function recordTaskUsage(
   env: LlmEnv & { DB: D1Database },
@@ -131,8 +132,8 @@ export async function recordTaskUsage(
   usage: { inputTokens: number; outputTokens: number; costUsd: number },
   latencyMs: number,
   unpricedCalls = 0,
-) {
-  if (usage.inputTokens === 0 && usage.outputTokens === 0 && unpricedCalls === 0) return;
+): Promise<{ costMicros: number; unpricedCalls: number }> {
+  if (usage.inputTokens === 0 && usage.outputTokens === 0 && unpricedCalls === 0) return { costMicros: 0, unpricedCalls: 0 };
   // With per-call counting the priced calls' sum is the turn's known cost; the rest is in the unpriced rows.
   const cost = unpricedCalls > 0 ? Math.round(usage.costUsd * 1_000_000) : taskCostMicros(env, ctx.model, usage);
   const bill = await billing(env.DB, ctx.projectId);
@@ -178,6 +179,25 @@ export async function recordTaskUsage(
       costMicros: cost,
       latencyMs,
     });
+  return { costMicros: cost ?? 0, unpricedCalls: unpricedCalls || (cost === null ? 1 : 0) };
+}
+
+export type TurnRow = typeof schema.turnStats.$inferInsert;
+
+/** Writes a finished turn's statistics row. The figures a turn never reported stay null, not zero. */
+export async function recordTurn(d1: D1Database, row: TurnRow): Promise<void> {
+  await createDb(d1).insert(schema.turnStats).values(row).onConflictDoNothing();
+}
+
+/** A run's figures as its statistics row has them. */
+export function turnFigures(usage: TaskProgress["usage"]) {
+  return {
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens ?? null,
+    outputTokens: usage.outputTokens,
+    modelMs: usage.modelMs ? Math.round(usage.modelMs) : null,
+    waitMs: Math.round(usage.waitMs ?? 0),
+  };
 }
 
 /** Marks an agent turn as running in a cloud sandbox now (see schema.sandboxActive), until recordSandboxRun. */

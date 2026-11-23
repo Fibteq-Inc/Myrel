@@ -7,7 +7,7 @@ import { type AcpMcpServer, AcpTurn } from "./acp";
 import { type AppServerAsk, AppServerTurn, type AppServerTurnOptions, approveAccess } from "./app-server";
 import { ClaudeStreamTurn } from "./claude-stream";
 import { accountEnv } from "./accounts";
-import { ADAPTERS, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
+import { ADAPTERS, type ClaudeSessionTotals, type CliAdapter, hasAppServer, hasStreamInput, modelFlags, type ParseState, safeModel } from "./clis";
 import { childEnv, type RunnerConfig, type SessionStore, type StoredSession } from "./config";
 import { GitCredentials } from "./github";
 import { sandboxed, sandboxNote } from "./sandbox";
@@ -181,7 +181,7 @@ export class TaskRunner {
       if (appServer) log("  as its app server");
       // Claude Code keeps its stdin open while the turn runs, so new messages can go in mid-turn.
       const stream = !!adapter.streamInput && (await hasStreamInput(adapter.bin));
-      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup, appServer, stream };
+      const run = { cwd, adapter, agent, env, dirs, asks: asks && !!agentDir, skills, where, cleanup, appServer, stream, totals: session?.totals };
       const retry = await this.attempt(task, run, session?.id, short ?? task.prompt);
       if (retry) {
         log(`  could not resume the ${adapter.id} session; starting a new one`);
@@ -257,6 +257,8 @@ export class TaskRunner {
       appServer?: Pick<AppServerTurnOptions, "sandbox" | "approvalPolicy" | "approvalsReviewer" | "config" | "ask">;
       /** Claude Code's streaming input instead of a prompt on a stdin that ends at once. */
       stream?: boolean;
+      /** What Claude Code's session had added up to before this run, when it resumes one (see claudeModelMs). */
+      totals?: ClaudeSessionTotals;
       /** A coordinator turn's whole command line (CliAdapter.coordinator), instead of args(): it keeps no session either. */
       fixed?: string[];
       /** Set on the run started again because the first could not connect to Myrel's tools (ParseState.mcpDown). */
@@ -312,7 +314,8 @@ export class TaskRunner {
       setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 5000).unref();
     }, idleMs);
 
-    const state: ParseState = {};
+    // The session is saved anew without its totals while the run goes on, so one cut off leaves none behind.
+    const state: ParseState = { claudeSession: resume ? run.totals : { apiMs: 0, output: 0, fresh: true } };
     let stdout = "";
     let stderr = "";
     let buffered = "";
@@ -492,7 +495,7 @@ export class TaskRunner {
         }
         // The session now holds this turn too, so the next one can continue it with only what is new.
         if (state.sessionId && keepsSession) {
-          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd }, task.account).catch(() => {});
+          await this.opts.sessions.set(task.threadId, task.cli, { id: state.sessionId, task: task.taskId, cwd, ...(state.claudeTotals && { totals: state.claudeTotals }) }, task.account).catch(() => {});
         }
         const result = idled
           ? idleMessage(adapter.bin, idleMs)

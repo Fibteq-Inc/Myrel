@@ -81,6 +81,7 @@ import type {
   PushSubscriptionInput,
   Routine,
   UpdateRoutineInputRaw,
+  UsageQuery,
   UsageSummary,
   CreateSshHostInput,
   SshHost,
@@ -773,9 +774,12 @@ export class ApiClient {
   // --- usage ---
 
   /** Model usage across the caller's projects, bucketed by day in the caller's time zone. */
-  getUsage(input: { days: number; projectId?: string | null; tzOffset?: number }) {
-    const query = new URLSearchParams({ days: String(input.days), tzOffset: String(input.tzOffset ?? 0) });
-    if (input.projectId) query.set("projectId", input.projectId);
+  getUsage(input: UsageQuery) {
+    const query = new URLSearchParams({ tzOffset: String(input.tzOffset ?? 0) });
+    for (const key of ["days", "from", "to", "projectId", "cli", "runtime", "scope"] as const) {
+      const value = input[key];
+      if (value) query.set(key, String(value));
+    }
     return this.request<UsageSummary>(`/api/usage?${query}`);
   }
 

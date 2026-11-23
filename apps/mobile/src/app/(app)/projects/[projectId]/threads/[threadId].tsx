@@ -28,12 +28,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PlanProgress } from "../../../../../components/checklist";
 import { ThreadCliNote, ThreadRunnerNote, ThreadSettingsPicker, useOwnWorkspaces, usePickableClis, usePlaceable } from "../../../../../components/cli-picker";
+import { ContextPicker } from "../../../../../components/context-gauge";
 import { Conversation } from "../../../../../components/conversation";
 import { Tabs } from "../../../../../components/project/tabs";
 import { WorkspaceFilesTab } from "../../../../../components/thread/files";
 import { OutputsTab } from "../../../../../components/thread/outputs";
 import { PullRequestsTab } from "../../../../../components/thread/pull-requests";
 import { ChangesTab, TerminalTab } from "../../../../../components/thread/tasks";
+import { ThreadStatsPicker } from "../../../../../components/thread/stats-picker";
 import { ThreadUsageTab } from "../../../../../components/thread/usage";
 import { ThreadStatusIcon } from "../../../../../components/thread-status";
 import { formatCost, formatTokens } from "../../../../../lib/format";
@@ -78,6 +80,7 @@ export default function ThreadScreen() {
   // Kept the same array until these change, not rebuilt on every live event: the list redraws when it changes.
   const root = thread && !held.hasEarlier ? findMessage(state, thread.rootMessageId) : undefined;
   const messages = useMemo(() => (root ? [root, ...replies] : replies), [root, replies]);
+  const prompt = useMemo(() => lastPromptSize(messages), [messages]);
   // Messages the working agent has not taken in yet: the newest says so, with a way to send them now.
   const waiting = thread ? messages.findLast((m) => waitsForAgent(m, thread)) : undefined;
   const onSend = useCallback(
@@ -226,17 +229,27 @@ export default function ThreadScreen() {
           header={header}
           tools={
             thread && (
-              <ThreadSettingsPicker
-                projectId={projectId}
-                pickable={pickable}
-                workspaces={ownWorkspaces}
-                placeable={placeable}
-                thread={thread}
-                prompt={lastPromptSize(messages)}
-                onRunner={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })}
-                onCli={(cli, account) => emit({ type: "thread.cli", threadId, cli, ...(account && { account }) })}
-                onModel={(pick) => emit({ type: "thread.model", threadId, ...pick })}
-              />
+              <>
+                <ThreadSettingsPicker
+                  projectId={projectId}
+                  pickable={pickable}
+                  workspaces={ownWorkspaces}
+                  placeable={placeable}
+                  thread={thread}
+                  onRunner={(runnerId) => emit({ type: "thread.runner", threadId, runnerId })}
+                  onCli={(cli, account) => emit({ type: "thread.cli", threadId, cli, ...(account && { account }) })}
+                  onModel={(pick) => emit({ type: "thread.model", threadId, ...pick })}
+                />
+                {prompt && <ContextPicker prompt={prompt} />}
+                <ThreadStatsPicker
+                  projectId={projectId}
+                  threadId={threadId}
+                  messages={messages}
+                  complete={!held.hasEarlier}
+                  version={JSON.stringify(thread.summary?.usage ?? null)}
+                  onDetails={() => setTab("usage")}
+                />
+              </>
             )
           }
           plan={plan}

@@ -202,7 +202,10 @@ ws.addEventListener("message", async (e) => {
   if (ask) threadIds.set(ask.title, frame.threadId).set(frame.threadId, ask.title);
   try {
     if (ask) await ask.play(call);
-    send({ type: "task.done", taskId: frame.taskId, ok: true, result: "" });
+    // What the CLI used comes with the turn's end, after the pictures of the thread's tour.
+    await new Promise((r) => setTimeout(r, 20_000));
+    const usage = { inputTokens: 184_000, cachedInputTokens: 142_000, outputTokens: 640, modelMs: 8200, model: "claude-opus-5-5" };
+    send({ type: "task.done", taskId: frame.taskId, ok: true, result: "", usage });
   } catch (err) {
     send({ type: "task.done", taskId: frame.taskId, ok: false, result: String(err) });
   }
@@ -288,11 +291,18 @@ await step("quickstart", page.getByRole("button", { name: /Lazy-load it/ }).firs
 
 // Following a thread: where it stands, how a reply was made, steering it and finishing it.
 await step("thread", page.getByText("Waiting for you").last());
-await step("thread", page.getByText("Your computer").last());
+await step("thread", page.locator("button[aria-label=\"How this reply was made\"]").last());
 await step("thread", page.getByPlaceholder("Reply in this thread"));
 await step("thread", byName("Changes"));
 await step("thread", byName("Mark resolved"));
 await shot("thread");
+
+// The thread's statistics, once the turn's usage is in.
+await page.waitForTimeout(20_000);
+await byName("Thread statistics").click();
+await page.getByText("Where the time went").waitFor();
+await shot("thread-statistics");
+await page.keyboard.press("Escape");
 
 // A second ask, for the chat, the artifact and the usage pictures.
 await page.goto(`${WEB}/projects/${projectId}`);
@@ -356,6 +366,36 @@ await shot("project-settings");
 await page.goto(`${WEB}/settings`);
 await page.getByText("Appearance").first().scrollIntoViewIfNeeded();
 await shot("settings-account");
+
+// A month of made-up turns, so the usage page has something to show.
+const me = (await api("/api/auth/get-session")).user.id;
+let seed = 7;
+const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const turns = [];
+for (let day = 1; day < 30; day++) {
+  const weekend = [0, 6].includes(new Date(Date.now() - day * 86_400_000).getUTCDay());
+  for (const [cli, where, perDay, speed, model] of [
+    ["claude", "local", 6, 58, "claude-opus-5-5"],
+    ["codex", "local", 3, 71, "gpt-codex"],
+    ["opencode", "cloud", 2, 46, "glm-5p3"],
+  ]) {
+    const count = Math.round(perDay * random() * (weekend ? 0.4 : 1.4));
+    for (let i = 0; i < count; i++) {
+      const end = Date.now() - day * 86_400_000 - Math.round(random() * 3_600_000);
+      const out = Math.round(2500 + random() * 5000);
+      const cloud = where === "cloud";
+      turns.push(
+        `('demo-${Date.now()}-${day}-${cli}-${i}','${projectId}','thr_demo','${me}','${where}','${cli}',${cloud ? "'fireworks'" : "NULL"},'${model}',${end - Math.round(200_000 + random() * 400_000)},${end},'${random() < 0.05 ? "failed" : "done"}',${out * 40},${out * 30},${out},${Math.round((out / speed) * 1000)},0,${cloud ? out * 12 : 0},0)`,
+      );
+    }
+  }
+}
+for (let i = 0; i < turns.length; i += 100) {
+  execFileSync("pnpm", ["exec", "wrangler", "d1", "execute", "myrel", "--local", "--command", `INSERT INTO turn_stats VALUES ${turns.slice(i, i + 100).join(",")}`], {
+    cwd: fileURLToPath(new URL("../../api/", import.meta.url)),
+    stdio: "ignore",
+  });
+}
 
 await page.goto(`${WEB}/usage`);
 await page.waitForLoadState("networkidle");

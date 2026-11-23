@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { CliId, RunnerAccess, RunnerFolder } from "@myrel/protocol";
 import type { ClaudeAccount } from "./accounts";
+import type { ClaudeSessionTotals } from "./clis";
 
 /**
  * What the CLI may do without asking. read: look only. edit (default): change files, but not run
@@ -107,7 +108,13 @@ export function unshareFolder(config: RunnerConfig, folder: string): boolean {
  * A thread's CLI session, the task whose turn it last ran, and the folder it ran in (`cwd`; none in
  * sessions saved before runners kept it): a session is continued only in the folder it ran in.
  */
-export type StoredSession = { id: string; task?: string; cwd?: string };
+export type StoredSession = {
+  id: string;
+  task?: string;
+  cwd?: string;
+  /** Claude Code's running totals when the session's last run ended with a result (see claudeModelMs). */
+  totals?: ClaudeSessionTotals;
+};
 
 export class SessionStore {
   constructor(private readonly path = join(runnerHome(), "sessions.json")) {}

@@ -135,6 +135,8 @@ export const projects = sqliteTable("projects", {
    * default). Off: threads work in the project's folder itself, one turn at a time per computer.
    */
   worktrees: integer("worktrees", { mode: "boolean" }).notNull().default(true),
+  /** The turns that ended before turn_stats existed have been copied into it (see projects/turn-history.ts). */
+  turnHistory: integer("turn_history", { mode: "boolean" }).notNull().default(false),
   /**
    * The coordinator works with a CLI on a member's computer: JSON { mode: "cli", runnerId, cli, model,
    * effort, account, by } (CoordinatorSettings in @myrel/protocol, without the computer's name). null: with the
@@ -234,6 +236,47 @@ export const sandboxRuns = sqliteTable(
     billedTo: text("billed_to"),
   },
   (t) => [index("sandbox_runs_project_ended_idx").on(t.projectId, t.endedAt), index("sandbox_runs_billed_ended_idx").on(t.billedTo, t.endedAt)],
+);
+
+/**
+ * One row per agent turn, for statistics: threads' turns on people's computers and in the cloud, and
+ * the coordinator's turns with a CLI. Apart from usage_events on purpose: that is the billing ledger,
+ * where a row without a price is charged a flat amount, and a person's own CLI costs the service
+ * nothing. Figures only, never contents. No foreign keys, like usage_events.
+ */
+export const turnStats = sqliteTable(
+  "turn_stats",
+  {
+    /** The task's id, which usage_events calls the turn's id. */
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    /** null = the coordinator's turn. */
+    threadId: text("thread_id"),
+    /** The person the turn worked for, when there was one. */
+    userId: text("user_id"),
+    runtime: text("runtime", { enum: ["local", "cloud"] }).notNull(),
+    /** The CLI that did the work (CliId, or a cloud harness). */
+    harness: text("harness").notNull(),
+    /** Cloud turns: the provider whose model ran. */
+    provider: text("provider"),
+    /** Empty when the CLI did not say. */
+    model: text("model").notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }).notNull(),
+    outcome: text("outcome", { enum: ["done", "failed", "cancelled"] }).notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    /** null: the CLI does not say. */
+    cachedInputTokens: integer("cached_input_tokens"),
+    outputTokens: integer("output_tokens").notNull(),
+    /** Time in model calls; null when it was not measured. */
+    modelMs: integer("model_ms"),
+    /** Time waiting for a person to allow a step. */
+    waitMs: integer("wait_ms").notNull().default(0),
+    /** Cloud turns: what the model calls cost, as in usage_events; 0 for a person's own CLI. */
+    costMicros: integer("cost_micros").notNull().default(0),
+    unpricedCalls: integer("unpriced_calls").notNull().default(0),
+  },
+  (t) => [index("turn_stats_project_ended_idx").on(t.projectId, t.endedAt), index("turn_stats_user_idx").on(t.userId)],
 );
 
 /**

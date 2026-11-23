@@ -45,6 +45,15 @@ export const darkColors = {
   accentWash: "rgba(30,33,66,0.35)",
   /** Dims the screen behind a bottom sheet. */
   scrim: "rgba(0,0,0,0.5)",
+  /** Series in charts (chartSlot in @myrel/client). */
+  chart1: "#3987e5",
+  chart2: "#d95926",
+  chart3: "#199e70",
+  chart4: "#c98500",
+  chart5: "#d55181",
+  chart6: "#0ca30c",
+  chart7: "#9085e9",
+  chart8: "#e66767",
 };
 
 export type Colors = { [K in keyof typeof darkColors]: string };
@@ -86,6 +95,14 @@ export const lightColors: Colors = {
   accentBorderSoft: "rgba(74,85,214,0.35)",
   accentWash: "rgba(236,238,255,0.6)",
   scrim: "rgba(17,17,20,0.3)",
+  chart1: "#2a78d6",
+  chart2: "#eb6834",
+  chart3: "#1baf7a",
+  chart4: "#eda100",
+  chart5: "#e87ba4",
+  chart6: "#008300",
+  chart7: "#6250d6",
+  chart8: "#e34948",
 };
 
 export const palettes: Record<Theme, Colors> = { dark: darkColors, light: lightColors };

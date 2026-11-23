@@ -92,7 +92,8 @@ export function Tabs<K extends string>({
 
 const useStyles = makeStyles((colors) =>
   StyleSheet.create({
-    bar: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.line },
+    // Never squeezed by a long page below it.
+    bar: { flexGrow: 0, flexShrink: 0, borderBottomWidth: 1, borderBottomColor: colors.line },
     row: { paddingHorizontal: 12, gap: 4 },
     tab: { paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: "transparent" },
     selected: { borderBottomColor: colors.accent },

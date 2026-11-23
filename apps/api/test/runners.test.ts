@@ -459,11 +459,36 @@ describe("local workspace", () => {
       taskId: start.taskId,
       ok: true,
       result: "Summary posted.",
-      usage: { inputTokens: 1500, outputTokens: 120, model: "claude-sonnet-5-5" },
+      usage: { inputTokens: 1500, outputTokens: 120, cachedInputTokens: 900, modelMs: 2000, model: "claude-sonnet-5-5" },
     });
     // What it used after its last reply joins that reply.
     await until(async () => (await messages()).find((m) => m.id === first.id)?.stats?.inputTokens === 1500, "tail usage");
-    expect((await messages()).find((m) => m.id === first.id)!.stats!.outputTokens).toBe(120);
+    expect((await messages()).find((m) => m.id === first.id)!.stats).toMatchObject({ outputTokens: 120, cachedInputTokens: 900, modelMs: 2000, turn: start.taskId });
+    // The turn's statistics are kept apart from the billing ledger, which a person's own CLI never touches.
+    const row = await until(() => env.DB.prepare("SELECT * FROM turn_stats WHERE id = ?").bind(start.taskId).first(), "the turn's row");
+    expect(row).toMatchObject({
+      thread_id: thread.id,
+      user_id: author,
+      runtime: "local",
+      harness: "claude",
+      model: "claude-sonnet-5-5",
+      outcome: "done",
+      input_tokens: 1500,
+      cached_input_tokens: 900,
+      output_tokens: 120,
+      model_ms: 2000,
+      cost_micros: 0,
+    });
+    expect(await env.DB.prepare("SELECT 1 FROM usage_events WHERE turn_id = ?").bind(start.taskId).first()).toBeNull();
+    // Filling in the past finds the same turns, and leaves the ones already there as they are.
+    await env.DB.prepare("DELETE FROM turn_stats WHERE id = ?").bind(start.taskId).run();
+    await projectAgent.fillTurnHistory(null);
+    expect(await env.DB.prepare("SELECT user_id, model_ms, output_tokens FROM turn_stats WHERE id = ?").bind(start.taskId).first()).toEqual({
+      user_id: author,
+      model_ms: 2000,
+      output_tokens: 120,
+    });
+    expect(await env.DB.prepare("SELECT turn_history AS n FROM projects WHERE id = ?").bind(project.id).first("n")).toBe(1);
     // The turn's token dies with it, and the waiting message gets the next turn.
     await until(async () => (await mcp({ jsonrpc: "2.0", id: 5, method: "tools/list" })).status === 401, "token revoked");
     const next = await until(() => starts()[1], "next agent turn");

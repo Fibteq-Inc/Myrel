@@ -11,7 +11,8 @@ export type TaskProgress = {
   lastText: string | null;
   lastTool: string | null;
   prUrl: string | null;
-  usage: { inputTokens: number; outputTokens: number; costUsd: number };
+  /** cachedInputTokens, modelMs and waitMs are absent until something reports them. */
+  usage: { inputTokens: number; outputTokens: number; costUsd: number; cachedInputTokens?: number; modelMs?: number; waitMs?: number };
   /** The model the harness says it used (absent on older runs). */
   model?: string;
   finished: null | { ok: boolean; exitCode?: number; error?: string };
@@ -54,6 +55,7 @@ export function reduceTask(p: TaskProgress, e: RunnerEvent): TaskProgress {
           inputTokens: p.usage.inputTokens + e.inputTokens,
           outputTokens: p.usage.outputTokens + e.outputTokens,
           costUsd: p.usage.costUsd + (e.costUsd ?? 0),
+          ...sumKnown(p.usage, e),
         },
         ...(e.model && { model: e.model }),
       };
@@ -62,6 +64,15 @@ export function reduceTask(p: TaskProgress, e: RunnerEvent): TaskProgress {
     case "log":
       return p;
   }
+}
+
+/** The optional figures, summed; one nothing has reported yet stays absent rather than zero. */
+function sumKnown(a: TaskProgress["usage"], b: Pick<TaskProgress["usage"], "cachedInputTokens" | "modelMs" | "waitMs">) {
+  const out: Pick<TaskProgress["usage"], "cachedInputTokens" | "modelMs" | "waitMs"> = {};
+  for (const key of ["cachedInputTokens", "modelMs", "waitMs"] as const) {
+    if (a[key] !== undefined || b[key] !== undefined) out[key] = (a[key] ?? 0) + (b[key] ?? 0);
+  }
+  return out;
 }
 
 type Labels = Record<Phase, { todo: string; doing: string; done: string; failed: string }> & {

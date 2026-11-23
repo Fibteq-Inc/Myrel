@@ -14,6 +14,7 @@ export function Menu({
   side = "bottom",
   className = "",
   panelClassName = "",
+  kind = "menu",
   children,
 }: {
   trigger: ReactNode;
@@ -22,6 +23,8 @@ export function Menu({
   side?: "bottom" | "top" | "right";
   className?: string;
   panelClassName?: string;
+  /** dialog: the panel shows things rather than listing choices. */
+  kind?: "menu" | "dialog";
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -57,7 +60,7 @@ export function Menu({
     const r = ref.current.getBoundingClientRect();
     const height = panel.current.offsetHeight;
     const gap = 6;
-    const horizontal = align === "end" ? { right: Math.max(8, innerWidth - r.right) } : { left: Math.max(8, r.left) };
+    const horizontal = align === "end" ? { right: Math.max(8, innerWidth - r.right) } : { left: Math.max(8, Math.min(r.left, innerWidth - panel.current.offsetWidth - 8)) };
     if (side === "right") {
       setStyle({ left: r.right + 8, bottom: Math.max(8, innerHeight - r.bottom) });
       return;
@@ -72,7 +75,7 @@ export function Menu({
       <button
         type="button"
         aria-label={label}
-        aria-haspopup="menu"
+        aria-haspopup={kind}
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         onClick={() => setOpen((o) => !o)}
@@ -85,7 +88,7 @@ export function Menu({
           <div
             ref={panel}
             id={id}
-            role="menu"
+            role={kind}
             aria-label={label}
             style={style}
             className={cn(

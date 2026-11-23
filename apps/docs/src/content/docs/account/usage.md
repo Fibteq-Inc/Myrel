@@ -5,13 +5,25 @@ description: What your projects used and what it costs.
 
 ## Usage
 
-**Usage** in the left rail shows all your projects; each project also has a **Usage** tab. Pick a **Project** and a **Range** (7, 30 or 90 days).
+**Usage** in the left rail shows all your projects; each project also has a **Usage** tab. Work on your own computer counts too, not only the cloud's.
+
+The row at the top decides what the page covers: **Today**, 7, 30 or 90 days, **This month** or **Custom** dates, a project, a CLI, **Local** or **Cloud**, and **Everyone's turns** or **My turns**.
 
 ![The Usage page](../../../assets/screenshots/usage.png)
 
-- **Totals**: estimated cost, tokens, model calls, cached input and cloud sandbox time
-- **Daily usage**: tokens or cost per day
-- **By model**, **By project**, **Who spent it** (the thread agents doing the work, or the coordinator routing it) and **Top threads**
+- **Totals**: tokens, turns, working time, speed and estimated cost
+- **Daily, by CLI**: tokens, turns, working time or cost per day
+- **By CLI** and **By project**: the same figures side by side
+- **By model**, **Who spent it** (the thread agents doing the work, or the coordinator routing it) and **Top threads**
+
+### The two speeds
+
+Both are output tokens per second, and they answer different questions:
+
+- **Turn speed** covers the whole turn, with the commands it ran and the time it waited for you. Every CLI has one.
+- **Model speed** covers only the time the model was answering. In the cloud Myrel measures it. On your computer it needs myrel-runner 0.43.0 or newer and a CLI that reports it, which Claude Code does. Where it isn't known, a dash shows instead of a guess.
+
+A thread's **Statistics** button, under its message box, shows both for the last turn and the thread so far. See [Threads](/work/threads/).
 
 ## The cost under a reply
 

@@ -111,6 +111,8 @@ export class CliMeter {
   private outputTokens = 0;
   private takenInput = 0;
   private takenOutput = 0;
+  private cachedInputTokens?: number;
+  private modelMs?: number;
   private model = "";
 
   constructor(
@@ -121,7 +123,17 @@ export class CliMeter {
   update(usage: CliUsage) {
     this.inputTokens = Math.max(this.inputTokens, usage.inputTokens);
     this.outputTokens = Math.max(this.outputTokens, usage.outputTokens);
+    if (usage.cachedInputTokens !== undefined) this.cachedInputTokens = usage.cachedInputTokens;
+    if (usage.modelMs !== undefined) this.modelMs = usage.modelMs;
     if (usage.model) this.model = usage.model;
+  }
+
+  /** All the turn used so far, for its statistics row. */
+  total() {
+    return {
+      model: this.model,
+      usage: { inputTokens: this.inputTokens, outputTokens: this.outputTokens, costUsd: 0, cachedInputTokens: this.cachedInputTokens, modelMs: this.modelMs },
+    };
   }
 
   /** Stats since the previous take, then starts counting afresh. */

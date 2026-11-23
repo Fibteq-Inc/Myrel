@@ -113,11 +113,11 @@ import { connectRepoByName, findUserRepo, githubLogin, listProjectRepos } from "
 import { memberHasKey, projectTaskModel } from "../keys";
 import { type ResearchState, researchTools } from "../research/research";
 import { answerResearch, pollResearch, type ResearchHost, readResearch, requestResearch, stopResearch } from "../research/thread";
-import { handleMcp, type Tool, tool } from "../llm";
+import { handleMcp, type ModelCallReport, type Tool, tool } from "../llm";
 import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
-import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
+import { markSandboxActive, recordSandboxRun, recordTaskUsage, recordTurn, taskCostMicros, taskRuntime, turnFigures, type TurnRow } from "../usage";
 import { personReviewModels, projectCliModels, resolveReviewModel, resolveTaskModel } from "../task-model";
 import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
 import {
@@ -254,8 +254,25 @@ type PendingNews = {
 /** shared: the CLI worked in the project's folder itself, which it held on its computer (RunnerAgent.claimFolder). */
 type StoredSpec = Omit<TaskSpec, "harness"> & { harness: string; runnerId?: string; computer?: string; agent?: boolean; promptSize?: PromptSize; shared?: boolean };
 
+/** A finished run as a statistics row; whom it worked for and its cost are the caller's to add. */
+function turnRow(row: TaskRow, ids: { projectId: string; threadId: string }, progress: TaskProgress): TurnRow {
+  const spec = JSON.parse(row.spec) as StoredSpec;
+  return {
+    id: row.id,
+    ...ids,
+    runtime: taskRuntime(row.backend),
+    harness: spec.harness,
+    provider: spec.model?.provider ?? null,
+    model: spec.model?.id ?? progress.model ?? "",
+    startedAt: new Date(row.created_at),
+    endedAt: new Date(row.finished_at ?? row.created_at),
+    outcome: row.status === "done" ? "done" : row.status === "cancelled" ? "cancelled" : "failed",
+    ...turnFigures(progress.usage),
+  };
+}
+
 /** How far into the turn's run a message's stats line counted: when, and the run's usage by then. */
-type StatsMark = { at: number; inputTokens: number; outputTokens: number; costUsd: number };
+type StatsMark = { at: number } & TaskProgress["usage"];
 
 /** What the thread's agent did through Myrel's tools during its turn, kept until the turn ends. */
 type AgentTurn = {
@@ -1264,7 +1281,7 @@ export class ThreadAgent extends Agent<Env> {
     }
     // Otherwise what it used after its last reply (often the rest of that reply's own model call) joins that reply.
     const last = turn?.lastReplyStats;
-    if (!sentTail && last && tail.inputTokens + tail.outputTokens > 0) {
+    if (!sentTail && last && (tail.inputTokens + tail.outputTokens > 0 || tail.modelMs)) {
       await project.setMessageStats(last.id, this.runStats(row, last.from).stats);
     }
     const resolved = turn?.resolved ?? false;
@@ -1319,18 +1336,15 @@ export class ThreadAgent extends Agent<Env> {
   }
 
   /**
-   * What one model call through Myrel cost, added to its turn's usage; null for a call that used
-   * tokens but has no price, counted so plan limits charge each such call. Callable over RPC.
+   * What one model call through Myrel took, added to its turn's usage: its time, and its cost (null for
+   * a call that used tokens but has no price, counted so plan limits charge each such call). Callable over RPC.
    */
-  async modelCost(taskId: string, costUsd: number | null): Promise<void> {
-    if (costUsd === null) {
-      if (this.runningTask()?.id === taskId) this.setMeta(`unpriced_calls:${taskId}`, String(this.unpricedCalls(taskId) + 1));
-      return;
-    }
-    await this.taskEvents(taskId, [{ type: "usage", inputTokens: 0, outputTokens: 0, costUsd }]);
+  async modelCall(taskId: string, call: ModelCallReport): Promise<void> {
+    if (call.costUsd === null && this.runningTask()?.id === taskId) this.setMeta(`unpriced_calls:${taskId}`, String(this.unpricedCalls(taskId) + 1));
+    await this.taskEvents(taskId, [{ type: "usage", inputTokens: 0, outputTokens: 0, modelMs: call.ms, ...(call.costUsd !== null && { costUsd: call.costUsd }) }]);
   }
 
-  /** Model calls of a cloud turn that could not be priced (see modelCost). */
+  /** Model calls of a cloud turn that could not be priced (see modelCall). */
   private unpricedCalls(taskId: string): number {
     return Number(this.getMeta(`unpriced_calls:${taskId}`) ?? 0);
   }
@@ -1479,6 +1493,24 @@ export class ThreadAgent extends Agent<Env> {
    * the answer: null when none came in time or the turn ended.
    */
   private async askAccess(folder: string, what: string, kind?: "command" | "ssh", ssh?: { request: NonNullable<AccessRequest["ssh"]>; body: string }): Promise<AccessAnswer | null> {
+    const taskId = this.runningTask()?.id;
+    // Cards waiting side by side count once: the clock runs while any of them waits.
+    if (this.accessWaits++ === 0) this.accessWaitFrom = Date.now();
+    try {
+      return await this.waitForAccess(folder, what, kind, ssh);
+    } finally {
+      if (--this.accessWaits === 0 && taskId) {
+        const waitMs = Date.now() - this.accessWaitFrom;
+        await this.taskEvents(taskId, [{ type: "usage", inputTokens: 0, outputTokens: 0, waitMs }]).catch((err) => console.warn("wait time", err));
+      }
+    }
+  }
+
+  /** How many permission cards the run waits on now, and since when (see askAccess). */
+  private accessWaits = 0;
+  private accessWaitFrom = 0;
+
+  private async waitForAccess(folder: string, what: string, kind?: "command" | "ssh", ssh?: { request: NonNullable<AccessRequest["ssh"]>; body: string }): Promise<AccessAnswer | null> {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
     const until = Date.now() + ACCESS_WAIT_MS;
@@ -2845,6 +2877,9 @@ export class ThreadAgent extends Agent<Env> {
     const inputTokens = Math.max(0, mark.inputTokens - start.inputTokens);
     const outputTokens = Math.max(0, mark.outputTokens - start.outputTokens);
     const costUsd = Math.max(0, mark.costUsd - start.costUsd);
+    const since = (key: "cachedInputTokens" | "modelMs" | "waitMs") => Math.round(Math.max(0, (mark[key] ?? 0) - (start[key] ?? 0)));
+    const modelMs = since("modelMs");
+    const waitMs = since("waitMs");
     const runtime = taskRuntime(row.backend);
     const model = spec.model?.id ?? progress.model ?? "";
     const stats: MessageStats = {
@@ -2852,7 +2887,7 @@ export class ThreadAgent extends Agent<Env> {
       durationMs: Math.max(0, mark.at - start.at),
       calls: 0,
       inputTokens,
-      cachedInputTokens: 0,
+      cachedInputTokens: since("cachedInputTokens"),
       outputTokens,
       // A person's own CLI runs on their own account, so Myrel puts no price on it.
       costMicros: runtime === "local" ? null : taskCostMicros(this.env, model || null, { inputTokens, outputTokens, costUsd }),
@@ -2860,6 +2895,9 @@ export class ThreadAgent extends Agent<Env> {
       ...(runtime === "local" && spec.computer && { computer: spec.computer }),
       harness: spec.harness,
       ...(spec.promptSize && { prompt: spec.promptSize }),
+      turn: row.id,
+      ...(modelMs && { modelMs }),
+      ...(waitMs && { waitMs }),
     };
     return { stats, from: start, mark };
   }
@@ -2875,8 +2913,25 @@ export class ThreadAgent extends Agent<Env> {
     const inputTokens = Math.max(0, usage.inputTokens - progress.usage.inputTokens);
     const outputTokens = Math.max(0, usage.outputTokens - progress.usage.outputTokens);
     const newModel = usage.model && usage.model !== progress.model ? usage.model : undefined;
-    if (inputTokens === 0 && outputTokens === 0 && !newModel) return;
-    await this.taskEvents(taskId, [{ type: "usage", inputTokens, outputTokens, ...(newModel && { model: newModel }) }]);
+    const more = (key: "cachedInputTokens" | "modelMs") => (usage[key] === undefined ? {} : { [key]: Math.max(0, usage[key] - (progress.usage[key] ?? 0)) });
+    const extra = { ...more("cachedInputTokens"), ...more("modelMs") };
+    if (inputTokens === 0 && outputTokens === 0 && !newModel && !Object.values(extra).some((v) => v > 0)) return;
+    await this.taskEvents(taskId, [{ type: "usage", inputTokens, outputTokens, ...extra, ...(newModel && { model: newModel }) }]);
+  }
+
+  /**
+   * The statistics rows of this thread's finished turns, for the ones that ended before turn_stats
+   * existed, each with the computer it ran on (whose owner it worked for). Callable over RPC.
+   */
+  turnHistory(): { row: TurnRow; runnerId: string | null }[] {
+    const projectId = this.getMeta("project_id");
+    const threadId = this.getMeta("thread_id");
+    if (!projectId || !threadId) return [];
+    const rows = this.sql<TaskRow>`SELECT * FROM tasks WHERE status != 'running' AND finished_at IS NOT NULL ORDER BY created_at`;
+    return rows.map((row) => ({
+      row: turnRow(row, { projectId, threadId }, JSON.parse(row.progress) as TaskProgress),
+      runnerId: (JSON.parse(row.spec) as StoredSpec).runnerId ?? null,
+    }));
   }
 
   // ---- Runs -----------------------------------------------------------------
@@ -2961,12 +3016,21 @@ export class ThreadAgent extends Agent<Env> {
       if (step?.type === "tool") await project.setActivity(threadId, true, step.title.slice(0, 200));
     }
     if (finished) {
+      let cost = { costMicros: 0, unpricedCalls: 0 };
       if (spec.model) {
         const ctx = { projectId, threadId, taskId, provider: spec.model.provider, model: spec.model.id };
         const ms = Date.now() - Date.parse(row.created_at);
-        await recordTaskUsage(this.env, ctx, progress.usage, ms, this.unpricedCalls(taskId)).catch((err) => console.error("task usage", err));
+        cost = await recordTaskUsage(this.env, ctx, progress.usage, ms, this.unpricedCalls(taskId)).catch((err) => {
+          console.error("task usage", err);
+          return cost;
+        });
         this.deleteMeta(`unpriced_calls:${taskId}`);
       }
+      await recordTurn(this.env.DB, {
+        ...turnRow({ ...row, status, finished_at: new Date().toISOString() }, { projectId, threadId }, progress),
+        userId: this.getMeta("requester") || null,
+        ...cost,
+      }).catch((err) => console.error("turn stats", err));
       if (row.backend === "sandbox") {
         const run = { taskId, projectId, threadId, startedAt: new Date(row.created_at), endedAt: new Date() };
         await recordSandboxRun(this.env.DB, run).catch((err) => console.error("sandbox run", err));

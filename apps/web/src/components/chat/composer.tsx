@@ -169,7 +169,7 @@ export function Composer({
           autoFocus={autoFocus}
           className="max-h-[240px] min-h-6 resize-none bg-transparent text-fg outline-none placeholder:text-subtle"
         />
-        <div className="-mr-1.5 flex items-center gap-1">
+        <div className="@container -mr-1.5 flex items-center gap-1">
           {onUpload && (
             <>
               <button
