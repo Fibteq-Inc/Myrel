@@ -1,13 +1,22 @@
-import { dirname } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { childEnv } from "../src/config";
 import { detectClis, type MissingCli, missingReason } from "../src/clis";
-import { expandWindowsVars, mergePath, parseRegPath, refreshPath } from "../src/path";
+import { expandWindowsVars, mergePath, parseRegPath, refreshPath, unixBins } from "../src/path";
 import { sameClis } from "../src/runner";
 
-const savedPath = process.env.PATH;
+const saved = { PATH: process.env.PATH, HOME: process.env.HOME };
+let home: string;
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), "myrel-home-"));
+  process.env.HOME = home;
+});
 afterEach(() => {
-  process.env.PATH = savedPath;
+  rmSync(home, { recursive: true, force: true });
+  process.env.PATH = saved.PATH;
+  process.env.HOME = saved.HOME;
 });
 
 describe("mergePath", () => {
@@ -48,11 +57,27 @@ describe("CLI detection", () => {
     expect(childEnv().PATH).toBe(process.env.PATH);
   });
 
+  it("finds a CLI in its installer's folder that is not on the runner's PATH", async () => {
+    const bin = join(home, ".opencode", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "opencode"), "#!/bin/sh\necho 'opencode v2.4.0'\n");
+    chmodSync(join(bin, "opencode"), 0o755);
+    process.env.PATH = "/usr/bin:/bin";
+    expect((await detectClis()).find((c) => c.id === "opencode")).toEqual({ id: "opencode", version: "opencode v2.4.0" });
+    // At the end, so what the person put on PATH wins.
+    expect(process.env.PATH!.startsWith("/usr/bin:/bin:")).toBe(true);
+    expect(unixBins(home)).toContain(bin);
+  });
+
+  it("leaves out install folders that do not exist", () => {
+    expect(unixBins(home).filter((p) => p.startsWith(home))).toEqual([]);
+  });
+
   it("says why a CLI was not found", async () => {
     process.env.PATH = "/nowhere";
     const missing: MissingCli[] = [];
     await detectClis(missing);
-    // Only the runner's Node folder is on PATH now, which has none of the CLIs.
+    // Only the runner's Node folder is on PATH now, which has none of the CLIs, and the home folder is empty.
     expect(missing.find((m) => m.id === "codex")?.reason).toBe("not on PATH");
     expect(missingReason(Object.assign(new Error("Command failed"), { killed: true }))).toMatch(/^no answer in \d+s$/);
     expect(missingReason(new Error("Command failed: codex --version"), "'codex' is not recognized as an internal or external command,\r\n")).toBe(

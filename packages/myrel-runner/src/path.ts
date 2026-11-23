@@ -8,9 +8,11 @@ import { delimiter, dirname, join } from "node:path";
  * before the install may not have on its PATH. On Windows the PATH the runner inherited is the one
  * Explorer had at login, so a CLI installed later, or one whose folder a shell profile adds (fnm,
  * a PowerShell profile), is not found; the PATH saved in the registry is read again each time.
+ * Elsewhere the background service keeps the PATH it was installed with, so the folder an installer
+ * adds in a shell profile afterwards (opencode's ~/.opencode/bin in ~/.bashrc) is missing the same way.
  */
 export async function refreshPath(): Promise<void> {
-  const extra = [dirname(process.execPath), ...(process.platform === "win32" ? [...(await registryPath()), ...windowsBins()] : [])];
+  const extra = [dirname(process.execPath), ...(process.platform === "win32" ? [...(await registryPath()), ...windowsBins()] : unixBins())];
   process.env.PATH = mergePath(process.env.PATH ?? "", extra, delimiter, process.platform === "win32");
 }
 
@@ -73,5 +75,17 @@ function windowsBins(): string[] {
     join(home, "scoop", "shims"),
     join(local, "Microsoft", "WinGet", "Links"),
     join(local, "Volta", "bin"),
+  ].filter((p) => existsSync(p));
+}
+
+/** Where the CLIs' installers, npm, pnpm, bun and Volta put CLIs on macOS and Linux, when they exist. */
+export function unixBins(home = homedir()): string[] {
+  return [
+    join(home, ".local", "bin"),
+    join(home, ".opencode", "bin"),
+    join(home, ".bun", "bin"),
+    join(home, ".npm-global", "bin"),
+    process.env.PNPM_HOME ?? join(home, process.platform === "darwin" ? "Library/pnpm" : ".local/share/pnpm"),
+    join(home, ".volta", "bin"),
   ].filter((p) => existsSync(p));
 }
