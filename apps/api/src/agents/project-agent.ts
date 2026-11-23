@@ -75,7 +75,8 @@ import {
   type Relay,
 } from "./coordinator";
 import { type Author, type KnowledgeHost, type KnowledgeSnapshot, KnowledgeStore } from "./knowledge";
-import { meteredForTurn, TurnMeter } from "../usage";
+import { fillTurnHistory, markTurnHistory, TURN_HISTORY_BATCH } from "../projects/turn-history";
+import { meteredForTurn, recordTurn, TurnMeter, turnFigures, type TurnRow } from "../usage";
 import { CliMeter, type CoordinatorTarget, coordinatorTarget } from "../coordinator-cli";
 import { hashAgentToken, newAgentToken, sameHash } from "./harness-agent";
 import {
@@ -1405,6 +1406,22 @@ export class ProjectAgent extends Agent<Env> {
     return { threadIds: this.listThreads().map((t) => t.id), artifactIds: this.artifacts.list().map((a) => a.id) };
   }
 
+  /**
+   * Copies the turns that ended before turn_stats existed into it, a batch of threads at a time (the
+   * hourly cron starts it, see projects/turn-history.ts). Callable over RPC; a second start while one
+   * runs is the same one.
+   */
+  async fillTurnHistory(payload: { after?: string } | null): Promise<void> {
+    const threads = this.listThreads()
+      .map((t) => t.id)
+      .sort();
+    const left = payload?.after ? threads.filter((id) => id > payload.after!) : threads;
+    const batch = left.slice(0, TURN_HISTORY_BATCH);
+    await fillTurnHistory(this.env, this.name, batch);
+    if (left.length > batch.length) await this.schedule(1, "fillTurnHistory", { after: batch.at(-1)! }, { idempotent: true });
+    else await markTurnHistory(this.env.DB, this.name);
+  }
+
   /** Erases this project's storage and pending alarms. */
   async wipe(): Promise<void> {
     await this.ctx.storage.deleteAlarm();
@@ -1694,7 +1711,7 @@ export class ProjectAgent extends Agent<Env> {
       ];
       // Something to answer, which a turn that called no tool at all has surely missed (its CLI never reached Myrel).
       const expectsTools = !onlyThreadUpdates;
-      const handled = cli?.ok ? await this.cliCoordinatorTurn(cli.target, prompt, tools, expectsTools) : false;
+      const handled = cli?.ok ? await this.cliCoordinatorTurn(cli.target, prompt, tools, expectsTools, this.turnRequester(inbox)) : false;
       if (!handled) {
         llm ??= await projectProvider(this.env, this.name);
         if (!llm.ok) throw new Error(llm.reason);
@@ -1750,7 +1767,11 @@ export class ProjectAgent extends Agent<Env> {
     prompt: string,
     tools: (meter: StatsMeter) => Tool[],
     expectsTools: boolean,
+    requester: string | null,
   ): Promise<boolean> {
+    const startedAt = new Date();
+    let outcome: TurnRow["outcome"] = "failed";
+    let ran = false;
     const meter = new CliMeter(target.cli, target.workspace.runnerName);
     const { token, hash } = await newAgentToken();
     const taskId = createId("task");
@@ -1790,11 +1811,13 @@ export class ProjectAgent extends Agent<Env> {
         console.warn("the coordinator's CLI could not start:", started.reason);
         return false;
       }
+      ran = true;
       const timeout = new Promise<CliCoordinatorEnd>((resolve) => {
         timer = setTimeout(() => resolve({ ok: false, result: "It took too long.", timedOut: true }), CLI_COORDINATOR_TURN_MS);
       });
       const end = await Promise.race([ended, timeout]);
       if (end.timedOut) await runner.cancelTask(taskId).catch(() => {});
+      if (end.ok) outcome = "done";
       if (end.ok && (calls > 0 || !expectsTools)) return true;
       if (!acted) {
         console.warn("the coordinator's CLI ended without handling the turn:", end.result.slice(0, 300));
@@ -1812,6 +1835,22 @@ export class ProjectAgent extends Agent<Env> {
     } finally {
       clearTimeout(timer);
       this.cliTurns.delete(taskId);
+      if (ran) {
+        const { model, usage } = meter.total();
+        await recordTurn(this.env.DB, {
+          id: taskId,
+          projectId: this.name,
+          threadId: null,
+          userId: requester,
+          runtime: "local",
+          harness: target.cli,
+          model,
+          startedAt,
+          endedAt: new Date(),
+          outcome,
+          ...turnFigures(usage),
+        }).catch((err) => console.error("turn stats", err));
+      }
     }
   }
 

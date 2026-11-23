@@ -1,7 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { type TaskModel, unwrapShell } from "@myrel/protocol";
-import type { ParseState } from "./clis";
+import type { ParseState, RunUsage } from "./clis";
 import { codexLimits } from "./limits";
 import { agentUsage, endAgent, startAgent, step } from "./subagents";
 
@@ -178,9 +178,10 @@ export class AppServerTurn {
   private addUsage(p: Obj) {
     // `last` is one model call; `total` also holds the session's earlier turns.
     const last = obj(obj(p.tokenUsage).last);
-    const u = (this.state.usage ??= { inputTokens: 0, outputTokens: 0 });
+    const u: RunUsage = (this.state.usage ??= { inputTokens: 0, outputTokens: 0 });
     u.inputTokens += count(last.inputTokens);
     u.outputTokens += count(last.outputTokens);
+    if (typeof last.cachedInputTokens === "number") u.cachedInputTokens = (u.cachedInputTokens ?? 0) + count(last.cachedInputTokens);
   }
 
   /** One item of the turn, or (agent) of a subagent's thread. */

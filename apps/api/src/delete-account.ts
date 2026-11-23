@@ -5,7 +5,7 @@ import { beforeDeleteAccount, type LimitCheck } from "./extensions";
 import { deleteProject } from "./projects/delete";
 import { deleteOwnerFiles } from "./skills/store";
 
-const { projectMembers, projects, usageEvents, user } = schema;
+const { projectMembers, projects, turnStats, usageEvents, user } = schema;
 
 const SUCCESSION = { owner: 0, admin: 1, member: 2 } as const;
 
@@ -73,6 +73,7 @@ export async function deleteAccount(env: Env, userId: string): Promise<LimitChec
   await deleteOwnerFiles(env, { userId }).catch((err) => console.error("account delete: skill files", userId, err));
   await db.batch([
     db.update(usageEvents).set({ userId: null }).where(eq(usageEvents.userId, userId)),
+    db.update(turnStats).set({ userId: null }).where(eq(turnStats.userId, userId)),
     db.delete(user).where(eq(user.id, userId)),
   ]);
   // Connections the person still has open to shared projects end with the account.

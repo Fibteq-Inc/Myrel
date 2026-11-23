@@ -198,16 +198,50 @@ describe("CLI usage", () => {
     for (const l of [{ type: "system", subtype: "init", model: "claude-sonnet-5-5" }, call("m1", "a"), call("m1", "b"), call("m2", "c")]) {
       ADAPTERS.claude.line(JSON.stringify(l), state);
     }
-    expect(state.usage).toEqual({ inputTokens: 200, outputTokens: 10 });
+    expect(state.usage).toEqual({ inputTokens: 200, outputTokens: 10, cachedInputTokens: 180 });
     expect(state.model).toBe("claude-sonnet-5-5");
     ADAPTERS.claude.line(JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 30, cache_read_input_tokens: 270, output_tokens: 15 } }), state);
-    expect(state.usage).toEqual({ inputTokens: 300, outputTokens: 15 });
+    expect(state.usage).toEqual({ inputTokens: 300, outputTokens: 15, cachedInputTokens: 270 });
+  });
+
+  describe("Claude Code's model time", () => {
+    /** Figures a real run printed: the totals are the session's, across turns and processes. */
+    const result = (apiMs: number, sessionOutput: number, output: number) =>
+      JSON.stringify({ type: "result", result: "ok", duration_ms: 9000, duration_api_ms: apiMs, usage: { input_tokens: 4, output_tokens: output }, modelUsage: { "claude-haiku-5-5": { outputTokens: sessionOutput } } });
+    const run = (session: ParseState["claudeSession"], ...lines: string[]) => {
+      const state: ParseState = { claudeSession: session };
+      for (const l of lines) ADAPTERS.claude.line(l, state);
+      return state;
+    };
+
+    it("is the session's total in a new session, a message put in mid-turn included", () => {
+      const state = run({ apiMs: 0, output: 0, fresh: true }, result(1140, 87, 87), result(2356, 394, 307));
+      expect(state.usage).toMatchObject({ modelMs: 2356, outputTokens: 394 });
+      expect(state.claudeTotals).toEqual({ apiMs: 2356, output: 394 });
+    });
+
+    it("is what the total grew by in a resumed one", () => {
+      expect(run({ apiMs: 2356, output: 394 }, result(2756, 400, 6)).usage!.modelMs).toBe(400);
+    });
+
+    it("is the total itself when the CLI started the resumed session's totals from zero", () => {
+      expect(run({ apiMs: 2356, output: 394 }, result(400, 6, 6)).usage!.modelMs).toBe(400);
+      expect(run({ apiMs: 300, output: 394 }, result(400, 6, 6)).usage!.modelMs).toBe(400);
+    });
+
+    it("is not known when the session's earlier totals are not, or the CLI says none", () => {
+      const state = run(undefined, result(2756, 400, 6));
+      expect(state.usage).not.toHaveProperty("modelMs");
+      // The next run starts from here.
+      expect(state.claudeTotals).toEqual({ apiMs: 2756, output: 400 });
+      expect(run({ apiMs: 0, output: 0, fresh: true }, JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, output_tokens: 1 } })).usage).not.toHaveProperty("modelMs");
+    });
   });
 
   it("reads Codex's turn usage and Antigravity's run totals", () => {
     const codex: ParseState = {};
     ADAPTERS.codex.line(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 500, cached_input_tokens: 400, output_tokens: 40 } }), codex);
-    expect(codex.usage).toEqual({ inputTokens: 500, outputTokens: 40 });
+    expect(codex.usage).toEqual({ inputTokens: 500, outputTokens: 40, cachedInputTokens: 400 });
 
     const agy: ParseState = {};
     ADAPTERS.antigravity.line(JSON.stringify({ event: "init", conversation_id: "c", init: { model: "gemini-3.1-pro" } }), agy);

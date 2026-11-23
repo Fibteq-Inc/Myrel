@@ -1219,19 +1219,21 @@ describe("coordinator and thread agent", () => {
       (await (await api(`/api/usage?days=7&tzOffset=-180${query}`, { token })).json()) as UsageSummary;
     // Coordinator: start_thread, then stop. The thread's agent ran on the person's own CLI and account.
     const summary = await until(async () => {
-      const s = await usage();
+      const s = await usage("&cli=coordinator");
       return s.totals.calls === 2 ? s : null;
     }, "two metered calls");
     await until(async () => (await agent.getMessagesAfter(0)).messages.some((m: Message) => m.body === "Here it is."), "the reply");
 
     // The fake model reports 1000 input / 100 output tokens per call and auto has no built-in price.
-    expect(summary.totals).toEqual({
+    expect(summary.totals).toMatchObject({
       calls: 2,
       inputTokens: 2000,
       cachedInputTokens: 0,
       outputTokens: 200,
       costMicros: 0,
       unpricedCalls: 2,
+      turns: 1,
+      modelOutputTokens: 200,
     });
     // The thread's agent ran on the person's computer, so no sandbox time.
     expect(summary.sandbox).toEqual({ runs: 0, seconds: 0 });

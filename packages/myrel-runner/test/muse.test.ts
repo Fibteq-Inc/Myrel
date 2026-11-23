@@ -146,7 +146,7 @@ describe("Muse Code output", () => {
       "Done: all worked.",
     ]);
     // Input already holds the cached tokens.
-    expect(state.usage).toEqual({ inputTokens: 181661, outputTokens: 961 });
+    expect(state.usage).toEqual({ inputTokens: 181661, outputTokens: 961, cachedInputTokens: 150453 });
     expect(state.result).toBe("Done: all worked.");
     expect(state.failed).toBe(false);
   });

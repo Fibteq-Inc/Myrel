@@ -20,6 +20,7 @@ import { githubRoutes } from "./routes/github";
 import { artifactRoutes } from "./routes/artifacts";
 import { projectRoutes } from "./routes/projects";
 import { usageRoutes } from "./routes/usage";
+import { startTurnHistory } from "./projects/turn-history";
 import { runnerDeviceRoutes, runnerRoutes } from "./routes/runners";
 import { notificationRoutes } from "./routes/notifications";
 import { routineRoutes } from "./routes/routines";
@@ -153,7 +154,7 @@ const app = new Hono<AppEnv>()
         // Fireworks caches prompts per replica, Messages calls included (see ChatRequest.cacheKey).
         ...(model.model.kind === "openai" && { cacheKey: threadId.data }),
       },
-      (usd) => thread.modelCost(caller.taskId, usd),
+      (call) => thread.modelCall(caller.taskId, call),
       (p) => c.executionCtx.waitUntil(p),
     );
   })
@@ -230,6 +231,7 @@ async function scheduled(_controller: ScheduledController, env: Env) {
     await reportError(env, "cron", "connector catalog sync", err);
   }
   await pruneErrors(env).catch((err) => console.error("pruning errors failed", err));
+  await startTurnHistory(env).catch((err) => reportError(env, "cron", "turn history", err));
 }
 
 export default {

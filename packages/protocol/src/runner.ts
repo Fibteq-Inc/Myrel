@@ -378,6 +378,10 @@ export type RunnerDirListing = z.infer<typeof RunnerDirListing>;
 export const CliUsage = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
+  /** The part of inputTokens read from the prompt cache, when the CLI says. Older runners never send it. */
+  cachedInputTokens: z.number().int().nonnegative().optional(),
+  /** Time this run spent in model calls, only when the CLI reports it. Older runners never send it. */
+  modelMs: z.number().int().nonnegative().optional(),
   /** The model the CLI says it used, when it says. */
   model: z.string().max(200).optional(),
 });

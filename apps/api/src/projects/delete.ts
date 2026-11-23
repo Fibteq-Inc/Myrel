@@ -20,6 +20,11 @@ export async function deleteProject(env: Env, projectId: string): Promise<void> 
   // Skill rows cascade with the project; their files are listed by those rows.
   await deleteOwnerFiles(env, { projectId }).catch((err) => console.error("project delete: skill files", projectId, err));
   await createDb(env.DB).delete(schema.projects).where(eq(schema.projects.id, projectId));
+  // Statistics, unlike the billing ledger, go with the project.
+  await createDb(env.DB)
+    .delete(schema.turnStats)
+    .where(eq(schema.turnStats.projectId, projectId))
+    .catch((err: unknown) => console.error("project delete: turn stats", projectId, err));
 
   const steps: Promise<unknown>[] = [
     deletePrefix(env.FILES, fileKey(projectId, "")),

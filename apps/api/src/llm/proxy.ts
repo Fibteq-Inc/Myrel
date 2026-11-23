@@ -23,6 +23,9 @@ export function modelCallAllowed(kind: "openai" | "anthropic", method: string, p
 /** Request headers a harness's model call keeps; its own credentials are replaced. */
 const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta"];
 
+/** One finished inference: how long it took, and its cost (0 when it used nothing that costs, null when it cannot be priced). */
+export type ModelCallReport = { ms: number; costUsd: number | null };
+
 /**
  * Forwards one model call from a sandboxed harness to the real provider, adding the key there so
  * it never enters the sandbox: a bearer token for an OpenAI-compatible API, x-api-key for
@@ -32,7 +35,8 @@ const KEPT_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-
  * Fireworks' auto picks one per call. An Anthropic call is priced from its usage the same way. This
  * count is the turn's, whatever the harness reports, so a call made around the harness (with the
  * turn's token from its shell) is counted too. A call that used tokens but cannot be priced reports
- * null, so plan limits can charge it a fallback per call.
+ * null, so plan limits can charge it a fallback per call. Each call's time, from asking the provider
+ * to the last of its answer, is reported with it.
  */
 export async function proxyModel(
   req: Request,
@@ -45,7 +49,7 @@ export async function proxyModel(
     /** Keeps the turn's calls on one replica so the provider's prompt cache hits (see ChatRequest.cacheKey). */
     cacheKey?: string;
   },
-  onCost: (usd: number | null) => Promise<void>,
+  onCall: (call: ModelCallReport) => Promise<void>,
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
   const headers = new Headers(target.kind === "anthropic" ? { "x-api-key": target.apiKey } : { authorization: `Bearer ${target.apiKey}` });
@@ -66,6 +70,7 @@ export async function proxyModel(
   const refused = responses ? responsesRefusal(text) : null;
   if (refused) return Response.json({ error: { message: refused } }, { status: 400 });
   const sent = text !== undefined && target.kind === "openai" && !responses ? withStreamUsage(text) : text;
+  const started = Date.now();
   const upstream = await fetch(target.url, { method: req.method, headers, body: sent });
   const out = new Headers();
   for (const name of PASSED_HEADERS) {
@@ -74,7 +79,7 @@ export async function proxyModel(
   }
   // Called once per inference that used tokens: its cost, or null when it cannot be priced.
   const report = (usd: number | undefined) => {
-    if (usd === undefined || usd > 0) waitUntil(onCost(usd ?? null).catch((err) => console.error("model cost", err)));
+    waitUntil(onCall({ ms: Date.now() - started, costUsd: usd ?? null }).catch((err) => console.error("model call", err)));
   };
 
   if (!upstream.body || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers: out });

@@ -13,6 +13,12 @@ import { reviewPlugin } from "./opencode-review";
 import { refreshPath } from "./path";
 import { type AgentNote, agentUsage, endAgent, type SubAgent, startAgent, step } from "./subagents";
 
+/** What a run used: cachedInputTokens and modelMs only where the CLI reports them. */
+export type RunUsage = { inputTokens: number; outputTokens: number; cachedInputTokens?: number; modelMs?: number };
+
+/** Claude Code's running totals for a session: time in model calls, and output tokens of every model. */
+export type ClaudeSessionTotals = { apiMs: number; output: number };
+
 /** What a CLI's output told us so far. */
 export type ParseState = {
   /** The latest human-readable step, e.g. "Edit src/app.ts". */
@@ -32,7 +38,13 @@ export type ParseState = {
   /** The last error the CLI reported, which may have been one it recovered from. */
   error?: string;
   /** Tokens the CLI reported using so far, summed. */
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: RunUsage;
+  /** What Claude Code's running totals for the session were before this run (see claudeModelMs). */
+  claudeSession?: ClaudeSessionTotals & { fresh?: boolean };
+  /** The session's totals by the run's end, for the next run to start from. */
+  claudeTotals?: ClaudeSessionTotals;
+  /** The output tokens of the run's results so far. */
+  claudeOutput?: number;
   /** The model the CLI says it uses. */
   model?: string;
   /** Model calls already counted, for CLIs that repeat a call's usage on each of its parts. */
@@ -439,8 +451,16 @@ const claude: CliAdapter = {
       // The run's own totals, when they say more than what was summed along the way.
       if (event.usage) {
         const total = claudeUsage(event.usage);
+        // A message put in mid-turn gets a result of its own, so the run's output is all of them.
+        state.claudeOutput = (state.claudeOutput ?? 0) + total.outputTokens;
         const sum = state.usage ?? { inputTokens: 0, outputTokens: 0 };
-        state.usage = { inputTokens: Math.max(sum.inputTokens, total.inputTokens), outputTokens: Math.max(sum.outputTokens, total.outputTokens) };
+        state.usage = {
+          ...sum,
+          inputTokens: Math.max(sum.inputTokens, total.inputTokens),
+          outputTokens: Math.max(sum.outputTokens, state.claudeOutput),
+          cachedInputTokens: Math.max(sum.cachedInputTokens ?? 0, total.cachedInputTokens ?? 0),
+        };
+        claudeModelMs(event, state);
       }
       state.result = typeof event.result === "string" ? event.result : "";
       state.failed = event.is_error === true || (typeof event.subtype === "string" && event.subtype !== "success");
@@ -521,7 +541,7 @@ const codex: CliAdapter = {
     }
     if (event.type === "turn.completed" && event.usage) {
       const u = event.usage as Record<string, unknown>;
-      addUsage(state, { inputTokens: count(u.input_tokens), outputTokens: count(u.output_tokens) });
+      addUsage(state, { inputTokens: count(u.input_tokens), outputTokens: count(u.output_tokens), ...cached(u.cached_input_tokens) });
     }
     // Codex also reports errors it recovers from this way ("Reconnecting... 1/5"), so only a failed
     // turn (or its exit code) fails the run; a turn that completes after an error is fine.
@@ -705,7 +725,11 @@ const opencode: CliAdapter = {
     if (event.type === "step_finish") {
       const t = (part.tokens ?? {}) as Record<string, unknown>;
       const cache = (t.cache ?? {}) as Record<string, unknown>;
-      addUsage(state, { inputTokens: count(t.input) + count(cache.read) + count(cache.write), outputTokens: count(t.output) + count(t.reasoning) });
+      addUsage(state, {
+        inputTokens: count(t.input) + count(cache.read) + count(cache.write),
+        outputTokens: count(t.output) + count(t.reasoning),
+        ...cached(cache.read),
+      });
     }
     // opencode 1 puts the message under data, opencode 2 on the error itself.
     if (event.type === "error") {
@@ -892,7 +916,8 @@ const cursor: CliAdapter = {
       // Its input tokens leave out cache reads and writes, which Myrel counts as input.
       const u = (event.usage ?? {}) as Record<string, unknown>;
       const input = count(u.inputTokens) + count(u.cacheReadTokens) + count(u.cacheWriteTokens);
-      if (input || count(u.outputTokens)) state.usage = { inputTokens: input, outputTokens: count(u.outputTokens) };
+      // Its duration_api_ms is the whole run, commands included, so it is no model time.
+      if (input || count(u.outputTokens)) state.usage = { inputTokens: input, outputTokens: count(u.outputTokens), ...cached(u.cacheReadTokens) };
     }
   },
   models: async () => parseModelLines((await output("cursor-agent", ["models"])) ?? ""),
@@ -1021,7 +1046,8 @@ const muse: CliAdapter = {
         const models = Array.isArray(p.models) ? (p.models as Array<Record<string, unknown>>) : [];
         const input = models.reduce((n, m) => n + count(m.input_tokens), 0);
         const output = models.reduce((n, m) => n + count(m.output_tokens), 0);
-        if (input || output) state.usage = { inputTokens: input, outputTokens: output };
+        const read = models.some((m) => typeof m.cached_tokens === "number") ? models.reduce((n, m) => n + count(m.cached_tokens), 0) : undefined;
+        if (input || output) state.usage = { inputTokens: input, outputTokens: output, ...cached(read) };
         break;
       }
       default:
@@ -1328,18 +1354,45 @@ function count(v: unknown): number {
 }
 
 /** Claude's input tokens leave out cache reads and writes; Myrel counts all of them as input. */
-function claudeUsage(usage: unknown): { inputTokens: number; outputTokens: number } {
+function claudeUsage(usage: unknown): RunUsage {
   const u = (usage ?? {}) as Record<string, unknown>;
   return {
     inputTokens: count(u.input_tokens) + count(u.cache_read_input_tokens) + count(u.cache_creation_input_tokens),
     outputTokens: count(u.output_tokens),
+    ...cached(u.cache_read_input_tokens),
   };
 }
 
-function addUsage(state: ParseState, add: { inputTokens: number; outputTokens: number }) {
+/**
+ * The run's time in model calls, from Claude Code's result. Its duration_api_ms is the session's running
+ * total, also across processes: a resumed session starts from what its earlier runs added up to. So the
+ * run's own time is what the total grew by. A session an older Claude Code resumes starts from zero
+ * instead, which its output token total tells. Nothing is said when the start is not known (the session
+ * last ran under an older runner, or a run was cut off before its result): a guess would mix turns.
+ */
+function claudeModelMs(event: Record<string, unknown>, state: ParseState) {
+  const ms = event.duration_api_ms;
+  if (typeof ms !== "number" || !(ms >= 0)) return;
+  const models = Object.values((event.modelUsage ?? {}) as Record<string, { outputTokens?: unknown }>);
+  const output = models.length ? models.reduce((n, m) => n + count(m?.outputTokens), 0) : undefined;
+  if (output !== undefined) state.claudeTotals = { apiMs: ms, output };
+  const before = state.claudeSession;
+  if (!before || !state.usage) return;
+  const carried = !before.fresh && output !== undefined && ms >= before.apiMs && output >= before.output + (state.claudeOutput ?? 0);
+  if (!before.fresh && output === undefined) return;
+  state.usage.modelMs = Math.round(carried ? ms - before.apiMs : ms);
+}
+
+/** The cached part of the input, when the CLI says what it was. */
+function cached(tokens: unknown): { cachedInputTokens?: number } {
+  return typeof tokens === "number" ? { cachedInputTokens: count(tokens) } : {};
+}
+
+function addUsage(state: ParseState, add: RunUsage) {
   const u = (state.usage ??= { inputTokens: 0, outputTokens: 0 });
   u.inputTokens += add.inputTokens;
   u.outputTokens += add.outputTokens;
+  if (add.cachedInputTokens !== undefined) u.cachedInputTokens = (u.cachedInputTokens ?? 0) + add.cachedInputTokens;
 }
 
 function parseJson(line: string): Record<string, unknown> | null {

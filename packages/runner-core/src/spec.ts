@@ -165,6 +165,11 @@ export const RunnerEvent = z.discriminatedUnion("type", [
     inputTokens: z.number().nonnegative(),
     outputTokens: z.number().nonnegative(),
     costUsd: z.number().nonnegative().optional(),
+    cachedInputTokens: z.number().nonnegative().optional(),
+    /** Time spent in model calls, where it is measured. */
+    modelMs: z.number().nonnegative().optional(),
+    /** Time the run waited for a person to allow a step. */
+    waitMs: z.number().nonnegative().optional(),
     /** The model the harness says it used. */
     model: z.string().max(200).optional(),
   }),

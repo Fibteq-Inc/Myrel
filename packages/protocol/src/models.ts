@@ -109,6 +109,12 @@ export const MessageStats = z.object({
   task: TaskStats.optional(),
   /** A thread agent's turn: what its prompt held. */
   prompt: PromptSize.optional(),
+  /** The agent turn (its run's id) the message was written in: model time is known per turn, not per message. */
+  turn: z.string().max(60).optional(),
+  /** Time spent in model calls, where it was measured; absent when the CLI does not report it. */
+  modelMs: Count.optional(),
+  /** Time the run waited for a person to allow a step. */
+  waitMs: Count.optional(),
 });
 export type MessageStats = z.infer<typeof MessageStats>;
 

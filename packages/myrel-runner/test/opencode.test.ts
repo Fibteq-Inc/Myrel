@@ -83,7 +83,7 @@ describe("opencode output", () => {
     expect(state).toMatchObject({ result: "Dosyada\n\nsecret42 yazıyor.", progress: "secret42 yazıyor." });
     expect(state.failed).toBeFalsy();
     // Cache reads and writes count as input, reasoning as output.
-    expect(state.usage).toEqual({ inputTokens: 9789 + 8448 + 12544 + 5760 + 2, outputTokens: 45 + 4 + 10 });
+    expect(state.usage).toEqual({ inputTokens: 9789 + 8448 + 12544 + 5760 + 2, outputTokens: 45 + 4 + 10, cachedInputTokens: 8448 + 5760 });
   });
 
   it("keeps only the last message's text as the answer", () => {
