@@ -11,6 +11,7 @@ import {
   type ProjectIcon,
   type ProjectRole,
   type ProviderId,
+  REVIEW_CLIS,
   type RunnerCli,
   type TaskTarget,
   type UpdateProjectSettingsInput,
@@ -510,7 +511,9 @@ function CliModels({
     onChange({ ...value, [cli]: { ...value[cli], model, effort: effort && effortsFor(models, model).includes(effort) ? effort : null } });
   };
   const setAccount = (cli: CliId, account: string | null) =>
-    onChange({ ...value, [cli]: { model: value[cli]?.model ?? null, effort: value[cli]?.effort ?? null, account } });
+    onChange({ ...value, [cli]: { model: null, effort: null, ...value[cli], account } });
+  const setReviewModel = (cli: CliId, reviewModel: string | null) =>
+    onChange({ ...value, [cli]: { model: null, effort: null, ...value[cli], reviewModel } });
   return (
     <Section title={t("projectSettings.cliModels")} description={t("projectSettings.cliModelsDescription", { computer: runner.name })}>
       {listing.length === 0 ? (
@@ -561,6 +564,21 @@ function CliModels({
                     ))}
                   </Select>
                 </Field>
+                {(REVIEW_CLIS as readonly CliId[]).includes(c.id) && (
+                  <Field label={t("reviewModel.title", { cli: cliName(c.id) })} hint={t("reviewModel.projectHint")}>
+                    <Select value={current.reviewModel ?? ""} disabled={disabled} onChange={(e) => setReviewModel(c.id, e.target.value || null)}>
+                      <option value="">{t("reviewModel.projectDefault")}</option>
+                      {current.reviewModel && !c.models.some((m) => m.id === current.reviewModel) && (
+                        <option value={current.reviewModel}>{current.reviewModel}</option>
+                      )}
+                      {c.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
               </div>
             );
           })}

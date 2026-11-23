@@ -1,5 +1,5 @@
 import { useT } from "@myrel/i18n/react";
-import { type CliId, cliLogins, effortsFor, type RunnerCli } from "@myrel/protocol";
+import { type CliId, cliLogins, effortsFor, REVIEW_CLIS, type RunnerCli } from "@myrel/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text } from "react-native";
@@ -7,6 +7,7 @@ import { runnersQueryKey, workspaceQueryKey } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { makeStyles } from "../../theme";
 import { cliName, effortName, Option, Sheet } from "../cli-picker";
+import { ReviewModelRow, ReviewModelSheet } from "../review-model";
 import { Notice, Section, ValueRow } from "../settings-section";
 import { errorMessage } from "../ui";
 import { useProjectSettings } from "./general";
@@ -25,6 +26,7 @@ export function CliModelSettings({ projectId, canManage }: { projectId: string; 
   const { data: workspace } = useQuery({ queryKey: workspaceQueryKey(server, projectId), queryFn: () => api.getWorkspace(projectId) });
   const { data: runners } = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners(), enabled: !!workspace });
   const [open, setOpen] = useState<CliId | null>(null);
+  const [openReview, setOpenReview] = useState<CliId | null>(null);
   const runner = workspace && runners?.find((r) => r.id === workspace.runnerId);
   if (!settings.data || !runner || runner.clis.length === 0) return null;
   const value = settings.data.cliModels;
@@ -37,9 +39,15 @@ export function CliModelSettings({ projectId, canManage }: { projectId: string; 
     setOpen(null);
   };
   const setAccount = (cli: Listing, account: string | null) => {
-    save.mutate({ cliModels: { ...value, [cli.id]: { model: value[cli.id]?.model ?? null, effort: value[cli.id]?.effort ?? null, account } } });
+    save.mutate({ cliModels: { ...value, [cli.id]: { model: null, effort: null, ...value[cli.id], account } } });
     setOpen(null);
   };
+  const setReviewModel = (cli: Listing, reviewModel: string | null) => {
+    save.mutate({ cliModels: { ...value, [cli.id]: { model: null, effort: null, ...value[cli.id], reviewModel } } });
+    setOpenReview(null);
+  };
+  const reviewers = listing.filter((c) => (REVIEW_CLIS as readonly CliId[]).includes(c.id));
+  const reviewCli = openReview && reviewers.find((c) => c.id === openReview);
   const openCli = open && listing.find((c) => c.id === open);
   const current = openCli ? (value[openCli.id] ?? { model: null, effort: null }) : null;
 
@@ -67,7 +75,30 @@ export function CliModelSettings({ projectId, canManage }: { projectId: string; 
           );
         })
       )}
+      {reviewers.map((c) => {
+        const picked = value[c.id]?.reviewModel;
+        return (
+          <ReviewModelRow
+            key={c.id}
+            cli={c.id}
+            hint={t("reviewModel.projectHint")}
+            value={picked ? (c.models.find((m) => m.id === picked)?.name ?? picked) : t("reviewModel.projectDefault")}
+            onPress={canManage ? () => setOpenReview(c.id) : undefined}
+          />
+        );
+      })}
       {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
+
+      {reviewCli && (
+        <ReviewModelSheet
+          cli={reviewCli.id}
+          models={reviewCli.models}
+          value={value[reviewCli.id]?.reviewModel ?? null}
+          none={t("reviewModel.projectDefault")}
+          onPick={(id) => setReviewModel(reviewCli, id)}
+          onClose={() => setOpenReview(null)}
+        />
+      )}
 
       {openCli && current && (
         <Sheet open onClose={() => setOpen(null)} title={cliName(openCli.id)}>

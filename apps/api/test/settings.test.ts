@@ -346,7 +346,7 @@ describe("sign-up setting", () => {
     expect((await api("/api/admin/settings", { token: user.token })).status).toBe(403);
     await makeAdmin(admin);
     expect(await json(api("/api/account", { token: admin.token }))).toEqual({
-      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [], checkModels: {} },
+      user: { id: admin.id, name: "Test", email: admin.email, role: "admin", onboarded: false, tips: [], checkModels: {}, reviewModels: {} },
     });
 
     const set = (signUpEnabled: boolean) =>

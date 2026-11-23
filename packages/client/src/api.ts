@@ -13,6 +13,7 @@ import type {
   CheckModels,
   ResearchAction,
   ResearchSummary,
+  ReviewModels,
   VisualCheckAction,
   Connector,
   ConnectSuggestionInput,
@@ -328,6 +329,11 @@ export class ApiClient {
   /** The CLIs that may judge the visual checks of this person's projects that list none (CheckModels); replaces the list. */
   async setCheckModels(checkModels: CheckModels) {
     return (await this.request<{ checkModels: CheckModels }>("/api/account/check-models", { method: "PUT", body: { checkModels } })).checkModels;
+  }
+
+  /** The models that judge CLIs' commands in this person's projects that pick none (ReviewModels); replaces them. */
+  async setReviewModels(reviewModels: ReviewModels) {
+    return (await this.request<{ reviewModels: ReviewModels }>("/api/account/review-models", { method: "PUT", body: { reviewModels } })).reviewModels;
   }
 
   /** Marks a one-time tip seen for this account, on every device. */

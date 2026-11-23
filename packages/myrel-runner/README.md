@@ -172,11 +172,12 @@ commands, or allow single ones under `permissions.allow` in `~/.gemini/antigravi
 
 OpenCode has no sandbox for commands either, so with `read` and `edit` its command tool is denied: OpenCode then does
 not offer it at all, and the run goes on with files and Myrel's tools. With `auto` on OpenCode 2 (runner 0.41.0 or
-later; verified with 2.4.0) a plugin the runner adds for the run judges each command before it runs, with the run's
-own model (one extra model call per command, on your OpenCode account): ordinary development work runs, and what it
-is unsure about comes to you as a card in the thread. `sudo`, SSH, keys, force pushes and publishing always do. The
-review reads the command, not what it does, and there is still no sandbox, so a command it allows runs with your
-rights. On OpenCode 1, `auto` is the same as `edit`. Anything else that would ask (for example a
+later; verified with 2.4.0) a plugin the runner adds for the run judges each command before it runs, with the model
+picked for it in Myrel (the project's, else your account's) or the run's own: one extra model call per command, on
+your OpenCode account. From runner 0.42.0, commands that only look at the project's folders and repeats of one
+already allowed in the turn need no call. Ordinary development work runs, and what the model is unsure about comes to
+you as a card in the thread. `sudo`, SSH, keys, force pushes and publishing always do. The review reads the command,
+not what it does, and there is still no sandbox, so a command it allows runs with your rights. On OpenCode 1, `auto` is the same as `edit`. Anything else that would ask (for example a
 permission you set to `ask` yourself) is declined; on OpenCode 1 the run goes on too
 (`experimental.continue_loop_on_deny`). OpenCode 2 dropped that flag and allows folders outside the project by
 default, so there the runner writes OpenCode 2's native permission rules instead: below `full`, folders outside

@@ -77,7 +77,7 @@ A thread that switches accounts starts a new Claude Code session, with the threa
 Then pick **OpenCode** and a model that starts with `zai-coding-plan/` in **How this thread works**, or as the project's default in **Project settings › Models on the computer**. Models that start with `zai/` use Z.ai's pay-as-you-go API instead.
 
 - Sign in with that command rather than setting `ZHIPU_API_KEY` in the runner's environment: commands a thread runs can read that variable.
-- As for every OpenCode thread, shell commands need **Automatic** or **Full access**. With **Automatic**, judging each command is one more call to your plan's model.
+- As for every OpenCode thread, shell commands need **Automatic** or **Full access**. With **Automatic**, judging a command is one more call to your plan's model, except for commands that only look at the project's folders and repeats of one it allowed in the same turn. Pick a faster model for it in **Settings** for all your projects, or per project in **Project settings › Models on the computer** (runner 0.42.0 or newer).
 - Myrel shows no plan limits for it; see your usage on Z.ai.
 - Z.ai's terms allow the plan only in [the tools it supports](https://docs.z.ai/devpack/tool/others), for one person. Don't share your key with others.
 

@@ -944,6 +944,11 @@ export const tr: Catalog = {
     "{computer} üzerindeki her kodlama CLI'ının bu projenin thread'lerini hangi model ve effort ile çalıştıracağı. Bir thread kendi seçimini mesaj kutusundan yapabilir. Listeler CLI'ların kendisinden gelir.",
   "projectSettings.cliAccount": "{cli} hesabı",
   "projectSettings.cliAccountHint": "Bilgisayardaki hangi girişle çalışacağı (`myrel-runner claude add` ile eklenir).",
+  "reviewModel.title": "{cli}: komutları onaylayan model",
+  "reviewModel.projectHint": "Automatic erişimde her kabuk komutunu çalışmadan önce bu model değerlendirir; küçük ve hızlı bir model yeter. Runner 0.42.0 ya da üstü gerekir.",
+  "reviewModel.accountHint": "Automatic erişimde, kendi modelini seçmemiş projelerinde her kabuk komutunu çalışmadan önce bu model değerlendirir. Küçük ve hızlı bir model yeter. Runner 0.42.0 ya da üstü gerekir.",
+  "reviewModel.projectDefault": "Kişinin kendi seçimi, yoksa thread'in modeli",
+  "reviewModel.accountDefault": "Thread'in modeli",
   "projectSettings.cliModelsEmpty":
     "{computer} üzerindeki hiçbir CLI henüz model listesini bildirmedi. Burada seçebilmek için oradaki myrel-runner'ı güncelle.",
   "coordinator.title": "Koordinatör",

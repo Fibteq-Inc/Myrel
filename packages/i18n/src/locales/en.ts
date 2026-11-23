@@ -946,6 +946,11 @@ export const en = {
     "The model and effort each coding CLI on {computer} runs this project's threads with. A thread can pick its own from its message box. The lists come from the CLIs themselves.",
   "projectSettings.cliAccount": "{cli} account",
   "projectSettings.cliAccountHint": "Which login on the computer runs it, from `myrel-runner claude add`.",
+  "reviewModel.title": "{cli}: model that approves commands",
+  "reviewModel.projectHint": "With Automatic access, this model judges each shell command before it runs; a small, fast one is enough. Needs runner 0.42.0 or newer.",
+  "reviewModel.accountHint": "With Automatic access, this model judges each shell command before it runs, in your projects that pick none. A small, fast one is enough. Needs runner 0.42.0 or newer.",
+  "reviewModel.projectDefault": "Each person's own pick, else the thread's model",
+  "reviewModel.accountDefault": "The thread's model",
   "projectSettings.cliModelsEmpty":
     "No CLI on {computer} has listed its models yet. Update myrel-runner there to pick them here.",
   "coordinator.title": "Coordinator",

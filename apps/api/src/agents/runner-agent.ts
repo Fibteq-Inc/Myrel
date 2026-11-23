@@ -45,6 +45,8 @@ export type TaskStart = {
   github?: TaskGithub;
   /** The CLI's other login to run with, only one the runner listed (so only runners with feature "cli-accounts"). */
   account?: string;
+  /** The model that judges the CLI's commands at auto access, only one the runner listed. */
+  reviewModel?: string;
   /**
    * The CLI works in `folder` itself, not in a worktree of it (the project's setting, ProjectSettings.worktrees;
    * only runners with feature "shared-folder"): one such turn of the project at a time, see claimFolder.
@@ -325,6 +327,7 @@ export class RunnerAgent extends Agent<Env> {
       ...(input.model && { model: input.model }),
       ...(input.github && { github: input.github }),
       ...(input.account && { account: input.account }),
+      ...(input.reviewModel && { reviewModel: input.reviewModel }),
       ...(input.coordinator && { coordinator: input.coordinator }),
     };
     // A runner drops a frame it cannot read, and the task would then wait for output forever.
