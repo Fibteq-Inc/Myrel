@@ -10,7 +10,7 @@ On your computer, tasks run through a coding CLI you already have.
 | Claude Code | `claude` | Yes | Asks before opening other folders or running commands it isn't allowed to |
 | Codex CLI | `codex` | Yes | Asks before a command or file its sandbox doesn't allow (for example `git push`). Needs a Codex with `codex app-server` |
 | Antigravity CLI | `agy` | No | A step that needs approval ends the run, which then says what stopped it |
-| OpenCode | `opencode` | No | Doesn't run shell commands below **Full access** |
+| OpenCode | `opencode` | With **Automatic** | With **Automatic**, its model judges each shell command and asks you about the ones it is unsure of (OpenCode 2, runner 0.41.0 or newer). Doesn't run shell commands with **Only read** and **Edit files** |
 | Hermes Agent | `hermes` | No | Needs `hermes pm install --extra acp` once |
 | Cursor CLI | `cursor-agent` | No | Below **Full access**, commands run in Cursor's sandbox, without network |
 | Muse Code | `muse` | No | Below **Full access**, it writes only in the project's main folder |
@@ -76,8 +76,8 @@ A thread that switches accounts starts a new Claude Code session, with the threa
 
 Then pick **OpenCode** and a model that starts with `zai-coding-plan/` in **How this thread works**, or as the project's default in **Project settings › Models on the computer**. Models that start with `zai/` use Z.ai's pay-as-you-go API instead.
 
-- Sign in with that command rather than setting `ZHIPU_API_KEY` in the runner's environment: commands a thread runs with **Full access** can read that variable.
-- As for every OpenCode thread, shell commands need **Full access** and it can't ask you mid-task.
+- Sign in with that command rather than setting `ZHIPU_API_KEY` in the runner's environment: commands a thread runs can read that variable.
+- As for every OpenCode thread, shell commands need **Automatic** or **Full access**. With **Automatic**, judging each command is one more call to your plan's model.
 - Myrel shows no plan limits for it; see your usage on Z.ai.
 - Z.ai's terms allow the plan only in [the tools it supports](https://docs.z.ai/devpack/tool/others), for one person. Don't share your key with others.
 
