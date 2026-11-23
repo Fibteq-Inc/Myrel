@@ -477,7 +477,7 @@ export class TaskRunner {
         if (buffered.trim()) adapter.line(buffered.trim(), state);
         adapter.end?.(stdout, state);
         reportLimits(state.limits ?? (await adapter.limits?.(state).catch(() => undefined)));
-        const ok = code === 0 && !state.failed && !idled;
+        const ok = (code === 0 || (code === 1 && !!state.completed)) && !state.failed && !idled;
         if (resume && !ok && !idled && !state.usage && !state.progress && !this.cancelled.has(task.taskId)) {
           done = true;
           clearTimeout(idle);

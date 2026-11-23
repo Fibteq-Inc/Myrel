@@ -764,6 +764,40 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' 
   });
 });
 
+describe.skipIf(process.platform === "win32")("an opencode run that cancelled a form", () => {
+  async function run(events: object[], code: number) {
+    const bin = join(home, "bin");
+    await mkdir(bin, { recursive: true });
+    const out = join(home, "events.jsonl");
+    await writeFile(out, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    await writeFile(join(bin, "opencode"), `#!/bin/sh\n[ "$1" = --version ] && { echo "opencode v2.4.0"; exit 0; }\ncat > /dev/null\ncat "${out}"\nexit ${code}\n`);
+    await chmod(join(bin, "opencode"), 0o755);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const folder = join(home, "proj-opencode");
+    await mkdir(folder, { recursive: true });
+    const frames: RunnerToServer[] = [];
+    const runner = new TaskRunner({ config: () => ({ folders: [{ path: folder, name: "p" }], access: "edit" }), sessions: new SessionStore() });
+    runner.setSender((f) => frames.push(f));
+    await runner.start({ type: "task.start", taskId: "task_01JTEST0000000000000000007", threadId: "thr_01JTEST0000000000000000000", folder, cli: "opencode", prompt: "x" });
+    return frames.at(-1);
+  }
+  const answer = [
+    { type: "step_start", sessionID: "s", part: { messageID: "m" } },
+    { type: "text", sessionID: "s", part: { messageID: "m", text: "Bitti." } },
+    { type: "step_finish", sessionID: "s", part: { messageID: "m", reason: "stop", tokens: { input: 1, output: 1 } } },
+  ];
+  const cancelled = { type: "error", sessionID: "s", error: { type: "unknown", message: "Cancelled a request for input this run cannot answer: Web Search" } };
+
+  it("is done with its answer, though opencode exits with 1", async () => {
+    expect(await run([...answer, cancelled], 1)).toMatchObject({ type: "task.done", ok: true, result: "Bitti." });
+  });
+
+  it("still fails on another error, or another exit code", async () => {
+    expect(await run([...answer, { type: "error", sessionID: "s", error: { type: "unknown", message: "Overloaded" } }], 1)).toMatchObject({ ok: false, result: "Overloaded" });
+    expect(await run([...answer, cancelled], 137)).toMatchObject({ ok: false });
+  });
+});
+
 describe("package", () => {
   it("reports the version it is published as", async () => {
     const versions = await Promise.all(

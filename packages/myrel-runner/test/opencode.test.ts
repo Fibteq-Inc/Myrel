@@ -105,6 +105,26 @@ describe("opencode output", () => {
     expect(v2).toMatchObject({ failed: true, result: "Model unavailable: x/y" });
   });
 
+  it("does not fail a run that answered because of a form opencode 2 had to cancel", () => {
+    // opencode 2.4.0, when the agent tried a web search nobody had allowed yet.
+    const step = (reason: string) => ({ type: "step_finish", sessionID: "s", part: { reason, messageID: "m", tokens: {} } });
+    const text = { type: "text", sessionID: "s", part: { messageID: "m", text: "Bitti." } };
+    const cancelled = { type: "error", sessionID: "s", error: { type: "unknown", message: "Cancelled a request for input this run cannot answer: Web Search" } };
+    const read = (...events: object[]) => {
+      const state: ParseState = {};
+      for (const event of events) opencode.line(JSON.stringify(event), state);
+      return state;
+    };
+    const answered = read(step("tool-calls"), { type: "step_start", sessionID: "s", part: {} }, text, step("stop"), cancelled);
+    expect(answered).toMatchObject({ result: "Bitti.", completed: true });
+    expect(answered.failed).toBeFalsy();
+    // Cut off before it answered: the cancelled form hides what went wrong, so it stays a failure.
+    for (const cut of [read(text, step("tool-calls"), cancelled), read(text, step("stop"), { type: "step_start", sessionID: "s", part: {} }, cancelled), read(cancelled)]) {
+      expect(cut.failed).toBe(true);
+      expect(cut.completed).toBeFalsy();
+    }
+  });
+
   it("ignores lines that are not its JSON events", () => {
     const state: ParseState = {};
     opencode.line("! permission requested: bash (ls); auto-rejecting", state);
