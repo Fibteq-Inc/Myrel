@@ -184,6 +184,11 @@ default, so there the runner writes OpenCode 2's native permission rules instead
 the project's stay closed except the ones the run was given. With `full`, `--auto` approves what would ask, but
 rules you set to `deny` still hold.
 
+OpenCode 2 asks once, on screen, before its first web search. A run has no screen to ask on, so its searches are
+cancelled until you choose: pick a provider in OpenCode yourself, or set `"websearch": { "provider": "random" }`
+(or `false` to turn it off) in `~/.config/opencode/opencode.json`. OpenCode exits with an error after such a
+cancelled search; from runner 0.42.1 a run that went on and answered is not shown as failed for it.
+
 Hermes Agent runs as an ACP server (`hermes acp`), whose session takes an edit mode: `default` (asks before
 edits) with `read`, `accept_edits` with `edit` and `auto`, `dont_ask` with `full`. What it asks permission for
 (dangerous commands, sensitive files, edits with `read`) is declined below `full` and allowed with `full`. Its
