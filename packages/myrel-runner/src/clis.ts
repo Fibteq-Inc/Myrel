@@ -29,6 +29,8 @@ export type ParseState = {
   result?: string;
   /** True when the CLI reported a failure in its own output. */
   failed?: boolean;
+  /** The CLI finished its work, so exit code 1 is not a failure (see OPENCODE_CANCELLED). */
+  completed?: boolean;
   /** The last error the CLI reported, which may have been one it recovered from. */
   error?: string;
   /** Tokens the CLI reported using so far, summed. */
@@ -44,6 +46,8 @@ export type ParseState = {
   /** An answer still arriving in pieces, and the step it belongs to (Antigravity CLI, Muse Code). */
   draft?: string;
   draftStep?: unknown;
+  /** The last model call ended the turn rather than asking for a tool (OpenCode). */
+  draftDone?: boolean;
   /** The ACP conversation of this run, for CLIs that speak ACP (see CliAdapter.acp). */
   acp?: AcpTurn;
   /** The app server turn of this run, when Codex runs as `codex app-server` (see CliAdapter.appServer). */
@@ -634,6 +638,13 @@ const OPENCODE_ACCESS: Record<Access, Record<string, string>> = {
   full: { edit: "allow", bash: "allow" },
 };
 
+/**
+ * opencode 2 remembers a form it had to cancel (the web search consent it asks before the first search)
+ * and reports it once the run ended, exiting with 1, although the agent went on without it and answered.
+ * It hides a real failure the same way, so it is forgiven only after a model call that ended the turn.
+ */
+const OPENCODE_CANCELLED = "Cancelled a request for input this run cannot answer";
+
 const opencode: CliAdapter = {
   id: "opencode",
   bin: "opencode",
@@ -701,6 +712,7 @@ const opencode: CliAdapter = {
       state.result = state.draft;
       state.progress = clip(part.text);
     }
+    if (event.type === "step_start" || event.type === "step_finish") state.draftDone = event.type === "step_finish" && part.reason === "stop";
     // Each model call's tokens; input leaves out cache reads and writes, which Myrel counts as input.
     if (event.type === "step_finish") {
       const t = (part.tokens ?? {}) as Record<string, unknown>;
@@ -711,6 +723,10 @@ const opencode: CliAdapter = {
     if (event.type === "error") {
       const error = (event.error ?? {}) as { name?: unknown; message?: unknown; data?: { message?: unknown } };
       const message = [error.data?.message, error.message, error.name].find((m) => typeof m === "string" && m);
+      if (state.draftDone && typeof message === "string" && message.startsWith(OPENCODE_CANCELLED)) {
+        state.completed = true;
+        return;
+      }
       state.failed = true;
       state.result = typeof message === "string" ? message : "opencode reported an error.";
     }
