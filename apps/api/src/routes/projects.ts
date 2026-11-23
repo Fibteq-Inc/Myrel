@@ -905,8 +905,10 @@ function mergeCliModels(current: CliModelDefaults, changes: CliModelDefaults): s
   for (const [cli, value] of Object.entries(changes) as [keyof CliModelDefaults, CliModelDefaults[keyof CliModelDefaults]][]) {
     // A client that does not know accounts leaves the saved one as it is.
     const account = value?.account === undefined ? current[cli]?.account : value.account;
-    const merged = value && { model: value.model, effort: value.effort, ...(account && { account }) };
-    if (merged && (merged.model || merged.effort || merged.account)) next[cli] = merged;
+    // The same for the model that judges its commands.
+    const reviewModel = value?.reviewModel === undefined ? current[cli]?.reviewModel : value.reviewModel;
+    const merged = value && { model: value.model, effort: value.effort, ...(account && { account }), ...(reviewModel && { reviewModel }) };
+    if (merged && (merged.model || merged.effort || merged.account || merged.reviewModel)) next[cli] = merged;
     else delete next[cli];
   }
   return Object.keys(next).length ? JSON.stringify(next) : null;

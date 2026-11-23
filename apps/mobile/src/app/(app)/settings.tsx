@@ -1,6 +1,6 @@
 import { THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES } from "@myrel/i18n";
-import type { BillingSummary, CheckModels } from "@myrel/protocol";
+import { type BillingSummary, type CheckModels, type CliId, modelsOf, REVIEW_CLIS, type ReviewModels } from "@myrel/protocol";
 import { useI18n } from "@myrel/i18n/react";
 import { Check, ExternalLink } from "lucide-react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,7 +10,9 @@ import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
+import { cliName } from "../../components/cli-picker";
 import { EvaluatorList, mergeClis } from "../../components/evaluator-picker";
+import { ReviewModelRow, ReviewModelSheet } from "../../components/review-model";
 import { Notice, Section } from "../../components/settings-section";
 import { Button, errorMessage } from "../../components/ui";
 import { appPage } from "../../lib/app-page";
@@ -93,6 +95,7 @@ export default function SettingsScreen() {
       </Section>
 
       <EvaluatorSection />
+      <ReviewModelSection />
 
       <Section title={t("settings.server")}>
         <Text style={styles.value}>{info?.name ?? ""}</Text>
@@ -313,6 +316,53 @@ function EvaluatorSection() {
       {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
     </Section>
   );
+}
+
+/** The models that judge CLIs' commands at auto access in this person's projects that pick none (ReviewModels). */
+function ReviewModelSection() {
+  const { t } = useI18n();
+  const { api, server } = useSession();
+  const queryClient = useQueryClient();
+  const meKey = ["me", server];
+  const me = useQuery({ queryKey: meKey, queryFn: () => api.getMe() });
+  const runners = useQuery({ queryKey: runnersQueryKey(server), queryFn: () => api.listRunners() });
+  const [open, setOpen] = useState<CliId | null>(null);
+  const save = useMutation({
+    mutationFn: (next: ReviewModels) => api.setReviewModels(next),
+    onSuccess: (reviewModels) => queryClient.setQueryData(meKey, (old: typeof me.data) => old && { ...old, reviewModels }),
+  });
+  if (!me.data) return null;
+  const saved = save.isPending ? (save.variables ?? {}) : (me.data.reviewModels ?? {});
+  return REVIEW_CLIS.map((cli) => {
+    const models = modelsOf(cli, runners.data ?? []);
+    const picked = saved[cli];
+    if (models.length === 0 && !picked) return null;
+    const { [cli]: _, ...rest } = saved;
+    return (
+      <Section key={cli} title={t("reviewModel.title", { cli: cliName(cli) })}>
+        <ReviewModelRow
+          cli={cli}
+          hint={t("reviewModel.accountHint")}
+          value={picked ? (models.find((m) => m.id === picked)?.name ?? picked) : t("reviewModel.accountDefault")}
+          onPress={save.isPending ? undefined : () => setOpen(cli)}
+        />
+        {save.error && <Notice tone="bad">{errorMessage(save.error, t("common.error"))}</Notice>}
+        {open === cli && (
+          <ReviewModelSheet
+            cli={cli}
+            models={models}
+            value={picked ?? null}
+            none={t("reviewModel.accountDefault")}
+            onPick={(id) => {
+              save.mutate(id ? { ...rest, [cli]: id } : rest);
+              setOpen(null);
+            }}
+            onClose={() => setOpen(null)}
+          />
+        )}
+      </Section>
+    );
+  });
 }
 
 const useStyles = makeStyles((colors) =>

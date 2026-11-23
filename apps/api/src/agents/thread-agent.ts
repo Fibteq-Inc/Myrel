@@ -118,7 +118,7 @@ import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWor
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, taskCostMicros, taskRuntime } from "../usage";
-import { projectCliModels, resolveTaskModel } from "../task-model";
+import { personReviewModels, projectCliModels, resolveReviewModel, resolveTaskModel } from "../task-model";
 import { UNVERIFIED_MESSAGE, userVerified } from "../verification";
 import {
   type AgentPlace,
@@ -1019,7 +1019,8 @@ export class ThreadAgent extends Agent<Env> {
         const model = resolveTaskModel(workspace.cli, input.threadModel, defaults, installed);
         // The thread's login for the CLI, else the project's; one the computer lost runs the CLI's own.
         const login = resolveAccount({ thread: input.threadAccount, project: defaults[workspace.cli]?.account }, installed);
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account, shared: input.shared });
+        const reviewModel = resolveReviewModel(workspace.cli, defaults, await personReviewModels(this.env, input.requester), installed);
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account, reviewModel, shared: input.shared });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.

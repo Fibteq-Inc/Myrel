@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProjectColor, ProjectIcon, ProjectRole } from "./models";
-import { CliAccountId, CliId, RunnerId } from "./runner";
+import { CliAccountId, CliId, type CliModel, type RunnerCli, RunnerId } from "./runner";
 
 /** Model providers a server can call. Each has its own key format and default model. */
 export const ProviderId = z.enum(["fireworks", "anthropic", "openai"]);
@@ -60,9 +60,30 @@ export const CliModelDefault = z.object({
   model: z.string().trim().min(1).max(200).nullable(),
   effort: z.string().trim().min(1).max(20).nullable(),
   account: CliAccountId.nullable().optional(),
+  /**
+   * For a CLI in REVIEW_CLIS: the model that judges its commands at auto access; null: the person's own
+   * pick (Me.reviewModels), else the thread's model. Absent in an update: the saved one stays.
+   */
+  reviewModel: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type CliModelDefault = z.infer<typeof CliModelDefault>;
 
+
+/**
+ * The CLIs whose commands a model of their own judges at auto access because the CLI has no reviewer
+ * (OpenCode 2, see the runner's opencode-review.ts).
+ */
+export const REVIEW_CLIS = ["opencode"] as const satisfies readonly CliId[];
+
+/** The models a CLI lists on any of these computers, each once. */
+export function modelsOf(cli: CliId, computers: { clis: RunnerCli[] }[]): CliModel[] {
+  const models = computers.flatMap((r) => r.clis.find((c) => c.id === cli)?.models ?? []);
+  return models.filter((m, i) => models.findIndex((o) => o.id === m.id) === i);
+}
+
+/** Per CLI in REVIEW_CLIS, the model that judges its commands in this person's projects that pick none. */
+export const ReviewModels = z.partialRecord(CliId, z.string().trim().min(1).max(200));
+export type ReviewModels = z.infer<typeof ReviewModels>;
 
 /** Defaults per CLI for the project's threads on a computer, keyed by CliId. */
 export const CliModelDefaults = z.partialRecord(CliId, CliModelDefault);
@@ -228,11 +249,16 @@ export const Me = z.object({
   tips: z.array(z.string()).optional(),
   /** The CLIs that may judge the visual checks of the person's projects that list none (see CheckModels); older servers do not send it. */
   checkModels: CheckModels.optional(),
+  /** The models that judge CLIs' commands in the person's projects that pick none (see ReviewModels); older servers do not send it. */
+  reviewModels: ReviewModels.optional(),
 });
 export type Me = z.infer<typeof Me>;
 
 export const SetCheckModelsInput = z.object({ checkModels: CheckModels });
 export type SetCheckModelsInput = z.infer<typeof SetCheckModelsInput>;
+
+export const SetReviewModelsInput = z.object({ reviewModels: ReviewModels });
+export type SetReviewModelsInput = z.infer<typeof SetReviewModelsInput>;
 
 /** Server settings admins change at runtime. */
 export const AdminSettings = z.object({ signUpEnabled: z.boolean() });

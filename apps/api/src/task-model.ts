@@ -1,5 +1,5 @@
 import { createDb, schema } from "@myrel/db";
-import { type CliId, CliModelDefaults, effortsFor, type RunnerCli, type TaskModel, type ThreadModel } from "@myrel/protocol";
+import { type CliId, CliModelDefaults, effortsFor, REVIEW_CLIS, ReviewModels, type RunnerCli, type TaskModel, type ThreadModel } from "@myrel/protocol";
 import { eq } from "drizzle-orm";
 
 /** A project's per-CLI defaults from their JSON column; anything unreadable counts as none. */
@@ -48,3 +48,29 @@ export function resolveTaskModel(
   return out.model || out.effort ? out : undefined;
 }
 
+/** A person's ReviewModels from their JSON column; anything unreadable counts as none. */
+export function parseReviewModels(raw: string | null | undefined): ReviewModels {
+  if (!raw) return {};
+  try {
+    return ReviewModels.catch({}).parse(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+export async function personReviewModels(env: Env, userId: string | null): Promise<ReviewModels> {
+  if (!userId) return {};
+  const [row] = await createDb(env.DB).select({ reviewModels: schema.user.reviewModels }).from(schema.user).where(eq(schema.user.id, userId));
+  return parseReviewModels(row?.reviewModels);
+}
+
+/**
+ * The model that judges `cli`'s commands at auto access: the project's pick, else the person's. Only one
+ * the CLI lists on this computer; a pick it does not have gives way to the next, and with none the
+ * thread's own model judges.
+ */
+export function resolveReviewModel(cli: CliId, defaults: CliModelDefaults, person: ReviewModels, installed: RunnerCli | undefined): string | undefined {
+  if (!(REVIEW_CLIS as readonly CliId[]).includes(cli)) return undefined;
+  const listed = (id: string | null | undefined) => !!id && !!installed?.models?.some((m) => m.id === id);
+  return [defaults[cli]?.reviewModel, person[cli]].find(listed) ?? undefined;
+}

@@ -149,6 +149,7 @@ export class TaskRunner {
         asks,
         access: config.access,
         dirs,
+        ...(task.reviewModel && { reviewModel: task.reviewModel }),
         ...(skills && { skills: { plugin: skills.plugin, dir: skills.skills } }),
       });
     }

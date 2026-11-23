@@ -1283,6 +1283,12 @@ describe("local workspace", () => {
     // A client that does not know accounts keeps the saved one when it changes the model.
     const saved = (await (await settings({ cliModels: { claude: { model: "opus", effort: null } } })).json()) as { settings: ProjectSettings };
     expect(saved.settings.cliModels).toEqual({ claude: { model: "opus", effort: null, account: "side" } });
+    // The model that judges OpenCode's commands stays through an update that does not name it, until cleared.
+    const oc = async (value: Record<string, unknown>) =>
+      ((await (await settings({ cliModels: { opencode: { model: null, effort: null, ...value } } })).json()) as { settings: ProjectSettings }).settings.cliModels.opencode;
+    expect(await oc({ reviewModel: "zai/fast" })).toEqual({ model: null, effort: null, reviewModel: "zai/fast" });
+    expect(await oc({ model: "zai/big" })).toEqual({ model: "zai/big", effort: null, reviewModel: "zai/fast" });
+    expect(await oc({ reviewModel: null })).toBeUndefined();
 
     const projectAgent = await getAgentByName(env.PROJECT_AGENT, project.id);
     const author = await idOf(user);

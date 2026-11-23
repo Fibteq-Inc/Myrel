@@ -39,11 +39,12 @@ export function localBackend(
     model?: TaskModel;
     github?: TaskGithub | null;
     account?: string;
+    reviewModel?: string;
     /** The CLI works in the folder itself, one turn of the project at a time (see RunnerAgent.claimFolder). */
     shared?: boolean;
   },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent, model, github, account, shared } = where;
+  const { projectId, threadId, workspace, agent, model, github, account, reviewModel, shared } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -62,6 +63,7 @@ export function localBackend(
         model,
         ...(github && { github }),
         ...(account && { account }),
+        ...(reviewModel && { reviewModel }),
         ...(shared && { shared }),
       });
       if (!started.ok) throw new Error(started.reason);

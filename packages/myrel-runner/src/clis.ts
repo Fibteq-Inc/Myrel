@@ -240,6 +240,8 @@ export type AgentMcp = {
   access?: Access;
   /** The project's other folders, for CLIs that take them in their config rather than as flags. */
   dirs?: string[];
+  /** The model that judges opencode 2's commands at auto access (see opencode-review.ts); absent: the run's own. */
+  reviewModel?: string;
 };
 
 /** Claude Code's permission prompt tool on Myrel's MCP server. */
@@ -646,7 +648,7 @@ const opencode: CliAdapter = {
     ...extra,
   ],
   // Servers, permissions and skills for one run, in the environment: nothing goes into the person's config.
-  async agent({ url, token, dir, connectors = [], skills, access = "edit", dirs = [] }) {
+  async agent({ url, token, dir, connectors = [], skills, access = "edit", dirs = [], reviewModel }) {
     const version = await cliVersion("opencode");
     const auth = { Authorization: `Bearer {env:${TOKEN_VAR}}` };
     const servers: Record<string, unknown> = { [MYREL_MCP_SERVER]: { type: "remote", url, headers: auth, oauth: false } };
@@ -663,7 +665,7 @@ const opencode: CliAdapter = {
       // Auto: each command is judged before it runs, and the person is asked about the rest. The last rule wins.
       if (access === "auto") {
         (config.permissions as unknown[]).push({ action: "shell", resource: "*", effect: "ask" });
-        config.plugins = [await reviewPlugin(dir, { url, folders })];
+        config.plugins = [await reviewPlugin(dir, { url, folders, ...(safeModelArg(reviewModel) && { reviewModel }) })];
       }
     } else {
       // Its tools are <server>_<tool>. Without an allow rule, a tool the person's config asks about is declined.

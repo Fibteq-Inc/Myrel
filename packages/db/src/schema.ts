@@ -31,6 +31,8 @@ export const user = sqliteTable("user", {
   tipsSeen: text("tips_seen", { mode: "json" }).$type<string[]>(),
   /** The CLIs that may judge the visual checks of this person's projects that list none, JSON CheckModels in @myrel/protocol; null: none. */
   checkModels: text("check_models"),
+  /** The models that judge CLIs' commands at auto access in this person's projects that pick none, JSON ReviewModels in @myrel/protocol; null: none. */
+  reviewModels: text("review_models"),
   ...timestamps,
 });
 

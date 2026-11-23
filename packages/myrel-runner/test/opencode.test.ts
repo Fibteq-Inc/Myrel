@@ -226,6 +226,26 @@ describe.skipIf(process.platform === "win32")("opencode 2 at auto access", () =>
     for (const access of ["read", "edit", "full"] as const) expect(config(await opencode.agent({ ...mcp(), access })).plugins).toBeUndefined();
   });
 
+  it("gives the plugin the picked model, split as opencode names it", async () => {
+    await fakeOpencode("opencode v2.4.0");
+    const model = async (reviewModel: string) => config(await opencode.agent({ ...mcp(), access: "auto", reviewModel })).plugins[0].options.model;
+    expect(await model("zai-coding-plan/glm-5.4-air")).toEqual({ providerID: "zai-coding-plan", id: "glm-5.4-air" });
+    expect(await model("openrouter/z-ai/glm")).toEqual({ providerID: "openrouter", id: "z-ai/glm" });
+    expect(await model("no-provider")).toBeUndefined();
+    expect(await model("bad model/x")).toBeUndefined();
+  });
+
+  it("judges with the picked model, and with the run's own only when that one does not answer", async () => {
+    const run = (model: string, picked: { down?: boolean }) => review("pnpm test", { model, person: "deny" }, "shell", "/code/work", 1, "", picked);
+    const ok = await run('{"decision":"allow"}', {});
+    expect([ok.judges, ok.event.effect]).toEqual([["fast"], "allow"]);
+    const down = await run('{"decision":"allow"}', { down: true });
+    expect([down.judges, down.event.effect]).toEqual([["fast", "zai-coding-plan"], "allow"]);
+    // An unclear answer is an answer: no second opinion.
+    const unsure = await run("hm", {});
+    expect([unsure.judges, unsure.asked.length, unsure.event.effect]).toEqual([["fast"], 1, "deny"]);
+  });
+
   it("leaves opencode 1 without commands at auto", async () => {
     await fakeOpencode("1.19.4");
     expect(config(await opencode.agent({ ...mcp(), access: "auto" })).permission.bash).toBe("deny");
@@ -233,12 +253,15 @@ describe.skipIf(process.platform === "win32")("opencode 2 at auto access", () =>
 
   type Review = { effect: string; message?: string; action: string };
   /** Runs the plugin's hook on one command, with a model answer and a person's answer. */
-  async function review(command: string, answers: { model?: string | Error; person?: "allow" | "deny" | "down" }, action = "shell") {
+  async function review(command: string, answers: { model?: string | Error; person?: "allow" | "deny" | "down" }, action = "shell", directory = "/code/work", times = 1, then = "", picked?: { down?: boolean }) {
+    vi.stubEnv("PWD", "/code/work");
     const mod = await import(`data:text/javascript,${encodeURIComponent(REVIEW_PLUGIN)}`);
     let hook!: (e: unknown) => Promise<void>;
     let shell!: (e: { env: Record<string, string> }) => Promise<void>;
     const prompts: string[] = [];
     const asked: string[] = [];
+    const judges: string[] = [];
+    let calls = 0;
     vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
       asked.push(JSON.parse(init.body).params.arguments.input.command);
       if (answers.person === "down") throw new Error("offline");
@@ -246,30 +269,36 @@ describe.skipIf(process.platform === "win32")("opencode 2 at auto access", () =>
       return new Response(JSON.stringify({ result: { content: [{ type: "text", text }] } }));
     });
     await mod.default.setup({
-      options: { url: "https://myrel.test/mcp", folders: ["/code/app"] },
-      location: { directory: "/code/work" },
+      options: { url: "https://myrel.test/mcp", folders: ["/code/app"], ...(picked && { model: { providerID: "fast", id: "mini" } }) },
+      location: { directory },
       shell: { hook: async (_n: string, h: typeof shell) => void (shell = h) },
       permission: { hook: async (_n: string, h: typeof hook) => void (hook = h) },
       session: {
         context: async () => [
           { id: "m0", type: "user", text: "go" },
-          { id: "m1", model: { providerID: "zai-coding-plan", id: "glm-5.4" }, content: [{ type: "tool", id: "c1", state: { input: { command } } }] },
+          { id: "m1", model: { providerID: "zai-coding-plan", id: "glm-5.4" }, content: [{ type: "tool", id: "c1", state: { input: { command: command + (calls > 1 ? then : ""), description: `call ${calls}` } } }] },
         ],
       },
       experimental: {
         generate: {
-          text: async (o: { prompt: string }) => {
+          text: async (o: { prompt: string; model: { providerID: string } }) => {
             prompts.push(o.prompt);
+            judges.push(o.model.providerID);
+            if (picked?.down && o.model.providerID === "fast") throw new Error("down");
             if (answers.model instanceof Error) throw answers.model;
             return { text: answers.model ?? "" };
           },
         },
       },
     });
-    const event: Review & Record<string, unknown> = { sessionID: "s", action, resources: [command], source: { type: "tool", messageID: "m1", id: "c1" }, effect: "ask" };
-    await hook(event);
+    let event!: Review & Record<string, unknown>;
+    while (calls++ < times) {
+      event = { sessionID: "s", action, resources: [command], source: { type: "tool", messageID: "m1", id: "c1" }, effect: "ask" };
+      await hook(event);
+    }
     vi.unstubAllGlobals();
-    return { event, prompts, asked, shell };
+    vi.unstubAllEnvs();
+    return { event, prompts, asked, shell, judges };
   }
 
   it("runs what the model allows without asking the person", async () => {
@@ -277,7 +306,7 @@ describe.skipIf(process.platform === "win32")("opencode 2 at auto access", () =>
     expect(event.effect).toBe("allow");
     expect(asked).toEqual([]);
     expect(prompts[0]).toContain('"/code/work","/code/app"');
-    expect(prompts[0]).toContain('{"command":"pnpm test"}');
+    expect(prompts[0]).toContain('"command":"pnpm test"');
   });
 
   it("puts what the model would not run, or did not answer about, to the person", async () => {
@@ -311,6 +340,88 @@ describe.skipIf(process.platform === "win32")("opencode 2 at auto access", () =>
     for (const command of ["git push -u origin work", "git commit -m fix", "ls ~/.myrel-runner/worktrees/x", "pnpm install"]) {
       expect((await review(command, { model: '{"decision":"allow"}' })).asked).toEqual([]);
     }
+  });
+
+  it("needs no model for a command that only looks at the project's folders", async () => {
+    const mod = await import(`data:text/javascript,${encodeURIComponent(REVIEW_PLUGIN)}`);
+    const only = (command: string, more = {}) => mod.readsOnly({ command, ...more }, ["/code/work", "/code/app"]);
+    for (const command of [
+      "ls -la src",
+      "pwd",
+      "git status --short",
+      "git --no-pager diff --stat main...HEAD",
+      "git log --oneline -5 2>&1 | head -3",
+      'git log --format="%h %s" -n 3',
+      "cd /code/app/packages && git diff HEAD~1 -- a.ts",
+      "git branch --show-current; git remote -v",
+      "cat package.json 2>/dev/null",
+      'grep -n "foo bar" src/a.ts',
+    ]) {
+      expect([command, only(command)]).toEqual([command, true]);
+    }
+    for (const command of [
+      // Writes, runs or deletes.
+      "git branch -D work",
+      "git stash drop",
+      "git remote add x y",
+      "git diff --output=x",
+      "git diff --outp=x",
+      "git diff --ext-diff",
+      "git -c core.pager=x log",
+      "git log --output x",
+      "rg --pre=sh x",
+      "find . -delete",
+      "ls > x",
+      "ls & rm x",
+      "ls |& sh",
+      "cat x | sh",
+      "ls\nrm x",
+      "ls $(rm x)",
+      "ls `rm x`",
+      "FOO=1 ls",
+      'ls "a; ls " x; rm b',
+      "constructor",
+      "git constructor",
+      // Leaves the folders.
+      "cat /etc/passwd",
+      "cat ../x",
+      "cat a/../../x",
+      "cat ~/x",
+      'cat "/etc/hosts"',
+      "cat /code/workother/x",
+      "cd && cat x",
+      "cd - && ls",
+      "cd .. && cat x",
+      "git diff /etc/a /etc/b",
+      "grep -f/etc/hosts x",
+      "wc --files0-from=/etc/hosts",
+      // Secrets, also behind globs and folders.
+      "cat .env",
+      "git show HEAD:.env.local",
+      "cat .e*",
+      "cat .e{nv,x}",
+      "cat '.e'nv",
+      "grep -rn KEY .",
+      "cat config/credentials.json",
+      "ls; cat .git/config",
+    ]) {
+      expect([command, only(command)]).toEqual([command, false]);
+    }
+    // Another folder, or anything else about the call it does not know.
+    expect(only("ls", { workdir: "/etc" })).toBe(false);
+    const { event, prompts, asked } = await review("git status", {}, "shell", "/code/work");
+    expect([event.effect, prompts, asked]).toEqual(["allow", [], []]);
+    // A session that moved out of the run's folders is reviewed.
+    expect((await review("git status", { model: '{"decision":"allow"}' }, "shell", "/etc")).prompts).toHaveLength(1);
+  });
+
+  it("remembers what the model allowed for the turn, word for word, and nothing a person allowed", async () => {
+    const twice = await review("pnpm test", { model: '{"decision":"allow"}' }, "shell", "/code/work", 2);
+    expect([twice.prompts.length, twice.asked.length, twice.event.effect]).toEqual([1, 0, "allow"]);
+    const person = await review("pnpm test", { model: '{"decision":"ask"}', person: "allow" }, "shell", "/code/work", 2);
+    expect([person.prompts.length, person.asked.length]).toEqual([2, 2]);
+    const other = await review("pnpm test", { model: '{"decision":"allow"}' }, "shell", "/code/work", 2, " --run");
+    expect(other.prompts).toHaveLength(2);
   });
 
   it("leaves other permissions alone and keeps the turn's token from commands", async () => {

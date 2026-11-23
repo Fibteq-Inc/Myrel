@@ -1,11 +1,12 @@
 import { isThemePreference, THEME_PREFERENCES } from "@myrel/client";
 import { LOCALE_NAMES, LOCALES, isLocale } from "@myrel/i18n";
 import { useI18n, useT } from "@myrel/i18n/react";
-import type { CheckModels } from "@myrel/protocol";
+import { type CheckModels, modelsOf, REVIEW_CLIS, type ReviewModels } from "@myrel/protocol";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { AppUpdateSection } from "../../../components/app-update";
+import { cliName } from "../../../components/chat/cli-picker";
 import { EvaluatorPicker, mergeClis } from "../../../components/evaluator-picker";
 import { Field, Notice, Section, Select } from "../../../components/settings";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
@@ -133,6 +134,8 @@ function AccountSettings() {
 
       <EvaluatorSection value={me.checkModels ?? {}} />
 
+      <ReviewModelSection value={me.reviewModels ?? {}} />
+
       {platform.updater && <AppUpdateSection updater={platform.updater} />}
 
       <DeleteAccount email={me.email} />
@@ -163,6 +166,49 @@ function EvaluatorSection({ value }: { value: CheckModels }) {
       {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
     </Section>
   );
+}
+
+/** The models that judge CLIs' commands at auto access in this person's projects that pick none; each change saves. */
+function ReviewModelSection({ value }: { value: ReviewModels }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const { data: runners = [] } = useQuery(runnersQuery);
+  const save = useMutation({
+    mutationFn: (next: ReviewModels) => api.setReviewModels(next),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: meQuery.queryKey }),
+  });
+  const saved = save.isPending ? (save.variables ?? value) : value;
+  return REVIEW_CLIS.map((cli) => {
+    const models = modelsOf(cli, runners);
+    const picked = saved[cli];
+    if (models.length === 0 && !picked) return null;
+    const title = t("reviewModel.title", { cli: cliName(cli) });
+    return (
+      <Section key={cli} title={title} description={t("reviewModel.accountHint")}>
+        <div className="max-w-80">
+          <Select
+            aria-label={title}
+            value={picked ?? ""}
+            disabled={save.isPending}
+            onChange={(e) => {
+              const { [cli]: _, ...rest } = saved;
+              save.mutate(e.target.value ? { ...rest, [cli]: e.target.value } : rest);
+            }}
+          >
+            <option value="">{t("reviewModel.accountDefault")}</option>
+            {/* A pick no computer lists any more stays visible until it is changed. */}
+            {picked && !models.some((m) => m.id === picked) && <option value={picked}>{picked}</option>}
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+        {save.error && <Notice>{errorMessage(save.error, t)}</Notice>}
+      </Section>
+    );
+  });
 }
 
 const THEME_LABELS = { system: "settings.themeSystem", light: "settings.themeLight", dark: "settings.themeDark" } as const;

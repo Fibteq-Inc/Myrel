@@ -508,6 +508,11 @@ export const ServerToRunner = z.discriminatedUnion("type", [
     /** The model and effort to run with (feature "models"); absent: the CLI's own default. */
     model: TaskModel.optional(),
     /**
+     * The model that judges the CLI's commands at auto access (OpenCode 2), one it listed; absent: the
+     * run's own. Runners before 0.42.0 ignore it.
+     */
+    reviewModel: z.string().min(1).max(200).optional(),
+    /**
      * Which of the CLI's logins runs the turn (feature "cli-accounts"): one of RunnerCli.accounts.
      * Absent: the CLI's own. The runner fails a task naming one it no longer has.
      */
