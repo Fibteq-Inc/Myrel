@@ -19,7 +19,7 @@ Antigravity CLI, OpenCode, Hermes Agent, Cursor CLI, Muse Code, Kimi Code or Qwe
 
 ## Use
 
-Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code), `kimi` (Kimi Code) or `qwen` (Qwen Code) on your `PATH`, already signed in. The runner looks for them again every few minutes, so one you install later shows up without a restart; on Windows it also reads the PATH saved in your user settings and the usual npm, pnpm, Scoop and winget folders. `myrel-runner status` lists the CLIs it could not find and why.
+Requires Node 22+ and at least one of `claude`, `codex`, `agy` (Antigravity CLI), `opencode`, `hermes` (Hermes Agent), `cursor-agent` (Cursor CLI), `muse` (Muse Code), `kimi` (Kimi Code) or `qwen` (Qwen Code) on your `PATH`, already signed in. The runner looks for them again every few minutes, so one you install later shows up without a restart; on Windows it also reads the PATH saved in your user settings and the usual npm, pnpm, Scoop and winget folders, and on macOS and Linux the usual install folders (`~/.local/bin`, `~/.opencode/bin`, `~/.bun/bin`, `~/.npm-global/bin`, pnpm's and Volta's). `myrel-runner status` lists the CLIs it could not find and why.
 
 ```sh
 npx myrel-runner pair ABCD-1234 --server https://myrel.example.com   # code from Myrel > Devices
@@ -45,7 +45,7 @@ cache) and registers it to start at login:
 | Linux | systemd user service `myrel-runner.service` | `journalctl --user -u myrel-runner` |
 | Windows | `myrel-runner.vbs` in the Startup folder | `~/.myrel-runner/runner.log` |
 
-It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `agy`.
+It keeps the `PATH` of the terminal you install it from, which is where it finds `claude`, `codex` and `agy`, then the usual install folders.
 On macOS and Linux it restarts after a crash, but not after a clean stop (the computer was removed in Myrel, or
 `myrel-runner start` was run somewhere else with the same pairing). `myrel-runner update` installs the newest version
 from npm and restarts the background runner on it once its running tasks finish (at most 10 minutes; `--now` restarts
