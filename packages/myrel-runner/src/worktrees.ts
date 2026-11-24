@@ -80,13 +80,64 @@ export async function threadWorktree(
   return { cwd: join(worktree.path, relative(root, await realpath(folder))), worktree, created };
 }
 
-/** Whether the worktree has uncommitted changes, or its branch has commits the main checkout's branch lacks. */
+/** The commits finished work ends up in: the main checkout's own, and the remote's default branch as last fetched. */
+async function mergeTargets(repo: string): Promise<string[]> {
+  const refs = ["HEAD"];
+  // The main checkout is often left on an old commit, so its remote-tracking branch knows more.
+  for (const ref of ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master"]) {
+    if (!(await git(repo, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).catch(() => null))) continue;
+    refs.push(ref);
+    break;
+  }
+  return refs;
+}
+
+/** Whether `target` has the work of `commit`: its commits, or the same changes squashed or rebased into others. */
+async function contains(repo: string, target: string, commit: string): Promise<boolean> {
+  const out = async (args: string[]) => (await git(repo, args)).stdout.trim();
+  try {
+    await git(repo, ["merge-base", "--is-ancestor", commit, target]);
+    return true;
+  } catch {
+    // Not its commits; look for their changes.
+  }
+  try {
+    // Merging it would change nothing (fails on a conflict, and on git before 2.38).
+    const merged = await out(["merge-tree", "--write-tree", target, commit]);
+    if (merged === (await out(["rev-parse", `${target}^{tree}`]))) return true;
+  } catch {
+    // The target changed the same lines since; compare the changes themselves.
+  }
+  try {
+    // The whole branch as one commit: `git cherry` marks it "-" when the target has a commit with the same diff.
+    const base = await out(["merge-base", target, commit]);
+    const ident = ["-c", "user.name=myrel-runner", "-c", "user.email=runner@localhost", "-c", "commit.gpgSign=false"];
+    const squashed = await out([...ident, "commit-tree", `${commit}^{tree}`, "-p", base, "-m", "squashed"]);
+    return (await out(["cherry", target, squashed])).startsWith("-");
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the worktree has uncommitted changes, or commits (on its branch or checked out in it) that are not merged yet. */
 export async function worktreeState(w: Worktree): Promise<{ missing: boolean; dirty: boolean; merged: boolean }> {
   if (!(await stat(w.path).catch(() => null))) return { missing: true, dirty: false, merged: true };
   const status = await git(w.path, ["status", "--porcelain"]).catch(() => null);
-  const merged = await git(w.repo, ["merge-base", "--is-ancestor", w.branch, "HEAD"])
-    .then(() => true)
-    .catch(() => false);
+  const commit = (cwd: string, ref: string) =>
+    git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])
+      .then((r) => r.stdout.trim())
+      .catch(() => null);
+  // Agents often move to a branch of their own, so what is checked out counts as well as the thread's branch.
+  const head = await commit(w.path, "HEAD");
+  const branch = await commit(w.repo, `refs/heads/${w.branch}`);
+  const targets = await mergeTargets(w.repo);
+  let merged = head !== null;
+  for (const c of new Set([head, branch])) {
+    if (!merged || !c) continue;
+    let found = false;
+    for (const target of targets) found ||= await contains(w.repo, target, c);
+    merged = found;
+  }
   return { missing: false, dirty: status === null || status.stdout.trim() !== "", merged };
 }
 
@@ -106,8 +157,10 @@ export async function removeWorktree(w: Worktree, { force = false } = {}): Promi
 
 /**
  * Cleans up after finished threads: removes worktrees idle for a day that
- * have no uncommitted changes and whose branch is merged into the main
- * checkout's branch. Anything else is kept. Returns what was removed.
+ * have no uncommitted changes and whose work is in the main checkout's branch
+ * or the remote's default branch, also when it was squashed or rebased there.
+ * Anything else is kept, and so are branches git does not see as merged.
+ * Returns what was removed.
  */
 export async function pruneWorktrees(busy: (w: Worktree) => boolean = () => false, now = Date.now()): Promise<Worktree[]> {
   const removed: Worktree[] = [];

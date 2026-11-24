@@ -81,6 +81,69 @@ describe.skipIf(process.platform === "win32")("thread worktrees", () => {
     expect(await listWorktrees()).toEqual([]);
   });
 
+  describe("work merged on the remote while the main checkout stays behind", () => {
+    const later = () => Date.now() + 2 * 24 * 60 * 60 * 1000;
+    const commit = async (cwd: string, file: string, text: string, message = file) => {
+      await writeFile(join(cwd, file), text);
+      git(cwd, "add", ".");
+      git(cwd, "commit", "-qm", message);
+    };
+    /** Moves origin/main to a commit made on a detached checkout, as a fetch would. */
+    const onRemote = async (work: (upstream: string) => Promise<void>) => {
+      const upstream = join(home, "upstream");
+      git(repo, "worktree", "add", "-q", "--detach", upstream, "main");
+      await work(upstream);
+      git(repo, "update-ref", "refs/remotes/origin/main", git(upstream, "rev-parse", "HEAD"));
+      git(repo, "worktree", "remove", "--force", upstream);
+    };
+
+    it("removes one whose commits are in the remote's main", async () => {
+      const w = (await threadWorktree(repo, A))!.worktree;
+      await commit(w.path, "b.txt", "b\n");
+      await onRemote(async (up) => void git(up, "merge", "-q", "--no-ff", "-m", "merge", w.branch));
+      expect((await pruneWorktrees(() => false, later())).map((x) => x.path)).toEqual([w.path]);
+    });
+
+    it("removes a squash-merged one, also after main changed the same lines again", async () => {
+      const w = (await threadWorktree(repo, A))!.worktree;
+      await commit(w.path, "b.txt", "one\n");
+      await commit(w.path, "b.txt", "two\n");
+      await onRemote(async (up) => {
+        git(up, "merge", "-q", "--squash", w.branch);
+        git(up, "commit", "-qm", "squashed");
+        await commit(up, "b.txt", "three\n");
+      });
+      expect((await pruneWorktrees(() => false, later())).map((x) => x.path)).toEqual([w.path]);
+      // The commits themselves are on no other branch, so the branch stays.
+      expect(git(repo, "branch", "--list", w.branch)).not.toBe("");
+    });
+
+    it("keeps one whose work only partly reached main", async () => {
+      const w = (await threadWorktree(repo, A))!.worktree;
+      await commit(w.path, "b.txt", "b\n");
+      await onRemote(async (up) => void git(up, "cherry-pick", w.branch));
+      await commit(w.path, "c.txt", "c\n");
+      expect(await pruneWorktrees(() => false, later())).toEqual([]);
+    });
+
+    it("looks at the branch the agent moved to, and at a detached checkout", async () => {
+      const own = (await threadWorktree(repo, A))!.worktree;
+      git(own.path, "checkout", "-q", "-b", "feature");
+      await commit(own.path, "b.txt", "b\n");
+      const detached = (await threadWorktree(repo, B))!.worktree;
+      git(detached.path, "checkout", "-q", "--detach");
+      await commit(detached.path, "c.txt", "c\n");
+      // The threads' own branches are still at main, but the work checked out is not merged.
+      expect(await pruneWorktrees(() => false, later())).toEqual([]);
+
+      await onRemote(async (up) => {
+        git(up, "merge", "-q", "--squash", "feature");
+        git(up, "commit", "-qm", "squashed");
+      });
+      expect((await pruneWorktrees(() => false, later())).map((x) => x.path)).toEqual([own.path]);
+    });
+  });
+
   it("runs a thread's task in its worktree and says where the work is", async () => {
     const bin = join(home, "bin");
     await mkdir(bin);
