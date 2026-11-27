@@ -132,9 +132,15 @@ export const projects = sqliteTable("projects", {
   checkModels: text("check_models"),
   /**
    * In a git repository, each thread works on the person's computer in its own worktree and branch (on by
-   * default). Off: threads work in the project's folder itself, one turn at a time per computer.
+   * default). Off: threads work in the project's folder itself, one turn at a time per computer unless
+   * folderQueue is off.
    */
   worktrees: integer("worktrees", { mode: "boolean" }).notNull().default(true),
+  /**
+   * With worktrees off: one turn of the project at a time per computer, the others queued (on by default).
+   * Off: its threads' turns work in the folder side by side.
+   */
+  folderQueue: integer("folder_queue", { mode: "boolean" }).notNull().default(true),
   /** The turns that ended before turn_stats existed have been copied into it (see projects/turn-history.ts). */
   turnHistory: integer("turn_history", { mode: "boolean" }).notNull().default(false),
   /**

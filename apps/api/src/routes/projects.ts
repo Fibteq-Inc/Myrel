@@ -149,7 +149,7 @@ export const projectRoutes = new Hono<AppEnv>()
 
     const db = createDb(c.env.DB);
     const current = await readSettings(c.env, id);
-    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels, worktrees, coordinator } = input.data;
+    const { name, icon, color, model, taskTarget, cloudCli, cliModels, visualCheck, checkModels, worktrees, folderQueue, coordinator } = input.data;
     // The coordinator works with a CLI only on a computer of the person turning it on, one with this
     // project's folder and that CLI: their own subscription, and every member's message starts it there.
     let storedCoordinator: string | null | undefined;
@@ -197,6 +197,7 @@ export const projectRoutes = new Hono<AppEnv>()
         ...(visualCheck !== undefined && { visualCheck }),
         ...(checkModels !== undefined && { checkModels: Object.keys(checkModels).length ? JSON.stringify(checkModels) : null }),
         ...(worktrees !== undefined && { worktrees }),
+        ...(folderQueue !== undefined && { folderQueue }),
         ...(storedCoordinator !== undefined && { coordinator: storedCoordinator }),
         llmProvider: provider,
         llmKeyId: keyId,
@@ -882,6 +883,7 @@ async function readSettings(env: Env, projectId: string): Promise<ProjectSetting
       visualCheck: projects.visualCheck,
       checkModels: projects.checkModels,
       worktrees: projects.worktrees,
+      folderQueue: projects.folderQueue,
       coordinator: projects.coordinator,
     })
     .from(projects)

@@ -954,6 +954,49 @@ describe("local workspace", () => {
     runnerSide.ws.close();
   });
 
+  it("runs the turns side by side in the folder of a project that turned its queue off", { timeout: 30_000 }, async () => {
+    const user = await signUp();
+    const { runner, token } = await pair(user);
+    const runnerSide = await connectRunner(token, ["cancel", "agent", "shared-folder"]);
+    await until(async () => (await listRunners(user))[0]?.folders.length, "hello");
+    const project = await createProject(user);
+    await api(`/api/projects/${project.id}/workspace`, {
+      method: "PUT",
+      token: user,
+      body: JSON.stringify({ runnerId: runner.id, path: "/Users/ismail/code/myrel", cli: "claude" }),
+    });
+    const settings = async () => ((await (await api(`/api/projects/${project.id}/settings`, { token: user })).json()) as { settings: ProjectSettings }).settings;
+    // One turn at a time unless the project says otherwise.
+    expect((await settings()).folderQueue).toBe(true);
+    const patch = await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ worktrees: false, folderQueue: false }) });
+    expect(patch.status).toBe(200);
+    expect(await settings()).toMatchObject({ worktrees: false, folderQueue: false });
+
+    type Start = Extract<ServerToRunner, { type: "task.start" }>;
+    const starts = () => runnerSide.frames.filter((f): f is Start => f.type === "task.start");
+    const a = await startThread(project.id, user);
+    const first = await until(() => starts()[0], "the first thread's task.start");
+    expect(first).toMatchObject({ threadId: a.thread.id, worktree: false });
+    expect(first.prompt).toContain("and side by side");
+    // A second thread starts while the first one's turn still works in the folder.
+    const b = await startThread(project.id, user);
+    const second = await until(() => starts()[1], "the second thread's task.start");
+    expect(second).toMatchObject({ threadId: b.thread.id, worktree: false });
+
+    // The queue back on: a third thread waits for the turns working there.
+    await api(`/api/projects/${project.id}/settings`, { method: "PATCH", token: user, body: JSON.stringify({ folderQueue: true }) });
+    const c = await startThread(project.id, user);
+    await c.threadAgent.folderRetry();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(starts()).toHaveLength(2);
+    runnerSide.send({ type: "task.done", taskId: first.taskId, ok: true, result: "Done." });
+    runnerSide.send({ type: "task.done", taskId: second.taskId, ok: true, result: "Done." });
+    const third = await until(() => starts()[2], "the third thread's task.start");
+    expect(third).toMatchObject({ threadId: c.thread.id, worktree: false });
+    expect(third.prompt).toContain("Myrel runs one thread's turn at a time here");
+    runnerSide.ws.close();
+  });
+
   it("asks to update a runner that cannot work in the project's folder itself", async () => {
     const user = await signUp();
     const { runner, token } = await pair(user);

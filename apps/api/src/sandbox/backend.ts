@@ -42,9 +42,11 @@ export function localBackend(
     reviewModel?: string;
     /** The CLI works in the folder itself, one turn of the project at a time (see RunnerAgent.claimFolder). */
     shared?: boolean;
+    /** With `shared`: side by side with the project's other turns there, without the queue (TaskStart.parallel). */
+    parallel?: boolean;
   },
 ): RunnerBackend {
-  const { projectId, threadId, workspace, agent, model, github, account, reviewModel, shared } = where;
+  const { projectId, threadId, workspace, agent, model, github, account, reviewModel, shared, parallel } = where;
   return {
     id: "local",
     unavailable: () =>
@@ -65,6 +67,7 @@ export function localBackend(
         ...(account && { account }),
         ...(reviewModel && { reviewModel }),
         ...(shared && { shared }),
+        ...(shared && parallel && { parallel }),
       });
       if (!started.ok) throw new Error(started.reason);
     },

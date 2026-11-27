@@ -49,7 +49,9 @@ When the folder is a git repository, each thread works in its own copy (a git wo
 
 Some projects need their threads in the folder itself, for example a game whose editor shows the changes as they happen. Turn off **Each thread in its own copy** under **Working copies** on the project's **Folders** tab. Only that project changes; it is on for every project unless you turn it off.
 
-With it off, threads work in your checkout, on the branch it is on. On each computer only one of the project's threads works at a time: another one that has something to do shows **Queued** and starts when the first one's turn ends. Threads do not switch your branch or put your changes aside, and commit only the files they changed. A thread that checks another thread's work (a visual check) still works in a copy of its own, and turns in the cloud always do.
+With it off, threads work in your checkout, on the branch it is on. On each computer only one of the project's threads works at a time: another one that has something to do shows **Queued** and starts when the first one's turn ends. Threads do not switch your branch or put your changes aside, and commit only the files they changed.
+
+When the project's threads can safely work at the same time (most of them answer questions or touch different files, say), turn off **One thread at a time** below it. Then they work side by side in the folder without waiting. Each one changes only the files its work needs and reads a file again before changing it, but two threads can still change the same file at once, so keep this on when they often work on the same files. A thread that checks another thread's work (a visual check) still works in a copy of its own, and turns in the cloud always do.
 
 Work a thread did in its copy before you turned this off stays there; the thread starts a new session in the folder. It needs myrel-runner 0.37.0 or later; with an older one, the Folders tab and the thread say to update it.
 

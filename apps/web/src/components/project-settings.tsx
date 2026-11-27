@@ -242,7 +242,8 @@ function useSaveSettings(projectId: string) {
 
 /**
  * Whether the project's threads work in their own worktree on a computer (the default) or in the
- * project's folder itself, one at a time (ProjectSettings.worktrees). A change saves.
+ * project's folder itself (ProjectSettings.worktrees), and there one at a time or side by side
+ * (ProjectSettings.folderQueue). A change saves.
  */
 function WorktreeSetting({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const t = useT();
@@ -253,6 +254,7 @@ function WorktreeSetting({ projectId, canManage }: { projectId: string; canManag
   const { data: runners } = useQuery({ ...runnersQuery, enabled: !!workspace });
   const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
   const on = save.isPending && save.variables.worktrees !== undefined ? save.variables.worktrees : settings.worktrees;
+  const queue = save.isPending && save.variables.folderQueue !== undefined ? save.variables.folderQueue : settings.folderQueue;
   return (
     <Section title={t("projectFolders.copies")}>
       <label className="flex items-center gap-3">
@@ -262,6 +264,15 @@ function WorktreeSetting({ projectId, canManage }: { projectId: string; canManag
         </span>
         <Switch checked={on} disabled={!canManage || save.isPending} onChange={(e) => save.mutate({ worktrees: e.target.checked })} />
       </label>
+      {!on && (
+        <label className="flex items-center gap-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium">{t("projectFolders.folderQueue")}</span>
+            <span className="mt-0.5 block text-xs text-subtle">{t(queue ? "projectFolders.folderQueueOn" : "projectFolders.folderQueueOff")}</span>
+          </span>
+          <Switch checked={queue} disabled={!canManage || save.isPending} onChange={(e) => save.mutate({ folderQueue: e.target.checked })} />
+        </label>
+      )}
       {!on && computer && !computer.features.includes("shared-folder") && (
         <Notice>{t("projectFolders.worktreesUpdate", { computer: computer.name, command: "npx myrel-runner@latest update" })}</Notice>
       )}

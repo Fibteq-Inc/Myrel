@@ -114,7 +114,7 @@ import { memberHasKey, projectTaskModel } from "../keys";
 import { type ResearchState, researchTools } from "../research/research";
 import { answerResearch, pollResearch, type ResearchHost, readResearch, requestResearch, stopResearch } from "../research/thread";
 import { handleMcp, type ModelCallReport, type Tool, tool } from "../llm";
-import { getWorkspace, projectWorktrees, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
+import { getWorkspace, projectFolderMode, runnerBrowser, runnerHasFeature, setWorkspaceFolder, workspaceClis } from "../runners";
 import { cloudHarness, localBackend, localCanceller, localGithubToken, ownsComputer, projectCloudCli, projectGithubSecrets, sandboxBackend, type TaskPlace, taskGithubTokens, taskPlace } from "../sandbox/backend";
 import { readWorkspace, threadWorkspace, type WorkspaceView } from "../sandbox/workspace";
 import { markSandboxActive, recordSandboxRun, recordTaskUsage, recordTurn, taskCostMicros, taskRuntime, turnFigures, type TurnRow } from "../usage";
@@ -734,15 +734,18 @@ export class ThreadAgent extends Agent<Env> {
       );
     }
     // A project whose threads work in its folder itself (its setting): one turn at a time on the computer,
-    // the others wait for it. A thread checking another's work (a visual check's evaluator) keeps a worktree.
-    const shared = place.kind === "local" && !ctx.thread.parentId && !(await projectWorktrees(this.env, projectId));
+    // the others wait for it, unless the project lets them work side by side (folderQueue off). A thread
+    // checking another's work (a visual check's evaluator) keeps a worktree.
+    const folderMode = place.kind === "local" && !ctx.thread.parentId ? await projectFolderMode(this.env, projectId) : null;
+    const shared = !!folderMode && !folderMode.worktrees;
+    const parallel = !!folderMode && !folderMode.worktrees && !folderMode.queue;
     if (place.kind === "local" && shared) {
       if (!(await runnerHasFeature(this.env, place.workspace.runnerId, "shared-folder"))) {
         return this.cannotWork(
           `This project's threads work in its folder itself, which myrel-runner on "${place.workspace.runnerName}" cannot do yet. Update it with \`npx myrel-runner@latest update\`, then write here again.`,
         );
       }
-      const claim = await (await getAgentByName(this.env.RUNNER_AGENT, place.workspace.runnerId)).claimFolder(projectId, threadId);
+      const claim = parallel ? ({ ok: true } as const) : await (await getAgentByName(this.env.RUNNER_AGENT, place.workspace.runnerId)).claimFolder(projectId, threadId);
       if (!claim.ok) {
         const lastBody = [ctx.root, ...ctx.messages].reverse().find((m) => m.authorKind === "user")?.body ?? "";
         return this.waitForFolder(claim.busy, (this.getMeta("language") ?? "").startsWith("tr") || /[çğıöşüÇĞİÖŞÜ]/.test(lastBody));
@@ -814,6 +817,7 @@ export class ThreadAgent extends Agent<Env> {
       threadAccount: ctx.thread.cli?.account ?? null,
       threadRunner: ctx.thread.runner?.id ?? null,
       shared,
+      parallel,
     });
   }
 
@@ -928,6 +932,8 @@ export class ThreadAgent extends Agent<Env> {
     threadAccount?: string | null;
     /** The CLI works in the project's folder itself, which this turn holds on the computer (see waitForFolder). */
     shared?: boolean;
+    /** With `shared`: side by side with the project's other turns there, without holding it (folderQueue off). */
+    parallel?: boolean;
   }) {
     const { projectId, threadId } = this.ids();
     const project = await getAgentByName(this.env.PROJECT_AGENT, projectId);
@@ -946,6 +952,7 @@ export class ThreadAgent extends Agent<Env> {
             asks: place.workspace.cli === "claude" && (await runnerHasFeature(this.env, place.workspace.runnerId, "project-folders")),
             github: !!github,
             ...(input.shared && { shared: true }),
+            ...(input.shared && input.parallel && { parallel: true }),
           }
         : { kind: "cloud", images: false, saveBranch: saveBranch(threadId) };
     const taskId = createId("task");
@@ -1037,7 +1044,7 @@ export class ThreadAgent extends Agent<Env> {
         // The thread's login for the CLI, else the project's; one the computer lost runs the CLI's own.
         const login = resolveAccount({ thread: input.threadAccount, project: defaults[workspace.cli]?.account }, installed);
         const reviewModel = resolveReviewModel(workspace.cli, defaults, await personReviewModels(this.env, input.requester), installed);
-        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account, reviewModel, shared: input.shared });
+        const backend = localBackend(this.env, { projectId, threadId, workspace, agent, model, github, account: login.account, reviewModel, shared: input.shared, parallel: input.parallel });
         const unavailable = backend.unavailable(spec);
         if (unavailable) throw new Error(unavailable);
         // The person's own CLI does the work, so the run shows that CLI.
