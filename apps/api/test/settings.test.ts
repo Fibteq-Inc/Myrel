@@ -139,6 +139,7 @@ describe("project settings", () => {
       visualCheck: false,
       checkModels: {},
       worktrees: true,
+      folderQueue: true,
       coordinator: { mode: "model" },
     });
     const claude = await json<{ settings: ProjectSettings }>(patch(alice.token, { cloudCli: "claude" }));

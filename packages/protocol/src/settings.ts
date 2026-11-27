@@ -175,11 +175,17 @@ export const ProjectSettings = z.object({
   /**
    * In a git repository, each thread works on the person's computer in its own worktree and branch, so
    * threads never change each other's files. Off: threads work in the project's folder itself (a game whose
-   * editor watches it, say), one turn at a time on each computer while the others wait. On by default; a
-   * computer whose own setting is off (RunnerSettings.worktrees) shares the folder either way, without the
-   * queue. Cloud turns always work in their own sandbox. Older servers never send it.
+   * editor watches it, say), one turn at a time on each computer while the others wait (folderQueue). On by
+   * default; a computer whose own setting is off (RunnerSettings.worktrees) shares the folder either way,
+   * without the queue. Cloud turns always work in their own sandbox. Older servers never send it.
    */
   worktrees: z.boolean().default(true),
+  /**
+   * With worktrees off: one turn of the project at a time on each computer, the others waiting for it (on by
+   * default). Off: the turns work in the folder side by side, kept apart only by the agents' rules. Older
+   * servers never send it.
+   */
+  folderQueue: z.boolean().default(true),
   /** How the coordinator works; older servers never send it. One the app cannot read counts as the server's model. */
   coordinator: CoordinatorSettings.catch({ mode: "model" }).default({ mode: "model" }),
 });
@@ -200,6 +206,7 @@ export const UpdateProjectSettingsInput = z.object({
   /** Replaces the whole list. */
   checkModels: CheckModels.optional(),
   worktrees: z.boolean().optional(),
+  folderQueue: z.boolean().optional(),
   coordinator: CoordinatorInput.optional(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof UpdateProjectSettingsInput>;

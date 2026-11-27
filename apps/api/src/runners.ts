@@ -243,8 +243,20 @@ export async function runnerHasFeature(env: Env, runnerId: string, feature: Runn
  * default), rather than in the project's folder itself.
  */
 export async function projectWorktrees(env: Env, projectId: string): Promise<boolean> {
-  const [row] = await createDb(env.DB).select({ worktrees: projects.worktrees }).from(projects).where(eq(projects.id, projectId));
-  return row?.worktrees ?? true;
+  return (await projectFolderMode(env, projectId)).worktrees;
+}
+
+/**
+ * How the project's threads share a computer: in worktrees of their own (ProjectSettings.worktrees, the
+ * default), or in the project's folder itself, one turn at a time (`queue`, ProjectSettings.folderQueue,
+ * the default) or side by side.
+ */
+export async function projectFolderMode(env: Env, projectId: string): Promise<{ worktrees: boolean; queue: boolean }> {
+  const [row] = await createDb(env.DB)
+    .select({ worktrees: projects.worktrees, queue: projects.folderQueue })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  return { worktrees: row?.worktrees ?? true, queue: row?.queue ?? true };
 }
 
 /** Tells every project working on this runner that its workspace changed, so open clients refresh. */

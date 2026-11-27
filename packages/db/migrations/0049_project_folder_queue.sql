@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `folder_queue` integer DEFAULT true NOT NULL;

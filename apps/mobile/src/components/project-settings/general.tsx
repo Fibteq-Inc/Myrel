@@ -132,7 +132,8 @@ export function GeneralSettings({ projectId, canManage }: { projectId: string; c
 
 /**
  * Whether the project's threads work in their own worktree on a computer (the default) or in the
- * project's folder itself, one at a time (ProjectSettings.worktrees), as on the web's Folders tab. A change saves.
+ * project's folder itself (ProjectSettings.worktrees), and there one at a time or side by side
+ * (ProjectSettings.folderQueue), as on the web's Folders tab. A change saves.
  */
 export function WorktreeSettings({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const t = useT();
@@ -146,6 +147,7 @@ export function WorktreeSettings({ projectId, canManage }: { projectId: string; 
   const computer = workspace ? runners?.find((r) => r.id === workspace.runnerId) : undefined;
   if (!settings.data) return null;
   const on = save.isPending && save.variables.worktrees !== undefined ? save.variables.worktrees : settings.data.worktrees;
+  const queue = save.isPending && save.variables.folderQueue !== undefined ? save.variables.folderQueue : settings.data.folderQueue;
   return (
     <Section title={t("projectFolders.copies")}>
       <View style={styles.toggle}>
@@ -162,6 +164,22 @@ export function WorktreeSettings({ projectId, canManage }: { projectId: string; 
           thumbColor={colors.raised}
         />
       </View>
+      {!on && (
+        <View style={styles.toggle}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.toggleTitle}>{t("projectFolders.folderQueue")}</Text>
+            <Text style={styles.label}>{t(queue ? "projectFolders.folderQueueOn" : "projectFolders.folderQueueOff")}</Text>
+          </View>
+          <Switch
+            value={queue}
+            disabled={!canManage || save.isPending}
+            onValueChange={(folderQueue) => save.mutate({ folderQueue })}
+            accessibilityLabel={t("projectFolders.folderQueue")}
+            trackColor={{ false: colors.edge, true: colors.accent }}
+            thumbColor={colors.raised}
+          />
+        </View>
+      )}
       {!on && computer && !computer.features.includes("shared-folder") && (
         <Notice>{t("projectFolders.worktreesUpdate", { computer: computer.name, command: "npx myrel-runner@latest update" })}</Notice>
       )}

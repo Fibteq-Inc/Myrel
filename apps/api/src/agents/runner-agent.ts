@@ -53,6 +53,11 @@ export type TaskStart = {
    */
   shared?: boolean;
   /**
+   * With `shared`: the project lets such turns work side by side (ProjectSettings.folderQueue off), so this
+   * one neither claimed the folder nor waits for another turn there.
+   */
+  parallel?: boolean;
+  /**
    * The CLI works as the project's coordinator for one turn (only runners with feature "coordinator"):
    * what it reports goes to the project, not to a thread (`threadId` is a fresh id nothing uses).
    */
@@ -337,7 +342,7 @@ export class RunnerAgent extends Agent<Env> {
       console.error("task.start does not fit the runner protocol", taskId, issue?.path.join("."), issue?.message);
       return { ok: false, reason: `Myrel could not send this task to the computer (${issue?.path.join(".") || "frame"}: ${issue?.message ?? "invalid"}).` };
     }
-    if (input.shared) {
+    if (input.shared && !input.parallel) {
       // claimFolder said it may; a turn of another thread that started meanwhile still comes first.
       if (this.sharedRunning(input.projectId, input.threadId)) {
         return { ok: false, reason: "Another thread of this project is working in its folder on this computer right now. Write here again once it is done." };

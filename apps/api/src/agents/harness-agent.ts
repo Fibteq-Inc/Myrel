@@ -16,9 +16,10 @@ export type AgentPlace =
    * folders: the project's other folders on that computer. asks: Claude Code asks the person
    * through Myrel before reaching outside them (a runner with feature "project-folders"). github: git
    * has a token of the turn's own for the project's repositories (task.start's `github`). shared: it works
-   * in the project's folder itself, not a worktree of its own (ProjectSettings.worktrees off).
+   * in the project's folder itself, not a worktree of its own (ProjectSettings.worktrees off); parallel: other
+   * threads' turns may work there at the same time (ProjectSettings.folderQueue off).
    */
-  | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean; github?: boolean; shared?: boolean }
+  | { kind: "local"; cli: CliId; folder: string; folders?: string[]; computer: string; asks?: boolean; github?: boolean; shared?: boolean; parallel?: boolean }
   /**
    * images: its model reads images, so it can look at screenshots itself. saveBranch: where unpushed
    * work in its cloned repositories is kept on GitHub between turns. harness: the CLI it runs as
@@ -60,8 +61,11 @@ function localFolders(place: Extract<AgentPlace, { kind: "local" }>): string {
 }
 
 /** What working in a folder the person and the project's other threads also use asks of the agent. */
-const SHARED_FOLDER =
-  "This project's threads work in this folder itself, not in a copy of their own: the person and the project's other threads use it too (Myrel runs one thread's turn at a time here, and another may have left changes in it). Do not switch its branch, stash, reset, clean or check out files, and leave changes that are not yours as they are. Commit only the files you changed (`git add <files>`, never `-A` or `.`). For a pull request, push your commits to a new branch without switching to it (`git push origin HEAD:refs/heads/<branch>`).";
+const SHARED_FOLDER_RULES =
+  "Do not switch its branch, stash, reset, clean or check out files, and leave changes that are not yours as they are. Commit only the files you changed (`git add <files>`, never `-A` or `.`). For a pull request, push your commits to a new branch without switching to it (`git push origin HEAD:refs/heads/<branch>`).";
+const SHARED_FOLDER = `This project's threads work in this folder itself, not in a copy of their own: the person and the project's other threads use it too (Myrel runs one thread's turn at a time here, and another may have left changes in it). ${SHARED_FOLDER_RULES}`;
+/** The same, when the project lets its threads' turns work there side by side (ProjectSettings.folderQueue off). */
+const PARALLEL_FOLDER = `This project's threads work in this folder itself, not in a copy of their own, and side by side: the person and other threads' turns may be changing files here while you work. ${SHARED_FOLDER_RULES} Change only the files your work needs; before changing a file, read it again rather than relying on an earlier read, and if it changes under you, or another thread is clearly working on it, leave it and say so in your reply instead of overwriting. Run \`git status\` right before you commit, and when git says another git process is running (index.lock), wait a moment and try again rather than deleting the lock.`;
 
 /** How git reaches GitHub from the person's computer. */
 function localGit(place: Extract<AgentPlace, { kind: "local" }>): string {
@@ -76,7 +80,7 @@ export const SANDBOX_REPOS = "/workspace/repos";
 export function agentSystem(place: AgentPlace): string {
   const where =
     place.kind === "local"
-      ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${place.shared ? `${SHARED_FOLDER} ` : ""}${localFolders(place)} A file in these folders you mention in a reply opens in a preview when you link it with its path, relative to the folder or absolute ([sonuc.json](out/sonuc.json)), but only for the person whose computer this is: put anything others in the project need to see in the project files too (never one holding secrets). ${localGit(place)} Name the repository as it is listed as connected (an old name in the folder's git remote still works for pushing, since GitHub redirects renamed repositories).`
+      ? `You run as ${CLI_NAMES[place.cli]} on the person's own computer ("${place.computer}"), in the project's folder ${place.folder}, signed in with their own account. Their files are real: never change git history you did not make. ${place.shared ? `${place.parallel ? PARALLEL_FOLDER : SHARED_FOLDER} ` : ""}${localFolders(place)} A file in these folders you mention in a reply opens in a preview when you link it with its path, relative to the folder or absolute ([sonuc.json](out/sonuc.json)), but only for the person whose computer this is: put anything others in the project need to see in the project files too (never one holding secrets). ${localGit(place)} Name the repository as it is listed as connected (an old name in the folder's git remote still works for pushing, since GitHub redirects renamed repositories).`
       : `You run as ${CLOUD_LABELS[place.harness ?? "opencode"]} in this thread's own Linux sandbox in the cloud (git, gh, Node, pnpm, Python, internet). Your current folder is saved at the end of every turn and the next turn starts from it, so keep your work there. Clone the project's GitHub repositories into ${SANDBOX_REPOS}/<name> instead, over HTTPS and without old file versions, which makes a large repository clone several times faster (\`git clone --filter=blob:none https://github.com/<owner>/<name>.git\`; git fetches an old version when a command needs it): git and gh already have access to the connected ones, and there is no SSH key. A repository that is not listed as connected cannot be pushed to (and a private one not even cloned): ask for it with request_repo_connection, which puts a one-tap card to the person, and end your turn rather than waiting. The sandbox can be reset between turns, so commit and push any branch you want to keep before your turn ends. As a safety net, when a turn ends Myrel pushes whatever you left uncommitted or unpushed in each repository there to the branch ${place.saveBranch} on GitHub, as one commit on top of where you were. To pick that work up in a later turn, clone again, run \`git fetch origin ${place.saveBranch}\`, then \`git checkout -B <the branch its commit message names> FETCH_HEAD && git reset --soft HEAD~1\`.`;
   return `You are Myrel, working one thread of a shared project. The coordinator opened this thread and handed you a brief; you own the thread: decide how to do the work, do it, and deliver the result here. To people, you and the coordinator are one assistant called Myrel.
 
